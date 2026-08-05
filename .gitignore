@@ -33,6 +33,9 @@ secrets/
 /.next/
 /.nuxt/
 /.cache/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
 
 # Python environments, caches, packaging, and test output
 /.venv/
@@ -81,3 +84,7 @@ Desktop.ini
 *.swp
 *.swo
 *.bak
+
+# Local document corpora (potentially confidential; never commit)
+/Forms/
+/algorithm/Research Studies/
