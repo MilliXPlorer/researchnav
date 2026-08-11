@@ -2,16 +2,23 @@
 
 ## 1. Purpose and status
 
-This document freezes the API data contract that the Vue 3 frontend migration
-must preserve. It is the browser-boundary contract between `v1/src/api.ts` and
-the authoritative Laravel API. The legacy Express server is a rollback/reference
-implementation for the auth and provisioning subset only.
+This document specifies the API data contract that the Vue 3 frontend migration
+must preserve. It is the browser-boundary contract between the pre-F1
+`api.ts` input/mapping behavior and the Laravel API. The legacy Express server
+is a rollback/reference implementation for the auth and provisioning subset
+only.
 
-- **Status:** frozen contract for the Vue 3 migration; no boundary change is
-  authorized by this document.
+- **Status:** provisional contract for the Vue 3 migration. It becomes frozen
+  only after the sanitized F1 source manifest and digest have been attested and
+  this contract has been re-reviewed; no boundary change is authorized by this
+  document before or after that attestation.
 - **Plan PR:** https://github.com/MilliXPlorer/researchnav/pull/5
 - **Plan document:** `docs/plans/react-to-vue3.md`
-- **Authoritative source:** read-only snapshot of the tracked `v1/**` subtree.
+- **Authoritative pre-F1 source:** `<external-source-root>/v1/**`, read-only.
+  This is not the tracked destination.
+- **Tracked destination:** `v1/**`. It is the destination for the sanitized F1
+  import and is not evidence of source authority until the manifest/digest
+  attestation and re-review above are complete.
 - **Boundary owner:** `v1/src/api.ts` (framework-neutral, kept as-is).
 - **Normal API:** Laravel on `127.0.0.1:3001`, proxied at `/api`.
 - **Legacy rollback:** `v1/server/**` (Express), reference implementation for
@@ -22,11 +29,13 @@ The contract is the source of truth for migration tasks F4 and F5 in the plan.
 Any deviation requires explicit approval recorded in the parent Plan PR and
 re-verification of every acceptance check in Section 14.
 
-## 2. Authoritative sources
+## 2. Authoritative sources and provenance
 
-All paths are relative to the tracked `v1/**` subtree and are read-only inputs
-to this contract, so a reviewer can verify that the Vue boundary matches the
-server behavior exactly.
+The following paths are relative to `<external-source-root>/v1/**` and are
+read-only pre-F1 review inputs. After attestation, reviewers must verify the
+same paths in the tracked `v1/**` destination against the sanitized manifest
+and digest before treating this contract as frozen. This document intentionally
+does not record a machine-local source path or an unsanitized corpus name.
 
 - `backend/routes/web.php` — Laravel routes (methods, paths, guards).
 - `backend/config/session.php`, `backend/config/researchnav.php`,
@@ -71,8 +80,9 @@ server behavior exactly.
 
 ### 4.1 Public, sessionless endpoints
 
-These endpoints never start or persist a browser session and never set the
-session cookie.
+These endpoints are sessionless: they do not create, load, save, or refresh a
+browser session. They neither set nor clear `researchnav.sid`; an existing
+cookie is left untouched.
 
 - `GET /api/health` — success `200 {"status":"ok"}`; no errors.
 - `GET /api/categories` — success `200 {"data":[CategoryResource]}`.
@@ -94,7 +104,8 @@ rendering.
   success `200 {"user": UserSession}` and a session cookie; errors
   `400 INVALID_REQUEST`, `401 GOOGLE_EMAIL_NOT_VERIFIED`,
   `403 ORIGIN_NOT_ALLOWED`, `413 PAYLOAD_TOO_LARGE`,
-  `429 RATE_LIMIT_EXCEEDED`.
+  `429 RATE_LIMIT_EXCEEDED`, `500 INTERNAL_SERVER_ERROR` (known invalid or
+  expired nonempty GIS credential defect; see Section 10).
 - `GET /api/auth/session` — success `200 {"user": UserSession}`; errors
   `401 AUTHENTICATION_REQUIRED`, `401 SESSION_USER_NOT_FOUND`.
 - `POST /api/auth/logout` — success `204` no content and the `researchnav.sid`
@@ -167,14 +178,20 @@ interface UserSession {
 `academics`. The session mapper emits exactly these four fields; the Vue
 boundary must not add or rename fields.
 
-### 5.2 Public research resource
+### 5.2 Public research resource and display mapping
+
+`PublicResearchResource` is the exact Laravel public wire resource emitted by
+`PublicResearchDocumentResource`; it is not the boundary-compatible TypeScript
+input accepted by the existing mapping helper. In particular, the Laravel
+resource has no `year` alias, does not emit keyword arrays, and emits nullable
+database fields as `null` rather than omitting them.
 
 ```ts
 interface PublicResearchResource {
-  id: string | number;
+  id: number;
   title: string;
   abstract: string | null;
-  keywords: string | null; // comma-separated string in practice
+  keywords: string | null; // comma-separated database text
   publication_year: number | null;
   institution_name: string | null;
   institution_location: string | null;
@@ -182,7 +199,7 @@ interface PublicResearchResource {
   degree_program: string | null;
   manuscript_date_label: string | null;
   abstract_provenance: string | null;
-  research_stage: string | null; // snake_case, e.g. "completed"
+  research_stage: string; // snake_case, e.g. "completed"
   authors: PublicResearchAuthor[];
   category: PublicCategory | null;
 }
@@ -202,22 +219,91 @@ interface PublicCategory {
 }
 ```
 
-Frontend mapping rules (frozen in `toResearchRecord`):
+The existing `toResearchRecord` helper accepts the deliberately broader
+boundary-compatible input below. This describes the helper's current TypeScript
+contract and compatibility aliases, not additional Laravel public fields.
 
-- `authors` are sorted by `author_order` ascending and joined as
-  `"First, Second"` using `author_name` only.
-- Year accepts `publication_year` first, then `year`, coerced to `Number`.
-- For `category`, a string value is returned as-is, including an empty string.
-  An object category uses its `name`; only a non-string category with no
-  `name` reaches the helper's `"Uncategorized"` fallback.
-- For `keywords`, an array is returned as supplied, without trimming or
-  filtering its values. The legacy comma-separated-string branch splits the
-  string into an array.
-- `research_stage` is split on `_` and title-cased for display.
-- Deprecated `institute`/`program` aliases on the display record are kept for
-  existing workspace layouts and are derived from `academic_unit` and
-  `degree_program`.
-- A source filename is never derived or exposed (see Section 11).
+```ts
+interface PublicResearchResourceInput {
+  id: string | number;
+  title: string;
+  authors: PublicResearchAuthor[];
+  publication_year?: number | string;
+  year?: number | string; // compatibility fallback only; not Laravel wire
+  institution_name?: string;
+  institution_location?: string;
+  academic_unit?: string;
+  degree_program?: string;
+  category?: { name?: string } | string | null;
+  abstract?: string;
+  keywords?: string[] | string | null;
+  research_stage?: string;
+  manuscript_date_label?: string;
+  abstract_provenance?: string;
+}
+
+interface ResearchRecord {
+  id: string;
+  title: string;
+  authors: string;
+  year: number;
+  institutionName: string;
+  institutionLocation?: string;
+  academicUnit: string;
+  degreeProgram: string;
+  /** @deprecated compatibility alias for existing workspace layouts. */
+  institute: string;
+  /** @deprecated compatibility alias for existing workspace layouts. */
+  program: string;
+  category: string;
+  abstract: string;
+  keywords: string[];
+  researchStage: string;
+  manuscriptDate?: string;
+  abstractProvenance?: string;
+}
+```
+
+`toResearchRecord` produces the complete normalized `ResearchRecord` as
+follows. `null` values from the exact Laravel wire resource reach this helper
+at runtime even where the current compatibility input marks a field optional;
+the listed `??` behavior is therefore part of the required boundary behavior.
+
+- `id` is `String(input.id)` and `title` is passed through unchanged.
+- `authors` is copied, sorted numerically by `author_order` ascending, mapped
+  to `author_name`, and joined with `", "`.
+- `year` is `Number(input.publication_year ?? input.year ?? 0)`. Thus a numeric
+  string is accepted, `publication_year` wins over the optional legacy `year`,
+  and absent or `null` values become `0` (an invalid numeric string becomes
+  `NaN`, not a fabricated year).
+- `institutionName` is `input.institution_name ?? ""`; `institutionLocation`
+  is passed through unchanged (including a wire `null`). `academicUnit` and
+  `degreeProgram` are `input.academic_unit ?? ""` and
+  `input.degree_program ?? ""`; `institute` and `program` are those same two
+  normalized values.
+- A string `category` is returned unchanged, including `""`. An object uses
+  `category.name`, including `""`; `null`, `undefined`, or an object with a
+  `null`/missing `name` becomes `"Uncategorized"`.
+- `abstract` is `input.abstract ?? ""`. For `keywords`, an array is returned
+  unchanged (including its whitespace and empty elements). A truthy string is
+  split on commas, each item is trimmed, and empty results are removed. `null`,
+  `undefined`, and `""` become `[]`.
+- `researchStage` is `(input.research_stage ?? "Not specified")`, split on
+  `_`, with each word title-cased and rejoined with spaces. `null`/`undefined`
+  therefore become `"Not Specified"`; an empty string remains `""`.
+- `manuscriptDate` and `abstractProvenance` pass through respectively from
+  `manuscript_date_label` and `abstract_provenance` without a default, so a
+  wire `null` stays `null` at runtime despite the optional display typings. A
+  source filename is never derived or exposed (see Section 11).
+
+The mapping tests must retain fixtures for: (a) an exact Laravel wire record
+with nullable public metadata and comma-delimited keywords, (b) a
+boundary-compatible record with string `publication_year`, (c) a record using
+only the `year` fallback, (d) a string category including `""`, (e) an object
+category with no name, and (f) both keyword-array pass-through and keyword
+string trim/filter behavior. Each fixture must assert the complete normalized
+`ResearchRecord`, including `institutionName`, `academicUnit`, `degreeProgram`,
+and the deprecated `institute`/`program` aliases.
 
 ### 5.3 NotificationResource (frontend boundary)
 
@@ -316,17 +402,22 @@ propagates to the caller.
 - SameSite: `Lax`.
 - Secure: `true` in production only.
 - Path: `/`.
+- Domain: `SESSION_DOMAIN` is frozen to `null`, so the cookie is host-only.
+  A parent-domain, wildcard, or other domain-sharing value is not permitted.
 - Lifetime: 8 hours (Laravel `SESSION_LIFETIME=480` minutes, idle-based;
   legacy Express `maxAge` 8h with `rolling: true`).
 - Storage: Laravel database `sessions` table; legacy Express PostgreSQL
   `user_sessions` table.
 
-Only authenticated sessions persist. Unauthenticated requests neither set nor
-retain the cookie (`saveUninitialized=false` behavior is mirrored by
-`StartResearchNavSession` and `DiscardUnauthenticatedSession` on the Laravel
-side). The application explicitly stores the user ID under `user_id`; no
-application-level role, email, or token is stored. Laravel guard keys and other
-Laravel session internals may coexist in the session.
+Only authenticated sessions persist. On a **session-enabled** route, an
+unauthenticated session is discarded; when the request carried a stale session
+cookie, the response clears it (`saveUninitialized=false` behavior is mirrored
+by `StartResearchNavSession` and `DiscardUnauthenticatedSession`). This rule
+does not apply to the public sessionless routes in Section 4.1: they do not
+create or refresh a session and leave an existing cookie untouched. The
+application explicitly stores the user ID under `user_id`; no application-level
+role, email, or token is stored. Laravel guard keys and other Laravel session
+internals may coexist in the session.
 
 ### 7.2 Origins
 
@@ -373,15 +464,43 @@ request parsing, rate-limit errors, error bodies, or body-limit behavior.
 
 ## 9. Notification action URLs
 
-- The server emits `action_url` as an internal path such as `/research/42`
-  (never a full URL).
-- The Vue boundary treats `action_url` as a client-side navigation path: it is
-  passed to the manual History API `navigate()` callback. It is never opened
-  as an external link, never prefixed with an origin, and never used as a
-  fetch target.
-- The drawer may display `action_url` as text only.
+- The server currently emits `action_url` as an internal path such as
+  `/research/42` (never a full URL). The notification envelope target remains
+  normalized exactly as specified in Section 5.3; action validation does not
+  rename, default, or otherwise mutate the returned notification.
+- Before passing an action to the manual History API `navigate()` callback, the
+  frontend must validate the **raw string before URL parsing**. Accept only a
+  string beginning exactly with `/research/`; reject a raw backslash, any ASCII
+  control character (including DEL), a protocol-relative value (`//…`), and a
+  full URL. Before parsing, inspect the entire raw value case-insensitively and
+  reject percent-encoded separators or controls (`%2f`, `%5c`, `%00`–`%1f`,
+  `%7f`); inspect its pathname portion (the text before `?` or `#`) for
+  percent-encoded dot-segment bypasses (`%2e`). These checks apply at every
+  decoding layer, so recursively encoded forms such as `%252f` and `%252e` are
+  rejected. This is required even if a browser URL parser would normalize the
+  value safely.
+- Only after those raw checks may the frontend parse in a `try` block against
+  `window.location.origin`. The parsed URL must have that exact origin and a
+  pathname beginning with `/research/`; any parse failure or failed check is
+  ignored safely (no navigation). Query strings and fragments are permitted
+  only after an accepted `/research/...` pathname and are passed as the parsed
+  `pathname + search + hash`. They do not relax pathname validation. This
+  retains the plan's History API/query behavior; the navigation callback, not
+  action validation, remains responsible for its established query-preservation
+  semantics.
+- An accepted value is a client-side navigation path only. It is never opened
+  as an external link, never prefixed with an origin for navigation, and never
+  used as a fetch target. The drawer may display `action_url` as text only.
 - Clicking a notification marks it read first (when `read_at` is `null`), then
-  navigates.
+  navigates only if the action passes this validation.
+- Tests must cover accepted `/research/42` and
+  `/research/42?tab=activity#comments` actions (including the exact path,
+  query, and fragment passed to navigation). They must safely ignore malformed
+  input; `https://…` full URLs; `//host/path` protocol-relative URLs;
+  root-relative paths outside `/research/`; raw backslash/control fixtures such
+  as `"/research\\42"` and `"/research/\u0000"`; and encoded fixtures such as
+  `/research/%2fadmin`, `/research/%00`, `/research/%2e%2e/admin`, and
+  `/research/%252fadmin`.
 
 ## 10. Google Identity Services credential handling
 
@@ -397,9 +516,13 @@ request parsing, rate-limit errors, error bodies, or body-limit behavior.
    `{"credential": ...}` in `POST /api/auth/google`. The frontend never
    validates, logs, stores, or persists the credential (no localStorage, no
    sessionStorage, no state beyond the in-flight request).
-5. Server-side verification is authoritative: the ID token must match the
-   configured audience and `email_verified` must be true; unverified or
-   missing identity returns `401 GOOGLE_EMAIL_NOT_VERIFIED`.
+5. Server-side verification is authoritative. A verifier result with a missing
+   subject/email or `email_verified: false` returns
+   `401 GOOGLE_EMAIL_NOT_VERIFIED`. **Known backend defect / out of scope:** an
+   invalid or expired but nonempty GIS credential currently bubbles out of the
+   verifier and reaches `500 INTERNAL_SERVER_ERROR`, not `401`. The Vue client
+   must use its ordinary generic error handling for that failure; it must not
+   claim, translate, or special-case it as an authentication `401`.
 6. A missing `VITE_GOOGLE_CLIENT_ID` shows the configuration error state and
    never initializes GIS. Script blocking shows the privacy-settings error
    state with a retry path.
@@ -412,12 +535,17 @@ request parsing, rate-limit errors, error bodies, or body-limit behavior.
 - The public repository scope is: `submission_status` in (`approved`,
   `archived`), `visibility` = `public`, and `archive_status` = `archived`.
 - `PublicResearchDocumentResource` exposes only the fields in Section 5.2. It
-  never exposes `import_source_filename`, `import_source_sha256`, submitter
-  identity, internal status fields, file paths, or similarity results.
+  never exposes `submission_status`, `archive_status`, `visibility`,
+  `import_source_filename`, `import_source_sha256`, submitter identity, file
+  paths, or similarity results. This prohibition is scoped to the **public
+  API and public catalog**; it does not remove or redefine the frontend's
+  existing `Status` union or its authenticated workspace UI.
 - The Vue boundary never derives or displays a source filename, and tests
   assert its absence (`expect(record).not.toHaveProperty("sourceFilename")`).
 - The metadata dialog renders only public fields. Document download remains
-  gated behind sign-in and is not performed by the public page.
+  gated behind sign-in and is not performed by the public page. The workspace
+  may continue to use its `Status` display union independently of public
+  catalog data.
 - Catalog filtering and sorting are client-side over the fetched public
   dataset; the Vue boundary adds no extra server queries.
 
@@ -425,7 +553,7 @@ request parsing, rate-limit errors, error bodies, or body-limit behavior.
 
 The following files are framework-neutral and are preserved as-is by the Vue
 migration, except for the approved frontend-only notification read-envelope
-normalization and its exact test; otherwise, only required type or lint
+normalization and its exact tests; otherwise, only required type or lint
 adjustments are permitted, with no behavior change:
 
 - `src/api.ts` — the sole browser API boundary: relative fetch paths,
@@ -433,19 +561,22 @@ adjustments are permitted, with no behavior change:
   `normalizeNextPath`, resource mapping (`toResearchRecord`, `toAuthors`,
   `toKeywords`, `toCategory`, `toResearchStage`), `roleLabel`, and the required
   frontend-only notification read-envelope normalization.
-- `src/types.ts` — `Role`, `Status`, `ResearchRecord`, `RoleConfig`,
-  `UserSession`.
+- `src/types.ts` — `Role`, the existing workspace `Status` union,
+  `ResearchRecord`, `RoleConfig`, `UserSession`. The public-field prohibition
+  in Section 11 does not delete or change `Status`.
 - `src/access.ts` — `canEnterDashboard` (active-only gate).
 - `src/data.ts` — `roleConfigs`, `defaultUserSession`.
 - `src/api.test.ts` — behavioral coverage: exact Laravel author fields,
-  author sort, absolute `next` URL normalization, empty collection handling,
-  exact notification pass-through, UUID read route and `PATCH` method, and the
-  required exact unwrapping of `{"data": notification}` to the bare
-  notification.
+  complete resource-mapping fixtures from Section 5.2, author sort, absolute
+  `next` URL normalization, empty collection handling, exact notification
+  pass-through, UUID read route and `PATCH` method, and the required exact
+  unwrapping of `{"data": notification}` to the bare notification.
 
 The migration must not move, rename, or framework-wrap these modules. The
 notification read-envelope normalization and its exact test are the approved
-frontend-only exception to otherwise preserving `api.ts` behavior.
+frontend-only exception to otherwise preserving `api.ts` behavior. Notification
+action-path validation in the Vue notification UI is separately required by
+Section 9 and must not alter the normalized notification object.
 
 ## 13. Frozen behavior outside the boundary
 
@@ -461,20 +592,29 @@ manuscript files remain excluded from Git and from the Vite filesystem.
 The Vue migration passes only when every check below holds on the exact
 frontend child head:
 
-- [ ] Every request from the Vue boundary uses a relative `/api/...` path and
-      `credentials: "include"`.
-- [ ] `src/api.ts` error mapping is unchanged: non-2xx parses `{error}` and
-      throws the stable code or `REQUEST_FAILED_<status>`; `204` yields
-      `undefined`; only `AUTHENTICATION_REQUIRED` on session lookup maps to
-      `null`.
+- [ ] Every request has an explicit transport test that asserts its relative
+      `/api/...` path, `credentials: "include"`, `Content-Type:
+application/json`, exact HTTP method, and JSON body (or its absence).
+      This includes Google login, logout, both provisioning list endpoints,
+      both provisioning POST endpoints, session lookup, notifications, the
+      notification read PATCH, and the public repository request.
+- [ ] `src/api.ts` error mapping has tests for a JSON stable error code and a
+      non-JSON/bodyless fallback `REQUEST_FAILED_<status>`; a `204` response
+      returns `undefined`; only `AUTHENTICATION_REQUIRED` from session lookup
+      maps to `null`. Every other error, including GIS
+      `INTERNAL_SERVER_ERROR`, propagates.
 - [ ] Endpoint methods and paths are unchanged: `GET /api/auth/session`,
       `POST /api/auth/google`, `POST /api/auth/logout`,
       `GET|POST /api/admin/coordinators`,
       `GET|POST /api/coordinator/instructors`, `GET /api/notifications`,
       `PATCH /api/notifications/{encodeURIComponent(uuid)}/read`, and
       `GET /api/repository?per_page=50`.
-- [ ] `normalizeNextPath` and the 100-page caps are unchanged; empty
-      collections return empty arrays with no manufactured records or alerts.
+- [ ] `normalizeNextPath` is tested with an absolute next URL, and both list
+      functions are tested to stop at the 100-page cap. Empty collections
+      return empty arrays with no manufactured records or alerts.
+- [ ] Public-resource fixtures cover the exact Laravel wire record and every
+      compatibility/default case in Section 5.2, asserting the complete
+      normalized `ResearchRecord`.
 - [ ] `NotificationResource` passes through exactly, including all nullable
       fields. Laravel's read PATCH response is
       `{ "data": NotificationResource }`; Vue `api.ts` normalizes it to a
@@ -482,20 +622,39 @@ frontend child head:
       mocks that envelope and covers the normalization. The missing
       normalization in the current React v1 source is the known defect this
       migration fixes at the frontend boundary only.
-- [ ] `action_url` is treated as an internal navigation path and is never
-      opened externally or prefixed with an origin.
+- [ ] A notification read ID containing reserved characters is encoded with
+      `encodeURIComponent` in the PATCH path. The read response fixture is a
+      `{ "data": NotificationResource }` envelope.
+- [ ] `action_url` validation performs raw-string rejection before URL parsing:
+      it accepts only `/research/` paths (with an optional query and fragment),
+      rejects raw backslashes/controls, encoded separator/control/dot-segment
+      or double-encoding bypasses, malformed/full/protocol-relative and
+      unsupported-prefix inputs without navigation, and never opens an external
+      target or alters the normalized notification envelope. Tests cover both
+      accepted plain and query/fragment paths and every rejected category.
 - [ ] GIS lifecycle, initialization options, 320px button, retry cleanup, and
       single-use credential POST are preserved; no credential storage exists.
-- [ ] No source filename, import metadata, or internal status appears in
-      `types.ts`, `api.ts`, or rendered output.
-- [ ] Session cookie name `researchnav.sid`, HttpOnly/SameSite/Secure flags,
-      and the origin allowlist behavior are unchanged; no CSRF token is sent.
+- [ ] No source filename, import metadata, `submission_status`,
+      `archive_status`, or `visibility` appears in the public API/catalog
+      types, mapping, or rendered output. The existing frontend `Status`
+      union and authenticated workspace UI remain intact.
+- [ ] Public sessionless routes neither create nor refresh a session and leave
+      an existing cookie untouched; session-enabled unauthenticated routes
+      clear stale cookies. The cookie remains `researchnav.sid`, host-only
+      (`SESSION_DOMAIN=null`), HttpOnly, SameSite Lax, and production-Secure;
+      no CSRF token is sent.
+- [ ] Invalid or expired nonempty GIS credentials are documented and tested as
+      the current backend `500 INTERNAL_SERVER_ERROR` defect; Vue shows only
+      generic propagated-error handling and does not claim a `401`.
 - [ ] `src/api.ts`, `src/types.ts`, `src/access.ts`, `src/data.ts`, and
       `src/api.test.ts` are preserved with only type/lint adjustments, except
       for the required frontend-only notification read-envelope normalization
       and its exact test.
 - [ ] No backend, schema, migration, or `server/**` logic change exists in the
       migration diff.
+- [ ] Before this contract is marked frozen, the sanitized F1 manifest and
+      digest attest `<external-source-root>/v1` to the tracked `v1`
+      destination and the contract receives a re-review.
 - [ ] Committed docs contain no local absolute paths and no confidential
       filenames (corpus basenames, derived catalog names, or user data).
 
@@ -504,9 +663,10 @@ frontend child head:
 - No new endpoints, no endpoint removal, and no method or path changes.
 - No change to session, cookie, origin, body-limit, rate-limit, or
   authorization behavior.
-- No Laravel notification-envelope change, action URL semantic change, or GIS
-  credential-flow change. The Vue frontend-only normalization of Laravel's
-  existing read envelope is required.
+- No Laravel notification-envelope or GIS credential-flow change. The Vue
+  frontend-only normalization of Laravel's existing read envelope and the safe
+  client-side action-path validation in Section 9 are required; neither changes
+  the server action URL value or its notification envelope.
 - No expansion of the public resource fields and no exposure of import
   metadata or source filenames.
 - No backend, database, schema, or migration work; no `server/**` logic
