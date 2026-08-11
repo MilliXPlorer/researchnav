@@ -19,7 +19,7 @@ This document is the execution control plane. The dirty external source app is a
 
 ## 1. Objective
 
-Replace the authoritative ResearchNAV React 19 frontend with an equivalent Vue 3 Composition API/TypeScript frontend while preserving its observable UI, accessibility behavior, styles, Laravel API contracts, authentication/session behavior, legacy server rollback implementation, and similarity algorithm. Deliver the migrated application as a sanitized `v1/**` subtree without committing credentials, dependencies, generated output, runtime data, caches, TypeScript build metadata, or confidential manuscript/form corpora. The migration also intentionally corrects only the four approved frontend baseline defects: notification response-envelope normalization, accessible names for responsive shelf controls, programmatic notification read/unread semantics, and safe validation of notification action paths.
+Replace the authoritative ResearchNAV React 19 frontend with an equivalent Vue 3 Composition API/TypeScript frontend while preserving its observable UI, accessibility behavior, styles, Laravel API contracts, authentication/session behavior, legacy server rollback implementation, and similarity algorithm. Deliver the migrated application as a sanitized `v1/**` subtree without committing credentials, dependencies, generated output, runtime data, caches, TypeScript build metadata, or confidential manuscript/form corpora. The migration also intentionally corrects only the five approved frontend baseline defects: notification response-envelope normalization, accessible names for responsive shelf controls, programmatic notification read/unread semantics, safe validation of notification action paths, and fail-closed `links.next` normalization at the same-origin API boundary.
 
 Success means a developer can install and run the Vue application from `v1`, all migrated frontend tests use Testing Library Vue, `vue-tsc` validates the SFCs, no React runtime or tooling remains in `v1`, and the untouched backend/server/algorithm regression suites remain green.
 
@@ -35,7 +35,7 @@ Success means a developer can install and run the Vue application from `v1`, all
 - Replace `lucide-react` with `lucide-vue-next` while retaining the same icons, labels, and decorative `aria-hidden` treatment.
 - Replace React Vite, ESLint, type, and test integration with Vue equivalents.
 - Port existing React Testing Library tests to `@testing-library/vue` and retain the behavioral coverage for public repository data, API mapping/pagination, all ten role workspaces, access blocking, notifications, status chips, and similarity rings.
-- Correct, during the Vue migration and only in frontend-owned files, the missing accessible names on shelf navigation controls whose visible text is hidden at viewport widths `<=1100px`, missing programmatic notification read/unread semantics, and unsafe acceptance of notification action paths. Retain the already approved notification envelope normalization. Each correction requires focused regression tests.
+- Correct, during the Vue migration and only in frontend-owned files, the missing accessible names on shelf navigation controls whose visible text is hidden at viewport widths `<=1100px`, missing programmatic notification read/unread semantics, unsafe acceptance of notification action paths, and permissive repository/notification `links.next` normalization. Retain the already approved notification envelope normalization. Each correction requires focused regression tests.
 - Preserve Google Identity Services loading, server-side credential verification, session cookies, errors, dialog focus management, and retry states.
 - Require the final SHA-256 of `src/styles.css` to equal the F1-frozen source hash. The sole exception is a verified Vue selector-matching incompatibility that cannot be resolved in template markup and requires a minimal selector-only compatibility correction; no declaration, value, custom property, media query, or unrelated selector change is allowed. Any exception requires the two hashes, exact selector diff, reproduced incompatibility, focused test, and explicit parent Plan PR documentation.
 - Preserve and regression-test Laravel, legacy Express/server, and Python algorithm logic without creating backend or database implementation workstreams.
@@ -43,7 +43,8 @@ Success means a developer can install and run the Vue application from `v1`, all
 
 ### Non-goals
 
-- No feature development, broad redesign, unplanned copy/content change, API expansion, schema/migration change, data import, or fabricated repository/workflow data. F1's required sanitized copy of allowlisted `<external-source-root>/v1` snapshot content is permitted and required; the four enumerated frontend baseline defect corrections are intentional migration remediations, not authority for adjacent cleanup or redesign.
+- No feature development, broad redesign, unplanned copy/content change, API expansion, schema/migration change, data import, or fabricated repository/workflow data. F1's required sanitized copy of allowlisted `<external-source-root>/v1` snapshot content is permitted and required; the five enumerated frontend baseline defect corrections are intentional migration remediations, not authority for adjacent cleanup or redesign.
+- No correction, normalization, or cleanup of the existing odd `researchStage` mapping; preserve it exactly as frozen parity behavior.
 - No Laravel, database, `server/**`, or `algorithm/**` logic changes.
 - No SSR, hydration, Nuxt, `vue-router`, Pinia, Vuex, or another client state library.
 - No replacement of Google Identity Services and no change to OAuth client/origin configuration.
@@ -150,7 +151,9 @@ Until the post-F1 C0 re-attestation, this section and `docs/contracts/vue-api-da
 
 `UserSession` remains `{ email: string; role: Role; accessStatus: "active" | "invited" | "blocked"; isAdmin: boolean }`. Roles remain `admin`, `researcher`, `adviser`, `instructor`, `panel`, `statistician`, `coordinator`, `librarian`, `research-office`, and `academics`.
 
-Public resource mapping remains exact: sort `authors` by `author_order`; map `author_name`; accept `publication_year` or `year`; map institution, academic unit, degree program, category, abstract, keywords, research stage, manuscript date, and abstract provenance; retain deprecated `institute`/`program` aliases used by current layouts. Do not expose a source filename.
+Repository and notification pagination share one frontend-only `links.next` normalization rule. An absolute HTTP(S) API link may be parsed only to discard its scheme/authority and produce a credentialed same-origin pathname/query fetch target; it must never be fetched as an absolute URL. Normalization fails closed unless the resulting pathname begins case-sensitively and exactly with `/api/` and the raw or normalized target does not begin with `//`. In particular, a raw protocol-relative value such as `//host/api/repository?page=2` is rejected before URL parsing, and `/apiary`, `/api`, same-origin non-API paths, and absolute non-API URLs are rejected. Rejection stops pagination without any follow-up fetch. Focused repository and notification tests must each prove that a benign absolute `/api/...` next link is rewritten to and fetched only as its same-origin path/query, while hostile `//host/...` and non-API next links cause no follow-up request. This correction preserves the credentialed same-origin API boundary: `credentials: "include"` must never accompany a pagination request to an authority supplied by `links.next`.
+
+Public resource mapping remains exact: sort `authors` by `author_order`; map `author_name`; accept `publication_year` or `year`; map institution, academic unit, degree program, category, abstract, keywords, research stage, manuscript date, and abstract provenance; retain deprecated `institute`/`program` aliases used by current layouts. The existing odd `researchStage` mapping is deliberately preserved verbatim; this plan does not authorize correcting or normalizing it. Do not expose a source filename.
 
 `NotificationResource` remains `{ id, type, event, title, message, action_url, research_document_id, read_at, created_at }`, including nullable fields.
 
@@ -158,7 +161,7 @@ Public resource mapping remains exact: sort `authors` by `author_order`; map `au
 
 Notification action navigation must add a frontend-only allowlist guard without changing the wire resource. An action is navigable only when its raw value is a root-relative path beginning with one `/` (never `//`, a scheme/authority, a backslash form, or control characters) and its parsed same-origin pathname matches a supported prefix re-attested from the F1-frozen source. The provisional expected supported prefix is `/research/`, matching the current Laravel notification producer; C0 must confirm the final exact prefix list and record it in `docs/contracts/vue-api-data.md`. Invalid, unsupported, or absent actions remain displayable and may still be marked read, but must not be passed to `history.pushState` or another navigation sink. Tests must accept representative root-relative supported paths, including query/hash where the frozen contract permits them, and reject absolute, protocol-relative, encoded/bypass, backslash, control-character, and unsupported-prefix inputs.
 
-The approved notification fixes are limited to: (1) preserving `{ data: notification }` envelope normalization in `api.ts`; (2) exposing each notification's `read_at === null` state as deterministic programmatic read/unread text or an equivalent accessible relationship that updates after one/all mark-read actions; and (3) the action-path guard above. These and the responsive shelf-name correction in Section 6 are intentional baseline defect corrections required during migration, not a broad notification, navigation, copy, visual, or backend redesign. Focused API and Testing Library Vue tests are mandatory.
+The approved notification fixes are limited to: (1) preserving `{ data: notification }` envelope normalization in `api.ts`; (2) exposing each notification's `read_at === null` state as deterministic programmatic read/unread text or an equivalent accessible relationship that updates after one/all mark-read actions; (3) the action-path guard above; and (4) the shared fail-closed `links.next` normalization rule above. These, the repository-side application of that pagination rule, and the responsive shelf-name correction in Section 6 are intentional baseline defect corrections required during migration, not a broad notification, navigation, copy, visual, mapping, or backend redesign. Focused API and Testing Library Vue tests are mandatory.
 
 ## 6. Provisional UI and accessibility contract
 
@@ -374,8 +377,8 @@ The two documentation-only contract lanes are mandatory pre-implementation lanes
 - **Owner:** Vue API Contract Author.
 - **Dependencies:** P0.
 - **Exact path:** `docs/contracts/vue-api-data.md` only, on `design/vue-api-contract` in `<vue-api-contract-worktree>`.
-- **Actions:** materialize Section 5 as a provisional route/request/raw-wire/normalized-return matrix covering credentials, JSON/error/204 handling, session and access shapes, public and notification pagination caps/URL normalization, public resource mapping, admin/coordinator operations, nullable notification fields, and UUID encoding. Explicitly record the discovered Laravel mark-read envelope `{ data: notification }`, approved `api.ts` boundary unwrapping, root-relative supported-prefix action guard, programmatic read-state consumption, and required focused assertions; do not prescribe a backend change. Record `/research/` as the provisional notification-action prefix and require post-F1 C0 confirmation before it is frozen.
-- **Acceptance checks:** wire and frontend-normalized shapes are unambiguous; `NotificationResource` fields remain exact; envelope normalization and action-path validation are frontend-only and narrowly scoped; accepted/rejected path classes and tests are explicit; the known invalid-nonempty-GIS-token 500 is recorded as an out-of-scope backend defect with generic Vue handling; no route, cookie, authorization, schema, fabricated data, or backend behavior changes.
+- **Actions:** materialize Section 5 as a provisional route/request/raw-wire/normalized-return matrix covering credentials, JSON/error/204 handling, session and access shapes, public and notification pagination caps/fail-closed URL normalization, public resource mapping, admin/coordinator operations, nullable notification fields, and UUID encoding. Explicitly record the discovered Laravel mark-read envelope `{ data: notification }`, approved `api.ts` boundary unwrapping, root-relative supported-prefix action guard, programmatic read-state consumption, exact preservation of the odd `researchStage` mapping, and required focused assertions; do not prescribe a backend change. Require repository and notification pagination tests for benign absolute API links and rejected protocol-relative/non-API links. Record `/research/` as the provisional notification-action prefix and require post-F1 C0 confirmation before it is frozen.
+- **Acceptance checks:** wire and frontend-normalized shapes are unambiguous; `NotificationResource` fields remain exact; envelope normalization, action-path validation, and pagination fail-closed behavior are frontend-only and narrowly scoped; accepted/rejected path classes and tests are explicit; pagination cannot send credentials to a `links.next` authority; the odd `researchStage` mapping remains unchanged; the known invalid-nonempty-GIS-token 500 is recorded as an out-of-scope backend defect with generic Vue handling; no route, cookie, authorization, schema, fabricated data, mapping cleanup, or backend behavior changes.
 - **Exit gate:** only the owned file is modified, Markdown is formatted, examples are synthetic, and the author returns an unstaged handoff to A2.
 
 ### A2 — Verify the API/data contract before commit
@@ -383,7 +386,7 @@ The two documentation-only contract lanes are mandatory pre-implementation lanes
 - **Owner:** API Contract Pre-Commit Tester (read-only).
 - **Dependencies:** A1.
 - **Actions:** inspect the complete unstaged file; run the API contract commands in Section 12; compare the contract to Section 5 and the read-only authoritative Laravel notification controller/resource evidence without copying source or disclosing local/confidential paths.
-- **Exit gate:** evidence-backed PASS confirms `{ data: notification }` on the wire, normalized `NotificationResource` at the frontend boundary, all frozen API/security behavior, and clean privacy/path scans. Failure returns only `docs/contracts/vue-api-data.md` to the stopped A1 owner or a designated fix owner, then A2 reruns. Nothing is staged before PASS.
+- **Exit gate:** evidence-backed PASS confirms `{ data: notification }` on the wire, normalized `NotificationResource` at the frontend boundary, fail-closed repository/notification pagination at relative `/api/` targets only, preservation of the odd `researchStage` mapping, all frozen API/security behavior, and clean privacy/path scans. Failure returns only `docs/contracts/vue-api-data.md` to the stopped A1 owner or a designated fix owner, then A2 reruns. Nothing is staged before PASS.
 
 ### A3 — Commit the verified API/data contract
 
@@ -419,7 +422,7 @@ The two documentation-only contract lanes are mandatory pre-implementation lanes
 - **Dependencies:** Phase 1 depends on U6 and A6. Phase 2 depends on F1's completed sanitized copy, source/destination manifests and aggregate digests, supported-prefix evidence, and baseline classification.
 - **Phase 1 actions:** test the exact plan head containing both contract merges with the combined contract gate in Section 12; confirm each child URL/tested head/merge commit and ancestry correction is recorded; verify no path outside this plan and the two contract files changed before implementation; cross-check both provisional contracts against Sections 5 and 6 and each other.
 - **Phase 1 exit gate:** combined provisional gate PASS, no known contradiction or privacy/path violation exists, and the F1 frontend branch/worktree is created cleanly from this exact plan head. This authorizes only F1 freeze/sanitized copy/evidence work, not F2 or product conversion.
-- **Phase 2 actions:** after F1, compare both contracts line by line to the exact sanitized copied source and its matching source/destination manifests/digests; verify the notification wire envelope, final root-relative supported action-prefix list, shelf breakpoint behavior, read/unread semantics defect, GIS invalid-token 500 baseline, CSS hash, and all UI/API surfaces. Confirm evidence contains only aggregate digests/counts and approved synthetic values. Record the exact F1 source digest, destination digest, frontend worktree head, contract versions, and re-attestation result in Plan PR #5.
+- **Phase 2 actions:** after F1, compare both contracts line by line to the exact sanitized copied source and its matching source/destination manifests/digests; verify the notification wire envelope, final root-relative supported action-prefix list, permissive pagination baseline, exact odd `researchStage` mapping, shelf breakpoint behavior, read/unread semantics defect, GIS invalid-token 500 baseline, CSS hash, and all UI/API surfaces. Confirm evidence contains only aggregate digests/counts and approved synthetic values. Record the exact F1 source digest, destination digest, frontend worktree head, contract versions, and re-attestation result in Plan PR #5.
 - **Phase 2 exit gate:** C0 re-attestation PASS makes the contracts authoritative for the recorded F1 snapshot and authorizes F2. Any contradiction blocks F2 and requires a Plan PR amendment plus affected contract lane correction, ancestry merge, exact-head review, merge, and complete C0 re-attestation; source drift requires F1 and both C0 phases to repeat.
 
 ### F1 — Freeze, baseline, sanitize, and verify the authoritative source
@@ -427,7 +430,7 @@ The two documentation-only contract lanes are mandatory pre-implementation lanes
 - **Owner:** Frontend Builder.
 - **Dependencies:** C0 Phase 1 PASS.
 - **Writable paths:** owned `v1/**` paths only; do not create `v1/README.md` or `v1/docs/**`.
-- **Actions:** apply Section 7's filtered allowlist copy from external `v1/**` only (never external `v0/**`); update `v1/.gitignore` only to enforce the new nested exclusions; generate non-committed source/destination manifests and the separate parent-base root manifest; record both aggregate digests; execute baseline tests; capture only the synthetic/off-Git visual evidence permitted by Section 7; prove copied preserved files match; identify the authoritative notification action-prefix producer and baseline defects for C0 without changing product code.
+- **Actions:** apply Section 7's filtered allowlist copy from external `v1/**` only (never external `v0/**`); update `v1/.gitignore` only to enforce the new nested exclusions; generate non-committed source/destination manifests and the separate parent-base root manifest; record both aggregate digests; execute baseline tests; capture only the synthetic/off-Git visual evidence permitted by Section 7; prove copied preserved files match; identify the authoritative notification action-prefix producer, permissive pagination baseline, exact odd `researchStage` mapping, and other baseline defects for C0 without changing product code.
 - **Acceptance checks:** no denied file ever enters the worktree; destination manifest equals allowed external-v1 source and aggregate digests match; confidential filename list is not logged; copied style/backend/server/algorithm hashes match; parent-base paths outside `v1/**` have no diff except the three approved plan/contract paths; baseline evidence exists; any source/contract difference is reported rather than resolved silently.
 - **Exit gate:** cleanly classified baseline, empty allowed-file comparison, all deny scans pass, source and destination aggregate digests are recorded in the frontend handoff/PR evidence, and the complete re-attestation packet is handed to C0. F2 remains blocked until C0 Phase 2 PASS.
 
@@ -454,8 +457,8 @@ The two documentation-only contract lanes are mandatory pre-implementation lanes
 - **Owner:** Frontend Builder.
 - **Dependencies:** F3.
 - **Exact paths:** `v1/src/App.vue`, `v1/src/LandingPage.vue`, `v1/src/CatalogPage.vue`, `v1/src/api.ts`, `v1/src/api.test.ts`, `v1/src/access.ts`, `v1/src/data.ts`; delete `v1/src/App.tsx`, `v1/src/LandingPage.tsx`, and `v1/src/CatalogPage.tsx` after parity.
-- **Actions:** port root async state/lifecycle, manual History API navigation, public home, catalog filtering/sorting, and metadata dialog; preserve framework-neutral API mapping; retain the contract-approved mark-read correction by unwrapping Laravel's `{ data: notification }` response in `api.ts`; add a small typed frontend helper for the C0-re-attested root-relative supported notification-action prefixes without changing resource fields or backend behavior.
-- **Acceptance checks:** public API fixture, empty response, failure alert, author sort/resource mapping, query/filter/sort URL updates, metadata fields, and no source filename exposure all pass. Focused `api.test.ts` cases prove the encoded UUID/request options, raw `{ data: notification }` fixture, exact normalized resource return, unchanged error behavior, accepted supported root-relative paths, and rejection of absolute/protocol-relative/encoded-bypass/backslash/control-character/unsupported paths before any navigation sink.
+- **Actions:** port root async state/lifecycle, manual History API navigation, public home, catalog filtering/sorting, and metadata dialog; preserve framework-neutral API mapping, including the odd `researchStage` mapping without cleanup; retain the contract-approved mark-read correction by unwrapping Laravel's `{ data: notification }` response in `api.ts`; add a small typed frontend helper for the C0-re-attested root-relative supported notification-action prefixes without changing resource fields or backend behavior; make shared repository/notification `links.next` normalization stop unless it yields a non-`//` path beginning exactly `/api/`, and fetch only that path/query.
+- **Acceptance checks:** public API fixture, empty response, failure alert, author sort/resource mapping including the unchanged odd `researchStage` behavior, query/filter/sort URL updates, metadata fields, and no source filename exposure all pass. Focused `api.test.ts` cases prove the encoded UUID/request options, raw `{ data: notification }` fixture, exact normalized resource return, unchanged error behavior, accepted supported root-relative action paths, and rejection of absolute/protocol-relative/encoded-bypass/backslash/control-character/unsupported action paths before any navigation sink. Separate focused repository and notification pagination cases each prove a benign absolute API next link becomes a same-origin `/api/...` path/query request and hostile `//host/...`, `/apiary`, `/api`, root-relative non-API, and absolute non-API next links cause no follow-up fetch.
 - **Exit gate:** focused public/API tests pass; `/` and `/catalog` satisfy the private synthetic desktop/mobile visual comparison; CSS retains the exact F1 SHA-256 unless the documented selector-only exception gate applies.
 
 ### F5 — Port Google auth, dashboard, notifications, and all role workspaces
@@ -472,8 +475,8 @@ The two documentation-only contract lanes are mandatory pre-implementation lanes
 - **Owner:** Frontend Builder.
 - **Dependencies:** F5.
 - **Exact paths:** `v1/src/App.test.ts`, `v1/src/components.test.ts`, `v1/src/api.test.ts`, `v1/src/test/setup.ts`, `v1/vite.config.test.ts`; delete `v1/src/app.test.tsx` and `v1/src/components.test.tsx`.
-- **Actions:** port assertions to Testing Library Vue; add focused manual-navigation, dialog, GIS-500 generic-error, responsive shelf-name, notification read/unread, notification action-path, and deny-list tests where current coverage is implicit; in `v1/vite.config.test.ts`, replace any copied real manuscript basename with the exact neutral synthetic denied path `/src/research_studies/denied-manuscript.docx`; remove every React package/import/config artifact; rerun post-migration screenshots under the strict synthetic/off-Git controls and perform integrity comparisons.
-- **Acceptance checks:** all commands in Section 12 pass; all four approved baseline correction test groups remain present; `vite.config.test.ts` contains the synthetic denied DOCX path and no external corpus basename; no `.tsx`/React residue; `src/styles.css` final SHA-256 equals the recorded F1 hash, or the sole documented selector-only exception has exact evidence and tests; backend/server/algorithm allowed-file hashes remain unchanged; parent-base paths outside `v1/**` remain unchanged except the three approved plan/contract paths; screenshot comparison has no unexplained visual regressions and no image/metadata leaves the local off-Git temporary directory.
+- **Actions:** port assertions to Testing Library Vue; add focused manual-navigation, dialog, GIS-500 generic-error, responsive shelf-name, notification read/unread, notification action-path, repository/notification pagination normalization, unchanged `researchStage` mapping, and deny-list tests where current coverage is implicit; in `v1/vite.config.test.ts`, replace any copied real manuscript basename with the exact neutral synthetic denied path `/src/research_studies/denied-manuscript.docx`; remove every React package/import/config artifact; rerun post-migration screenshots under the strict synthetic/off-Git controls and perform integrity comparisons.
+- **Acceptance checks:** all commands in Section 12 pass; all five approved baseline correction test groups remain present; repository and notification pagination tests cover benign absolute API links and hostile protocol-relative/non-API links; the odd `researchStage` mapping remains unchanged and covered by mapping parity assertions; `vite.config.test.ts` contains the synthetic denied DOCX path and no external corpus basename; no `.tsx`/React residue; `src/styles.css` final SHA-256 equals the recorded F1 hash, or the sole documented selector-only exception has exact evidence and tests; backend/server/algorithm allowed-file hashes remain unchanged; parent-base paths outside `v1/**` remain unchanged except the three approved plan/contract paths; screenshot comparison has no unexplained visual regressions and no image/metadata leaves the local off-Git temporary directory.
 - **Exit gate:** builder returns an unstaged handoff with commands, exit codes, manifest digest, visual comparison summary, and acceptance mapping.
 
 ### V1 — Independent pre-commit verification
@@ -501,7 +504,7 @@ The two documentation-only contract lanes are mandatory pre-implementation lanes
 
 - **Owner:** Frontend PR Verification Lead (read-only).
 - **Dependencies:** P1.
-- **Actions:** verify P1's recorded latest plan SHA is an ancestor of the exact child SHA and remains the current plan head; test that child SHA in a detached worktree and collect independent code, accessibility, and security review findings for Vue lifecycle/reactivity, both re-attested contracts, the four narrow baseline corrections, parity, dependency removals, security boundaries, and sanitization.
+- **Actions:** verify P1's recorded latest plan SHA is an ancestor of the exact child SHA and remains the current plan head; test that child SHA in a detached worktree and collect independent code, accessibility, and security review findings for Vue lifecycle/reactivity, both re-attested contracts, the five narrow baseline corrections, parity including unchanged odd `researchStage` mapping, dependency removals, security boundaries, and sanitization.
 - **Exit gate:** ancestry proof, CI/commands, and reviews are green with no blocking finding. Corrections or a plan-head advance repeat Fix Agent -> V1 -> G1 -> P1 non-force ancestry merge -> V2. No merge occurs within V2.
 
 ### M1 — Merge the verified frontend child PR
@@ -516,7 +519,7 @@ The two documentation-only contract lanes are mandatory pre-implementation lanes
 - **Owner:** Documentation Agent.
 - **Dependencies:** M1.
 - **Exact paths:** `v1/README.md`, `v1/docs/migration/react-to-vue3.md` only.
-- **Actions:** write Vue/Vite setup and commands; retain Laravel/MariaDB, Google origin, session, admin, legacy server, and non-destructive migration guidance; link the merged/re-attested UI/API contracts; document architecture, manual navigation, source freeze digests, excluded data categories, the four intentional narrow frontend baseline corrections, known invalid-GIS-token 500 residual risk, rollback, and verification. Do not copy the React README verbatim and do not disclose confidential filenames.
+- **Actions:** write Vue/Vite setup and commands; retain Laravel/MariaDB, Google origin, session, admin, legacy server, and non-destructive migration guidance; link the merged/re-attested UI/API contracts; document architecture, manual navigation, source freeze digests, excluded data categories, the five intentional narrow frontend baseline corrections, unchanged odd `researchStage` mapping, known invalid-GIS-token 500 residual risk, rollback, and verification. Do not copy the React README verbatim and do not disclose confidential filenames.
 - **Acceptance checks:** commands match `package.json`; no React description remains except migration history; the backend GIS defect is not presented as fixed; paths assume execution from `v1`; no secret values or local personal paths appear.
 - **Exit gate:** documentation is ready for D2 as an unstaged two-file handoff.
 
@@ -581,6 +584,8 @@ The two documentation-only contract lanes are mandatory pre-implementation lanes
 - [ ] Icons use `lucide-vue-next`; tests use `@testing-library/vue`; SFC typing is enforced by `vue-tsc`.
 - [ ] `/`, `/catalog`, `/app`, query/filter/sort changes, History API behavior, loading/fallback behavior, and scroll behavior match the baseline.
 - [ ] Public catalog mapping/pagination, empty/error states, metadata dialog, and sign-in gates match the API/UI contracts.
+- [ ] Repository and notification `links.next` pagination fails closed unless normalization yields a path beginning exactly `/api/` and never `//`; benign absolute API links are fetched only as same-origin path/query targets, while protocol-relative and non-API links cause no follow-up fetch.
+- [ ] The frozen odd `researchStage` mapping remains exactly unchanged; this migration performs no adjacent mapping cleanup.
 - [ ] Mark-read preserves the Laravel wire envelope `{ data: notification }`; `api.ts` unwraps it at the frontend boundary and `api.test.ts` proves the exact normalized `NotificationResource` result and encoded request.
 - [ ] Every shelf control whose text hides at `<=1100px` retains its full programmatic accessible name; every notification exposes and correctly updates programmatic read/unread state; focused Testing Library Vue tests cover all controls and single/all/failure transitions.
 - [ ] Notification action paths navigate only when root-relative and within the C0-re-attested supported prefix list; focused tests reject absolute, protocol-relative, bypass-encoded, backslash/control-character, and unsupported paths before a navigation sink.
@@ -642,7 +647,7 @@ Write-Output "reviewed_child=$(git rev-parse HEAD) incorporated_plan=$LatestPlan
 
 The PR record must also show the ordinary merge/no-op result and normal push. A rebase, reset, force-push, changed child SHA, or subsequent plan-head advance invalidates the result and requires a new non-force merge plus complete exact-head review.
 
-U2/U5 map `docs/design/vue-ui-parity.md` to every Section 6 UI/accessibility state, including all responsive shelf names, programmatic notification state, path-rejection behavior, GIS-500 generic containment, and synthetic/off-Git screenshot rules. A2/A5 map `docs/contracts/vue-api-data.md` to every Section 5 route and must verify the literal `{ data: notification }` wire envelope, frontend-only unwrapping, exact fields, encoded UUID, root-relative supported-prefix guard/rejection matrix, credentials, errors, the known GIS 500 limitation, and authorization invariants. Both documents must say they are provisional until post-F1 C0 re-attestation. Each lane runs the repository-approved secret scanner scoped to its owned file and rejects personal/absolute machine paths, real identities, confidential filenames, or corpus-derived fixture content.
+U2/U5 map `docs/design/vue-ui-parity.md` to every Section 6 UI/accessibility state, including all responsive shelf names, programmatic notification state, path-rejection behavior, GIS-500 generic containment, and synthetic/off-Git screenshot rules. A2/A5 map `docs/contracts/vue-api-data.md` to every Section 5 route and must verify the literal `{ data: notification }` wire envelope, frontend-only unwrapping, exact fields, encoded UUID, root-relative supported-prefix guard/rejection matrix, fail-closed repository/notification pagination normalization, exact preservation of the odd `researchStage` mapping, credentials, errors, the known GIS 500 limitation, and authorization invariants. Pagination contract tests must include benign absolute API next links and hostile protocol-relative/non-API next links with no follow-up fetch. Both documents must say they are provisional until post-F1 C0 re-attestation. Each lane runs the repository-approved secret scanner scoped to its owned file and rejects personal/absolute machine paths, real identities, confidential filenames, or corpus-derived fixture content.
 
 After both child merges, C0 runs:
 
@@ -655,7 +660,7 @@ if ($dirty) { $dirty; throw "C0 requires a clean plan worktree" }
 
 C0 Phase 1 also compares the exact plan head to the P0 head and requires changes only at the two contract paths plus merge metadata; it records both child URLs, incorporated plan heads, tested heads, and resulting merge/squash commits. A dirty worktree or any additional path blocks F1 branch creation.
 
-C0 Phase 2 must independently reproduce the empty source/destination manifest comparison, verify the recorded aggregate digests identify that exact sanitized copy, and map the frozen source to every UI/API contract row. It must explicitly re-attest the `/research/` prefix or replace it through the affected contract lane with the exact source-supported prefix list, confirm the four approved defect baselines, verify the invalid-token 500 classification, and record PASS against the exact frontend worktree head. Any source digest drift or contract edit invalidates Phase 2 and blocks F2.
+C0 Phase 2 must independently reproduce the empty source/destination manifest comparison, verify the recorded aggregate digests identify that exact sanitized copy, and map the frozen source to every UI/API contract row. It must explicitly re-attest the `/research/` prefix or replace it through the affected contract lane with the exact source-supported prefix list, confirm the five approved defect baselines, freeze the odd `researchStage` mapping as unchanged parity behavior, verify the invalid-token 500 classification, and record PASS against the exact frontend worktree head. Any source digest drift or contract edit invalidates Phase 2 and blocks F2.
 
 ### Frontend gate
 
@@ -670,14 +675,14 @@ npm --prefix v1 run build
 
 Required focused tests include `v1/src/App.test.ts`, `v1/src/components.test.ts`, `v1/src/api.test.ts`, and `v1/vite.config.test.ts`.
 
-The four approved baseline corrections additionally require focused runs equivalent to:
+The five approved baseline corrections additionally require focused runs equivalent to:
 
 ```powershell
 npm --prefix v1 test -- src/api.test.ts
 npm --prefix v1 test -- src/App.test.ts
 ```
 
-Required assertions cover: raw `{ data: notification }` to exact nested object normalization; encoded mark-read UUID/options; accepted root-relative source-supported action paths and the complete rejected-path matrix before navigation; accessible names for every shelf control whose text hides at `<=1100px`; programmatic read/unread state before/after successful single and mark-all operations plus no false state on failure; and synthetic invalid-nonempty-GIS-token HTTP 500 handling with only the generic message, retry availability, and no server-detail disclosure.
+Required assertions cover: raw `{ data: notification }` to exact nested object normalization; encoded mark-read UUID/options; accepted root-relative source-supported action paths and the complete rejected-path matrix before navigation; repository and notification pagination where benign absolute API next links are reduced to same-origin `/api/...` path/query requests and raw `//host/...`, `/apiary`, `/api`, root-relative non-API, and absolute non-API next links produce no follow-up fetch; exact unchanged odd `researchStage` mapping behavior; accessible names for every shelf control whose text hides at `<=1100px`; programmatic read/unread state before/after successful single and mark-all operations plus no false state on failure; and synthetic invalid-nonempty-GIS-token HTTP 500 handling with only the generic message, retry availability, and no server-detail disclosure.
 
 ### Preserved logic regression gate
 
@@ -742,7 +747,8 @@ Run the repository-approved secret scanner. If none is configured, Security Revi
 
 - Compare frozen and final SHA-256 manifests for `v1/src/styles.css`, `v1/backend/**`, `v1/server/**`, and allowed `v1/algorithm/**`; only the destination prefix may differ. `styles.css` hash inequality fails the gate unless the parent PR records the sole minimal selector-only Vue compatibility exception with both hashes, exact selector diff, reproduction, focused test, and proof that declarations, values, custom properties, media queries, and unrelated selectors are byte-identical.
 - Inspect `package-lock.json` for expected Vue additions/React removals and run `npm audit --prefix v1 --omit=dev`. Findings are triaged; unrelated legacy server dependency findings are documented rather than fixed by broad unplanned upgrades.
-- Confirm API requests retain relative paths, JSON handling, URL encoding, pagination cap, and `credentials: "include"`; mark-read must perform only the approved `{ data: notification }` boundary unwrap.
+- Confirm API requests retain relative paths, JSON handling, URL encoding, pagination cap, and `credentials: "include"`; mark-read must perform only the approved `{ data: notification }` boundary unwrap. Repository and notification `links.next` values may yield a follow-up request only after normalization to a non-`//` pathname beginning exactly `/api/`; absolute API authorities are discarded, and protocol-relative or non-API targets stop pagination without a request so credentials cannot leave the same-origin API boundary.
+- Confirm the odd `researchStage` mapping remains byte-for-behavior equivalent to the F1-frozen source; the fifth correction does not authorize mapping cleanup.
 - Confirm notification action values cannot reach navigation until the root-relative supported-prefix validator accepts them, and read/unread semantics update only from successful normalized resources.
 - Confirm no `v-html`, dynamic script URL, token logging/storage, localStorage/sessionStorage auth, or client-side role override was introduced.
 - Confirm Vite retains default secret/certificate/git deny patterns and actively denies source, algorithm, and Forms corpus paths including encoded or `/@fs/` attempts.
@@ -759,6 +765,8 @@ Run the repository-approved secret scanner. If none is configured, Security Revi
 | Hidden shelf text removes accessible names                      | Controls are unnamed at `<=1100px`                         | Full-label names on every affected control; all-controls Testing Library Vue assertion; no CSS/layout redesign                     |
 | Notification state is conveyed only by a dot                    | Read/unread state is unavailable programmatically          | Deterministic accessible state that updates on successful single/all operations; success/failure transition tests                  |
 | Untrusted notification action reaches History API               | Broken or unsafe cross-origin/unsupported navigation       | Root-relative C0-re-attested prefix allowlist; rejection matrix and navigation-spy tests                                           |
+| Untrusted `links.next` is fetched with credentials              | Credentials or requests cross the same-origin API boundary | Normalize absolute links to path/query only; require exact `/api/` prefix, reject `//` and non-API targets, and test no follow-up  |
+| Pagination correction is used to clean up `researchStage`       | Unapproved data-mapping semantic change                    | Freeze and test the odd mapping verbatim; any mapping correction requires a separate approved plan amendment                       |
 | Untracked source changes during migration                       | Mixed or unreproducible version                            | F1 freeze digest; rerun baseline and restart copy if source digest changes                                                         |
 | Confidential corpus, identity, or screenshot data enters Git    | Severe privacy/security incident                           | Filter-before-copy; synthetic mocked/offline captures outside Git/artifacts; metadata/OCR inspection; scans; block PR immediately  |
 | Vue lifecycle differs from React effects                        | Duplicate requests, stale updates, leaked listeners/timers | Explicit mount/unmount guards; request count and teardown tests; code review                                                       |
@@ -818,12 +826,14 @@ Base snapshot: `882f52c6bbbebdd75c61021cdcfdfc0aa937c0e2`
 - `lucide-vue-next`, Testing Library Vue, and `vue-tsc`.
 - Frontend parity tests plus unchanged backend/server/algorithm regression gates.
 - Frontend-only `api.ts` normalization of Laravel's discovered notification-read `{ data: notification }` envelope, with a focused boundary test.
-- Narrow frontend-only baseline corrections for responsive shelf accessible names, programmatic notification read/unread semantics, and root-relative supported-prefix validation of notification action paths, all with focused tests. These are intentional defect corrections, not broad redesign.
+- Narrow frontend-only baseline corrections for responsive shelf accessible names, programmatic notification read/unread semantics, root-relative supported-prefix validation of notification action paths, and fail-closed repository/notification `links.next` normalization, all with focused tests. Pagination follows benign absolute API links only after reducing them to a same-origin path/query beginning exactly `/api/`; protocol-relative and non-API targets cause no follow-up fetch. These are intentional defect corrections, not broad redesign.
+- Exact preservation of the frozen odd `researchStage` mapping; no mapping correction or cleanup is authorized.
 - Vue setup, migration, exclusion, and rollback documentation.
 
 ## Non-goals
 
-- No feature/broad-redesign/copy/API/schema/database work beyond the four explicitly enumerated frontend baseline defect corrections.
+- No feature/broad-redesign/copy/API/schema/database work beyond the five explicitly enumerated frontend baseline defect corrections.
+- No change to the existing odd `researchStage` mapping.
 - No Laravel, server, or algorithm logic changes.
 - No copy or edit of external-reference-only `v0/**`; no change to parent-base root files outside `v1/**` except this plan and the two approved contract documents.
 - No credentials, runtime data, generated output, or manuscript/form DOCX corpora.
@@ -831,7 +841,7 @@ Base snapshot: `882f52c6bbbebdd75c61021cdcfdfc0aa937c0e2`
 
 ## Architecture
 
-The merged UI and API/data documents are provisional through F1. F1 copies the sanitized authoritative external `v1`, records matching source/destination manifests and aggregate digests, and supplies evidence for mandatory C0 re-attestation; only then are the contracts authoritative and F2 may begin. Vue mounts client-side at `#root`. `App.vue` retains root session/repository/path state and manual History API navigation for `/`, `/catalog`, and `/app`. Typed props/emits and local refs replace React state/props; no global store is added. Relative `/api` requests continue through Vite to unchanged Laravel with credentialed database sessions. Laravel mark-read continues to emit `{ data: notification }`; `api.ts` unwraps that envelope for frontend callers. Notification actions pass a root-relative source-supported prefix guard before navigation. The legacy Express server and Python algorithm remain unchanged rollback/reference utilities.
+The merged UI and API/data documents are provisional through F1. F1 copies the sanitized authoritative external `v1`, records matching source/destination manifests and aggregate digests, and supplies evidence for mandatory C0 re-attestation; only then are the contracts authoritative and F2 may begin. Vue mounts client-side at `#root`. `App.vue` retains root session/repository/path state and manual History API navigation for `/`, `/catalog`, and `/app`. Typed props/emits and local refs replace React state/props; no global store is added. Relative `/api` requests continue through Vite to unchanged Laravel with credentialed database sessions. Pagination accepts `links.next` only after normalization to a non-`//` path beginning exactly `/api/`; absolute API authorities are discarded, while protocol-relative and non-API values trigger no follow-up fetch. Laravel mark-read continues to emit `{ data: notification }`; `api.ts` unwraps that envelope for frontend callers. Notification actions pass a root-relative source-supported prefix guard before navigation. The odd `researchStage` mapping, legacy Express server, and Python algorithm remain unchanged parity/reference behavior.
 
 ## Acceptance criteria
 
@@ -844,6 +854,8 @@ The merged UI and API/data documents are provisional through F1. F1 copies the s
 - [ ] No SSR, router, Pinia, or other store is introduced.
 - [ ] Manual navigation, catalog, auth/access, dialogs, notifications, and ten role workspaces retain parity.
 - [ ] API request/response/session/security contracts remain unchanged.
+- [ ] Repository and notification pagination tests accept benign absolute API next links only as same-origin `/api/...` path/query requests and prove protocol-relative/non-API next links cause no follow-up fetch.
+- [ ] The odd `researchStage` mapping remains exactly unchanged.
 - [ ] `api.ts` unwraps the discovered `{ data: notification }` mark-read envelope and `api.test.ts` proves the exact normalized result without a backend change.
 - [ ] All responsive shelf controls retain full accessible names; notifications expose and correctly update programmatic read/unread state.
 - [ ] Only root-relative C0-re-attested notification action prefixes navigate; unsafe/unsupported forms are tested and rejected before navigation.
@@ -883,6 +895,8 @@ The merged UI and API/data documents are provisional through F1. F1 copies the s
 - [ ] CSS/backend/server/algorithm integrity comparison
 - [ ] Desktop/mobile public and fixture-driven UI parity evidence
 - [ ] Focused `api.test.ts` mark-read `{ data: notification }` normalization assertion
+- [ ] Focused repository and notification pagination assertions for benign absolute API links and hostile `//host`/non-API links with no follow-up fetch
+- [ ] Frozen odd `researchStage` mapping parity assertion
 - [ ] Focused shelf-name, notification read/unread transition, action-path rejection, and GIS-500 generic-handling assertions
 - [ ] Every child incorporates latest plan head non-force before final exact-head review; both SHAs and ancestry proof are recorded
 - [ ] Code review
@@ -897,7 +911,8 @@ The merged UI and API/data documents are provisional through F1. F1 copies the s
 - Merge independently owned UI and API/data contracts before allowing the frontend lane to start.
 - Treat Laravel's `{ data: notification }` mark-read wire shape as frozen and correct parity only at the `api.ts` frontend boundary with a focused test.
 - Treat contracts as provisional until F1 records matching sanitized source/destination manifests/digests and C0 re-attests them; block F2 until PASS.
-- Intentionally correct only responsive shelf names, programmatic notification state, action-path validation, and envelope normalization; do not broaden into redesign.
+- Intentionally correct only responsive shelf names, programmatic notification state, action-path validation, envelope normalization, and fail-closed repository/notification pagination normalization; do not broaden into redesign.
+- Preserve the existing odd `researchStage` mapping exactly; the pagination correction grants no authority for mapping cleanup.
 - Require exact CSS hash equality except a documented, tested minimal selector-only Vue compatibility exception.
 - Keep one frontend implementation lane; backend/database lanes are unnecessary because those contracts are frozen after C0 re-attestation.
 - Exclude derived `src/research_studies/catalog.json` with the confidential source corpus.
@@ -912,6 +927,8 @@ The merged UI and API/data documents are provisional through F1. F1 copies the s
 - Screenshots use only mocked/offline synthetic fixtures outside Git, PR/CI artifacts, shared logs, and external services; no image is uploaded.
 - Every child merges latest plan head non-force before final exact-head review; later plan movement invalidates that review.
 - Lifecycle, focus, History API, and GIS differences require focused parity tests.
+- Credentialed pagination must fail closed: only normalized `/api/` path/query targets may be fetched, never protocol-relative or non-API `links.next` values.
+- The odd `researchStage` mapping is intentionally preserved despite its irregularity.
 - A baseline failure blocks migration unless explicitly classified and accepted as pre-existing.
 - Parent remains Draft until all child PRs, full verification, reviews, and documentation pass.
 
@@ -955,7 +972,9 @@ The merged UI and API/data documents are provisional through F1. F1 copies the s
 
 - [ ] A1 changes only `docs/contracts/vue-api-data.md` on `design/vue-api-contract`.
 - [ ] Contract is marked provisional and distinguishes Laravel's `{ data: notification }` wire envelope from the normalized frontend `NotificationResource`.
-- [ ] Contract requires focused `api.ts` boundary normalization, encoded-route/envelope/result coverage, and root-relative supported-prefix action acceptance/rejection without backend changes.
+- [ ] Contract requires focused `api.ts` boundary normalization, encoded-route/envelope/result coverage, root-relative supported-prefix action acceptance/rejection, and fail-closed repository/notification pagination without backend changes.
+- [ ] Pagination contract requires benign absolute API links to become same-origin `/api/...` path/query requests and hostile `//host`/non-API paths to cause no follow-up fetch.
+- [ ] Contract freezes the odd `researchStage` mapping exactly and authorizes no mapping cleanup.
 - [ ] Contract records the invalid-nonempty-GIS-token 500 as a known out-of-scope backend defect with generic Vue handling and residual risk.
 - [ ] A2 formatting, ownership, API/security, privacy/path, and secret checks PASS before staging.
 - [ ] A3 explicitly stages and commits only the owned path.
@@ -968,7 +987,7 @@ The merged UI and API/data documents are provisional through F1. F1 copies the s
 - [ ] C0 Phase 1 starts from the exact plan head containing both ancestry-corrected contract merges.
 - [ ] Phase 1 combined formatting, clean-worktree, ownership, privacy/path, and provisional cross-contract checks PASS.
 - [ ] F1 records matching sanitized source/destination manifests and aggregate digests plus supported-prefix/baseline evidence.
-- [ ] C0 Phase 2 maps both contracts to that exact copy and re-attests all API/UI rows, approved corrections, GIS defect classification, and CSS hash.
+- [ ] C0 Phase 2 maps both contracts to that exact copy and re-attests all API/UI rows, five approved corrections, unchanged odd `researchStage` mapping, GIS defect classification, and CSS hash.
 - [ ] F1 branch/worktree is created only after Phase 1; F2 starts only after Phase 2 PASS.
 
 ### Frontend migration lane
@@ -978,7 +997,8 @@ The merged UI and API/data documents are provisional through F1. F1 copies the s
 - [ ] F1 confidentiality, secret, and generated/runtime deny checks pass.
 - [ ] F2 Vue toolchain/bootstrap gate passes.
 - [ ] F3 shared components/focus gate passes.
-- [ ] F4 root/public/catalog/API gate passes, including `{ data: notification }` normalization and root-relative supported-prefix action validation tests.
+- [ ] F4 root/public/catalog/API gate passes, including `{ data: notification }` normalization, root-relative supported-prefix action validation, unchanged odd `researchStage` mapping, and repository/notification fail-closed pagination tests.
+- [ ] Focused pagination tests accept benign absolute API next links only as same-origin `/api/...` path/query requests and prove hostile `//host` plus root-relative/absolute non-API next links cause no follow-up fetch.
 - [ ] F5 GIS/dashboard/notifications/roles gate passes, including all shelf names, read/unread success/failure transitions, rejected action non-navigation, and generic GIS-500 handling.
 - [ ] F6 Testing Library Vue port and React removal gate passes.
 - [ ] Final CSS SHA-256 equals F1 or the sole selector-only exception has complete evidence; backend/server/algorithm hashes pass.
@@ -994,7 +1014,7 @@ The merged UI and API/data documents are provisional through F1. F1 copies the s
 - [ ] Docs worktree starts from plan head containing frontend merge.
 - [ ] `v1/README.md` reflects Vue and retained Laravel/legacy setup.
 - [ ] `v1/docs/migration/react-to-vue3.md` records architecture, exclusions, digest, verification, and rollback.
-- [ ] Documentation records the four intentional narrow baseline corrections and invalid-GIS-token 500 residual risk without claiming a backend fix.
+- [ ] Documentation records the five intentional narrow baseline corrections, unchanged odd `researchStage` mapping, and invalid-GIS-token 500 residual risk without claiming a backend fix.
 - [ ] Documentation contains no confidential filenames, personal paths, or secrets.
 - [ ] D2 pre-commit formatting, ownership, privacy, and command checks PASS before staging.
 - [ ] D3 commits only the two documentation paths; D4 opens and links the exact-head child PR.
@@ -1031,7 +1051,7 @@ The merged UI and API/data documents are provisional through F1. F1 copies the s
 - All acceptance criteria and full verification/security/integrity gates pass on exact combined head.
 - No denied/confidential file or out-of-scope change is present.
 - Every child incorporated latest plan head non-force before final exact-head review, and each recorded ancestry proof remains current.
-- The four narrow frontend baseline corrections are tested without broad redesign; CSS satisfies exact-hash/selector-only-exception governance.
+- The five narrow frontend baseline corrections are tested without broad redesign; pagination preserves the credentialed same-origin `/api/` boundary; the odd `researchStage` mapping is unchanged; CSS satisfies exact-hash/selector-only-exception governance.
 - The invalid-nonempty-GIS-token backend 500 remains unchanged, has tested generic Vue containment, and is recorded as residual risk.
 - Parent PR checklist, decisions, evidence, links, and residual risks are current.
 - Parent is ready for human review, not automatically merged or released.
