@@ -250,8 +250,11 @@ notification`, together with its available title, rather than communicating that
 state only with the dot or color. Preserve the visual treatment and API behavior
 while adding that programmatic state. Tests must query the icon-only shelf
 buttons by their names at the 1100px layout and query both read and unread
-notification buttons by their programmatic names; they must also verify the name
-changes after an unread item is marked read.
+notification buttons by their programmatic names. They must verify that a
+successful individual mark-read and successful mark-all update the affected
+programmatic state from unread to read. They must also verify that failed
+individual mark-read and failed mark-all preserve the prior unread state and
+produce no false read announcement.
 
 ## Account Dialog
 
@@ -437,12 +440,16 @@ overlay stacking against the existing frontend.
 
 ### Screenshot evidence handling
 
-Screenshot capture uses synthetic fixtures only. It must not contain real users,
-email addresses, repository data, manuscript data, or other personal or
-confidential content. Store screenshots and pixel-comparison artifacts outside
-Git. Any committed or PR evidence is limited to non-sensitive summaries (such
-as state, viewport, pass/fail, and an intentional-difference explanation); do
-not commit, attach, or reproduce screenshot contents in repository files.
+Screenshot capture is mocked, offline, and limited to synthetic fixtures; it
+must not contact live services or contain real users, email addresses,
+repository data, manuscript data, or other personal or confidential content.
+Keep screenshots and pixel-comparison artifacts outside Git, CI, shared
+storage, and external artifacts. Before review, inspect captured pixels and all
+metadata, extracted text, and OCR output for sensitive content. Publish only a
+non-sensitive summary (such as state, viewport, pass/fail, and an
+intentional-difference explanation); do not commit, attach, or reproduce
+screenshot contents in repository files. Dispose of local capture evidence
+after review.
 
 ## Automated Acceptance
 
@@ -466,7 +473,10 @@ not commit, attach, or reproduce screenshot contents in repository files.
   PATCH for an already-read item, mark-all requests for unread items only, and
   safe action navigation for only validated root-relative `/research/` paths
   (including query/hash handling and rejected malformed/external/bypass forms),
-  plus the approved programmatic read/unread semantics.
+  plus the approved programmatic read/unread semantics: successful individual
+  mark-read and mark-all change the affected state to read, while failures for
+  either operation preserve the prior unread state and make no false read
+  announcement.
 - Dashboard tests cover the 2800 ms toast lifetime and the Statistician initial
   `[true, true, false, false]` / 50% checklist state and recalculation.
 - Responsive accessibility tests cover the named icon-only shelf buttons at
