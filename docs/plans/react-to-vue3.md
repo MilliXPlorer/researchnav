@@ -57,7 +57,7 @@ Success means a developer can install and run the Vue application from `v1`, all
 ## 3. Assumptions and constraints
 
 1. `<external-source-root>/v1` is authoritative even though it is dirty and outside the parent base. It must be treated as read-only during migration and frozen by an allowlisted manifest at task F1. `<external-source-root>` is an execution-time placeholder, not a committed machine path.
-2. The source may change before execution. F1 must record UTC freeze time and an aggregate preservation-manifest digest plus the separate source `v1/.gitignore` hash. A later source change, including a source `.gitignore` hash change, invalidates the baseline and requires rerunning F1; implementers must not silently mix snapshots.
+2. The source may change before execution. F1 must record UTC freeze time and an aggregate preservation-manifest digest plus the separate raw-byte source `v1/.gitignore` hash. A later source change, including a source `.gitignore` hash change, invalidates the baseline and requires rerunning F1; implementers must not silently mix snapshots.
 3. The source `src/research_studies/catalog.json` is derived from confidential manuscripts and is treated as corpus/runtime data. It is excluded with the source DOCX files even though it is JSON.
 4. `<external-source-root>/v0/**` is external-reference-only, is never copied, and is not a source for resolving ambiguities. Resolve ambiguities from the F1-frozen `<external-source-root>/v1/**` snapshot and this plan. Neither external `v0/**` nor external `v1/**` exists in the parent base.
 5. The parent-base repository-root files are the compatibility baseline, not migration input. F1 must record their tracked path/hash manifest before copying, and F6/V4 must require an empty diff for every parent-base path outside `v1/**`, excluding only `docs/plans/react-to-vue3.md`, `docs/design/vue-ui-parity.md`, and `docs/contracts/vue-api-data.md`. This narrow exception authorizes only the plan and approved contracts; all other root files remain unchanged.
@@ -65,7 +65,7 @@ Success means a developer can install and run the Vue application from `v1`, all
 7. The Laravel API remains the normal API on `127.0.0.1:3001`; `server/**` remains an explicit legacy rollback/reference implementation.
 8. The current UI intentionally contains prototype/empty states. Migration must preserve them rather than connecting unimplemented backend workflows.
 9. Public and authenticated browser behavior must remain client-rendered only. Direct navigation relies on the existing development/hosting fallback to `index.html`; no server rendering is added.
-10. The pre-F1 UI and API/data contracts are necessarily provisional because their authors inspect a dirty external source. They become authoritative implementation contracts only after F1 has copied the sanitized authoritative external `v1`, recorded matching source/destination preservation manifests and aggregate digests that omit deferred `README.md`, deferred `docs/**`, and the intentionally transformed root `.gitignore` from otherwise allowlisted paths, recorded separate source/target `.gitignore` hashes and its approved sanitation delta, and C0 has re-attested both contracts against that exact frozen copy. F2 and later work cannot start on provisional contracts.
+10. The pre-F1 UI and API/data contracts are necessarily provisional because their authors inspect a dirty external source. They become authoritative implementation contracts only after F1 has copied the sanitized authoritative external `v1`, recorded matching source/destination preservation manifests and aggregate digests that omit deferred `README.md`, deferred `docs/**`, and the intentionally transformed root `.gitignore` from otherwise allowlisted paths, recorded separate source/target `.gitignore` hashes and byte-for-byte equality of the target to the approved raw-byte expected target, and C0 has re-attested both contracts against that exact frozen copy. F2 and later work cannot start on provisional contracts.
 11. A nonempty but invalid Google Identity Services credential can currently cause the Laravel verifier path to return HTTP 500 rather than a stable 4xx error. This is a known pre-existing backend defect. Backend remediation and error-contract redesign are explicitly out of scope; Vue must retain the generic verification-failure message, avoid exposing server detail, and test generic handling of the 500 response. The inability to distinguish this case from a transient server failure remains a recorded residual risk.
 
 ## 4. Architecture
@@ -100,7 +100,7 @@ Offline similarity utility:
 - `useDialogFocus.ts` is a Vue composable using a template ref and mount/unmount lifecycle. It must focus the first eligible control, trap Tab/Shift+Tab, close on Escape, and restore prior focus.
 - Shared React helpers become focused Vue SFCs. Native attributes and events must fall through correctly, slots replace `ReactNode`, and CSS class names remain unchanged.
 - Vue templates use normal interpolation/attribute binding only. `v-html` is prohibited.
-- The merged `docs/design/vue-ui-parity.md` and `docs/contracts/vue-api-data.md` are provisional entry controls for F1 only. They become authoritative implementation contracts for F2 onward after C0 re-attests them against the F1-frozen sanitized copy, its matching preservation manifests/digests, and the separately hashed and reviewed root `.gitignore` sanitation delta. If either conflicts with this plan or frozen source, frontend work stops for a Plan PR/contract amendment and another C0 re-attestation; implementers may not silently choose one source.
+- The merged `docs/design/vue-ui-parity.md` and `docs/contracts/vue-api-data.md` are provisional entry controls for F1 only. They become authoritative implementation contracts for F2 onward after C0 re-attests them against the F1-frozen sanitized copy, its matching preservation manifests/digests, and the separately hashed root `.gitignore` whose bytes equal the independently computed approved expected target. If either conflicts with this plan or frozen source, frontend work stops for a Plan PR/contract amendment and another C0 re-attestation; implementers may not silently choose one source.
 
 ### 4.3 Exact frontend file map
 
@@ -136,7 +136,7 @@ All superseded `.tsx` files are deleted. No `.tsx`, JSX compiler option, React i
 
 ## 5. Provisional API contract and approved baseline corrections
 
-Until the post-F1 C0 re-attestation, this section and `docs/contracts/vue-api-data.md` are provisional descriptions derived from the external source. They become frozen only when F1 records matching sanitized source/destination preservation manifests and aggregate digests that omit deferred `README.md`, deferred `docs/**`, and transformed root `.gitignore` from otherwise allowlisted paths, records the separate `.gitignore` source/target hashes and approved sanitation delta, and C0 re-attests the contract against that exact copy. No API route, request, response, cookie, or authorization behavior may change. `v1/src/api.ts` remains the browser boundary and must continue to send `credentials: "include"` and JSON content type. Non-2xx responses parse `{ error?: string }` and throw that stable code or `REQUEST_FAILED_<status>`; `204` returns no body. Frontend-only normalization for the discovered Laravel notification-read response envelope remains required; it does not authorize a Laravel or route change.
+Until the post-F1 C0 re-attestation, this section and `docs/contracts/vue-api-data.md` are provisional descriptions derived from the external source. They become frozen only when F1 records matching sanitized source/destination preservation manifests and aggregate digests that omit deferred `README.md`, deferred `docs/**`, and transformed root `.gitignore` from otherwise allowlisted paths, records the separate `.gitignore` source/target hashes and byte-for-byte expected-target verification, and C0 re-attests the contract against that exact copy. No API route, request, response, cookie, or authorization behavior may change. `v1/src/api.ts` remains the browser boundary and must continue to send `credentials: "include"` and JSON content type. Non-2xx responses parse `{ error?: string }` and throw that stable code or `REQUEST_FAILED_<status>`; `204` returns no body. Frontend-only normalization for the discovered Laravel notification-read response envelope remains required; it does not authorize a Laravel or route change.
 
 | Frontend operation      | Request                                                    | Required response/behavior                                                                                                             |
 | ----------------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
@@ -165,7 +165,7 @@ The approved notification fixes are limited to: (1) preserving `{ data: notifica
 
 ## 6. Provisional UI and accessibility contract
 
-This section and `docs/design/vue-ui-parity.md` remain provisional until the post-F1 C0 re-attestation binds them to the recorded sanitized source preservation manifests/digests and the separately verified root `.gitignore` sanitation delta. F2 and later implementation must use only the re-attested contract.
+This section and `docs/design/vue-ui-parity.md` remain provisional until the post-F1 C0 re-attestation binds them to the recorded sanitized source preservation manifests/digests and the separately verified raw-byte expected target for root `.gitignore`. F2 and later implementation must use only the re-attested contract.
 
 ### Root and navigation
 
@@ -215,14 +215,14 @@ F1 creates `v1/**` from regular files in `<external-source-root>/v1/**` only aft
 - every `*.docx` (case-insensitive), especially `src/research_studies/**`, `algorithm/Research Studies/**`, and `Forms/**`.
 - the entire `src/research_studies/**` derived catalog/corpus directory and all of `Forms/**` and `algorithm/Research Studies/**`.
 
-The external source `v1/.gitignore` is read-only. The copied target `v1/.gitignore` must explicitly enforce these exclusions relative to the new subtree, including nested DOCX files and `src/research_studies/`, and must keep example environment files trackable. F1 must derive it with one deterministic, additions-only sanitation step: preserve every source line and its order, append each missing approved exclusion line from the following canonical list exactly once and in the order shown, and make no other textual change:
+The external source `v1/.gitignore` is read-only. The copied target `v1/.gitignore` must explicitly enforce these exclusions relative to the new subtree, including nested DOCX files and `src/research_studies/`, and must keep example environment files trackable. F1 must derive it with one deterministic raw-byte, additions-only sanitation step. Accept only strict UTF-8 with or without a UTF-8 BOM, UTF-16 LE with BOM, or UTF-16 BE with BOM; reject malformed, BOM-less UTF-16, UTF-32, other unsupported encodings, embedded NUL, lone-CR, mixed-LF/CRLF, or no-detectable-EOL input. Preserve the source BOM/encoding, every existing source byte, its single EOL convention, and whether the source ends in a final newline. Append each missing approved exclusion line from the following canonical list exactly once and in the order shown, encoded with the source encoding and separated with its EOL convention:
 
 ```gitignore
 *.docx
 /src/research_studies/
 ```
 
-The sanitation diff may therefore contain only added instances of those two exact lines. Existing protections, negations for example environment files, comments, ordering, and all other content must not be removed, weakened, reordered, or edited. If either canonical line is already present in the frozen source, it is retained in place and not duplicated. Any additional required `.gitignore` change blocks F1 for a Plan PR amendment rather than expanding this delta.
+If the source has a final newline, the expected target retains one after the appended lines; if it lacks a final newline, the verifier inserts the source EOL before the first addition but leaves the expected target without a final newline. If either canonical line is already present exactly once in the frozen source, it is retained in place and not duplicated; a duplicate canonical source line blocks F1 because an additions-only transform cannot repair it. The target must equal the computed expected byte array byte for byte. This single equality rejects duplicate additions, transcoding, BOM changes, EOL normalization, final-newline drift, removals, reorderings, edits, and every unapproved change without printing source path, source content, or a diff. Any unsupported source form or additional required `.gitignore` change blocks F1 for a Plan PR amendment rather than broadening this delta.
 
 ### Baseline evidence
 
@@ -230,13 +230,13 @@ Before conversion, F1 must:
 
 1. After applying Section 7's deny rules, enumerate preservation-eligible source files as normalized paths relative to external `v1`, byte length, and SHA-256. From those otherwise allowlisted files, exclude the intentionally deferred `README.md` and `docs/**` documentation paths and the intentionally transformed root `.gitignore` from this source preservation manifest; calculate an aggregate digest over the sorted manifest.
 2. Produce the same preservation manifest for the copied target `v1/**`, with target `README.md`, `docs/**`, and root `.gitignore` excluded, and require an empty `Compare-Object` result and equal source/destination aggregate preservation digests. These exclusions prevent intentional deferral or sanitation from being misreported as byte-preservation failure; they authorize no other mismatch.
-3. Hash the frozen external source root `.gitignore` before transformation and the copied target `v1/.gitignore` after transformation as separate SHA-256 values. Retain an exact local line diff and require it to be the minimal deterministic additions-only delta defined above: only missing `*.docx` and `/src/research_studies/` lines in canonical order, with no duplicate and no removed, weakened, reordered, or edited source protection. The target hash is not expected to equal the source hash and neither `.gitignore` hash participates in the matching preservation aggregate digests.
-4. Record only freeze time, matching source/destination preservation aggregate digests, preservation-file count, both `.gitignore` hashes, the approved added exclusion lines, and denied-file counts by category in the child PR. Do not record confidential filenames or absolute user paths in committed files. Retain the full manifests and sanitation diff as local verification evidence outside Git and expose only their aggregate digests/counts, the two `.gitignore` hashes, and approved added lines.
+3. Hash the frozen external source root `.gitignore` before transformation and the copied target `v1/.gitignore` after transformation as separate SHA-256 values. Compute the expected target directly from source bytes under the rule above and require byte-for-byte target equality. Mandatory local fixtures must cover strict UTF-8 with and without BOM, LF and CRLF, UTF-16 LE/BE with BOM, and source files missing a final newline; negative fixtures must reject mixed/lone-CR EOLs, unsupported encodings, duplicate canonical source lines, and target tampering/duplicate/unapproved additions. The target hash is not expected to equal the source hash and neither `.gitignore` hash participates in the matching preservation aggregate digests.
+4. Record only freeze time, matching source/destination preservation aggregate digests, preservation-file count, both `.gitignore` hashes, expected-target verification PASS, approved added exclusion lines/count, fixture-test PASS, `git check-ignore --no-index` PASS, and denied-file counts by category in the child PR. Do not record confidential filenames or absolute user paths in committed files. Retain the full manifests and raw-byte verification details as local evidence outside Git; never print or publish the source path, source content, or a source/target diff.
 5. Hash source and copied `src/styles.css`, `backend/**` logic/config/tests, `server/**`, and allowed `algorithm/**`; require equality before framework work.
 6. Create a second filtered copy in a unique temporary directory outside every Git worktree and run the baseline commands there. This permits installs, builds, caches, and tests without writing to the authoritative source. Save command, exit code, and concise output in the child PR. A baseline failure blocks conversion unless it is reproducible, explicitly classified as pre-existing, and accepted in the parent Plan PR with a no-regression assertion.
 7. Record the parent-base repository-root manifest separately from the external-source preservation manifest. The filtered copy may populate only `v1/**`; it must not overwrite, delete, or use any parent-base root file as source input. Root-baseline comparison may exclude only the plan and the two merged contract documents named in Assumption 5.
 8. Capture sanitized public/error/empty and fixture-driven role UI screenshots at desktop (1440x900) and mobile (390x844) only in a unique temporary directory outside every Git worktree. The capture harness must use wholly synthetic, non-identifying fixtures (including synthetic names, emails, UUIDs, timestamps, titles, paths, and counts), disable or mock live API/GIS/network access, and never load a real account, repository row, manuscript-derived value, corpus filename, browser profile, machine path, token, or email address. Before comparison, inspect rendered pixels and image metadata and run a local text/OCR review where available. Screenshots must never be added to Git, PR attachments/comments, CI artifacts, shared logs, or external visual-diff services; publish only aggregate pass/fail and redacted numeric difference summaries. Repeat after Vue migration, document intentional differences without embedding images, and securely delete the temporary evidence after final review according to local policy.
-9. Hand the matching source/destination preservation aggregate digests, empty preservation-manifest comparison result, separate `.gitignore` source/target hashes and exact approved sanitation delta, authoritative supported notification-action prefixes, and relevant source-to-contract evidence to C0 for mandatory post-F1 re-attestation. F2 is blocked until that re-attestation passes.
+9. Hand the matching source/destination preservation aggregate digests, empty preservation-manifest comparison result, separate `.gitignore` source/target hashes, raw-byte expected-target equality result, fixture and `git check-ignore --no-index` results, authoritative supported notification-action prefixes, and relevant source-to-contract evidence to C0 for mandatory post-F1 re-attestation. F2 is blocked until that re-attestation passes.
 
 Baseline commands:
 
@@ -324,7 +324,7 @@ D1 docs -> D2 pre-commit test -> D3 commit -> D4 child PR/merge latest plan head
 V4 final combined verification -> P2 complete parent checklist / ready for review
 ```
 
-The two documentation-only contract lanes are mandatory pre-implementation lanes and may proceed in parallel. C0's provisional merge gate blocks F1 until both ancestry-corrected, exact-head-tested contract child PRs are merged into `plan/react-to-vue3`. F1 then binds the provisional contracts to one sanitized source copy through matching preservation manifests/digests and the separately hashed root `.gitignore` sanitation delta; C0 must re-attest that evidence and both contracts before F2. After re-attestation there is one product implementation lane. No backend/database implementation lane is created.
+The two documentation-only contract lanes are mandatory pre-implementation lanes and may proceed in parallel. C0's provisional merge gate blocks F1 until both ancestry-corrected, exact-head-tested contract child PRs are merged into `plan/react-to-vue3`. F1 then binds the provisional contracts to one sanitized source copy through matching preservation manifests/digests and a separately hashed root `.gitignore` that equals its approved raw-byte expected target; C0 must independently reproduce that evidence and re-attest both contracts before F2. After re-attestation there is one product implementation lane. No backend/database implementation lane is created.
 
 ## 10. Ordered executable tasks
 
@@ -427,25 +427,25 @@ The two documentation-only contract lanes are mandatory pre-implementation lanes
 ### C0 — Provisional merge gate and post-F1 contract re-attestation
 
 - **Owner:** Contract Integration Tester (read-only).
-- **Dependencies:** Phase 1 depends on U6 and A6. Phase 2 depends on F1's completed sanitized copy, matching source/destination preservation manifests and aggregate digests, separate root `.gitignore` source/target hashes and sanitation diff, supported-prefix evidence, and baseline classification.
+- **Dependencies:** Phase 1 depends on U6 and A6. Phase 2 depends on F1's completed sanitized copy, matching source/destination preservation manifests and aggregate digests, separate root `.gitignore` source/target hashes, byte-for-byte expected-target result, mandatory local fixture and ignore-semantics results, supported-prefix evidence, and baseline classification.
 - **Phase 1 actions:** test the exact plan head containing both contract merges with the combined contract gate in Section 12; confirm each child URL/tested head/merge commit and ancestry correction is recorded; verify no path outside this plan and the two contract files changed before implementation; cross-check both provisional contracts against Sections 5 and 6 and each other.
 - **Phase 1 exit gate:** combined provisional gate PASS, no known contradiction or privacy/path violation exists, and the F1 frontend branch/worktree is created cleanly from this exact plan head. This authorizes only F1 freeze/sanitized copy/evidence work, not F2 or product conversion.
-- **Phase 2 actions:** after F1, compare both contracts line by line to the exact sanitized copied source and its matching source/destination preservation manifests/digests. Independently hash the read-only source and target root `.gitignore` files and review their exact line diff; require only the missing canonical `*.docx` and `/src/research_studies/` additions in order, no duplicates, and no removed, weakened, reordered, or edited protection. Verify the notification wire envelope, final root-relative supported action-prefix list, permissive pagination baseline, exact odd `researchStage` mapping, shelf breakpoint behavior, read/unread semantics defect, GIS invalid-token 500 baseline, CSS hash, and all UI/API surfaces. Confirm evidence contains only aggregate digests/counts, the two `.gitignore` hashes, approved sanitation lines, and approved synthetic values. Record the exact F1 preservation source/destination digests, `.gitignore` source/target hashes, approved sanitation-delta result, frontend worktree head, contract versions, and re-attestation result in Plan PR #5.
-- **Phase 2 exit gate:** C0 re-attestation PASS makes the contracts authoritative for the recorded F1 snapshot and authorizes F2 only when the preservation manifests/digests match and the separate `.gitignore` sanitation review passes. Any contradiction or sanitation-delta violation blocks F2 and requires a Plan PR amendment plus affected lane correction, ancestry merge, exact-head review, merge, and complete C0 re-attestation; source or source-`.gitignore` hash drift requires F1 and both C0 phases to repeat.
+- **Phase 2 actions:** after F1, compare both contracts line by line to the exact sanitized copied source and its matching source/destination preservation manifests/digests. Independently rerun the Section 12 raw-byte verifier from the read-only source: validate the allowed encoding/BOM and one EOL convention, preserve all source bytes and final-newline semantics, append only missing canonical `*.docx` then `/src/research_studies/`, and require byte-for-byte target equality. Independently run every mandatory local encoding/EOL/final-newline and negative fixture plus the `git check-ignore --no-index` assertions for nested corpus/DOCX, non-example environment files, and trackable `.env.example`. Do not print source path, source content, or a diff. Verify the notification wire envelope, final root-relative supported action-prefix list, permissive pagination baseline, exact odd `researchStage` mapping, shelf breakpoint behavior, read/unread semantics defect, GIS invalid-token 500 baseline, CSS hash, and all UI/API surfaces. Confirm published evidence contains only aggregate digests/counts, the two `.gitignore` hashes, approved additions/count, verifier/fixture/ignore-semantics PASS, and approved synthetic values. Record the exact F1 preservation source/destination digests, `.gitignore` source/target hashes, expected-target result, frontend worktree head, contract versions, and re-attestation result in Plan PR #5.
+- **Phase 2 exit gate:** C0 re-attestation PASS makes the contracts authoritative for the recorded F1 snapshot and authorizes F2 only when the preservation manifests/digests match, source and target hashes match F1, target bytes equal C0's independently computed expected bytes, all mandatory fixtures pass, and ignore semantics pass. Any contradiction, unsupported/mixed source representation, byte mismatch, duplicate/unapproved change, or ignore-semantics failure blocks F2 and requires a Plan PR amendment plus affected lane correction, ancestry merge, exact-head review, merge, and complete C0 re-attestation; source or source-`.gitignore` hash drift requires F1 and both C0 phases to repeat.
 
 ### F1 — Freeze, baseline, sanitize, and verify the authoritative source
 
 - **Owner:** Frontend Builder.
 - **Dependencies:** C0 Phase 1 PASS.
 - **Writable paths:** owned `v1/**` paths only; do not create `v1/README.md` or `v1/docs/**`.
-- **Actions:** apply Section 7's filtered allowlist copy from external `v1/**` only (never external `v0/**`); leave the external source read-only; derive target `v1/.gitignore` through only the deterministic additions-only sanitation rule; generate non-committed source/destination preservation manifests that both exclude deferred `README.md`, `docs/**`, and transformed root `.gitignore`, plus the separate parent-base root manifest; record the matching preservation aggregate digests, separate source/target `.gitignore` hashes, and exact sanitation diff; execute baseline tests; capture only the synthetic/off-Git visual evidence permitted by Section 7; prove copied preserved files match; identify the authoritative notification action-prefix producer, permissive pagination baseline, exact odd `researchStage` mapping, and other baseline defects for C0 without changing product code.
-- **Acceptance checks:** no denied file ever enters the worktree; after deny filtering, source and destination preservation manifests compare empty and their aggregate digests match while omitting only deferred `README.md`, `docs/**`, and transformed root `.gitignore` from otherwise allowlisted paths; the separately hashed `.gitignore` files differ only by missing canonical `*.docx` and `/src/research_studies/` additions in order, with no duplicate or removed/weakened/reordered/edited protection; confidential filename list is not logged; copied style/backend/server/algorithm hashes match; parent-base paths outside `v1/**` have no diff except the three approved plan/contract paths; baseline evidence exists; any source/contract difference is reported rather than resolved silently.
-- **Exit gate:** cleanly classified baseline, empty preservation-file comparison, matching preservation aggregate digests, passing separate `.gitignore` hash/diff review, all deny scans PASS, and the complete re-attestation packet are recorded in the frontend handoff/PR evidence and handed to C0. F2 remains blocked until C0 Phase 2 PASS.
+- **Actions:** apply Section 7's filtered allowlist copy from external `v1/**` only (never external `v0/**`); leave the external source read-only; derive target `v1/.gitignore` from the computed raw-byte expected target only; generate non-committed source/destination preservation manifests that both exclude deferred `README.md`, `docs/**`, and transformed root `.gitignore`, plus the separate parent-base root manifest; record the matching preservation aggregate digests, separate source/target `.gitignore` hashes, byte-for-byte expected-target result, fixture result, and ignore-semantics result; execute baseline tests; capture only the synthetic/off-Git visual evidence permitted by Section 7; prove copied preserved files match; identify the authoritative notification action-prefix producer, permissive pagination baseline, exact odd `researchStage` mapping, and other baseline defects for C0 without changing product code.
+- **Acceptance checks:** no denied file ever enters the worktree; after deny filtering, source and destination preservation manifests compare empty and their aggregate digests match while omitting only deferred `README.md`, `docs/**`, and transformed root `.gitignore` from otherwise allowlisted paths; the source `.gitignore` uses a supported strict encoding/BOM and one supported EOL convention with no duplicate canonical source line; the target equals the computed expected bytes exactly, preserving BOM/encoding, every source byte, EOL convention, and source final-newline semantics while appending only missing canonical lines in order; mandatory local positive and negative fixtures pass; `git check-ignore --no-index` proves nested corpus/DOCX and root/nested non-example `.env` paths ignored while `.env.example` is not ignored; confidential filename list, source path/content, and diffs are not logged; copied style/backend/server/algorithm hashes match; parent-base paths outside `v1/**` have no diff except the three approved plan/contract paths; baseline evidence exists; any source/contract difference is reported rather than resolved silently.
+- **Exit gate:** cleanly classified baseline, empty preservation-file comparison, matching preservation aggregate digests, matching separate source/target hash records, byte-for-byte expected-target PASS, mandatory fixture PASS, ignore-semantics PASS, all deny scans PASS, and the complete redacted re-attestation packet are recorded in the frontend handoff/PR evidence and handed to C0. Unsupported/mixed encoding or EOL, a duplicate canonical source line, any target byte mismatch, or any ignore assertion blocks F1. F2 remains blocked until C0 Phase 2 independently reproduces PASS.
 
 ### F2 — Convert package, Vite, TypeScript, lint, test bootstrap, and mount point
 
 - **Owner:** Frontend Builder.
-- **Dependencies:** F1 and C0 Phase 2 re-attestation PASS for the exact recorded matching preservation manifests/digests and separately reviewed `.gitignore` sanitation delta.
+- **Dependencies:** F1 and C0 Phase 2 re-attestation PASS for the exact recorded matching preservation manifests/digests and independently reproduced `.gitignore` raw-byte expected-target, fixture, and ignore-semantics checks.
 - **Exact paths:** `v1/package.json`, `v1/package-lock.json`, `v1/index.html`, `v1/vite.config.ts`, `v1/vitest.config.ts`, `v1/tsconfig.json`, `v1/tsconfig.app.json`, `v1/tsconfig.node.json`, `v1/tsconfig.server.json`, `v1/eslint.config.js`, `v1/src/main.ts`, `v1/src/vite-env.d.ts`, deletion of `v1/src/main.tsx`.
 - **Actions:** perform Section 4.4 changes; keep backend/legacy scripts; preserve Vite security middleware/proxy; mount Vue at `#root`; retain all font and CSS imports.
 - **Acceptance checks:** `npm ci` resolves from the regenerated lock; a minimal Vue root type-checks; Laravel/legacy command names still exist; custom DOCX/corpus deny config remains covered.
@@ -483,8 +483,8 @@ The two documentation-only contract lanes are mandatory pre-implementation lanes
 - **Owner:** Frontend Builder.
 - **Dependencies:** F5.
 - **Exact paths:** `v1/src/App.test.ts`, `v1/src/components.test.ts`, `v1/src/api.test.ts`, `v1/src/test/setup.ts`, `v1/vite.config.test.ts`; delete `v1/src/app.test.tsx` and `v1/src/components.test.tsx`.
-- **Actions:** port assertions to Testing Library Vue; add focused manual-navigation, dialog, GIS-500 generic-error, responsive shelf-name, notification read/unread, notification action-path, repository/notification pagination normalization, unchanged `researchStage` mapping, and deny-list tests where current coverage is implicit; in `v1/vite.config.test.ts`, replace any copied real manuscript basename with the exact neutral synthetic denied path `/src/research_studies/denied-manuscript.docx`; remove every React package/import/config artifact; rerun post-migration screenshots under the strict synthetic/off-Git controls and perform integrity comparisons.
-- **Acceptance checks:** all commands in Section 12 pass; all five approved baseline correction test groups remain present; repository and notification pagination tests cover benign absolute API links and hostile protocol-relative/non-API links; the odd `researchStage` mapping remains unchanged and covered by mapping parity assertions; `vite.config.test.ts` contains the synthetic denied DOCX path and no external corpus basename; no `.tsx`/React residue; `src/styles.css` final SHA-256 equals the recorded F1 hash, or the sole documented selector-only exception has exact evidence and tests; backend/server/algorithm allowed-file hashes remain unchanged; source `.gitignore` still has its frozen hash and target `v1/.gitignore` still has C0's reviewed target hash and exact approved sanitation delta; parent-base paths outside `v1/**` remain unchanged except the three approved plan/contract paths; screenshot comparison has no unexplained visual regressions and no image/metadata leaves the local off-Git temporary directory.
+- **Actions:** port assertions to Testing Library Vue; add focused manual-navigation, dialog, GIS-500 generic-error, responsive shelf-name, notification read/unread, notification action-path, repository/notification pagination normalization, unchanged `researchStage` mapping, and deny-list tests where current coverage is implicit; in `v1/vite.config.test.ts`, replace any copied real manuscript basename with the exact neutral synthetic denied path `/src/research_studies/denied-manuscript.docx`; remove every React package/import/config artifact; rerun post-migration screenshots under the strict synthetic/off-Git controls and perform integrity comparisons; rerun the Section 12 raw-byte `.gitignore` expected-target verifier, all mandatory fixtures, and all ignore-semantics assertions without source path/content/diff output.
+- **Acceptance checks:** all commands in Section 12 pass; all five approved baseline correction test groups remain present; repository and notification pagination tests cover benign absolute API links and hostile protocol-relative/non-API links; the odd `researchStage` mapping remains unchanged and covered by mapping parity assertions; `vite.config.test.ts` contains the synthetic denied DOCX path and no external corpus basename; no `.tsx`/React residue; `src/styles.css` final SHA-256 equals the recorded F1 hash, or the sole documented selector-only exception has exact evidence and tests; backend/server/algorithm allowed-file hashes remain unchanged; source `.gitignore` still has its frozen hash, target `v1/.gitignore` still has C0's reviewed target hash and byte-for-byte expected-target equality, and the fixture/ignore-semantics gates still pass; parent-base paths outside `v1/**` remain unchanged except the three approved plan/contract paths; screenshot comparison has no unexplained visual regressions and no image/metadata leaves the local off-Git temporary directory.
 - **Exit gate:** builder returns an unstaged handoff with commands, exit codes, manifest digest, visual comparison summary, and acceptance mapping.
 
 ### V1 — Independent pre-commit verification
@@ -527,7 +527,7 @@ The two documentation-only contract lanes are mandatory pre-implementation lanes
 - **Owner:** Documentation Agent.
 - **Dependencies:** M1.
 - **Exact paths:** `v1/README.md`, `v1/docs/migration/react-to-vue3.md` only.
-- **Actions:** write Vue/Vite setup and commands; retain Laravel/MariaDB, Google origin, session, admin, legacy server, and non-destructive migration guidance; link the merged/re-attested UI/API contracts; document architecture, manual navigation, matching source freeze preservation digests, separate `.gitignore` source/target hashes and approved sanitation result, excluded data categories, the five intentional narrow frontend baseline corrections, unchanged odd `researchStage` mapping, known invalid-GIS-token 500 residual risk, rollback, and verification. Do not copy the React README verbatim and do not disclose confidential filenames.
+- **Actions:** write Vue/Vite setup and commands; retain Laravel/MariaDB, Google origin, session, admin, legacy server, and non-destructive migration guidance; link the merged/re-attested UI/API contracts; document architecture, manual navigation, matching source freeze preservation digests, separate `.gitignore` source/target hashes and raw-byte expected-target/fixture/ignore-semantics PASS, excluded data categories, the five intentional narrow frontend baseline corrections, unchanged odd `researchStage` mapping, known invalid-GIS-token 500 residual risk, rollback, and verification. Do not copy the React README verbatim and do not disclose confidential filenames.
 - **Acceptance checks:** commands match `package.json`; no React description remains except migration history; the backend GIS defect is not presented as fixed; paths assume execution from `v1`; no secret values or local personal paths appear.
 - **Exit gate:** documentation is ready for D2 as an unstaged two-file handoff.
 
@@ -570,8 +570,8 @@ The two documentation-only contract lanes are mandatory pre-implementation lanes
 
 - **Owner:** Integration Verification Lead (read-only).
 - **Dependencies:** C0's two contract merges, M1, and D6 remain present, and no later unreviewed changes exist on the plan branch.
-- **Actions:** run Section 12 on exact combined plan head; collect final code/security/accessibility review findings; inspect final tracked files and acceptance checklist; verify each child final review recorded a non-force latest-plan ancestry correction and exact reviewed SHA; verify C0 re-attestation binds the contracts to the F1 matching preservation manifests/digests and separately hashed/approved `.gitignore` sanitation delta, then rerun the sanitation check to prove the final target hash/delta remain unchanged; confirm no external `v0/**` content was copied and no parent-base repository-root path outside `v1/**` changed except the plan and two approved contract documents.
-- **Exit gate:** evidence-backed V4 PASS with no unresolved blocking finding, all child ancestry proofs current, and only the documented invalid-GIS-token behavior retained as an accepted residual risk.
+- **Actions:** run Section 12 on exact combined plan head; collect final code/security/accessibility review findings; inspect final tracked files and acceptance checklist; verify each child final review recorded a non-force latest-plan ancestry correction and exact reviewed SHA; verify C0 re-attestation binds the contracts to the F1 matching preservation manifests/digests and separately hashed `.gitignore` expected-target evidence, then independently rerun the raw-byte verifier, every mandatory fixture, and all `git check-ignore --no-index` assertions to prove final target bytes/hash and ignore semantics remain approved; confirm no external `v0/**` content was copied and no parent-base repository-root path outside `v1/**` changed except the plan and two approved contract documents.
+- **Exit gate:** evidence-backed V4 PASS with byte-for-byte `.gitignore` expected-target equality, fixture and ignore-semantics PASS, no unresolved blocking finding, all child ancestry proofs current, and only the documented invalid-GIS-token behavior retained as an accepted residual risk.
 
 ### P2 — Complete the parent Plan PR for review
 
@@ -585,9 +585,10 @@ The two documentation-only contract lanes are mandatory pre-implementation lanes
 - [ ] The tracked application exists under `v1/**` and corresponds to one recorded, sanitized authoritative source freeze.
 - [ ] No `.env`, credential, dependency tree, build output, runtime data, cache, `*.tsbuildinfo`, DOCX, Forms corpus, research-study corpus, or derived manuscript catalog is tracked.
 - [ ] No external `v0/**` file is copied or tracked; external `v0/**` remains reference-only.
-- [ ] `docs/design/vue-ui-parity.md` and `docs/contracts/vue-api-data.md` pass their pre-commit and ancestry-corrected exact-child-head gates, merge before F1, and are re-attested by C0 against F1's matching sanitized source/destination preservation manifests and aggregate digests plus the separately reviewed root `.gitignore` sanitation delta before F2.
+- [ ] `docs/design/vue-ui-parity.md` and `docs/contracts/vue-api-data.md` pass their pre-commit and ancestry-corrected exact-child-head gates, merge before F1, and are re-attested by C0 against F1's matching sanitized source/destination preservation manifests and aggregate digests plus the independently reproduced root `.gitignore` raw-byte expected-target evidence before F2.
 - [ ] After deny filtering, source and destination preservation manifests omit only deferred `README.md`, deferred `docs/**`, and the intentionally transformed root `.gitignore` from otherwise allowlisted paths; all included entries compare equal and their aggregate digests match.
-- [ ] The read-only source and target root `.gitignore` have separate recorded SHA-256 values; the exact deterministic diff adds only missing `*.docx` and `/src/research_studies/` lines in canonical order, without duplicates or any removed, weakened, reordered, or edited source protection, and C0 Phase 2 independently approves that sanitation delta.
+- [ ] The read-only source and target root `.gitignore` have separate recorded SHA-256 values; source encoding/BOM, bytes, one EOL convention, and final-newline semantics are preserved; the target equals the computed expected bytes after appending only missing `*.docx` then `/src/research_studies/`; mandatory UTF-8/UTF-16/EOL/final-newline and negative fixtures pass; unsupported/mixed representations and duplicate/unapproved changes fail; and C0 Phase 2 independently reproduces the result without printing source path/content/diff.
+- [ ] `git check-ignore --no-index` proves nested `src/research_studies/**`, nested `*.docx`, and root/nested non-example `.env` paths are ignored while `.env.example` remains trackable.
 - [ ] Parent-base repository-root files outside `v1/**` are unchanged and coexist with the new target, except this plan and the two explicitly approved contract documents.
 - [ ] Vue 3 Composition API/TypeScript mounts client-side at `#root`; there is no SSR, router, or Pinia/store dependency.
 - [ ] No React runtime, React tooling, React import, JSX/TSX source, `lucide-react`, or Testing Library React dependency remains in `v1`.
@@ -670,34 +671,201 @@ if ($dirty) { $dirty; throw "C0 requires a clean plan worktree" }
 
 C0 Phase 1 also compares the exact plan head to the P0 head and requires changes only at the two contract paths plus merge metadata; it records both child URLs, incorporated plan heads, tested heads, and resulting merge/squash commits. A dirty worktree or any additional path blocks F1 branch creation.
 
-C0 Phase 2 must independently reproduce the empty source/destination preservation-manifest comparison and matching aggregate digests after deny filtering, with only deferred `README.md`, deferred `docs/**`, and transformed root `.gitignore` omitted from otherwise allowlisted paths. It must independently calculate the source/target `.gitignore` hashes and approve the minimal deterministic sanitation delta before mapping the frozen source to every UI/API contract row. It must explicitly re-attest the `/research/` prefix or replace it through the affected contract lane with the exact source-supported prefix list, confirm the five approved defect baselines, freeze the odd `researchStage` mapping as unchanged parity behavior, verify the invalid-token 500 classification, and record PASS against the exact frontend worktree head. Any preservation digest drift, source `.gitignore` hash drift, sanitation-delta violation, or contract edit invalidates Phase 2 and blocks F2.
+C0 Phase 2 must independently reproduce the empty source/destination preservation-manifest comparison and matching aggregate digests after deny filtering, with only deferred `README.md`, deferred `docs/**`, and transformed root `.gitignore` omitted from otherwise allowlisted paths. It must independently calculate the source/target `.gitignore` hashes, compute expected target bytes from the frozen raw source, require target byte equality, pass all local fixtures, and prove required ignore semantics before mapping the frozen source to every UI/API contract row. It must explicitly re-attest the `/research/` prefix or replace it through the affected contract lane with the exact source-supported prefix list, confirm the five approved defect baselines, freeze the odd `researchStage` mapping as unchanged parity behavior, verify the invalid-token 500 classification, and record PASS against the exact frontend worktree head. Any preservation digest drift, source `.gitignore` hash drift, unsupported/mixed encoding or EOL, duplicate canonical source line, target-byte mismatch, fixture/ignore-semantics failure, or contract edit invalidates Phase 2 and blocks F2.
 
-Run this sanitation-delta check locally in F1 and independently in C0 Phase 2; retain the exact diff outside Git and publish only the two hashes and approved added lines:
+Run this raw-byte expected-target verifier locally in F1, independently in C0 Phase 2, again in F6, and at V4. The F1 transform must write exactly the `ExpectedBytes` produced by the same rules, without decoding/re-encoding existing source bytes; later gates are read-only. Do not use `Get-Content`, `Set-Content`, a line diff, or `git diff --no-index` for this control. Do not print the source path, source content, or a diff. Publish only the two hashes, approved-addition count, and PASS summaries:
 
 ```powershell
 $ExternalSourceRoot = $env:RESEARCHNAV_EXTERNAL_SOURCE
 if (-not $ExternalSourceRoot) { throw "Set RESEARCHNAV_EXTERNAL_SOURCE to <external-source-root>" }
 $SourceGitignore = Join-Path $ExternalSourceRoot 'v1/.gitignore'
 $TargetGitignore = 'v1/.gitignore'
-if (-not (Test-Path $SourceGitignore) -or -not (Test-Path $TargetGitignore)) { throw "Source and target .gitignore files are required" }
+if (-not (Test-Path -LiteralPath $SourceGitignore -PathType Leaf) -or -not (Test-Path -LiteralPath $TargetGitignore -PathType Leaf)) { throw "Required .gitignore input is unavailable" }
 
-$SourceGitignoreHash = (Get-FileHash -Algorithm SHA256 $SourceGitignore).Hash.ToLowerInvariant()
-$TargetGitignoreHash = (Get-FileHash -Algorithm SHA256 $TargetGitignore).Hash.ToLowerInvariant()
-$sourceLines = @(Get-Content $SourceGitignore)
-$targetLines = @(Get-Content $TargetGitignore)
-$approvedAdditions = @('*.docx', '/src/research_studies/')
-$expectedLines = [System.Collections.Generic.List[string]]::new()
-$expectedLines.AddRange([string[]]$sourceLines)
-foreach ($line in $approvedAdditions) {
-  if ($sourceLines -cnotcontains $line) { $expectedLines.Add($line) }
+function Test-BytePrefix([byte[]]$Bytes, [byte[]]$Prefix) {
+  if ($Bytes.Length -lt $Prefix.Length) { return $false }
+  for ($i = 0; $i -lt $Prefix.Length; $i++) {
+    if ($Bytes[$i] -ne $Prefix[$i]) { return $false }
+  }
+  return $true
 }
-if ($targetLines.Count -ne $expectedLines.Count) { throw "Unexpected .gitignore line count" }
-for ($i = 0; $i -lt $expectedLines.Count; $i++) {
-  if ($targetLines[$i] -cne $expectedLines[$i]) { throw "Unapproved .gitignore sanitation delta at line $($i + 1)" }
+
+function Test-BytesEqual([byte[]]$Left, [byte[]]$Right) {
+  if ($Left.Length -ne $Right.Length) { return $false }
+  for ($i = 0; $i -lt $Left.Length; $i++) {
+    if ($Left[$i] -ne $Right[$i]) { return $false }
+  }
+  return $true
 }
-git diff --no-index -- $SourceGitignore $TargetGitignore
-if ($LASTEXITCODE -notin @(0, 1)) { throw "Unable to inspect .gitignore sanitation diff" }
-Write-Output "source_gitignore_sha256=$SourceGitignoreHash target_gitignore_sha256=$TargetGitignoreHash"
+
+function Join-ByteArrays([byte[]]$Left, [byte[]]$Right) {
+  $joined = [byte[]]::new($Left.Length + $Right.Length)
+  [Array]::Copy($Left, 0, $joined, 0, $Left.Length)
+  [Array]::Copy($Right, 0, $joined, $Left.Length, $Right.Length)
+  return ,$joined
+}
+
+function Get-Sha256([byte[]]$Bytes) {
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try { return ([BitConverter]::ToString($sha.ComputeHash($Bytes))).Replace('-', '').ToLowerInvariant() }
+  finally { $sha.Dispose() }
+}
+
+function Get-GitignoreExpectedTarget([byte[]]$SourceBytes) {
+  $utf32Le = [byte[]](0xff, 0xfe, 0x00, 0x00)
+  $utf32Be = [byte[]](0x00, 0x00, 0xfe, 0xff)
+  if ((Test-BytePrefix $SourceBytes $utf32Le) -or (Test-BytePrefix $SourceBytes $utf32Be)) { throw "Unsupported .gitignore encoding" }
+  if (
+    (Test-BytePrefix $SourceBytes ([byte[]](0x2b, 0x2f, 0x76, 0x38))) -or
+    (Test-BytePrefix $SourceBytes ([byte[]](0x2b, 0x2f, 0x76, 0x39))) -or
+    (Test-BytePrefix $SourceBytes ([byte[]](0x2b, 0x2f, 0x76, 0x2b))) -or
+    (Test-BytePrefix $SourceBytes ([byte[]](0x2b, 0x2f, 0x76, 0x2f)))
+  ) { throw "Unsupported .gitignore encoding" }
+
+  $offset = 0
+  if (Test-BytePrefix $SourceBytes ([byte[]](0xef, 0xbb, 0xbf))) {
+    $encoding = [Text.UTF8Encoding]::new($false, $true)
+    $offset = 3
+  } elseif (Test-BytePrefix $SourceBytes ([byte[]](0xff, 0xfe))) {
+    $encoding = [Text.UnicodeEncoding]::new($false, $false, $true)
+    $offset = 2
+  } elseif (Test-BytePrefix $SourceBytes ([byte[]](0xfe, 0xff))) {
+    $encoding = [Text.UnicodeEncoding]::new($true, $false, $true)
+    $offset = 2
+  } else {
+    $encoding = [Text.UTF8Encoding]::new($false, $true)
+  }
+
+  try { $text = $encoding.GetString($SourceBytes, $offset, $SourceBytes.Length - $offset) }
+  catch { throw "Malformed or unsupported .gitignore encoding" }
+  if ($text.IndexOf([char]0) -ge 0) { throw "Unsupported .gitignore encoding" }
+
+  $hasCrLf = $text.Contains("`r`n")
+  $withoutCrLf = $text.Replace("`r`n", '')
+  if ($withoutCrLf.Contains("`r")) { throw "Unsupported .gitignore EOL" }
+  $hasLf = $withoutCrLf.Contains("`n")
+  if (($hasCrLf -and $hasLf) -or (-not $hasCrLf -and -not $hasLf)) { throw "Mixed or unsupported .gitignore EOL" }
+  $eol = if ($hasCrLf) { "`r`n" } else { "`n" }
+  $hasFinalNewline = $text.EndsWith($eol, [StringComparison]::Ordinal)
+  $lines = $text.Split([string[]]@($eol), [StringSplitOptions]::None)
+
+  $approved = [string[]]@('*.docx', '/src/research_studies/')
+  $missing = [Collections.Generic.List[string]]::new()
+  foreach ($line in $approved) {
+    $count = @($lines | Where-Object { $_ -ceq $line }).Count
+    if ($count -gt 1) { throw "Duplicate canonical .gitignore source line" }
+    if ($count -eq 0) { $missing.Add($line) }
+  }
+
+  $expectedBytes = [byte[]]$SourceBytes.Clone()
+  if ($missing.Count -gt 0) {
+    $appendText = if ($hasFinalNewline) { [string]::Join($eol, $missing) + $eol } else { $eol + [string]::Join($eol, $missing) }
+    $expectedBytes = Join-ByteArrays $expectedBytes ($encoding.GetBytes($appendText))
+  }
+  return [pscustomobject]@{ ExpectedBytes = $expectedBytes; AddedCount = $missing.Count }
+}
+
+function Assert-ExpectedTarget([byte[]]$SourceBytes, [byte[]]$TargetBytes) {
+  $result = Get-GitignoreExpectedTarget $SourceBytes
+  if (-not (Test-BytesEqual $result.ExpectedBytes $TargetBytes)) { throw "Target .gitignore bytes do not equal the approved expected target" }
+  return $result
+}
+
+function New-FixtureBytes([string]$Text, [ValidateSet('utf8', 'utf16le', 'utf16be')] [string]$Kind, [bool]$Bom) {
+  switch ($Kind) {
+    'utf8' { $enc = [Text.UTF8Encoding]::new($false, $true); $preamble = [byte[]](0xef, 0xbb, 0xbf) }
+    'utf16le' { $enc = [Text.UnicodeEncoding]::new($false, $false, $true); $preamble = [byte[]](0xff, 0xfe) }
+    'utf16be' { $enc = [Text.UnicodeEncoding]::new($true, $false, $true); $preamble = [byte[]](0xfe, 0xff) }
+  }
+  $payload = $enc.GetBytes($Text)
+  if ($Bom) { return ,(Join-ByteArrays $preamble $payload) }
+  return ,$payload
+}
+
+function Assert-Rejected([scriptblock]$Action) {
+  $rejected = $false
+  try { & $Action | Out-Null } catch { $rejected = $true }
+  if (-not $rejected) { throw "Invalid .gitignore fixture was accepted" }
+}
+
+# Mandatory local file fixtures: UTF-8 with/without BOM, both EOLs,
+# UTF-16 LE/BE with BOM, and final-newline present/absent.
+$fixtureCases = @(
+  @{ Kind = 'utf8'; Bom = $false; Eol = "`n"; Final = $true },
+  @{ Kind = 'utf8'; Bom = $true; Eol = "`n"; Final = $true },
+  @{ Kind = 'utf8'; Bom = $false; Eol = "`r`n"; Final = $true },
+  @{ Kind = 'utf8'; Bom = $true; Eol = "`r`n"; Final = $false },
+  @{ Kind = 'utf16le'; Bom = $true; Eol = "`n"; Final = $true },
+  @{ Kind = 'utf16le'; Bom = $true; Eol = "`r`n"; Final = $false },
+  @{ Kind = 'utf16be'; Bom = $true; Eol = "`r`n"; Final = $true },
+  @{ Kind = 'utf16be'; Bom = $true; Eol = "`n"; Final = $false }
+)
+$fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+try {
+  [IO.Directory]::CreateDirectory($fixtureRoot) | Out-Null
+  for ($i = 0; $i -lt $fixtureCases.Count; $i++) {
+    $case = $fixtureCases[$i]
+    $body = '# retained' + $case.Eol + '!.env.example'
+    $sourceText = $body + $(if ($case.Final) { $case.Eol } else { '' })
+    $expectedText = if ($case.Final) {
+      $sourceText + '*.docx' + $case.Eol + '/src/research_studies/' + $case.Eol
+    } else {
+      $sourceText + $case.Eol + '*.docx' + $case.Eol + '/src/research_studies/'
+    }
+    $sourceFixture = New-FixtureBytes $sourceText $case.Kind $case.Bom
+    $targetFixture = New-FixtureBytes $expectedText $case.Kind $case.Bom
+    $sourceFixtureFile = Join-Path $fixtureRoot "source-$i"
+    $targetFixtureFile = Join-Path $fixtureRoot "target-$i"
+    [IO.File]::WriteAllBytes($sourceFixtureFile, $sourceFixture)
+    [IO.File]::WriteAllBytes($targetFixtureFile, $targetFixture)
+    Assert-ExpectedTarget ([IO.File]::ReadAllBytes($sourceFixtureFile)) ([IO.File]::ReadAllBytes($targetFixtureFile)) | Out-Null
+  }
+
+  $mixed = New-FixtureBytes "# retained`r`n.env*`n" 'utf8' $false
+  $loneCr = New-FixtureBytes "# retained`r.env*`r" 'utf8' $false
+  $duplicate = New-FixtureBytes "# retained`n*.docx`n*.docx`n" 'utf8' $false
+  $utf32 = [byte[]](0xff, 0xfe, 0x00, 0x00, 0x23, 0x00, 0x00, 0x00, 0x0a, 0x00, 0x00, 0x00)
+  $utf16NoBom = [Text.UnicodeEncoding]::new($false, $false, $true).GetBytes("# retained`n")
+  Assert-Rejected { Get-GitignoreExpectedTarget $mixed }
+  Assert-Rejected { Get-GitignoreExpectedTarget $loneCr }
+  Assert-Rejected { Get-GitignoreExpectedTarget $duplicate }
+  Assert-Rejected { Get-GitignoreExpectedTarget $utf32 }
+  Assert-Rejected { Get-GitignoreExpectedTarget $utf16NoBom }
+  $valid = New-FixtureBytes "# retained`n" 'utf8' $false
+  $validExpected = (Get-GitignoreExpectedTarget $valid).ExpectedBytes
+  $tampered = Join-ByteArrays $validExpected ([Text.UTF8Encoding]::new($false, $true).GetBytes("unapproved`n"))
+  $duplicateTarget = Join-ByteArrays $validExpected ([Text.UTF8Encoding]::new($false, $true).GetBytes("*.docx`n"))
+  Assert-Rejected { Assert-ExpectedTarget $valid $tampered }
+  Assert-Rejected { Assert-ExpectedTarget $valid $duplicateTarget }
+} finally {
+  if (Test-Path -LiteralPath $fixtureRoot) { Remove-Item -LiteralPath $fixtureRoot -Recurse -Force }
+}
+
+try {
+  $sourceBytes = [IO.File]::ReadAllBytes($SourceGitignore)
+  $targetBytes = [IO.File]::ReadAllBytes($TargetGitignore)
+} catch { throw "Unable to read required .gitignore bytes" }
+$verified = Assert-ExpectedTarget $sourceBytes $targetBytes
+$SourceGitignoreHash = Get-Sha256 $sourceBytes
+$TargetGitignoreHash = Get-Sha256 $targetBytes
+
+function Assert-Ignored([string]$Candidate) {
+  & git -C v1 check-ignore --no-index --quiet -- $Candidate 2>$null
+  if ($LASTEXITCODE -ne 0) { throw "Required ignore assertion failed" }
+}
+function Assert-Trackable([string]$Candidate) {
+  & git -C v1 check-ignore --no-index --quiet -- $Candidate 2>$null
+  if ($LASTEXITCODE -ne 1) { throw "Required trackability assertion failed" }
+}
+Assert-Ignored 'src/research_studies/nested/catalog.json'
+Assert-Ignored 'nested/corpus/denied-manuscript.docx'
+Assert-Ignored '.env'
+Assert-Ignored '.env.local'
+Assert-Ignored 'nested/config/.env.production'
+Assert-Trackable '.env.example'
+Assert-Trackable 'nested/config/.env.example'
+
+Write-Output "source_gitignore_sha256=$SourceGitignoreHash target_gitignore_sha256=$TargetGitignoreHash approved_additions=$($verified.AddedCount) fixtures=PASS ignore_semantics=PASS expected_target=PASS"
 ```
 
 ### Frontend gate
@@ -784,7 +952,7 @@ Run the repository-approved secret scanner. If none is configured, Security Revi
 ### Integrity and security review controls
 
 - Compare frozen and final SHA-256 manifests for `v1/src/styles.css`, `v1/backend/**`, `v1/server/**`, and allowed `v1/algorithm/**`; only the destination prefix may differ. `styles.css` hash inequality fails the gate unless the parent PR records the sole minimal selector-only Vue compatibility exception with both hashes, exact selector diff, reproduction, focused test, and proof that declarations, values, custom properties, media queries, and unrelated selectors are byte-identical.
-- Recalculate the read-only source and final target `.gitignore` SHA-256 values and rerun the canonical sanitation-delta check. The source hash must equal F1's frozen source hash, the target hash must equal C0's approved target hash, and the line diff must still contain only the approved additions with every source protection intact.
+- Recalculate the read-only source and final target `.gitignore` SHA-256 values; rerun the raw-byte expected-target verifier, mandatory fixtures, and `git check-ignore --no-index` assertions. The source hash must equal F1's frozen source hash, the target hash must equal C0's approved target hash, target bytes must equal independently computed expected bytes, and no source path/content/diff may be printed.
 - Inspect `package-lock.json` for expected Vue additions/React removals and run `npm audit --prefix v1 --omit=dev`. Findings are triaged; unrelated legacy server dependency findings are documented rather than fixed by broad unplanned upgrades.
 - Confirm API requests retain relative paths, JSON handling, URL encoding, pagination cap, and `credentials: "include"`; mark-read must perform only the approved `{ data: notification }` boundary unwrap. Repository and notification `links.next` values may yield a follow-up request only after normalization to a non-`//` pathname beginning exactly `/api/`; absolute API authorities are discarded, and protocol-relative or non-API targets stop pagination without a request so credentials cannot leave the same-origin API boundary.
 - Confirm the odd `researchStage` mapping remains byte-for-behavior equivalent to the F1-frozen source; the fifth correction does not authorize mapping cleanup.
@@ -807,6 +975,7 @@ Run the repository-approved secret scanner. If none is configured, Security Revi
 | Untrusted `links.next` is fetched with credentials              | Credentials or requests cross the same-origin API boundary | Normalize absolute links to path/query only; require exact `/api/` prefix, reject `//` and non-API targets, and test no follow-up |
 | Pagination correction is used to clean up `researchStage`       | Unapproved data-mapping semantic change                    | Freeze and test the odd mapping verbatim; any mapping correction requires a separate approved plan amendment                      |
 | Untracked source changes during migration                       | Mixed or unreproducible version                            | F1 freeze digest; rerun baseline and restart copy if source digest changes                                                        |
+| `.gitignore` sanitation transcodes or normalizes source bytes   | Existing protections or reproducibility silently change    | Strict supported encoding/EOL validation; raw-byte expected target; fixture/ignore-semantics gates at F1, C0, F6, and V4          |
 | Confidential corpus, identity, or screenshot data enters Git    | Severe privacy/security incident                           | Filter-before-copy; synthetic mocked/offline captures outside Git/artifacts; metadata/OCR inspection; scans; block PR immediately |
 | Vue lifecycle differs from React effects                        | Duplicate requests, stale updates, leaked listeners/timers | Explicit mount/unmount guards; request count and teardown tests; code review                                                      |
 | Manual navigation loses query or back behavior                  | User-visible regression                                    | Keep History API contract; tests for push/replace/popstate and encoded queries                                                    |
@@ -821,7 +990,7 @@ Run the repository-approved secret scanner. If none is configured, Security Revi
 | Documentation leaks local/confidential details                  | Privacy/reproducibility issue                              | Docs use relative paths and aggregate digest/counts only; docs security review                                                    |
 | Child review uses stale or rewritten ancestry                   | Exact-head evidence does not match merge candidate         | Merge latest plan head into every child non-force before final review; record both SHAs; invalidate on either head change         |
 
-The transformed target `.gitignore` has a dedicated F1/C0 risk control outside preservation equality: omitting it from either preservation manifest prevents a false byte-equality failure, while separate source/target hashes and an independently reviewed canonical additions-only diff prevent sanitation from weakening or broadening existing protections.
+The transformed target `.gitignore` has a dedicated F1/C0 risk control outside preservation equality: omitting it from either preservation manifest prevents a false source/target equality failure, while separate hashes, independently computed expected bytes, byte-for-byte target equality, mandatory encoding/EOL/final-newline fixtures, and ignore-semantics assertions prevent sanitation from transcoding, weakening, broadening, or otherwise changing existing protections.
 
 Retry budget is three correction cycles per root pre-commit, PR, or final-integration failure. On exhaustion, leave work unstaged/unmerged and escalate with exact reproduction evidence.
 
@@ -882,15 +1051,15 @@ Base snapshot: `882f52c6bbbebdd75c61021cdcfdfc0aa937c0e2`
 
 ## Architecture
 
-The merged UI and API/data documents are provisional through F1. F1 copies the sanitized authoritative external `v1`, records matching source/destination preservation manifests and aggregate digests that exclude deferred `README.md`, deferred `docs/**`, and transformed root `.gitignore`, and separately records source/target `.gitignore` hashes plus the canonical additions-only sanitation delta. C0 Phase 2 independently reviews all of that evidence; only then are the contracts authoritative and F2 may begin. Vue mounts client-side at `#root`. `App.vue` retains root session/repository/path state and manual History API navigation for `/`, `/catalog`, and `/app`. Typed props/emits and local refs replace React state/props; no global store is added. Relative `/api` requests continue through Vite to unchanged Laravel with credentialed database sessions. Pagination accepts `links.next` only after normalization to a non-`//` path beginning exactly `/api/`; absolute API authorities are discarded, while protocol-relative and non-API values trigger no follow-up fetch. Laravel mark-read continues to emit `{ data: notification }`; `api.ts` unwraps that envelope for frontend callers. Notification actions pass a root-relative source-supported prefix guard before navigation. The odd `researchStage` mapping, legacy Express server, and Python algorithm remain unchanged parity/reference behavior.
+The merged UI and API/data documents are provisional through F1. F1 copies the sanitized authoritative external `v1`, records matching source/destination preservation manifests and aggregate digests that exclude deferred `README.md`, deferred `docs/**`, and transformed root `.gitignore`, and separately records source/target `.gitignore` hashes plus raw-byte expected-target, fixture, and ignore-semantics PASS. C0 Phase 2 independently reproduces all of that evidence; only then are the contracts authoritative and F2 may begin. Vue mounts client-side at `#root`. `App.vue` retains root session/repository/path state and manual History API navigation for `/`, `/catalog`, and `/app`. Typed props/emits and local refs replace React state/props; no global store is added. Relative `/api` requests continue through Vite to unchanged Laravel with credentialed database sessions. Pagination accepts `links.next` only after normalization to a non-`//` path beginning exactly `/api/`; absolute API authorities are discarded, while protocol-relative and non-API values trigger no follow-up fetch. Laravel mark-read continues to emit `{ data: notification }`; `api.ts` unwraps that envelope for frontend callers. Notification actions pass a root-relative source-supported prefix guard before navigation. The odd `researchStage` mapping, legacy Express server, and Python algorithm remain unchanged parity/reference behavior.
 
 ## Acceptance criteria
 
 - [ ] One sanitized source freeze is recorded by matching preservation aggregate digests and a separate frozen source `.gitignore` hash.
 - [ ] No forbidden/confidential/generated/runtime files are tracked.
-- [ ] Both contract child PRs incorporate latest plan head non-force, pass exact-head verification, merge before F1, and pass post-F1 C0 re-attestation against matching preservation manifests/digests and the separately reviewed `.gitignore` sanitation delta before F2.
+- [ ] Both contract child PRs incorporate latest plan head non-force, pass exact-head verification, merge before F1, and pass post-F1 C0 re-attestation against matching preservation manifests/digests and independently reproduced `.gitignore` raw-byte expected-target evidence before F2.
 - [ ] After deny filtering, preservation manifests omit only deferred `README.md`, deferred `docs/**`, and transformed root `.gitignore` from otherwise allowlisted paths; included source/target entries and aggregate digests match.
-- [ ] Separate source/target `.gitignore` hashes are recorded; its exact diff adds only missing `*.docx` and `/src/research_studies/` lines in order, removes or weakens no protection, and passes independent C0 Phase 2 review.
+- [ ] Separate source/target `.gitignore` hashes are recorded; target bytes preserve source encoding/BOM, existing bytes, EOL, and final-newline semantics while adding only missing canonical lines; target equality, mandatory local fixtures, and ignore-semantics assertions pass F1 and independent C0 Phase 2 without source path/content/diff output.
 - [ ] No external `v0/**` content is copied; parent-base root files outside `v1/**` (except the plan/contracts) and backend/server/algorithm logic pass integrity checks.
 - [ ] Final `src/styles.css` SHA-256 equals F1, except a fully documented minimal selector-only Vue compatibility exception with no declaration/value/media-query change.
 - [ ] Vue 3 Composition API/TypeScript replaces all React/TSX code and dependencies.
@@ -923,9 +1092,9 @@ The merged UI and API/data documents are provisional through F1. F1 copies the s
 
 - [ ] UI contract pre-commit, exact-head, accessibility, privacy/path, and merge gates pass.
 - [ ] API/data contract pre-commit, exact-head, API/security, privacy/path, and merge gates pass.
-- [ ] C0 Phase 1 confirms both provisional contracts are on the exact clean plan head before F1; Phase 2 re-attests them against F1 preservation manifests/digests and separately hashed `.gitignore` sanitation delta before F2.
+- [ ] C0 Phase 1 confirms both provisional contracts are on the exact clean plan head before F1; Phase 2 re-attests them against F1 preservation manifests/digests and independently reproduced `.gitignore` raw-byte expected-target, fixture, and ignore-semantics evidence before F2.
 - [ ] Sanitized source/destination preservation manifests match after deny filtering and the three governed otherwise-allowlisted path omissions, and deny scans pass.
-- [ ] Source/target `.gitignore` SHA-256 values and the canonical additions-only diff pass F1 and independent C0 Phase 2 review with no removed protection.
+- [ ] Source/target `.gitignore` SHA-256 values, byte-for-byte expected-target equality, mandatory encoding/EOL/final-newline fixtures, negative rejection fixtures, and `git check-ignore --no-index` assertions pass F1 and independent C0 Phase 2.
 - [ ] `npm --prefix v1 test`
 - [ ] `npm --prefix v1 run typecheck`
 - [ ] `npm --prefix v1 run lint`
@@ -954,11 +1123,11 @@ The merged UI and API/data documents are provisional through F1. F1 copies the s
 - Split shared TSX helpers into focused Vue components while preserving classes/semantics.
 - Merge independently owned UI and API/data contracts before allowing the frontend lane to start.
 - Treat Laravel's `{ data: notification }` mark-read wire shape as frozen and correct parity only at the `api.ts` frontend boundary with a focused test.
-- Treat contracts as provisional until F1 records matching sanitized source/destination preservation manifests/digests, separate source/target `.gitignore` hashes, and the canonical additions-only sanitation delta, and C0 re-attests them; block F2 until PASS.
+- Treat contracts as provisional until F1 records matching sanitized source/destination preservation manifests/digests, separate source/target `.gitignore` hashes, raw-byte expected-target equality, and fixture/ignore-semantics PASS, and C0 independently reproduces them; block F2 until PASS.
 - Intentionally correct only responsive shelf names, programmatic notification state, action-path validation, envelope normalization, and fail-closed repository/notification pagination normalization; do not broaden into redesign.
 - Preserve the existing odd `researchStage` mapping exactly; the pagination correction grants no authority for mapping cleanup.
 - Require exact CSS hash equality except a documented, tested minimal selector-only Vue compatibility exception.
-- Exclude deferred `README.md`, deferred `docs/**`, and transformed root `.gitignore` from both preservation manifests; govern `.gitignore` separately with source/target hashes, exact approved additions, preservation of every existing protection, and C0 Phase 2 review.
+- Exclude deferred `README.md`, deferred `docs/**`, and transformed root `.gitignore` from both preservation manifests; govern `.gitignore` separately with source/target hashes, raw-byte expected-target equality, mandatory encoding/EOL/final-newline and rejection fixtures, ignore-semantics assertions, and independent C0 Phase 2 reproduction.
 - Keep one frontend implementation lane; backend/database lanes are unnecessary because those contracts are frozen after C0 re-attestation.
 - Exclude derived `src/research_studies/catalog.json` with the confidential source corpus.
 
@@ -966,7 +1135,7 @@ The merged UI and API/data documents are provisional through F1. F1 copies the s
 
 - The source is untracked; a freeze digest and integrity manifests are mandatory.
 - Sanitization must occur before files enter a worktree, not as cleanup afterward.
-- The authoritative source `.gitignore` remains read-only; only target `v1/.gitignore` receives the two canonical additions, and it is not part of matching preservation digests.
+- The authoritative source `.gitignore` remains read-only; only target `v1/.gitignore` receives missing canonical additions through the byte-preserving transform, and it is not part of matching preservation digests.
 - Contract child branches have non-overlapping one-file ownership and require independent pre-commit/exact-head gates before merge.
 - Any F1 source/contract contradiction blocks implementation for a Plan PR amendment.
 - A nonempty invalid GIS token can return 500 from the existing Laravel path; Vue retains generic safe handling and the backend defect remains residual/out of scope.
@@ -983,7 +1152,7 @@ The merged UI and API/data documents are provisional through F1. F1 copies the s
 - [ ] Vue UI contract child linked, exact-head verified, and merged
 - [ ] Vue API/data contract child linked, exact-head verified, and merged
 - [ ] C0 contract integration evidence linked
-- [ ] Post-F1 C0 re-attestation links matching source/destination preservation aggregate digests, separate `.gitignore` source/target hashes, approved sanitation-delta result, and contract mapping
+- [ ] Post-F1 C0 re-attestation links matching source/destination preservation aggregate digests, separate `.gitignore` source/target hashes, raw-byte expected-target/fixture/ignore-semantics PASS, and contract mapping
 - [ ] Frontend child linked and merged
 - [ ] Frontend test/review/security evidence linked
 - [ ] Documentation child linked and merged
@@ -1033,22 +1202,23 @@ The merged UI and API/data documents are provisional through F1. F1 copies the s
 - [ ] C0 Phase 1 starts from the exact plan head containing both ancestry-corrected contract merges.
 - [ ] Phase 1 combined formatting, clean-worktree, ownership, privacy/path, and provisional cross-contract checks PASS.
 - [ ] F1 records matching sanitized source/destination preservation manifests and aggregate digests that, after deny filtering, omit only deferred `README.md`, deferred `docs/**`, and transformed root `.gitignore` from otherwise allowlisted paths, plus supported-prefix/baseline evidence.
-- [ ] F1 records separate source/target `.gitignore` hashes and an exact canonical additions-only sanitation diff with no duplicate or removed/weakened/reordered/edited protection.
-- [ ] C0 Phase 2 independently verifies the preservation-manifest equality and `.gitignore` sanitation delta, then maps both contracts to that exact copy and re-attests all API/UI rows, five approved corrections, unchanged odd `researchStage` mapping, GIS defect classification, and CSS hash.
+- [ ] F1 records separate source/target `.gitignore` hashes, byte-for-byte expected-target equality, mandatory local fixture PASS, and `git check-ignore --no-index` PASS without printing source path/content/diff.
+- [ ] C0 Phase 2 independently verifies preservation-manifest equality; recomputes `.gitignore` expected bytes; rejects unsupported/mixed representations and duplicate/unapproved changes; reruns all fixtures and ignore assertions; then maps both contracts to that exact copy and re-attests all API/UI rows, five approved corrections, unchanged odd `researchStage` mapping, GIS defect classification, and CSS hash.
 - [ ] F1 branch/worktree is created only after Phase 1; F2 starts only after Phase 2 PASS.
 
 ### Frontend migration lane
 
 - [ ] F1 source freeze preservation digest, source `.gitignore` hash, and baseline evidence recorded.
 - [ ] F1 filtered copy and source/destination preservation-manifest comparison plus both matching aggregate digests pass with the three governed otherwise-allowlisted path omissions only.
-- [ ] F1 target `.gitignore` hash and deterministic additions-only sanitation diff pass; only missing `*.docx` and `/src/research_studies/` lines were added and every source protection remains intact.
+- [ ] F1 target `.gitignore` hash and exact expected bytes pass; source encoding/BOM, all existing bytes, EOL, and final-newline semantics remain intact and only missing `*.docx` then `/src/research_studies/` were appended.
+- [ ] F1 local UTF-8 BOM/no-BOM, LF/CRLF, UTF-16 LE/BE, missing-final-newline, and negative fixtures pass; nested corpus/DOCX and non-example `.env` ignore assertions pass while `.env.example` remains trackable.
 - [ ] F1 confidentiality, secret, and generated/runtime deny checks pass.
 - [ ] F2 Vue toolchain/bootstrap gate passes.
 - [ ] F3 shared components/focus gate passes.
 - [ ] F4 root/public/catalog/API gate passes, including `{ data: notification }` normalization, root-relative supported-prefix action validation, unchanged odd `researchStage` mapping, and repository/notification fail-closed pagination tests.
 - [ ] Focused pagination tests accept benign absolute API next links only as same-origin `/api/...` path/query requests and prove hostile `//host` plus root-relative/absolute non-API next links cause no follow-up fetch.
 - [ ] F5 GIS/dashboard/notifications/roles gate passes, including all shelf names, read/unread success/failure transitions, rejected action non-navigation, and generic GIS-500 handling.
-- [ ] F6 Testing Library Vue port and React removal gate passes.
+- [ ] F6 Testing Library Vue port and React removal gate passes, including unchanged source/target hashes, raw-byte expected-target equality, mandatory fixtures, and ignore semantics.
 - [ ] Final CSS SHA-256 equals F1 or the sole selector-only exception has complete evidence; backend/server/algorithm hashes pass.
 - [ ] Mocked/offline wholly synthetic desktop/mobile evidence remains only in the inspected off-Git temporary directory; no image/metadata is uploaded.
 - [ ] Pre-Commit Tester returns PASS before staging.
@@ -1061,7 +1231,7 @@ The merged UI and API/data documents are provisional through F1. F1 copies the s
 
 - [ ] Docs worktree starts from plan head containing frontend merge.
 - [ ] `v1/README.md` reflects Vue and retained Laravel/legacy setup.
-- [ ] `v1/docs/migration/react-to-vue3.md` records architecture, exclusions, matching preservation digests, separate `.gitignore` hashes/sanitation result, verification, and rollback.
+- [ ] `v1/docs/migration/react-to-vue3.md` records architecture, exclusions, matching preservation digests, separate `.gitignore` hashes and raw-byte expected-target/fixture/ignore-semantics result, verification, and rollback.
 - [ ] Documentation records the five intentional narrow baseline corrections, unchanged odd `researchStage` mapping, and invalid-GIS-token 500 residual risk without claiming a backend fix.
 - [ ] Documentation contains no confidential filenames, personal paths, or secrets.
 - [ ] D2 pre-commit formatting, ownership, privacy, and command checks PASS before staging.
@@ -1072,7 +1242,7 @@ The merged UI and API/data documents are provisional through F1. F1 copies the s
 
 - [ ] Combined plan head passes all Section 12 commands.
 - [ ] Combined tracked-file, secret, corpus, React, and integrity scans pass.
-- [ ] Final source/target `.gitignore` hashes and canonical sanitation delta still equal the C0 Phase 2 reviewed evidence.
+- [ ] Final source/target `.gitignore` hashes, byte-for-byte expected-target equality, mandatory fixtures, and ignore semantics still equal/pass the C0 Phase 2 reviewed evidence.
 - [ ] Final code and security reviews have no blocking findings.
 - [ ] C0 re-attestation and every child's latest-plan ancestry proof/exact reviewed SHA remain current.
 - [ ] Known invalid-GIS-token backend 500 is documented as the accepted residual risk with tested generic Vue containment.
@@ -1090,8 +1260,8 @@ The merged UI and API/data documents are provisional through F1. F1 copies the s
 - C0 Phase 1 passed on the exact clean plan head, with contract child URLs, incorporated plan SHAs, tested child SHAs, and merge commits recorded.
 - Frontend worktree is isolated, clean, and based on that exact C0 Phase 1 plan head; only F1 is initially authorized.
 - F1 copied the sanitized authoritative source and recorded matching source/destination preservation manifests and aggregate digests that, after deny filtering, omitted only deferred `README.md`, deferred `docs/**`, and transformed root `.gitignore` from otherwise allowlisted paths, without source drift.
-- F1 separately recorded source/target `.gitignore` hashes and the exact canonical additions-only sanitation delta with no removed or weakened protection.
-- C0 Phase 2 independently verified the matching preservation evidence and `.gitignore` sanitation delta, re-attested both provisional contracts against that exact F1 copy, and recorded PASS; only then is F2 implementation authorized.
+- F1 separately recorded source/target `.gitignore` hashes, byte-for-byte expected-target equality, mandatory fixture PASS, and ignore-semantics PASS with no source path/content/diff output.
+- C0 Phase 2 independently reproduced the matching preservation evidence and `.gitignore` raw-byte expected-target/fixture/ignore-semantics checks, re-attested both provisional contracts against that exact F1 copy, and recorded PASS; only then is F2 implementation authorized.
 - Source remains read-only and F1 sanitization rules are understood.
 - Ownership table has no concurrent writable overlap.
 
@@ -1101,6 +1271,7 @@ The merged UI and API/data documents are provisional through F1. F1 copies the s
 - All acceptance criteria and full verification/security/integrity gates pass on exact combined head.
 - No denied/confidential file or out-of-scope change is present.
 - Every child incorporated latest plan head non-force before final exact-head review, and each recorded ancestry proof remains current.
+- Final `.gitignore` source/target hashes match the F1/C0 records; target bytes equal freshly computed expected bytes; mandatory fixtures and ignore-semantics assertions pass without source path/content/diff output.
 - The five narrow frontend baseline corrections are tested without broad redesign; pagination preserves the credentialed same-origin `/api/` boundary; the odd `researchStage` mapping is unchanged; CSS satisfies exact-hash/selector-only-exception governance.
 - The invalid-nonempty-GIS-token backend 500 remains unchanged, has tested generic Vue containment, and is recorded as residual risk.
 - Parent PR checklist, decisions, evidence, links, and residual risks are current.
