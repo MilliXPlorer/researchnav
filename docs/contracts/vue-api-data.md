@@ -289,8 +289,8 @@ the listed `??` behavior is therefore part of the required boundary behavior.
   split on commas, each item is trimmed, and empty results are removed. `null`,
   `undefined`, and `""` become `[]`.
 - `researchStage` is always a string. The current helper's exact behavior is:
-  `null` and `undefined` become the string `"Not Specified"` (capital `S`,
-  after title-casing); an empty string becomes the literal string `"undefined"`
+  `null` and `undefined` become the string `"Not specified"` (lowercase `s`);
+  an empty string becomes the literal string `"undefined"`
   (not JavaScript `undefined`) through the current helper concatenation. These
   outcomes are compatibility behavior, not an authorized behavior correction.
 - `manuscriptDate` and `abstractProvenance` pass through respectively from
@@ -304,8 +304,8 @@ boundary-compatible record with string `publication_year`, (c) a record using
 only the `year` fallback, (d) a string category including `""`, (e) an object
 category with no name, (f) both keyword-array pass-through and keyword string
 trim/filter behavior, and (g) `research_stage` values of `null`, `undefined`,
-and `""`, asserting respectively the strings `"Not Specified"`,
-`"Not Specified"`, and `"undefined"` (not JavaScript `undefined`). Each
+and `""`, asserting respectively the strings `"Not specified"`,
+`"Not specified"`, and `"undefined"` (not JavaScript `undefined`). Each
 fixture must assert the complete normalized `ResearchRecord`, including
 `institutionName`, `academicUnit`, `degreeProgram`, and the deprecated
 `institute`/`program` aliases. These fixtures document current research-stage
