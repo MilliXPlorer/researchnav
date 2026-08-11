@@ -338,11 +338,15 @@ changes DOM order, stacking, or focus behavior.
 - Disabled and busy actions expose their state and cannot submit twice.
 - Keyboard interaction must not depend on pointer hover.
 - External links retain safe target and relationship attributes.
-- Text, icons, borders, and state indicators must meet WCAG AA contrast. Color
-  alone must not communicate state: status chips retain their text, similarity
-  rings retain their numeric value and accessible band, and notifications use
-  the approved programmatic read/unread distinction in addition to their
-  dot/color treatment.
+- Preserve the baseline's existing text, icon, border, and state-indicator
+  contrast exactly; this migration makes no universal WCAG AA contrast claim
+  and does not authorize CSS declaration changes. Residual pre-existing risk:
+  notification timestamps are 7px `#8b958f` on white, approximately 3.08:1
+  contrast, and remain outside this Vue migration.
+- Color alone must not communicate state: status chips retain their text,
+  similarity rings retain their numeric value and accessible band, and
+  notifications use the approved programmatic read/unread distinction in
+  addition to their dot/color treatment.
 
 ## Visual Contract
 
