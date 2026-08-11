@@ -2,14 +2,20 @@
 
 ## Status
 
-Frozen UI contract for the React-to-Vue 3 migration tracked by the parent Plan
-PR. The existing frontend is the behavioral and visual source of truth.
+Provisional UI contract for the React-to-Vue 3 migration tracked by the parent
+Plan PR. It becomes frozen only after F1 records the allowlisted source manifest
+and aggregate digest and a post-F1 C0 re-attestation confirms this contract
+against that F1-frozen snapshot. The existing frontend is the behavioral and
+visual source of truth, except for the approved baseline accessibility
+remediations stated in this contract.
 
 ## Objective
 
 Replace the React implementation with a client-rendered Vue 3 application
 without changing product behavior, visible content, visual design, responsive
-layout, accessibility, security boundaries, or Laravel API usage.
+layout, security boundaries, or Laravel API usage. The approved accessibility
+remediations in [Keyboard And Accessibility](#keyboard-and-accessibility) are
+target improvements, not claims of exact baseline parity.
 
 ## Scope
 
@@ -96,6 +102,32 @@ The Vue catalog must preserve:
 Changing a control must retain the current query synchronization semantics and
 must not reset unrelated filters.
 
+### CatalogPage search, filter, and sort algorithm
+
+The authoritative v1 algorithm is exact:
+
+1. Compute `needle` exactly as
+   `(searchParams.get("q") ?? "").replaceAll('"', "").trim().toLowerCase()`:
+   all double-quote characters are removed before trimming and lowercasing.
+2. A record matches `needle` when `needle` is empty, or when the lowercased
+   space-joined string of `title`, `authors`, `abstract`, and every `keywords`
+   entry includes `needle`. This is one case-insensitive substring search; it
+   does not tokenize, score, or give quotation marks phrase-search semantics.
+3. Retain that record only when each selected `year`, `category`, and
+   `institute` is `all` or exactly equals the corresponding record value
+   (`String(record.year)`, `record.category`, and `record.institute`,
+   respectively).
+4. For `sort=newest`, return a copy of the retained records sorted by descending
+   numeric `year`; for `sort=oldest`, sort ascending. For `sort=relevance` (or
+   an absent or unrecognized sort value), retain the filtered API/source order:
+   relevance has no additional ranking algorithm.
+
+Changing `q` uses the same parameter update path as the other controls, so it
+preserves unrelated `year`, `category`, `institute`, and `sort` values. Tests
+must cover title, authors, abstract, and keyword matches; mixed-case and quoted
+queries (including quote removal); retained unrelated filters; and relevance,
+newest, and oldest ordering.
+
 ## Authentication Dialog
 
 The Google sign-in dialog preserves its title, explanatory copy, close control,
@@ -106,6 +138,27 @@ The GIS script loads only when the dialog is opened. The credential remains in
 memory only and is sent directly to the existing authentication endpoint. The
 dialog emits the authenticated session to the application and does not persist
 tokens in browser storage.
+
+When GIS is not already available, the loader creates its script with
+`src="https://accounts.google.com/gsi/client"`, `async`, `defer`, and
+`data-google-identity="true"`. It initializes GIS with `client_id`,
+`auto_select: false`, `cancel_on_tap_outside: true`, and
+`use_fedcm_for_prompt: true`; it renders the button with `type: "standard"`,
+`theme: "outline"`, `size: "large"`, `text: "continue_with"`,
+`shape: "rectangular"`, and `width: 320`. Preserve these current messages
+exactly: `Google Client ID is not configured.`, `Verifying account...`,
+`Google sign-in could not be verified. Please try again.`,
+`Google sign-in was blocked. Allow accounts.google.com in your browser privacy settings, then retry.`,
+and `Retry Google sign-in`. Tests must assert the script URL and attributes,
+initialize and render-button options (including width `320`), each message,
+credential submission failure, script failure, and retry reset.
+
+For an invalid, nonempty GIS credential whose `POST /api/auth/google` receives
+HTTP 500, render only `Google sign-in could not be verified. Please try again.`;
+do not render the response body, server error code, stack, or other server
+detail. Clear the submitting/busy state and retain the retry path. Tests must
+mock that HTTP 500 with server-detail content and assert the generic message,
+cleared submitting state, an invokable retry, and absence of that content.
 
 ## Account Access States
 
@@ -144,6 +197,13 @@ display labels are the exact `roleConfigs` `label` values in `data.ts` (not
 Placeholder and unavailable content is intentional and must remain placeholder
 content. The migration must not invent records or connect unused endpoints.
 
+Workspace status notifications render `role="status"` and clear 2.8 seconds
+(2800 ms) after `notify` sets their message. Fake-timer tests must verify both
+the visible status and its removal at 2800 ms. The Statistician workspace starts
+with checks exactly `[true, true, false, false]`: it initially displays `2 of 4
+checks complete` and `50%`. Tests must assert that initial state and a checkbox
+change that recalculates the count and percentage.
+
 ## Notifications
 
 The notification drawer preserves its heading, close action, unread count,
@@ -163,6 +223,35 @@ notification skips that `PATCH`. `Mark all as read` operates only on unread
 notifications and must not send a read request for an already-read item.
 Nullable action paths remain non-actions. The drawer must not turn API-provided
 paths into external links.
+
+An `action_url` is actionable only when it is a validated root-relative,
+supported `/research/` path. Before preserving an optional query or hash, the
+literal pathname must start with `/research/`, contain no `.` or `..` segment,
+and use only unencoded URI-path characters; the full value must contain neither
+backslashes nor control characters. Reject full URLs, protocol-relative URLs,
+unsupported prefixes, malformed percent encoding, and all percent-encoded or
+recursively encoded path bypass forms. A query or hash may be retained only for
+a valid pathname. Any malformed or rejected value is safely rendered as a
+non-action and is never navigated to. Tests must cover a valid `/research/` path
+with query and hash, plus full and protocol-relative URLs, unsupported prefixes,
+backslashes, controls, encoded and recursively encoded bypass attempts, and
+query/hash attached to an invalid path.
+
+### Approved Vue accessibility remediation
+
+The baseline uses a visual unread dot alone and, at `max-width: 1100px`, hides
+the shelf item text with CSS. Those are known baseline accessibility
+deficiencies. They are intentionally remediated in Vue and are not exact
+baseline-parity requirements. At 1100px and below, each icon-only shelf button
+must expose its item text as its accessible name (for example, with an
+`aria-label` while its visible label remains hidden). Every notification item
+must programmatically expose whether it is `Unread notification` or `Read
+notification`, together with its available title, rather than communicating that
+state only with the dot or color. Preserve the visual treatment and API behavior
+while adding that programmatic state. Tests must query the icon-only shelf
+buttons by their names at the 1100px layout and query both read and unread
+notification buttons by their programmatic names; they must also verify the name
+changes after an unread item is marked read.
 
 ## Account Dialog
 
@@ -237,7 +326,9 @@ changes DOM order, stacking, or focus behavior.
 - Preserve skip links and target IDs.
 - Preserve the visible `:focus-visible` treatment: a 2px solid
   `var(--moss)` outline with 2px offset for every interactive control.
-- Icon-only controls retain accessible names.
+- Icon-only controls retain accessible names. The approved shelf and
+  notification-state remediation is specified above; it is an accessibility
+  improvement over the known baseline deficiencies, not a claim of exact parity.
 - Form controls retain visible or programmatic labels.
 - Status, loading, error, and toast updates retain appropriate live-region
   behavior.
@@ -246,9 +337,9 @@ changes DOM order, stacking, or focus behavior.
 - External links retain safe target and relationship attributes.
 - Text, icons, borders, and state indicators must meet WCAG AA contrast. Color
   alone must not communicate state: status chips retain their text, similarity
-  rings retain their numeric value and accessible band, and notification
-  read/unread state has an equivalent programmatic or textual distinction in
-  addition to its dot/color treatment.
+  rings retain their numeric value and accessible band, and notifications use
+  the approved programmatic read/unread distinction in addition to their
+  dot/color treatment.
 
 ## Visual Contract
 
@@ -267,6 +358,21 @@ layout rules. Preserve:
 Scoped CSS, CSS modules, utility-class rewrites, and component-library
 substitution are out of scope.
 
+### Stylesheet integrity gate
+
+Before conversion, F1 records the frozen SHA-256 of the external authoritative
+source counterpart; after conversion, calculate the SHA-256 of the tracked
+destination `v1/src/styles.css` and require byte-identical equality with that
+counterpart or its recorded F1 digest. The before/after evidence must state
+both SHA-256 values and the equality result.
+The sole exception is a minimal **selector-only** correction for a verified Vue
+rendering incompatibility that has been approved by the parent Plan before the
+change. An exception may change selectors only, never declarations, tokens,
+properties, values, or rule ordering. The parent Plan PR must record the prior
+approval, incompatibility reproduction, selector-only diff, before/after hashes,
+and visual evidence. A child PR cannot self-approve or silently substitute this
+exception for the hash gate.
+
 ## Responsive Contract
 
 At wide desktop, medium desktop or tablet, and mobile widths, preserve the
@@ -276,8 +382,8 @@ breakpoints and behavior. In particular:
 - The desktop dashboard shelf rail and content proportions remain intact.
 - At 1100px and below, the dashboard shell has 76px left padding and the shelf
   rail is 76px wide. Its label and footer are hidden, and its navigation is an
-  icon-only rail; each icon-only button retains its item text as an accessible
-  name.
+  icon-only rail; each icon-only button exposes its item text as an accessible
+  name under the approved accessibility remediation.
 - Dense public and dashboard layouts collapse according to existing rules.
 - At 767px and below, the shelf rail is hidden and the fixed mobile tabs replace
   it. The tabs are exactly 66px tall, have five equal columns, and remain above
@@ -329,6 +435,15 @@ reduced motion enabled. Compare content order, line wrapping, spacing, control
 dimensions, icon alignment, overflow, fixed navigation, focus indication, and
 overlay stacking against the existing frontend.
 
+### Screenshot evidence handling
+
+Screenshot capture uses synthetic fixtures only. It must not contain real users,
+email addresses, repository data, manuscript data, or other personal or
+confidential content. Store screenshots and pixel-comparison artifacts outside
+Git. Any committed or PR evidence is limited to non-sensitive summaries (such
+as state, viewport, pass/fail, and an intentional-difference explanation); do
+not commit, attach, or reproduce screenshot contents in repository files.
+
 ## Automated Acceptance
 
 - Every existing React component assertion has an equivalent Vue Testing
@@ -340,11 +455,23 @@ overlay stacking against the existing frontend.
 - Dialog initial focus, tab wrapping, Escape, backdrop close, and focus restore
   are covered.
 - GIS configuration, script failure, retry, submission, and success are
-  covered without retaining credentials.
+  covered without retaining credentials, including the exact GIS URL, options,
+  button width, current messages, and an invalid nonempty credential HTTP 500
+  that clears submitting state, preserves retry, and contains no server detail.
+- Catalog tests cover the authoritative case-insensitive title/authors/abstract/
+  keywords search, quote removal, mixed-case and quoted queries, unrelated
+  filter retention, and relevance/newest/oldest ordering.
 - Notifications cover nullable-field conditional rendering, no fabricated
   alerts for empty/error responses, unread count, individual read with no
   PATCH for an already-read item, mark-all requests for unread items only, and
-  safe action navigation.
+  safe action navigation for only validated root-relative `/research/` paths
+  (including query/hash handling and rejected malformed/external/bypass forms),
+  plus the approved programmatic read/unread semantics.
+- Dashboard tests cover the 2800 ms toast lifetime and the Statistician initial
+  `[true, true, false, false]` / 50% checklist state and recalculation.
+- Responsive accessibility tests cover the named icon-only shelf buttons at
+  1100px and below. These and the notification semantics are approved target
+  remediations, not exact baseline-parity assertions.
 - Direct loading and pathname `popstate` behavior are covered; tests must not
   assert unsupported query-only catalog back/forward reactivity.
 - Vite document-denial tests use only a neutral synthetic document name.
@@ -352,6 +479,8 @@ overlay stacking against the existing frontend.
 ## Completion Gate
 
 UI parity is complete only when the Vue build, type check, lint, formatting,
-component tests, backend regression tests, and document-denial tests pass; the
-React runtime and React-specific source are absent; and the visual acceptance
-matrix has no unexplained regression.
+component tests, backend regression tests, document-denial tests, and stylesheet
+integrity gate pass; the React runtime and React-specific source are absent; and
+the visual acceptance matrix has no unexplained regression. The two approved
+accessibility remediations remain target improvements rather than exact baseline
+parity assertions.
