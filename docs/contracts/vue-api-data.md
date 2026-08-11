@@ -237,7 +237,7 @@ interface PublicResearchResourceInput {
   category?: { name?: string } | string | null;
   abstract?: string;
   keywords?: string[] | string | null;
-  research_stage?: string;
+  research_stage?: string | null;
   manuscript_date_label?: string;
   abstract_provenance?: string;
 }
@@ -258,7 +258,7 @@ interface ResearchRecord {
   category: string;
   abstract: string;
   keywords: string[];
-  researchStage: string;
+  researchStage: string; // always a string, including fallback values below
   manuscriptDate?: string;
   abstractProvenance?: string;
 }
@@ -288,9 +288,11 @@ the listed `??` behavior is therefore part of the required boundary behavior.
   unchanged (including its whitespace and empty elements). A truthy string is
   split on commas, each item is trimmed, and empty results are removed. `null`,
   `undefined`, and `""` become `[]`.
-- `researchStage` is `(input.research_stage ?? "Not specified")`, split on
-  `_`, with each word title-cased and rejoined with spaces. `null`/`undefined`
-  therefore become `"Not Specified"`; an empty string remains `""`.
+- `researchStage` is always a string. The current helper's exact behavior is:
+  `null` and `undefined` become the string `"Not Specified"` (capital `S`,
+  after title-casing); an empty string becomes the literal string `"undefined"`
+  (not JavaScript `undefined`) through the current helper concatenation. These
+  outcomes are compatibility behavior, not an authorized behavior correction.
 - `manuscriptDate` and `abstractProvenance` pass through respectively from
   `manuscript_date_label` and `abstract_provenance` without a default, so a
   wire `null` stays `null` at runtime despite the optional display typings. A
@@ -300,10 +302,14 @@ The mapping tests must retain fixtures for: (a) an exact Laravel wire record
 with nullable public metadata and comma-delimited keywords, (b) a
 boundary-compatible record with string `publication_year`, (c) a record using
 only the `year` fallback, (d) a string category including `""`, (e) an object
-category with no name, and (f) both keyword-array pass-through and keyword
-string trim/filter behavior. Each fixture must assert the complete normalized
-`ResearchRecord`, including `institutionName`, `academicUnit`, `degreeProgram`,
-and the deprecated `institute`/`program` aliases.
+category with no name, (f) both keyword-array pass-through and keyword string
+trim/filter behavior, and (g) `research_stage` values of `null`, `undefined`,
+and `""`, asserting respectively the strings `"Not Specified"`,
+`"Not Specified"`, and `"undefined"` (not JavaScript `undefined`). Each
+fixture must assert the complete normalized `ResearchRecord`, including
+`institutionName`, `academicUnit`, `degreeProgram`, and the deprecated
+`institute`/`program` aliases. These fixtures document current research-stage
+behavior and do not authorize changing it.
 
 ### 5.3 NotificationResource (frontend boundary)
 
@@ -453,10 +459,15 @@ request parsing, rate-limit errors, error bodies, or body-limit behavior.
    manufactures fallback records.
 2. `listNotifications` starts at `/api/notifications` and follows `links.next`
    until it is `null`, for at most 100 pages. It never fabricates alerts.
-3. `normalizeNextPath` converts an absolute `links.next` URL into a
-   same-origin relative path plus query by resolving against
-   `window.location.origin` and returning `pathname + search`. Host, port, and
-   scheme are stripped so every follow-up request stays relative.
+3. Once the Plan update lands, the approved Vue target is the following
+   Plan-authorized frontend-only baseline security correction:
+   `normalizeNextPath` fails closed. It rejects a protocol-relative
+   `links.next` value and returns `undefined` unless its normalized result
+   starts exactly with `/api/` and never starts with `//`. A benign absolute API
+   URL is normalized to that relative path; host, port, and scheme are stripped
+   so every permitted follow-up request stays relative. Neither list function
+   performs a follow-up fetch when normalization returns `undefined`, including
+   for protocol-relative and non-API paths.
 4. Query strings must round-trip without manual string manipulation beyond
    `URLSearchParams`/`encodeURIComponent` where the code already does so.
 5. An empty collection response (`{"data":[],"links":{"next":null}}`) must
@@ -553,28 +564,34 @@ request parsing, rate-limit errors, error bodies, or body-limit behavior.
 
 The following files are framework-neutral and are preserved as-is by the Vue
 migration, except for the approved frontend-only notification read-envelope
-normalization and its exact tests; otherwise, only required type or lint
-adjustments are permitted, with no behavior change:
+normalization and its exact tests and, once the Plan update lands, the
+Plan-authorized frontend-only pagination-next baseline security correction in
+Section 8; otherwise, only required type or lint adjustments are permitted,
+with no behavior change:
 
 - `src/api.ts` — the sole browser API boundary: relative fetch paths,
   `credentials: "include"`, JSON headers, error mapping, pagination caps,
   `normalizeNextPath`, resource mapping (`toResearchRecord`, `toAuthors`,
-  `toKeywords`, `toCategory`, `toResearchStage`), `roleLabel`, and the required
-  frontend-only notification read-envelope normalization.
+  `toKeywords`, `toCategory`, `toResearchStage`), `roleLabel`, the required
+  frontend-only notification read-envelope normalization, and, once the Plan
+  update lands, the Section 8 pagination-next guard.
 - `src/types.ts` — `Role`, the existing workspace `Status` union,
   `ResearchRecord`, `RoleConfig`, `UserSession`. The public-field prohibition
   in Section 11 does not delete or change `Status`.
 - `src/access.ts` — `canEnterDashboard` (active-only gate).
 - `src/data.ts` — `roleConfigs`, `defaultUserSession`.
 - `src/api.test.ts` — behavioral coverage: exact Laravel author fields,
-  complete resource-mapping fixtures from Section 5.2, author sort, absolute
-  `next` URL normalization, empty collection handling, exact notification
-  pass-through, UUID read route and `PATCH` method, and the required exact
-  unwrapping of `{"data": notification}` to the bare notification.
+  complete resource-mapping fixtures from Section 5.2, author sort, empty
+  collection handling, exact notification pass-through, UUID read route and
+  `PATCH` method, and the required exact unwrapping of `{"data": notification}`
+  to the bare notification. Once the Plan update lands, it also covers the
+  Section 8 pagination-next guard for both lists.
 
 The migration must not move, rename, or framework-wrap these modules. The
 notification read-envelope normalization and its exact test are the approved
-frontend-only exception to otherwise preserving `api.ts` behavior. Notification
+frontend-only exception to otherwise preserving `api.ts` behavior. Once the
+Plan update lands, the Section 8 pagination-next guard is the additional
+Plan-authorized frontend-only baseline security correction. Notification
 action-path validation in the Vue notification UI is separately required by
 Section 9 and must not alter the normalized notification object.
 
@@ -609,12 +626,17 @@ application/json`, exact HTTP method, and JSON body (or its absence).
       `GET|POST /api/coordinator/instructors`, `GET /api/notifications`,
       `PATCH /api/notifications/{encodeURIComponent(uuid)}/read`, and
       `GET /api/repository?per_page=50`.
-- [ ] `normalizeNextPath` is tested with an absolute next URL, and both list
-      functions are tested to stop at the 100-page cap. Empty collections
-      return empty arrays with no manufactured records or alerts.
+- [ ] Once the Plan update lands, `normalizeNextPath` is tested with a benign
+      absolute API next URL. Repository and notification pagination are each
+      tested to follow that accepted path and to make no follow-up fetch for
+      protocol-relative and non-API next paths; both list functions are also
+      tested to stop at the 100-page cap. Empty collections return empty arrays
+      with no manufactured records or alerts.
 - [ ] Public-resource fixtures cover the exact Laravel wire record and every
-      compatibility/default case in Section 5.2, asserting the complete
-      normalized `ResearchRecord`.
+      compatibility/default case in Section 5.2, including the current
+      `research_stage` mappings for `null`, `undefined`, and `""`, asserting
+      the complete normalized `ResearchRecord` without correcting that
+      behavior.
 - [ ] `NotificationResource` passes through exactly, including all nullable
       fields. Laravel's read PATCH response is
       `{ "data": NotificationResource }`; Vue `api.ts` normalizes it to a
@@ -649,7 +671,8 @@ application/json`, exact HTTP method, and JSON body (or its absence).
 - [ ] `src/api.ts`, `src/types.ts`, `src/access.ts`, `src/data.ts`, and
       `src/api.test.ts` are preserved with only type/lint adjustments, except
       for the required frontend-only notification read-envelope normalization
-      and its exact test.
+      and its exact test and, once the Plan update lands, the Plan-authorized
+      frontend-only pagination-next baseline security correction and its tests.
 - [ ] No backend, schema, migration, or `server/**` logic change exists in the
       migration diff.
 - [ ] Before this contract is marked frozen, the sanitized F1 manifest and
@@ -665,8 +688,10 @@ application/json`, exact HTTP method, and JSON body (or its absence).
   authorization behavior.
 - No Laravel notification-envelope or GIS credential-flow change. The Vue
   frontend-only normalization of Laravel's existing read envelope and the safe
-  client-side action-path validation in Section 9 are required; neither changes
-  the server action URL value or its notification envelope.
+  client-side action-path validation in Section 9 are required; once the Plan
+  update lands, the Section 8 pagination-next guard is the Plan-authorized
+  frontend-only baseline security correction. None changes the server action
+  URL value or its notification envelope.
 - No expansion of the public resource fields and no exposure of import
   metadata or source filenames.
 - No backend, database, schema, or migration work; no `server/**` logic
