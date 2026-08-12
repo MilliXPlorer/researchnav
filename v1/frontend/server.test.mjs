@@ -1,5 +1,6 @@
 // @vitest-environment node
 import http from "node:http";
+import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApp } from "./server.mjs";
 
@@ -47,6 +48,19 @@ describe("SSR gateway", () => {
     expect(source).toContain('browserHost = ["0.0.0.0", "::"]');
   });
 
+  it("allows Vite filesystem modules in development", async () => {
+    const app = await createApp({ production: false });
+    const origin = await listen(app);
+    const fontPath = resolve("../node_modules/@fontsource/inter/400.css")
+      .replace(/\\/g, "/")
+      .replace(/^\//, "");
+
+    const response = await fetch(`${origin}/@fs/${fontPath}`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/javascript");
+  });
+
   it("adds production security headers and denies private paths", async () => {
     const apiOrigin = await upstream((_request, response) => {
       response.setHeader("content-type", "application/json");
@@ -81,6 +95,10 @@ describe("SSR gateway", () => {
     );
     expect(privateResponse.status).toBe(404);
     expect(await privateResponse.text()).not.toContain("SSR content");
+
+    const viteFsResponse = await fetch(`${origin}/@fs/C:/workspace/file.css`);
+    expect(viteFsResponse.status).toBe(404);
+    expect(await viteFsResponse.text()).not.toContain("SSR content");
   });
 
   it("streams API method, body, cookie, origin, and response", async () => {

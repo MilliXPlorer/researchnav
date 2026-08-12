@@ -44,6 +44,9 @@ describe("Vite backend private storage denial", () => {
         "**/backend/storage/app/private/**",
       ]),
     );
+    expect(server.config.server.fs.allow).toContain(
+      resolve("../node_modules").replace(/\\/g, "/"),
+    );
 
     const absoluteDocumentPath = privateFile.replace(/\\/g, "/");
     const [index, canonical, encoded, absolute] = await Promise.all([

@@ -40,7 +40,7 @@ function configuredInteger(value, name, minimum, maximum) {
   return number;
 }
 
-function safePathname(requestUrl) {
+function safePathname(requestUrl, production) {
   const pathname = decodeURIComponent(
     new URL(requestUrl, "http://researchnav.local").pathname,
   )
@@ -48,7 +48,7 @@ function safePathname(requestUrl) {
     .toLowerCase();
   if (
     pathname.includes("/backend/storage/app/private/") ||
-    pathname.startsWith("/@fs/")
+    (production && pathname.startsWith("/@fs/"))
   ) {
     return null;
   }
@@ -140,7 +140,7 @@ export async function createApp(options = {}) {
 
   app.use((request, response, next) => {
     try {
-      const pathname = safePathname(request.originalUrl);
+      const pathname = safePathname(request.originalUrl, production);
       if (pathname === null) return response.status(404).send("Not Found");
       if (!pathname.startsWith("/api/")) return next();
 
