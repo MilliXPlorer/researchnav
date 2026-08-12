@@ -3,6 +3,7 @@ import {
   listNotifications,
   listPublicResearch,
   markNotificationRead,
+  normalizeNextPath,
   toResearchRecord,
 } from "./api";
 
@@ -79,6 +80,12 @@ describe("public repository API", () => {
       ),
     );
     await expect(listPublicResearch()).resolves.toEqual([]);
+  });
+
+  it("rejects pagination links outside the API boundary", () => {
+    expect(() =>
+      normalizeNextPath("https://example.test/private/file"),
+    ).toThrow("INVALID_PAGINATION_LINK");
   });
 });
 

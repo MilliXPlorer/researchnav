@@ -1,5 +1,7 @@
 import type { ResearchRecord, Role, UserSession } from "./types";
 
+export type ApiFetch = typeof globalThis.fetch;
+
 interface SessionResponse {
   user: UserSession;
 }
@@ -17,8 +19,12 @@ export interface NotificationResource {
   created_at: string | null;
 }
 
-async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
+async function apiRequest<T>(
+  path: string,
+  init?: RequestInit,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<T> {
+  const response = await fetcher(path, {
     ...init,
     credentials: "include",
     headers: {
@@ -36,12 +42,20 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export async function getCurrentSession() {
+export async function getCurrentSession(fetcher: ApiFetch = globalThis.fetch) {
   try {
-    return (await apiRequest<SessionResponse>("/api/auth/session")).user;
+    return (
+      await apiRequest<SessionResponse>("/api/auth/session", undefined, fetcher)
+    ).user;
   } catch (error) {
-    if (error instanceof Error && error.message === "AUTHENTICATION_REQUIRED")
+    if (
+      error instanceof Error &&
+      ["AUTHENTICATION_REQUIRED", "SESSION_USER_NOT_FOUND"].includes(
+        error.message,
+      )
+    ) {
       return null;
+    }
     throw error;
   }
 }
@@ -180,7 +194,9 @@ export function toResearchRecord(
   };
 }
 
-export async function listPublicResearch(): Promise<ResearchRecord[]> {
+export async function listPublicResearch(
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<ResearchRecord[]> {
   const records: ResearchRecord[] = [];
   let next: string | null = "/api/repository?per_page=50";
   const maxPages = 100;
@@ -189,7 +205,7 @@ export async function listPublicResearch(): Promise<ResearchRecord[]> {
     const response = await apiRequest<{
       data?: PublicResearchResource[];
       links?: { next?: string | null };
-    }>(next);
+    }>(next, undefined, fetcher);
     records.push(...(response.data ?? []).map(toResearchRecord));
     next = normalizeNextPath(response.links?.next ?? null);
   }
@@ -199,7 +215,10 @@ export async function listPublicResearch(): Promise<ResearchRecord[]> {
 
 export function normalizeNextPath(next: string | null): string | null {
   if (!next) return null;
-  const url = new URL(next, window.location.origin);
+  const url = new URL(next, "http://researchnav.local");
+  if (!url.pathname.startsWith("/api/")) {
+    throw new Error("INVALID_PAGINATION_LINK");
+  }
   return `${url.pathname}${url.search}`;
 }
 

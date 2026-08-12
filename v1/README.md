@@ -14,17 +14,17 @@ The repository root is an npm workspace and command facade. Normal development s
 ## Architecture
 
 ```text
-React/Vite (http://localhost:5173)
-    -> relative /api requests
-    -> Vite /api proxy
+Node/Vite SSR (http://localhost:5173)
+    -> server-rendered React + browser hydration
+    -> same-origin /api proxy
 Laravel (http://127.0.0.1:3001)
     -> Eloquent and database-backed sessions
 MariaDB (127.0.0.1:3307)
 ```
 
-Laravel owns authentication, authorization, validation, database access, and private document storage. The frontend owns browser presentation and state only. Private import documents live under `backend/storage/app/private/research_studies/<institute>/` and are never frontend assets. The current corpus is under `ics/`.
+Laravel owns authentication, authorization, validation, database access, and private document storage. The Node frontend server renders React, serves the browser bundle, and streams `/api` traffic to Laravel without becoming an authorization boundary. Private import documents live under `backend/storage/app/private/research_studies/<institute>/` and are never frontend assets. The current corpus is under `ics/`.
 
-Production should expose the frontend and `/api` on one HTTPS origin, with the edge proxy routing `/api/*` to Laravel before the SPA fallback. This preserves the existing HTTP-only session and origin-validation model without broad CORS rules.
+Production should expose only the SSR frontend service on the public HTTPS origin. Its `/api/*` gateway reaches Laravel on a private network and preserves method, body, cookies, origin, status, and streamed downloads. SSR HTML is not cached, and Laravel remains the sole session and authorization authority.
 
 ## Requirements
 
@@ -85,7 +85,7 @@ npm run dev:api
 npm run dev:web
 ```
 
-Open `http://localhost:5173`. Frontend requests use relative `/api` URLs and Vite proxies them to Laravel at `http://127.0.0.1:3001`.
+Open `http://localhost:5173`. The Node/Vite server renders public catalog HTML before JavaScript runs, hydrates React in the browser, and proxies relative `/api` requests to Laravel at `http://127.0.0.1:3001`.
 
 Each application can also run from its own directory:
 
@@ -93,6 +93,22 @@ Each application can also run from its own directory:
 npm run dev --workspace=@researchnav/frontend
 php backend\artisan serve --host=127.0.0.1 --port=3001
 ```
+
+## SSR Production
+
+Build the browser and server bundles, then start the SSR gateway:
+
+```powershell
+npm run build
+$env:NODE_ENV="production"
+$env:PUBLIC_ORIGIN="https://researchnav.example.edu"
+$env:SSR_API_ORIGIN="http://laravel.internal:3001"
+npm run start:web
+```
+
+`PUBLIC_ORIGIN` is the public HTTPS origin. `SSR_API_ORIGIN` is the private Laravel origin and must never use a `VITE_` prefix. `SSR_API_TIMEOUT_MS` defaults to `5000`; `SSR_MAX_BODY_BYTES` defaults to 27 MiB to accommodate Laravel's 25 MiB document limit; `HOST` and `PORT` default to `0.0.0.0:5173`.
+
+The gateway exposes `/_health`, sends `Cache-Control: no-store` and a restrictive CSP on SSR HTML, serves hashed assets from `frontend/dist/client`, and imports the SSR bundle from `frontend/dist/server`. Laravel should use a production PHP server rather than `artisan serve`.
 
 ## Authentication
 

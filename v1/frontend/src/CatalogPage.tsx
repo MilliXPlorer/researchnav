@@ -18,15 +18,21 @@ export default function CatalogPage({
   records,
   loading = false,
   error = null,
+  initialSearch,
 }: {
   onSignIn: () => void;
   navigate: (path: string) => void;
   records: ResearchRecord[];
   loading?: boolean;
   error?: string | null;
+  initialSearch?: string;
 }) {
   const [searchParams, setSearchParams] = useState(
-    () => new URLSearchParams(window.location.search),
+    () =>
+      new URLSearchParams(
+        initialSearch ??
+          (typeof window === "undefined" ? "" : window.location.search),
+      ),
   );
   const [query, setQuery] = useState(searchParams.get("q") ?? "");
   const [selectedRecord, setSelectedRecord] = useState<ResearchRecord | null>(
