@@ -1,0 +1,7 @@
+*
+!.gitignore
+!research_studies/
+research_studies/*
+!research_studies/*/
+research_studies/*/*
+!research_studies/*/.gitignore

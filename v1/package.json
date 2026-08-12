@@ -1,0 +1,28 @@
+{
+  "name": "researchnav",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": ["frontend", "server"],
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "php backend/artisan serve --host=127.0.0.1 --port=3001",
+    "dev:web": "npm run dev --workspace=@researchnav/frontend",
+    "start:api": "php backend/artisan serve --host=127.0.0.1 --port=3001",
+    "db:migrate": "php backend/artisan migrate",
+    "admin:bootstrap": "php backend/artisan admin:bootstrap",
+    "dev:legacy-api": "npm run dev --workspace=@researchnav/legacy-server",
+    "start:legacy-api": "npm run start --workspace=@researchnav/legacy-server",
+    "test:legacy-api": "npm run test --workspace=@researchnav/legacy-server",
+    "lint:legacy-api": "npm run lint --workspace=@researchnav/legacy-server",
+    "typecheck:legacy-api": "npm run typecheck --workspace=@researchnav/legacy-server",
+    "test:backend": "composer --working-dir=backend test",
+    "build": "npm run build --workspaces --if-present",
+    "format": "npm run format --workspaces --if-present",
+    "format:check": "npm run format:check --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.0"
+  }
+}

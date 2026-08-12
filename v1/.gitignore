@@ -1,0 +1,93 @@
+# Environment and credentials (keep documented examples trackable)
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+credentials.json
+credentials-*.json
+service-account*.json
+secrets/
+
+# PHP / Laravel dependencies and runtime data
+/vendor/
+/storage/logs/
+/storage/framework/
+/storage/app/private/
+/storage/app/uploads/
+/bootstrap/cache/
+/.phpunit.result.cache
+
+# Node.js dependencies, logs, and build artifacts
+/node_modules/
+/frontend/dist/
+/frontend/node_modules/
+/server/node_modules/
+/public/build/
+/public/hot
+/dist/
+/build/
+/.vite/
+/.next/
+/.nuxt/
+/.cache/
+*.tsbuildinfo
+/vite.config.js
+/vite.config.d.ts
+
+# Python environments, caches, packaging, and test output
+/.venv/
+/venv/
+/env/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+.hypothesis/
+*.egg-info/
+/.eggs/
+
+# Local databases and application logs
+*.sqlite
+*.sqlite3
+*.db
+*.log
+/logs/
+
+# IDE and OS files
+/.idea/
+/.vscode/
+*.code-workspace
+*.suo
+*.user
+*.userossc
+*.sln.docstates
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Temporary files and generic build output
+/tmp/
+/temp/
+*.tmp
+*.swp
+*.swo
+*.bak
+
+# Local document corpora (potentially confidential; never commit)
+/Forms/
+/algorithm/Research Studies/

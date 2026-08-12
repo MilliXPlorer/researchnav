@@ -1,0 +1,44 @@
+{
+  "name": "@researchnav/legacy-server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch index.ts",
+    "start": "tsx index.ts",
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "connect-pg-simple": "^10.0.0",
+    "dotenv": "^17.0.0",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.0.0",
+    "express-session": "^1.18.1",
+    "google-auth-library": "^10.0.0",
+    "helmet": "^8.1.0",
+    "nodemailer": "^9.0.3",
+    "pg": "^8.16.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/connect-pg-simple": "^7.0.3",
+    "@types/express": "^5.0.0",
+    "@types/express-session": "^1.18.1",
+    "@types/node": "^22.10.5",
+    "@types/nodemailer": "^7.0.0",
+    "@types/pg": "^8.15.0",
+    "eslint": "^10.8.0",
+    "globals": "^15.14.0",
+    "prettier": "^3.6.2",
+    "tsx": "^4.20.0",
+    "typescript": "~5.7.2",
+    "typescript-eslint": "^8.18.2",
+    "vitest": "^4.1.10"
+  }
+}
