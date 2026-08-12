@@ -38,6 +38,15 @@ afterEach(async () => {
 });
 
 describe("SSR gateway", () => {
+  it("documents a browser-safe development host", async () => {
+    const source = await import("node:fs/promises").then((fs) =>
+      fs.readFile(new URL("./server.mjs", import.meta.url), "utf8"),
+    );
+
+    expect(source).toContain('production ? "0.0.0.0" : "127.0.0.1"');
+    expect(source).toContain('browserHost = ["0.0.0.0", "::"]');
+  });
+
   it("adds production security headers and denies private paths", async () => {
     const apiOrigin = await upstream((_request, response) => {
       response.setHeader("content-type", "application/json");

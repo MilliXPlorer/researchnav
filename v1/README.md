@@ -106,7 +106,7 @@ $env:SSR_API_ORIGIN="http://laravel.internal:3001"
 npm run start:web
 ```
 
-`PUBLIC_ORIGIN` is the public HTTPS origin. `SSR_API_ORIGIN` is the private Laravel origin and must never use a `VITE_` prefix. `SSR_API_TIMEOUT_MS` defaults to `5000`; `SSR_MAX_BODY_BYTES` defaults to 27 MiB to accommodate Laravel's 25 MiB document limit; `HOST` and `PORT` default to `0.0.0.0:5173`.
+`PUBLIC_ORIGIN` is the public HTTPS origin. `SSR_API_ORIGIN` is the private Laravel origin and must never use a `VITE_` prefix. `SSR_API_TIMEOUT_MS` defaults to `5000`; `SSR_MAX_BODY_BYTES` defaults to 27 MiB to accommodate Laravel's 25 MiB document limit. Development defaults to `127.0.0.1:5173`; production containers should set `HOST=0.0.0.0` and expose the service through their public HTTPS endpoint.
 
 The gateway exposes `/_health`, sends `Cache-Control: no-store` and a restrictive CSP on SSR HTML, serves hashed assets from `frontend/dist/client`, and imports the SSR bundle from `frontend/dist/server`. Laravel should use a production PHP server rather than `artisan serve`.
 

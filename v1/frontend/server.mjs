@@ -239,9 +239,11 @@ export async function createApp(options = {}) {
 export async function start() {
   const app = await createApp();
   const port = configuredInteger(process.env.PORT ?? 5173, "PORT", 1, 65_535);
-  const host = process.env.HOST ?? "0.0.0.0";
+  const production = process.env.NODE_ENV === "production";
+  const host = process.env.HOST ?? (production ? "0.0.0.0" : "127.0.0.1");
+  const browserHost = ["0.0.0.0", "::"].includes(host) ? "localhost" : host;
   return app.listen(port, host, () => {
-    console.log(`ResearchNAV SSR listening on http://${host}:${port}`);
+    console.log(`ResearchNAV SSR ready at http://${browserHost}:${port}`);
   });
 }
 
