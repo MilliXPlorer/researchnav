@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { ShieldCheck, X } from "lucide-react";
 import { authenticateWithGoogle } from "./api";
+import ConsentNotice from "./ConsentNotice";
+import { hasAcceptedCurrentConsent, storeConsentAcceptance } from "./consent";
 import type { UserSession } from "./types";
 import { useDialogFocus } from "./useDialogFocus";
 
@@ -46,6 +48,8 @@ export default function GoogleSignInDialog({
   const [error, setError] = useState("");
   const [retryAttempt, setRetryAttempt] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+  // Consent is required before the Google button is initialized at all.
+  const [consented, setConsented] = useState(() => hasAcceptedCurrentConsent());
   const [dialogRef, handleDialogKeyDown] = useDialogFocus<HTMLElement>(onClose);
   const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
   const configurationError = clientId
@@ -53,7 +57,7 @@ export default function GoogleSignInDialog({
     : "Google Client ID is not configured.";
 
   useEffect(() => {
-    if (!clientId) return;
+    if (!clientId || !consented) return;
     let active = true;
     loadGoogleIdentityServices()
       .then(() => {
@@ -95,12 +99,12 @@ export default function GoogleSignInDialog({
     return () => {
       active = false;
     };
-  }, [clientId, onAuthenticated, retryAttempt]);
+  }, [clientId, consented, onAuthenticated, retryAttempt]);
 
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
       <section
-        className="google-signin-dialog"
+        className={`google-signin-dialog${consented ? "" : " consent-dialog"}`}
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
@@ -115,44 +119,56 @@ export default function GoogleSignInDialog({
         >
           <X />
         </button>
-        <span className="dialog-icon">
-          <ShieldCheck />
-        </span>
-        <p className="eyebrow">Secure account access</p>
-        <h2 id="google-signin-title">Continue with Google</h2>
-        <p>
-          ResearchNAV verifies your Gmail on the server, then routes you to the
-          dashboard assigned to that account.
-        </p>
-        <div
-          className="google-button-slot"
-          ref={buttonRef}
-          aria-busy={submitting}
-        />
-        {submitting && (
-          <span className="signin-progress">Verifying account...</span>
-        )}
-        {(error || configurationError) && (
+        {!consented ? (
+          <ConsentNotice
+            onDecline={onClose}
+            onAccept={() => {
+              storeConsentAcceptance();
+              setConsented(true);
+            }}
+          />
+        ) : (
           <>
-            <p className="signin-error" role="alert">
-              {error || configurationError}
+            <span className="dialog-icon">
+              <ShieldCheck />
+            </span>
+            <p className="eyebrow">Secure account access</p>
+            <h2 id="google-signin-title">Continue with Google</h2>
+            <p>
+              ResearchNAV verifies your Gmail on the server, then routes you to
+              the dashboard assigned to that account.
             </p>
-            {error && (
-              <button
-                className="text-action"
-                onClick={() => {
-                  setError("");
-                  setRetryAttempt((attempt) => attempt + 1);
-                }}
-              >
-                Retry Google sign-in
-              </button>
+            <div
+              className="google-button-slot"
+              ref={buttonRef}
+              aria-busy={submitting}
+            />
+            {submitting && (
+              <span className="signin-progress">Verifying account...</span>
             )}
+            {(error || configurationError) && (
+              <>
+                <p className="signin-error" role="alert">
+                  {error || configurationError}
+                </p>
+                {error && (
+                  <button
+                    className="text-action"
+                    onClick={() => {
+                      setError("");
+                      setRetryAttempt((attempt) => attempt + 1);
+                    }}
+                  >
+                    Retry Google sign-in
+                  </button>
+                )}
+              </>
+            )}
+            <small>
+              New and unassigned accounts remain blocked until provisioned.
+            </small>
           </>
         )}
-        <small>
-          New and unassigned accounts remain blocked until provisioned.
-        </small>
       </section>
     </div>
   );

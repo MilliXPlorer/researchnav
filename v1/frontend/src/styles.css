@@ -1039,6 +1039,91 @@ p {
   color: var(--rust);
   font-size: 10px;
 }
+/* Terms and Data Privacy consent gate */
+.consent-dialog {
+  width: min(640px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  text-align: left;
+}
+.consent-dialog .dialog-icon {
+  margin-left: 0;
+}
+.consent-notice h2 {
+  margin-bottom: 8px;
+}
+.consent-intro {
+  margin: 0 0 16px;
+  color: var(--slate);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.consent-scroll {
+  height: 260px;
+  padding: 16px 18px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--mist);
+}
+.consent-scroll section {
+  margin-bottom: 16px;
+}
+.consent-scroll h3 {
+  margin: 0 0 5px;
+  color: var(--canopy);
+  font-size: 12px;
+  font-weight: 700;
+}
+.consent-scroll p {
+  margin: 0;
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1.65;
+}
+.consent-version {
+  margin: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  color: var(--slate) !important;
+  font-family: var(--mono);
+  font-size: 9px !important;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.consent-hint {
+  margin: 10px 0 0;
+  color: #8a5215;
+  font-size: 11px;
+}
+.consent-agree {
+  margin: 16px 0 0;
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  align-items: start;
+  gap: 10px;
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1.6;
+  cursor: pointer;
+}
+.consent-agree input {
+  width: 17px;
+  height: 17px;
+  margin: 1px 0 0;
+  accent-color: var(--moss);
+}
+.consent-agree input:disabled {
+  cursor: not-allowed;
+}
+.consent-actions {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
 .modal-panel {
   position: relative;
   width: min(520px, 100%);
