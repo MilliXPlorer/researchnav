@@ -42,8 +42,12 @@ export default function RoleWorkspace({
   if (role === "researcher") {
     return (
       <ResearcherWorkspace
+        navigate={navigate}
         selectNav={selectNav}
         researchDocumentId={researchDocumentId}
+        dashboardScope={dashboardScope}
+        dashboardState={dashboardState}
+        onRetry={onRetry}
       />
     );
   }
@@ -83,48 +87,41 @@ function WorkspaceHeader({
 }
 
 function ResearcherWorkspace({
+  navigate,
   selectNav,
   researchDocumentId,
+  dashboardScope,
+  dashboardState,
+  onRetry,
 }: {
+  navigate: (path: string) => void;
   selectNav: (item: string) => void;
   researchDocumentId?: string | number;
+  dashboardScope: string;
+  dashboardState: RoleDashboardLoadState;
+  onRetry: () => void;
 }) {
+  const config = workspaceConfigs.researcher;
   return (
     <div className="workspace-content">
       <WorkspaceHeader
-        eyebrow="My dashboard / Overview"
-        title="Welcome back."
-        description="Submission tracking is available when a workspace record has been created."
+        eyebrow={config.eyebrow}
+        title={config.title}
+        description={config.description}
         action={
           <Button onClick={() => selectNav("New Submission")}>
             New submission <ArrowRight />
           </Button>
         }
       />
-      <section
-        className="kpi-grid kpi-grid-three"
-        aria-label="Submission overview"
-      >
-        <article className="kpi-card kpi-slate">
-          <small>Current status</small>
-          <strong>—</strong>
-          <p>No active submission</p>
-        </article>
-        <article className="kpi-card kpi-slate">
-          <small>Title similarity</small>
-          <strong>{researchDocumentId ? "Ready" : "Select record"}</strong>
-          <p>
-            {researchDocumentId
-              ? "Persisted matches are available below"
-              : "Select a research record to review matches"}
-          </p>
-        </article>
-        <article className="kpi-card kpi-slate">
-          <small>Revisions</small>
-          <strong>—</strong>
-          <p>No workflow record</p>
-        </article>
-      </section>
+      <DashboardSections
+        role="researcher"
+        config={config}
+        navigate={navigate}
+        dashboardScope={dashboardScope}
+        dashboardState={dashboardState}
+        onRetry={onRetry}
+      />
       <SimilarityResults researchDocumentId={researchDocumentId} />
     </div>
   );
@@ -144,7 +141,45 @@ type WorkspaceConfig = {
   sections: Record<string, SectionConfig>;
 };
 
-const workspaceConfigs: Record<Exclude<Role, "researcher">, WorkspaceConfig> = {
+const workspaceConfigs: Record<Role, WorkspaceConfig> = {
+  researcher: {
+    eyebrow: "My dashboard / Overview",
+    title: "My research.",
+    description:
+      "Your own submissions, review progress, and flagged title similarity.",
+    sections: {
+      my_drafts: {
+        title: "Drafts",
+        description: "Records you have started but not yet submitted.",
+      },
+      my_under_review: {
+        title: "Under review",
+        description: "Submitted research currently being reviewed.",
+      },
+      my_revision_required: {
+        title: "Revision required",
+        description: "Research returned to you for required revisions.",
+      },
+      my_flagged_similarity: {
+        title: "Flagged title similarity",
+        description:
+          "Your research with a stored similarity flag at or above the review threshold.",
+      },
+      my_approved: {
+        title: "Approved",
+        description: "Your research cleared to proceed.",
+      },
+      my_archived: {
+        title: "Archived",
+        description: "Your research preserved in the institutional repository.",
+      },
+      repository_references: {
+        title: "Repository references",
+        description: "Archived research available in the catalog.",
+        catalog: true,
+      },
+    },
+  },
   admin: {
     eyebrow: "System administration / Access control",
     title: "System access overview.",
@@ -426,7 +461,7 @@ function DashboardSections({
   dashboardState,
   onRetry,
 }: {
-  role: Exclude<Role, "researcher">;
+  role: Role;
   config: WorkspaceConfig;
   navigate: (path: string) => void;
   dashboardScope: string;
@@ -499,7 +534,7 @@ function DashboardSection({
   section: RoleDashboardSection;
   config: SectionConfig;
   navigate: (path: string) => void;
-  role: Exclude<Role, "researcher">;
+  role: Role;
 }) {
   if (section.state === "unavailable") {
     return (

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Bell,
   BookOpen,
@@ -14,13 +14,17 @@ import {
 } from "lucide-react";
 import { canEnterDashboard } from "./access";
 import {
+  ApiError,
+  getRoleDashboard,
   listNotifications,
   markNotificationRead,
   type NotificationResource,
 } from "./api";
+import AdminSidebarPage from "./AdminSidebarPages";
 import { Logo } from "./components";
 import { roleConfigs } from "./data";
-import RoleWorkspace from "./RoleWorkspaces";
+import RoleSidebarPage from "./RoleSidebarPages";
+import RoleWorkspace, { type RoleDashboardLoadState } from "./RoleWorkspaces";
 import type { Role, UserSession } from "./types";
 import { useDialogFocus } from "./useDialogFocus";
 
@@ -43,45 +47,126 @@ export default function Dashboard({
   session,
   navigate,
   onLogout,
+  researchDocumentId,
 }: {
   session: UserSession;
   navigate: (path: string) => void;
   onLogout?: () => Promise<void> | void;
+  researchDocumentId?: string | number;
 }) {
   const role = session.role;
+  const dashboardScope = `${role}:${session.email.trim().toLowerCase()}`;
+  const dashboardScopeRef = useRef(dashboardScope);
+  dashboardScopeRef.current = dashboardScope;
   const config = roleConfigs.find((item) => item.id === role)!;
-  const [activeNav, setActiveNav] = useState(primaryNav[role]);
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [activeNav, setActiveNav] = useState({
+    scope: dashboardScope,
+    role,
+    item: primaryNav[role],
+  });
+  const [drawer, setDrawer] = useState({
+    scope: dashboardScope,
+    open: false,
+  });
   const [accountOpen, setAccountOpen] = useState(false);
-  const [notifications, setNotifications] = useState<NotificationResource[]>(
-    [],
-  );
-  const [toast, setToast] = useState("");
+  const [notificationState, setNotificationState] = useState({
+    scope: dashboardScope,
+    status: "loading" as "loading" | "ready" | "error",
+    items: [] as NotificationResource[],
+    error: "",
+  });
+  const [notificationAttempt, setNotificationAttempt] = useState(0);
+  const [dashboardState, setDashboardState] = useState<RoleDashboardLoadState>({
+    scope: dashboardScope,
+    status: "loading",
+  });
+  const [dashboardAttempt, setDashboardAttempt] = useState(0);
+  const selectedNav =
+    activeNav.scope === dashboardScope ? activeNav.item : primaryNav[role];
+  const scopedDashboardState: RoleDashboardLoadState =
+    dashboardState.scope === dashboardScope
+      ? dashboardState
+      : { scope: dashboardScope, status: "loading" };
+  const scopedNotificationState =
+    notificationState.scope === dashboardScope
+      ? notificationState
+      : {
+          scope: dashboardScope,
+          status: "loading" as const,
+          items: [],
+          error: "",
+        };
+  const notifications = scopedNotificationState.items;
   const unreadCount = notifications.filter(
     (item) => item.read_at === null,
   ).length;
+  const notificationDrawerOpen = drawer.open && drawer.scope === dashboardScope;
 
   useEffect(() => {
-    if (!canEnterDashboard(session)) return;
+    if (session.accessStatus !== "active") return;
 
+    const requestScope = dashboardScope;
     let cancelled = false;
+    setNotificationState({
+      scope: requestScope,
+      status: "loading",
+      items: [],
+      error: "",
+    });
     void listNotifications()
       .then((items) => {
-        if (!cancelled) setNotifications(items);
+        if (!cancelled)
+          setNotificationState({
+            scope: requestScope,
+            status: "ready",
+            items,
+            error: "",
+          });
       })
-      .catch(() => {
-        if (!cancelled) setNotifications([]);
+      .catch((error: unknown) => {
+        if (!cancelled)
+          setNotificationState({
+            scope: requestScope,
+            status: "error",
+            items: [],
+            error: notificationErrorMessage(error),
+          });
       });
 
     return () => {
       cancelled = true;
     };
-  }, [session]);
+  }, [dashboardScope, notificationAttempt, session.accessStatus]);
 
-  const notify = (message: string) => {
-    setToast(message);
-    window.setTimeout(() => setToast(""), 2800);
-  };
+  useEffect(() => {
+    if (session.accessStatus !== "active") return;
+
+    const controller = new AbortController();
+    void getRoleDashboard(role, globalThis.fetch, controller.signal)
+      .then((dashboard) => {
+        if (!controller.signal.aborted) {
+          setDashboardState({
+            scope: dashboardScope,
+            status: "ready",
+            dashboard,
+          });
+        }
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          setDashboardState({
+            scope: dashboardScope,
+            status: "error",
+            error:
+              error instanceof ApiError
+                ? error
+                : new ApiError(0, "DASHBOARD_UNAVAILABLE"),
+          });
+        }
+      });
+
+    return () => controller.abort();
+  }, [dashboardAttempt, dashboardScope, role, session.accessStatus]);
 
   if (!canEnterDashboard(session)) {
     return <AccessBlocker session={session} navigate={navigate} />;
@@ -115,10 +200,10 @@ export default function Dashboard({
           <kbd>⌘ K</kbd>
         </label>
         <div className="lamp-actions">
-          <span className="term-label">AY 2025—26</span>
+          <span className="term-label">Role workspace</span>
           <button
             className="notification-button"
-            onClick={() => setDrawerOpen(true)}
+            onClick={() => setDrawer({ scope: dashboardScope, open: true })}
             aria-label="Open notifications"
           >
             <Bell />
@@ -148,21 +233,19 @@ export default function Dashboard({
         <nav aria-label={`${config.label} navigation`}>
           {config.nav.map((item, index) => {
             const Icon = navIcons[index % navIcons.length];
-            const active = item === activeNav;
+            const active = item === selectedNav;
             return (
               <button
                 key={item}
                 className={active ? "active" : ""}
-                onClick={() => {
-                  setActiveNav(item);
-                  if (item === "Notifications") setDrawerOpen(true);
-                }}
+                aria-label={item}
+                title={item}
+                onClick={() =>
+                  setActiveNav({ scope: dashboardScope, role, item })
+                }
               >
                 <Icon aria-hidden="true" />
                 <span>{item}</span>
-                {item === "Notifications" && unreadCount > 0 && (
-                  <small>{unreadCount}</small>
-                )}
               </button>
             );
           })}
@@ -172,7 +255,7 @@ export default function Dashboard({
             <BookOpen />
             <span>
               <strong>ResearchNAV</strong>
-              <small>Repository prototype</small>
+              <small>Repository workspace</small>
             </span>
           </div>
           <button onClick={() => navigate("/")}>
@@ -182,30 +265,42 @@ export default function Dashboard({
       </aside>
 
       <main id="workspace" className="workspace">
-        {activeNav === primaryNav[role] ? (
-          <RoleWorkspace role={role} notify={notify} />
+        {selectedNav === primaryNav[role] ? (
+          <RoleWorkspace
+            role={role}
+            navigate={navigate}
+            selectNav={(item) =>
+              setActiveNav({ scope: dashboardScope, role, item })
+            }
+            dashboardScope={dashboardScope}
+            dashboardState={scopedDashboardState}
+            onRetry={() => {
+              setDashboardState({ scope: dashboardScope, status: "loading" });
+              setDashboardAttempt((attempt) => attempt + 1);
+            }}
+            researchDocumentId={researchDocumentId}
+          />
+        ) : role === "admin" ? (
+          <AdminSidebarPage selectedNav={selectedNav} />
         ) : (
-          <section className="scope-page">
-            <p className="eyebrow">{config.label}</p>
-            <h1>{activeNav}</h1>
-            <div className="scope-card">
-              <BookOpen />
-              <h2>This shelf is being cataloged.</h2>
-              <p>
-                The prototype focuses on the primary workspace for each role.
-                Select <strong>{primaryNav[role]}</strong> to return to the
-                completed view.
-              </p>
-              <button onClick={() => setActiveNav(primaryNav[role])}>
-                Return to primary workspace
-              </button>
-            </div>
-          </section>
+          <RoleSidebarPage
+            role={role}
+            selectedNav={selectedNav}
+            navigate={navigate}
+          />
         )}
       </main>
 
       <nav className="mobile-tabs" aria-label="Mobile navigation">
-        <button onClick={() => setActiveNav(primaryNav[role])}>
+        <button
+          onClick={() =>
+            setActiveNav({
+              scope: dashboardScope,
+              role,
+              item: primaryNav[role],
+            })
+          }
+        >
           <Home />
           <span>Home</span>
         </button>
@@ -215,12 +310,20 @@ export default function Dashboard({
         </button>
         <button
           className="active"
-          onClick={() => setActiveNav(primaryNav[role])}
+          onClick={() =>
+            setActiveNav({
+              scope: dashboardScope,
+              role,
+              item: primaryNav[role],
+            })
+          }
         >
           <LayoutDashboard />
           <span>Dashboard</span>
         </button>
-        <button onClick={() => setDrawerOpen(true)}>
+        <button
+          onClick={() => setDrawer({ scope: dashboardScope, open: true })}
+        >
           <Bell />
           <span>Alerts</span>
           {unreadCount > 0 && <small>{unreadCount}</small>}
@@ -231,34 +334,72 @@ export default function Dashboard({
         </button>
       </nav>
 
-      {drawerOpen && (
+      {notificationDrawerOpen && (
         <NotificationsDrawer
           notifications={notifications}
+          state={scopedNotificationState.status}
+          error={scopedNotificationState.error}
+          onRetry={() => setNotificationAttempt((attempt) => attempt + 1)}
           onMarkAll={async () => {
-            const marked = await Promise.all(
+            const requestScope = dashboardScope;
+            const results = await Promise.allSettled(
               notifications
                 .filter((item) => item.read_at === null)
                 .map((item) => markNotificationRead(item.id)),
             );
-            setNotifications((current) =>
-              current.map(
-                (item) => marked.find(({ id }) => id === item.id) ?? item,
-              ),
+            const marked = results
+              .filter(
+                (
+                  result,
+                ): result is PromiseFulfilledResult<NotificationResource> =>
+                  result.status === "fulfilled",
+              )
+              .map((result) => result.value);
+            const failures = results.length - marked.length;
+            setNotificationState((current) =>
+              current.scope === requestScope
+                ? {
+                    ...current,
+                    items: current.items.map(
+                      (item) => marked.find(({ id }) => id === item.id) ?? item,
+                    ),
+                    error: failures
+                      ? `${failures} notification${failures === 1 ? "" : "s"} could not be marked as read.`
+                      : "",
+                  }
+                : current,
             );
           }}
           onOpen={async (item) => {
+            const requestScope = dashboardScope;
             if (item.read_at === null) {
-              const marked = await markNotificationRead(item.id);
-              setNotifications((current) =>
-                current.map((currentItem) =>
-                  currentItem.id === marked.id ? marked : currentItem,
-                ),
-              );
+              try {
+                const marked = await markNotificationRead(item.id);
+                setNotificationState((current) =>
+                  current.scope === requestScope
+                    ? {
+                        ...current,
+                        items: current.items.map((currentItem) =>
+                          currentItem.id === marked.id ? marked : currentItem,
+                        ),
+                      }
+                    : current,
+                );
+              } catch (error) {
+                setNotificationState((current) =>
+                  current.scope === requestScope
+                    ? { ...current, error: notificationErrorMessage(error) }
+                    : current,
+                );
+                return;
+              }
             }
-            if (item.action_url) navigate(item.action_url);
-            setDrawerOpen(false);
+            if (dashboardScopeRef.current !== requestScope) return;
+            if (isAllowedNotificationPath(item.action_url))
+              navigate(item.action_url);
+            setDrawer({ scope: requestScope, open: false });
           }}
-          onClose={() => setDrawerOpen(false)}
+          onClose={() => setDrawer({ scope: dashboardScope, open: false })}
         />
       )}
       {accountOpen && (
@@ -270,23 +411,23 @@ export default function Dashboard({
           onLogout={onLogout}
         />
       )}
-      {toast && (
-        <div className="toast" role="status">
-          <span>✓</span>
-          {toast}
-        </div>
-      )}
     </div>
   );
 }
 
 function NotificationsDrawer({
   notifications,
+  state,
+  error,
+  onRetry,
   onMarkAll,
   onOpen,
   onClose,
 }: {
   notifications: NotificationResource[];
+  state: "loading" | "ready" | "error";
+  error: string;
+  onRetry: () => void;
   onMarkAll: () => Promise<void>;
   onOpen: (item: NotificationResource) => Promise<void>;
   onClose: () => void;
@@ -318,37 +459,86 @@ function NotificationsDrawer({
         </div>
         <button
           className="mark-read"
-          disabled={!notifications.some((item) => item.read_at === null)}
+          disabled={
+            state !== "ready" ||
+            !notifications.some((item) => item.read_at === null)
+          }
           onClick={() => void onMarkAll()}
         >
           Mark all as read
         </button>
-        {notifications.length === 0 ? (
-          <p className="notification-empty">No notifications.</p>
+        {state === "loading" ? (
+          <p className="notification-empty" aria-busy="true">
+            Loading notifications…
+          </p>
+        ) : state === "error" && notifications.length === 0 ? (
+          <div className="notification-error" role="alert">
+            <p>{error}</p>
+            <button onClick={onRetry}>Retry</button>
+          </div>
         ) : (
-          <section className="notification-group">
-            {notifications.map((item) => (
-              <button
-                className="notification-item"
-                key={item.id}
-                onClick={() => void onOpen(item)}
-              >
-                <span className={item.read_at === null ? "unread-dot" : ""} />
-                <span>
-                  {item.title && <strong>{item.title}</strong>}
-                  {item.message && <small>{item.message}</small>}
-                  {item.created_at && <time>{item.created_at}</time>}
-                  {item.action_url && <small>{item.action_url}</small>}
-                  {item.research_document_id !== null && (
-                    <small>{item.research_document_id}</small>
-                  )}
-                </span>
-              </button>
-            ))}
-          </section>
+          <>
+            {error && (
+              <p className="notification-operation-error" role="alert">
+                {error}
+              </p>
+            )}
+            {notifications.length === 0 ? (
+              <p className="notification-empty">No notifications.</p>
+            ) : (
+              <section className="notification-group">
+                {notifications.map((item) => (
+                  <button
+                    className="notification-item"
+                    key={item.id}
+                    onClick={() => void onOpen(item)}
+                  >
+                    <span
+                      className={item.read_at === null ? "unread-dot" : ""}
+                    />
+                    <span>
+                      {item.title && <strong>{item.title}</strong>}
+                      {item.message && <small>{item.message}</small>}
+                      {item.created_at && <time>{item.created_at}</time>}
+                      {item.action_url && <small>{item.action_url}</small>}
+                      {item.research_document_id !== null && (
+                        <small>{item.research_document_id}</small>
+                      )}
+                    </span>
+                  </button>
+                ))}
+              </section>
+            )}
+          </>
         )}
       </aside>
     </div>
+  );
+}
+
+function notificationErrorMessage(error: unknown) {
+  if (error instanceof ApiError) {
+    if (error.status === 401)
+      return "Session expired. Sign out and sign in again.";
+    if (error.status === 403)
+      return "Notifications are not available for this account.";
+    return `Notifications are unavailable (${error.code}).`;
+  }
+  return "Notifications are unavailable (REQUEST_FAILED).";
+}
+
+/** Notification destinations are navigation hints, never arbitrary external URLs. */
+function isAllowedNotificationPath(path: string | null): path is string {
+  if (!path || !path.startsWith("/")) return false;
+  return (
+    path === "/app" ||
+    path.startsWith("/app/") ||
+    path.startsWith("/app?") ||
+    path.startsWith("/app#") ||
+    /^\/research\/\d+(?:[/?#]|$)/.test(path) ||
+    path === "/catalog" ||
+    path.startsWith("/catalog?") ||
+    path.startsWith("/catalog#")
   );
 }
 

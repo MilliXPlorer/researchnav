@@ -24,7 +24,7 @@ const record = {
 };
 
 describe("SSR entry", () => {
-  it("renders public repository content before hydration", async () => {
+  it("does not apply literal repository filtering for an initial similarity query", async () => {
     const result = await render("/catalog?q=SERVER", {
       apiOrigin: "http://api.example.test",
       fetcher: vi.fn(
@@ -37,7 +37,8 @@ describe("SSR entry", () => {
     });
 
     expect(result.statusCode).toBe(200);
-    expect(result.appHtml).toContain("SERVER RENDERED STUDY");
+    expect(result.appHtml).toContain("Calculating similarity results");
+    expect(result.appHtml).not.toContain("SERVER RENDERED STUDY");
     expect(result.serializedState).toContain("SERVER RENDERED STUDY");
     expect(result.setCookies).toEqual([]);
   });
@@ -48,7 +49,7 @@ describe("SSR entry", () => {
         const path = new URL(String(input)).pathname;
         if (path === "/api/auth/session") {
           expect(new Headers(init?.headers).get("cookie")).toBe(
-            "researchnav.sid=session-value",
+            "researchnav_sid=session-value",
           );
           return new Response(
             JSON.stringify({
@@ -70,13 +71,65 @@ describe("SSR entry", () => {
 
     const result = await render("/app", {
       apiOrigin: "http://api.example.test",
-      cookie: "researchnav.sid=session-value",
+      cookie: "researchnav_sid=session-value",
       fetcher,
     });
 
-    expect(result.appHtml).toContain("Welcome back");
+    expect(result.appHtml).toContain("My research.");
     expect(result.appHtml).toContain("researcher@example.test");
     expect(result.appHtml).not.toContain("Loading ResearchNAV");
+  });
+
+  it("redirects anonymous dashboard visits to the landing page", async () => {
+    const fetcher = vi.fn(
+      async (input: RequestInfo | URL): Promise<Response> => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/api/auth/session") {
+          return new Response(
+            JSON.stringify({ error: "AUTHENTICATION_REQUIRED" }),
+            { status: 401, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({ data: [], links: { next: null } }),
+        );
+      },
+    );
+
+    const result = await render("/app", {
+      apiOrigin: "http://api.example.test",
+      fetcher,
+    });
+
+    expect(result.statusCode).toBe(302);
+    expect(result.redirectTo).toBe("/");
+    expect(result.appHtml).toBe("");
+  });
+
+  it("redirects anonymous research-route visits to the landing page", async () => {
+    const fetcher = vi.fn(
+      async (input: RequestInfo | URL): Promise<Response> => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/api/auth/session") {
+          return new Response(
+            JSON.stringify({ error: "AUTHENTICATION_REQUIRED" }),
+            { status: 401, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({ data: [], links: { next: null } }),
+        );
+      },
+    );
+
+    const result = await render("/research/7", {
+      apiOrigin: "http://api.example.test",
+      fetcher,
+    });
+
+    expect(result.statusCode).toBe(302);
+    expect(result.redirectTo).toBe("/");
+    expect(result.appHtml).toBe("");
   });
 
   it("escapes script-breaking values in initial state", () => {
