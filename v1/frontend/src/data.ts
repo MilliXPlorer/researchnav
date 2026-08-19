@@ -16,6 +16,7 @@ export const roleConfigs: RoleConfig[] = [
     description: "Provision coordinators and manage system-wide access.",
     nav: [
       "System Overview",
+      "Access Requests",
       "Coordinator Accounts",
       "All Users",
       "Audit Logs",

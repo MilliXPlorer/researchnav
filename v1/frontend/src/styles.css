@@ -5011,6 +5011,96 @@ td strong {
     background: var(--rust);
     font-size: 6px;
   }
+  /* Workspace access request (Google-verified account asking for a role) */
+  .access-request-form,
+  .access-request-pending {
+    width: min(620px, 100%);
+    margin: 18px auto 0;
+    padding: 26px 28px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    background: var(--paper);
+    box-shadow: var(--shadow-sm);
+  }
+  .access-request-form {
+    display: grid;
+    gap: 13px;
+    text-align: left;
+  }
+  .access-request-form h2 {
+    margin: 0;
+    color: var(--canopy);
+    font-family: var(--serif);
+    font-size: 21px;
+  }
+  .access-request-intro {
+    margin: 0;
+    color: var(--slate);
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  .access-request-form label {
+    display: grid;
+    gap: 6px;
+    color: var(--canopy);
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .access-request-form input,
+  .access-request-form select,
+  .access-request-form textarea {
+    width: 100%;
+    min-height: 40px;
+    padding: 9px 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    color: var(--ink);
+    background: var(--paper);
+    font: inherit;
+    font-size: 12px;
+  }
+  .access-request-form textarea {
+    resize: vertical;
+  }
+  .access-request-form .button {
+    justify-self: start;
+  }
+  .access-request-error {
+    margin: 0;
+    color: var(--rust);
+    font-size: 11px;
+  }
+  .access-request-status {
+    margin: 18px 0 0;
+    color: var(--slate);
+    font-size: 12px;
+  }
+  .access-request-pending {
+    text-align: center;
+  }
+  .access-request-icon {
+    width: 46px;
+    height: 46px;
+    margin: 0 auto 12px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    color: var(--moss);
+    background: var(--fern-soft);
+  }
+  .access-request-pending strong {
+    display: block;
+    margin-bottom: 7px;
+    color: var(--canopy);
+    font-family: var(--serif);
+    font-size: 18px;
+  }
+  .access-request-pending p {
+    margin: 0;
+    color: var(--slate);
+    font-size: 12px;
+    line-height: 1.6;
+  }
   .toast {
     left: 14px;
     right: 14px;

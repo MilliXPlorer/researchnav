@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { canEnterDashboard } from "./access";
+import AccessRequestPanel from "./AccessRequestPanel";
 import {
   ApiError,
   getRoleDashboard,
@@ -676,6 +677,7 @@ function AccessBlocker({
             Use another Google account
           </button>
         </section>
+        {!invited && <AccessRequestPanel />}
       </main>
     </div>
   );

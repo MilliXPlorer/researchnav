@@ -2271,3 +2271,105 @@ export async function listCategories(
     )
   ).data;
 }
+
+/**
+ * Workspace access requests.
+ *
+ * Google stays the only authentication method. These calls let an already
+ * authenticated account that has no assigned role ask for one, and let an
+ * administrator decide those requests.
+ */
+export const REQUESTABLE_ROLES = [
+  "researcher",
+  "adviser",
+  "instructor",
+  "panel",
+  "statistician",
+  "coordinator",
+  "librarian",
+  "research-office",
+  "academics",
+] as const;
+
+export type RequestableRole = (typeof REQUESTABLE_ROLES)[number];
+
+export interface AccessRequestResource {
+  id: number;
+  user_id: string;
+  email: string | null;
+  requested_role: string;
+  status: "pending" | "approved" | "rejected";
+  full_name: string | null;
+  program: string | null;
+  justification: string | null;
+  decided_by_email: string | null;
+  decision_remarks: string | null;
+  requested_at: string | null;
+  decided_at: string | null;
+}
+
+export interface AccessRequestInput {
+  requested_role: RequestableRole;
+  full_name?: string;
+  program?: string;
+  justification?: string;
+}
+
+export async function getMyAccessRequest(
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<AccessRequestResource | null> {
+  return (
+    await apiRequest<{ data: AccessRequestResource | null }>(
+      "/api/access-requests/mine",
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export async function submitAccessRequest(
+  input: AccessRequestInput,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<AccessRequestResource> {
+  return (
+    await apiRequest<{ data: AccessRequestResource }>(
+      "/api/access-requests",
+      { method: "POST", body: JSON.stringify(input) },
+      fetcher,
+    )
+  ).data;
+}
+
+export function listAccessRequests(
+  input: { status?: AccessRequestResource["status"]; page?: number } = {},
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<LaravelPaginatedResponse<AccessRequestResource>> {
+  const params = new URLSearchParams();
+  if (input.status) params.set("status", input.status);
+  if (input.page) params.set("page", String(input.page));
+  const query = params.toString();
+
+  return apiRequest(
+    `/api/admin/access-requests${query ? `?${query}` : ""}`,
+    undefined,
+    fetcher,
+  );
+}
+
+export async function decideAccessRequest(
+  accessRequestId: number | string,
+  input: {
+    decision: "approve" | "reject";
+    granted_role?: RequestableRole;
+    decision_remarks?: string;
+  },
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<AccessRequestResource> {
+  return (
+    await apiRequest<{ data: AccessRequestResource }>(
+      `/api/admin/access-requests/${encodeURIComponent(String(accessRequestId))}`,
+      { method: "PATCH", body: JSON.stringify(input) },
+      fetcher,
+    )
+  ).data;
+}
