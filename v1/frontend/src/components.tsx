@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 import { ArrowRight, Search, X } from "lucide-react";
+import { similarityBand, SIMILARITY_FLAG_THRESHOLD } from "./similarity";
 import type { Status } from "./types";
 
 export function Logo({ compact = false }: { compact?: boolean }) {
@@ -44,6 +45,40 @@ export function StatusChip({ status }: { status: Status }) {
   );
 }
 
+/**
+ * The single similarity banding rule for the whole product.
+ * Mirrors the documented thresholds: 0–39 low, 40–69 moderate, 70–100 high/flagged.
+ */
+/** Text band label, always paired with a numeric score so color is never the only signal. */
+export function SimilarityBadge({ score }: { score: number }) {
+  const band = similarityBand(score);
+  return (
+    <span className={`similarity-band similarity-band-${band.tone}`}>
+      {band.label}
+    </span>
+  );
+}
+
+/** Explains the 70% review threshold wherever similarity is shown. */
+export function SimilarityLegend() {
+  return (
+    <ul className="similarity-legend" aria-label="Similarity score bands">
+      <li>
+        <span className="similarity-legend-dot similarity-band-low" />
+        Low 0–39%
+      </li>
+      <li>
+        <span className="similarity-legend-dot similarity-band-moderate" />
+        Moderate 40–69%
+      </li>
+      <li>
+        <span className="similarity-legend-dot similarity-band-high" />
+        High 70–100% · flagged for adviser review
+      </li>
+    </ul>
+  );
+}
+
 export function SimilarityRing({
   score,
   size = "regular",
@@ -51,17 +86,21 @@ export function SimilarityRing({
   score: number;
   size?: "small" | "regular" | "large";
 }) {
-  const band = score < 40 ? "Low" : score < 70 ? "Moderate" : "Flagged";
-  const color =
-    score < 40 ? "var(--fern)" : score < 70 ? "var(--moss)" : "var(--amber)";
-  const style = { "--score": score, "--ring-color": color } as CSSProperties;
+  const band = similarityBand(score);
+  const announced = band.name === "High" ? "flagged" : band.name.toLowerCase();
+  const style = {
+    "--score": score,
+    "--ring-color": band.color,
+  } as CSSProperties;
 
   return (
     <div
-      className={`similarity-ring ring-${size} ${score >= 70 ? "ring-high" : ""}`}
+      className={`similarity-ring ring-${size} ${
+        score >= SIMILARITY_FLAG_THRESHOLD ? "ring-high" : ""
+      }`}
       style={style}
       role="img"
-      aria-label={`Similarity: ${score} percent, ${band.toLowerCase()}`}
+      aria-label={`Similarity: ${score} percent, ${announced}`}
     >
       <span>{score}%</span>
     </div>

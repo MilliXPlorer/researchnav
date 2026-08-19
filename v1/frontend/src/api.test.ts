@@ -1,11 +1,47 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  ApiError,
+  getSystemStatus,
+  getRoleDashboard,
+  getInternalResearch,
+  archiveInternalResearch,
+  createFeedback,
   listNotifications,
+  listAdminAuditLogs,
+  listAdminCoordinators,
+  listAdminUsers,
+  listFeedback,
+  listMonitoringLogs,
+  listPersistedSimilarityResults,
   listPublicResearch,
+  listResearchRevisions,
+  listResearchAuthors,
+  listResearchFiles,
+  listReviewAssignments,
+  listTitleValidations,
+  listSectionMembers,
+  addSectionMembers,
+  removeSectionMember,
+  listInstructorStudents,
   markNotificationRead,
   normalizeNextPath,
+  runTitleSimilarityCheck,
+  searchPublicResearch,
+  searchPublicResearchBySimilarity,
+  resubmitResearchRevision,
+  replaceResearchAuthors,
+  replaceReviewAssignments,
+  researchFileDownloadUrl,
+  submitInternalResearch,
   toResearchRecord,
+  transitionInternalResearch,
+  updateInternalResearch,
+  updateAdminUser,
+  updateFeedbackStatus,
+  updateTitleValidation,
+  uploadResearchFile,
 } from "./api";
+import type { RoleDashboard } from "./api";
 
 const resource = (id: number, authorName: string, authorOrder = 1) => ({
   id,
@@ -82,6 +118,81 @@ describe("public repository API", () => {
     await expect(listPublicResearch()).resolves.toEqual([]);
   });
 
+  it("sends author, keyword, category, and year filtering to the repository endpoint", async () => {
+    let requestedUrl = "";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      requestedUrl = String(input);
+      return new Response(
+        JSON.stringify({
+          data: [resource(1, "Dela Cruz")],
+          links: { next: null },
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      searchPublicResearch({
+        author: "Dela Cruz",
+        keywords: "inventory",
+        category: "Web-based",
+        year: 2024,
+      }),
+    ).resolves.toMatchObject([{ id: "1" }]);
+
+    const requested = new URL(requestedUrl, "http://researchnav.local");
+    expect(requested.pathname).toBe("/api/repository");
+    expect(requested.searchParams.get("author")).toBe("Dela Cruz");
+    expect(requested.searchParams.get("keywords")).toBe("inventory");
+    expect(requested.searchParams.get("category")).toBe("Web-based");
+    expect(requested.searchParams.get("year")).toBe("2024");
+  });
+
+  it("omits blank filters instead of sending empty query parameters", async () => {
+    let requestedUrl = "";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      requestedUrl = String(input);
+      return new Response(JSON.stringify({ data: [], links: { next: null } }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await searchPublicResearch({ author: "   ", keywords: "", q: "  " });
+
+    const requested = new URL(requestedUrl, "http://researchnav.local");
+    expect(requested.searchParams.has("author")).toBe(false);
+    expect(requested.searchParams.has("keywords")).toBe(false);
+    expect(requested.searchParams.has("q")).toBe(false);
+    expect(requested.searchParams.get("per_page")).toBe("50");
+  });
+
+  it("posts the submitted query to the public similarity endpoint", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                ...resource(1, "First Author"),
+                query_similarity_score: "0.823456",
+              },
+            ],
+          }),
+        ),
+    );
+
+    await expect(
+      searchPublicResearchBySimilarity("climate adaptation", fetchMock),
+    ).resolves.toMatchObject([{ id: "1", querySimilarityScore: "0.823456" }]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/repository/similarity",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ q: "climate adaptation" }),
+        credentials: "include",
+      }),
+    );
+  });
+
   it("rejects pagination links outside the API boundary", () => {
     expect(() =>
       normalizeNextPath("https://example.test/private/file"),
@@ -121,8 +232,10 @@ describe("notification API", () => {
       async () =>
         new Response(
           JSON.stringify({
-            ...notification,
-            read_at: "2026-08-10T12:01:00.000000Z",
+            data: {
+              ...notification,
+              read_at: "2026-08-10T12:01:00.000000Z",
+            },
           }),
         ),
     );
@@ -135,6 +248,642 @@ describe("notification API", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       `/api/notifications/${notification.id}/read`,
       expect.objectContaining({ method: "PATCH" }),
+    );
+  });
+});
+
+describe("administrator API", () => {
+  it("preserves HTTP status, server code, and validation fields in ApiError", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            error: "VALIDATION_FAILED",
+            errors: { email: ["Invalid email."] },
+          }),
+          { status: 422 },
+        ),
+    );
+    await expect(listAdminCoordinators(fetchMock)).rejects.toMatchObject({
+      name: "ApiError",
+      message: "VALIDATION_FAILED",
+      status: 422,
+      code: "VALIDATION_FAILED",
+      fields: { email: ["Invalid email."] },
+    } satisfies Partial<ApiError>);
+  });
+
+  it("uses exact administrator paths, Laravel query names, and resource envelopes", async () => {
+    const response = {
+      data: [],
+      links: { first: null, last: null, prev: null, next: null },
+      meta: {
+        current_page: 2,
+        from: null,
+        last_page: 2,
+        links: [],
+        path: "/api/admin/users",
+        per_page: 25,
+        to: null,
+        total: 0,
+      },
+    };
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const path = String(input);
+      if (path === "/api/admin/coordinators")
+        return new Response(JSON.stringify({ users: [] }));
+      if (path === "/api/admin/system-status")
+        return new Response(JSON.stringify({ data: { schema_version: 1 } }));
+      return new Response(JSON.stringify(response));
+    });
+    await expect(listAdminCoordinators(fetchMock)).resolves.toEqual([]);
+    await expect(
+      listAdminUsers(
+        {
+          search: "Ada Lovelace",
+          role: "adviser",
+          access_status: "active",
+          page: 2,
+          per_page: 25,
+        },
+        fetchMock,
+      ),
+    ).resolves.toEqual(response);
+    await expect(
+      listAdminAuditLogs(
+        { action: "ADMIN_USER_UPDATED", page: 2, per_page: 25 },
+        fetchMock,
+      ),
+    ).resolves.toEqual(response);
+    await expect(
+      updateAdminUser(
+        "uuid/with space",
+        { role: "adviser", access_status: "active" },
+        fetchMock,
+      ),
+    ).resolves.toEqual([]);
+    await expect(getSystemStatus(fetchMock)).resolves.toEqual({
+      schema_version: 1,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/users?search=Ada+Lovelace&role=adviser&access_status=active&page=2&per_page=25",
+      expect.anything(),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/audit-logs?action=ADMIN_USER_UPDATED&page=2&per_page=25",
+      expect.anything(),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/users/uuid%2Fwith%20space",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ role: "adviser", access_status: "active" }),
+      }),
+    );
+  });
+});
+
+describe("role dashboard API", () => {
+  const dashboard: RoleDashboard = {
+    schema_version: 1,
+    role: "adviser",
+    sections: [
+      {
+        key: "repository_references",
+        state: "ready",
+        total: 1,
+        reason: null,
+        items: [
+          {
+            research_document_id: 1,
+            title: "Public dashboard preview",
+            research_stage: "completed",
+            submission_status: "archived",
+            archive_status: "archived",
+            visibility: "public",
+            publication_year: 2026,
+            updated_at: null,
+          },
+        ],
+      },
+    ],
+  };
+
+  it("loads the dashboard through the exact authenticated endpoint", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ data: dashboard })),
+    );
+
+    await expect(getRoleDashboard("adviser", fetchMock)).resolves.toEqual(
+      dashboard,
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/dashboard",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
+  it("rejects a dashboard with an unexpected schema version or role", async () => {
+    const schemaMismatch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ data: { ...dashboard, schema_version: 2 } }),
+        ),
+    );
+    const roleMismatch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ data: { ...dashboard, role: "instructor" } }),
+        ),
+    );
+
+    await expect(getRoleDashboard("adviser", schemaMismatch)).rejects.toThrow(
+      "DASHBOARD_ROLE_MISMATCH",
+    );
+    await expect(getRoleDashboard("adviser", roleMismatch)).rejects.toThrow(
+      "DASHBOARD_ROLE_MISMATCH",
+    );
+  });
+});
+
+describe("administrator internal research API", () => {
+  const research = {
+    id: 42,
+    submitted_by: "owner-42",
+    title: "Internal study",
+    abstract: "Internal abstract",
+    keywords: "internal, study",
+    publication_year: 2026,
+    research_stage: "ongoing" as const,
+    submission_status: "draft" as const,
+    archive_status: "not_archived" as const,
+    visibility: "private" as const,
+  };
+  const revision = {
+    id: 9,
+    revision_number: 2,
+    revision_remarks: "Clarify methods.",
+    revision_status: "requested" as const,
+  };
+  const validation = {
+    id: 7,
+    research_document_id: 42,
+    similarity_result_id: null,
+    validated_by: null,
+    validation_status: "pending" as const,
+    adviser_remarks: null,
+    validated_at: null,
+  };
+
+  it("uses exact methods, relative paths, bodies, and authenticated credentials", async () => {
+    const fetchMock = vi.fn(async (path: URL | RequestInfo) => {
+      const requestPath = String(path);
+      if (requestPath.endsWith("/revisions")) {
+        return new Response(JSON.stringify({ data: [revision] }));
+      }
+      if (requestPath.endsWith("/validation")) {
+        return new Response(JSON.stringify({ data: [validation] }));
+      }
+      return new Response(JSON.stringify({ data: research }));
+    });
+    const metadata = {
+      title: "Revised internal study",
+      abstract: "Updated abstract",
+      keywords: "revised",
+      publication_year: 2027,
+      research_stage: "completed" as const,
+    };
+
+    await expect(getInternalResearch(42, fetchMock)).resolves.toEqual(research);
+    await expect(
+      updateInternalResearch(42, metadata, fetchMock),
+    ).resolves.toEqual(research);
+    await expect(submitInternalResearch(42, fetchMock)).resolves.toEqual(
+      research,
+    );
+    await expect(
+      transitionInternalResearch(42, "under_review", fetchMock),
+    ).resolves.toEqual(research);
+    await expect(
+      archiveInternalResearch(42, "public", fetchMock),
+    ).resolves.toEqual(research);
+    await expect(listResearchRevisions(42, fetchMock)).resolves.toEqual([
+      revision,
+    ]);
+    await expect(resubmitResearchRevision(42, 9, fetchMock)).resolves.toEqual(
+      research,
+    );
+    await expect(listTitleValidations(42, fetchMock)).resolves.toEqual([
+      validation,
+    ]);
+    await expect(
+      updateTitleValidation(
+        42,
+        7,
+        {
+          validation_status: "approved",
+          adviser_remarks: "Looks good.",
+          similarity_result_id: 8,
+        },
+        fetchMock,
+      ),
+    ).resolves.toEqual(research);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/research/42",
+      expect.objectContaining({ credentials: "include" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/research/42",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify(metadata),
+        credentials: "include",
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/research/42/submit",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({}),
+        credentials: "include",
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "/api/research/42/status",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ submission_status: "under_review" }),
+        credentials: "include",
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      "/api/research/42/archive",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ visibility: "public" }),
+        credentials: "include",
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      6,
+      "/api/research/42/revisions",
+      expect.objectContaining({ credentials: "include" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      7,
+      "/api/research/42/revisions/9/resubmit",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({}),
+        credentials: "include",
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      8,
+      "/api/research/42/validation",
+      expect.objectContaining({ credentials: "include" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      9,
+      "/api/research/42/validation/7",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          validation_status: "approved",
+          adviser_remarks: "Looks good.",
+          similarity_result_id: 8,
+        }),
+        credentials: "include",
+      }),
+    );
+  });
+
+  it("uses the contextual resource endpoints and preserves multipart upload headers", async () => {
+    const author = {
+      id: 1,
+      user_id: null,
+      author_name: "Author",
+      author_order: 1,
+      is_corresponding_author: true,
+    };
+    const reviewer = {
+      id: 2,
+      reviewer_id: "11111111-1111-4111-8111-111111111111",
+      review_role: "adviser" as const,
+      is_active: true,
+      assigned_by: "office",
+    };
+    const document = {
+      id: 3,
+      research_document_id: 42,
+      document_type: "final_manuscript" as const,
+      version_number: 1,
+      original_filename: "study.pdf",
+      file_extension: "pdf",
+      mime_type: "application/pdf",
+      file_size: 1,
+      is_current: true,
+      uploaded_at: null,
+    };
+    const feedback = {
+      id: 4,
+      research_document_id: 42,
+      user_id: "office",
+      document_file_id: null,
+      comment: "Review",
+      feedback_type: "comment" as const,
+      feedback_status: "open" as const,
+      created_at: null,
+    };
+    const monitoring = {
+      id: 5,
+      research_document_id: 42,
+      performed_by: "office",
+      activity_type: "RESEARCH_CREATED",
+      remarks: null,
+      previous_status: null,
+      new_status: "draft",
+      monitoring_status: "open",
+      activity_date: null,
+    };
+    const fetchMock = vi.fn(
+      async (path: URL | RequestInfo, init?: RequestInit) => {
+        const value = String(path);
+        const data = value.endsWith("/authors")
+          ? [author]
+          : value.endsWith("/reviewers")
+            ? [reviewer]
+            : value.endsWith("/files")
+              ? init?.method === "POST"
+                ? document
+                : [document]
+              : value.endsWith("/feedback")
+                ? init?.method === "POST"
+                  ? feedback
+                  : [feedback]
+                : value.endsWith("/monitoring")
+                  ? [monitoring]
+                  : feedback;
+        return new Response(JSON.stringify({ data }));
+      },
+    );
+
+    await expect(listResearchAuthors(42, fetchMock)).resolves.toEqual([author]);
+    await expect(
+      replaceResearchAuthors(
+        42,
+        [
+          {
+            user_id: null,
+            author_name: "Author",
+            is_corresponding_author: true,
+          },
+        ],
+        fetchMock,
+      ),
+    ).resolves.toEqual([author]);
+    await expect(listReviewAssignments(42, fetchMock)).resolves.toEqual([
+      reviewer,
+    ]);
+    await expect(
+      replaceReviewAssignments(
+        42,
+        [{ reviewer_id: reviewer.reviewer_id, review_role: "adviser" }],
+        fetchMock,
+      ),
+    ).resolves.toEqual([reviewer]);
+    await expect(listResearchFiles(42, fetchMock)).resolves.toEqual([document]);
+    for (const documentType of [
+      "title_proposal",
+      "draft",
+      "chapter",
+      "revised_manuscript",
+      "final_manuscript",
+      "attachment",
+    ] as const) {
+      await expect(
+        uploadResearchFile(
+          42,
+          new File(["pdf"], "study.pdf", { type: "application/pdf" }),
+          documentType,
+          fetchMock,
+        ),
+      ).resolves.toEqual(document);
+    }
+    await expect(listFeedback(42, fetchMock)).resolves.toEqual([feedback]);
+    await expect(
+      createFeedback(
+        42,
+        { comment: "Review", feedback_type: "comment" },
+        fetchMock,
+      ),
+    ).resolves.toEqual(feedback);
+    await expect(
+      updateFeedbackStatus(42, 4, "resolved", fetchMock),
+    ).resolves.toEqual(feedback);
+    await expect(listMonitoringLogs(42, fetchMock)).resolves.toEqual([
+      monitoring,
+    ]);
+    expect(researchFileDownloadUrl(42, 3)).toBe(
+      "/api/research/42/files/3/download",
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/research/42/authors",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({
+          authors: [
+            {
+              user_id: null,
+              author_name: "Author",
+              is_corresponding_author: true,
+            },
+          ],
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/research/42/reviewers",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({
+          reviewers: [
+            { reviewer_id: reviewer.reviewer_id, review_role: "adviser" },
+          ],
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/research/42/files",
+      expect.objectContaining({ method: "POST", body: expect.any(FormData) }),
+    );
+    const uploadCalls = fetchMock.mock.calls.filter(
+      ([path, init]) =>
+        String(path).endsWith("/files") &&
+        (init as RequestInit).method === "POST",
+    );
+    expect(uploadCalls).toHaveLength(6);
+    uploadCalls.forEach(([, init], index) => {
+      expect(
+        new Headers((init as RequestInit).headers).has("Content-Type"),
+      ).toBe(false);
+      expect(
+        ((init as RequestInit).body as FormData).get("document_type"),
+      ).toBe(
+        [
+          "title_proposal",
+          "draft",
+          "chapter",
+          "revised_manuscript",
+          "final_manuscript",
+          "attachment",
+        ][index],
+      );
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/research/42/feedback/4",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ feedback_status: "resolved" }),
+      }),
+    );
+  });
+});
+
+describe("similarity API", () => {
+  const similarityResult = {
+    id: 8,
+    source_research_id: 42,
+    matched_research_id: 43,
+    source_title: "Source title",
+    matched_title: "Matched title",
+    tfidf_score: null,
+    cosine_score: "0.710000",
+    fasttext_score: "0.820000",
+    final_similarity_score: "0.760000",
+    threshold: "0.700000",
+    is_flagged: true,
+    contextual_analysis: "Related terms appear in the same research context.",
+    matched_terms: ["research"],
+    analysis_type: "title",
+    analyzed_at: "2026-08-14T12:00:00.000000Z",
+  };
+
+  it("loads only persisted results for the selected research document", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ data: [similarityResult] })),
+    );
+
+    await expect(
+      listPersistedSimilarityResults(42, fetchMock),
+    ).resolves.toEqual([similarityResult]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/research/42/similarity",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
+  it("posts a title similarity check for the selected research document", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+
+    await expect(
+      runTitleSimilarityCheck("42", fetchMock),
+    ).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/research/42/similarity/check",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({}),
+        credentials: "include",
+      }),
+    );
+  });
+});
+
+describe("instructor section member API", () => {
+  const member = {
+    id: "student-id",
+    email: "student@example.edu",
+    student_employee_id: "2023-0455",
+    first_name: "Anna",
+    middle_name: null,
+    last_name: "Student",
+    added_at: "2026-08-18T00:00:00.000000Z",
+  };
+
+  it("lists section members through the Laravel members endpoint", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ data: [member] })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(listSectionMembers(7)).resolves.toEqual([member]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/instructor/sections/7/members",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
+  it("adds student researchers with a PUT payload and removes them with a DELETE", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            data: {
+              id: 7,
+              name: "CS-101",
+              academic_year: null,
+              is_active: true,
+              documents_count: 0,
+              members_count: 1,
+              created_at: null,
+            },
+          }),
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(addSectionMembers(7, ["student-id"])).resolves.toMatchObject({
+      members_count: 1,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/instructor/sections/7/members",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({ user_ids: ["student-id"] }),
+      }),
+    );
+
+    await expect(removeSectionMember(7, "student-id")).resolves.toMatchObject({
+      members_count: 1,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/instructor/sections/7/members/student-id",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it("searches active researchers for the student picker", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ data: [member] })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(listInstructorStudents("ann")).resolves.toEqual([member]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/instructor/students?search=ann",
+      expect.objectContaining({ credentials: "include" }),
+    );
+    await expect(listInstructorStudents()).resolves.toEqual([member]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/instructor/students",
+      expect.objectContaining({ credentials: "include" }),
     );
   });
 });

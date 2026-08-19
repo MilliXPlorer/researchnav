@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -8,9 +8,33 @@ import {
   LockKeyhole,
   SlidersHorizontal,
 } from "lucide-react";
-import { Button, EmptyState, Logo, SearchBox } from "./components";
+import {
+  Button,
+  EmptyState,
+  Logo,
+  SearchBox,
+  SimilarityBadge,
+  SimilarityLegend,
+  SimilarityRing,
+} from "./components";
+import { searchPublicResearch, searchPublicResearchBySimilarity } from "./api";
+import { similarityBandPercentage } from "./similarity";
 import type { ResearchRecord } from "./types";
 import { useDialogFocus } from "./useDialogFocus";
+
+type SimilaritySearchResponse =
+  | {
+      query: string;
+      request: number;
+      status: "success";
+      records: ResearchRecord[];
+    }
+  | {
+      query: string;
+      request: number;
+      status: "error";
+      message: string;
+    };
 
 export default function CatalogPage({
   onSignIn,
@@ -41,36 +65,163 @@ export default function CatalogPage({
   const year = searchParams.get("year") ?? "all";
   const category = searchParams.get("category") ?? "all";
   const institute = searchParams.get("institute") ?? "all";
+  const author = (searchParams.get("author") ?? "").trim();
+  const keywords = (searchParams.get("keywords") ?? "").trim();
+  const [authorDraft, setAuthorDraft] = useState(author);
+  const [keywordsDraft, setKeywordsDraft] = useState(keywords);
+  /**
+   * Author, keyword, category, and year matching all run in SQL. Only these
+   * filters reach Laravel; `institute` has no server-side filter and stays local.
+   */
+  const hasServerFilters =
+    author !== "" || keywords !== "" || year !== "all" || category !== "all";
+  const serverFilterKey = JSON.stringify({ author, keywords, year, category });
+  const [serverFiltered, setServerFiltered] = useState<{
+    key: string;
+    status: "ready" | "error";
+    records: ResearchRecord[];
+  } | null>(null);
+  const serverFilterState =
+    serverFiltered?.key === serverFilterKey ? serverFiltered : null;
+  // Derived, so the effect never has to write a loading flag.
+  const serverFiltersLoading = hasServerFilters && serverFilterState === null;
+  const serverFiltersFailed = serverFilterState?.status === "error";
+
+  useEffect(() => {
+    if (!hasServerFilters) return;
+
+    let active = true;
+    const controller = new AbortController();
+
+    searchPublicResearch(
+      {
+        author: author || undefined,
+        keywords: keywords || undefined,
+        category: category === "all" ? undefined : category,
+        year: year === "all" ? undefined : year,
+      },
+      globalThis.fetch,
+      controller.signal,
+    )
+      .then((filteredRecords) => {
+        if (active)
+          setServerFiltered({
+            key: serverFilterKey,
+            status: "ready",
+            records: filteredRecords,
+          });
+      })
+      .catch(() => {
+        if (active)
+          setServerFiltered({
+            key: serverFilterKey,
+            status: "error",
+            records: [],
+          });
+      });
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [author, category, hasServerFilters, keywords, serverFilterKey, year]);
+
+  const activeQuery = (searchParams.get("q") ?? "").trim();
+  const hasActiveSimilarityQuery = activeQuery.length > 0;
+  const [similarityRequest, setSimilarityRequest] = useState(0);
+  const [similarityResponse, setSimilarityResponse] =
+    useState<SimilaritySearchResponse | null>(null);
+  const isCurrentSimilarityResponse =
+    similarityResponse?.query === activeQuery &&
+    similarityResponse.request === similarityRequest;
+  const similarityLoading =
+    hasActiveSimilarityQuery && !isCurrentSimilarityResponse;
+  const similarityRecords =
+    isCurrentSimilarityResponse && similarityResponse.status === "success"
+      ? similarityResponse.records
+      : null;
+  const similarityError =
+    isCurrentSimilarityResponse && similarityResponse.status === "error"
+      ? similarityResponse.message
+      : null;
+
+  useEffect(() => {
+    if (!hasActiveSimilarityQuery) return;
+
+    let active = true;
+    const controller = new AbortController();
+
+    searchPublicResearchBySimilarity(
+      activeQuery,
+      globalThis.fetch,
+      controller.signal,
+    )
+      .then((rankedRecords) => {
+        if (active) {
+          setSimilarityResponse({
+            query: activeQuery,
+            request: similarityRequest,
+            status: "success",
+            records: rankedRecords,
+          });
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setSimilarityResponse({
+            query: activeQuery,
+            request: similarityRequest,
+            status: "error",
+            message: "Similarity results are unavailable for this search.",
+          });
+        }
+      });
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [activeQuery, hasActiveSimilarityQuery, similarityRequest]);
 
   const results = useMemo(() => {
-    const needle = (searchParams.get("q") ?? "")
-      .replaceAll('"', "")
-      .trim()
-      .toLowerCase();
-    const filtered = records.filter((record) => {
-      const matchesQuery =
-        !needle ||
-        [record.title, record.authors, record.abstract, ...record.keywords]
-          .join(" ")
-          .toLowerCase()
-          .includes(needle);
-      return (
-        matchesQuery &&
-        (year === "all" || String(record.year) === year) &&
-        (category === "all" || record.category === category) &&
-        (institute === "all" || record.institute === institute)
-      );
+    // Server-side matching decides which records qualify whenever author,
+    // keyword, category, or year filters are active.
+    const allowedIds = hasServerFilters
+      ? new Set(serverFilterState?.records.map((record) => record.id))
+      : null;
+
+    const base = hasActiveSimilarityQuery
+      ? (similarityRecords ?? [])
+      : hasServerFilters
+        ? (serverFilterState?.records ?? [])
+        : records;
+
+    const filtered = base.filter((record) => {
+      if (allowedIds && !allowedIds.has(record.id)) return false;
+      // `institute` has no server-side filter, so it is always applied locally.
+      return institute === "all" || record.institute === institute;
     });
+
+    // Similarity endpoint response order is the backend's exact rank order.
+    if (hasActiveSimilarityQuery) return filtered;
     if (searchParams.get("sort") === "newest")
       return [...filtered].sort((a, b) => b.year - a.year);
     if (searchParams.get("sort") === "oldest")
       return [...filtered].sort((a, b) => a.year - b.year);
     return filtered;
-  }, [records, searchParams, year, category, institute]);
+  }, [
+    records,
+    similarityRecords,
+    hasActiveSimilarityQuery,
+    hasServerFilters,
+    serverFilterState,
+    searchParams,
+    institute,
+  ]);
 
   const updateParam = (name: string, value: string) => {
     const next = new URLSearchParams(searchParams);
-    if (value === "all") next.delete(name);
+    if (value === "all" || (name === "q" && !value)) next.delete(name);
     else next.set(name, value);
     setSearchParams(next);
     window.history.replaceState(
@@ -80,7 +231,26 @@ export default function CatalogPage({
     );
   };
 
-  const submitSearch = () => updateParam("q", query);
+  /** Applies several metadata filters at once so one Apply is one update. */
+  const updateParams = (values: Record<string, string>) => {
+    const next = new URLSearchParams(searchParams);
+    for (const [name, value] of Object.entries(values)) {
+      if (!value || value === "all") next.delete(name);
+      else next.set(name, value);
+    }
+    setSearchParams(next);
+    window.history.replaceState(
+      {},
+      "",
+      `/catalog${next.size ? `?${next.toString()}` : ""}`,
+    );
+  };
+
+  const submitSearch = () => {
+    setSimilarityResponse(null);
+    if (query.trim()) setSimilarityRequest((request) => request + 1);
+    updateParam("q", query.trim());
+  };
 
   return (
     <div className="catalog-page">
@@ -154,18 +324,63 @@ export default function CatalogPage({
               )}
             </select>
           </label>
+          <form
+            className="catalog-metadata-filters"
+            onSubmit={(event) => {
+              event.preventDefault();
+              updateParams({
+                author: authorDraft.trim(),
+                keywords: keywordsDraft.trim(),
+              });
+            }}
+          >
+            <label>
+              Author
+              <input
+                type="search"
+                value={authorDraft}
+                placeholder="Surname"
+                onChange={(event) => setAuthorDraft(event.target.value)}
+              />
+            </label>
+            <label>
+              Keyword
+              <input
+                type="search"
+                value={keywordsDraft}
+                placeholder="e.g. inventory"
+                onChange={(event) => setKeywordsDraft(event.target.value)}
+              />
+            </label>
+            <Button type="submit" variant="secondary">
+              Apply
+            </Button>
+          </form>
         </div>
         <div className="results-summary">
           <p>
-            <strong>{results.length}</strong>{" "}
+            <strong>
+              {similarityLoading || serverFiltersLoading ? "…" : results.length}
+            </strong>{" "}
             {results.length === 1 ? "study" : "studies"} found
+            {author && (
+              <span className="filter-note"> · author “{author}”</span>
+            )}
+            {keywords && (
+              <span className="filter-note"> · keyword “{keywords}”</span>
+            )}
           </p>
           <label className="sort-control">
             <SlidersHorizontal />
             <span className="sr-only">Sort studies</span>
             <select
-              value={searchParams.get("sort") ?? "relevance"}
+              value={
+                hasActiveSimilarityQuery
+                  ? "relevance"
+                  : (searchParams.get("sort") ?? "relevance")
+              }
               onChange={(event) => updateParam("sort", event.target.value)}
+              disabled={hasActiveSimilarityQuery}
             >
               <option value="relevance">Sort: Relevance</option>
               <option value="newest">Newest first</option>
@@ -173,16 +388,44 @@ export default function CatalogPage({
             </select>
           </label>
         </div>
+        {hasActiveSimilarityQuery &&
+          !similarityLoading &&
+          !similarityError &&
+          results.length > 0 && <SimilarityLegend />}
         <div className="catalog-layout">
           <section className="result-list" aria-label="Research results">
-            {loading ? (
+            {hasActiveSimilarityQuery && similarityLoading ? (
+              <EmptyState
+                title="Calculating similarity results"
+                message="Ranking public research studies for your submitted search…"
+              />
+            ) : hasActiveSimilarityQuery && similarityError ? (
+              <div role="alert">
+                <EmptyState
+                  title="Similarity search unavailable"
+                  message={similarityError}
+                />
+              </div>
+            ) : serverFiltersLoading ? (
+              <EmptyState
+                title="Applying filters"
+                message="Matching authors, keywords, categories, and years in the repository…"
+              />
+            ) : serverFiltersFailed ? (
+              <div role="alert">
+                <EmptyState
+                  title="Filtered search unavailable"
+                  message="The repository could not apply these filters. Adjust or clear them and try again."
+                />
+              </div>
+            ) : loading ? (
               <EmptyState
                 title="Loading public catalog"
                 message="Retrieving cataloged public metadata…"
               />
             ) : error ? (
               <EmptyState title="Public catalog unavailable" message={error} />
-            ) : records.length === 0 ? (
+            ) : !hasActiveSimilarityQuery && records.length === 0 ? (
               <EmptyState
                 title="No public catalog records are available"
                 message="The repository did not return any public records."
@@ -204,6 +447,32 @@ export default function CatalogPage({
                     {record.authors} · {record.year} · {record.program}
                   </p>
                   <p className="result-abstract">{record.abstract}</p>
+                  <p
+                    className={`result-similarity-score${
+                      hasActiveSimilarityQuery &&
+                      formatSimilarityPercentage(record.querySimilarityScore)
+                        ? ""
+                        : " is-unavailable"
+                    }`}
+                  >
+                    <span>Similarity</span>
+                    <strong>
+                      {hasActiveSimilarityQuery
+                        ? (formatSimilarityPercentage(
+                            record.querySimilarityScore,
+                          ) ?? "Similarity unavailable")
+                        : "Search to calculate"}
+                    </strong>
+                    {hasActiveSimilarityQuery &&
+                      (() => {
+                        const band = similarityBandPercentage(
+                          record.querySimilarityScore,
+                        );
+                        return band === null ? null : (
+                          <SimilarityBadge score={band} />
+                        );
+                      })()}
+                  </p>
                   <div className="keyword-list">
                     {record.keywords.map((keyword) => (
                       <span key={keyword}>{keyword}</span>
@@ -246,6 +515,7 @@ export default function CatalogPage({
       {selectedRecord && (
         <MetadataDialog
           record={selectedRecord}
+          hasActiveSimilarityQuery={hasActiveSimilarityQuery}
           onClose={() => setSelectedRecord(null)}
           onSignIn={onSignIn}
         />
@@ -256,14 +526,22 @@ export default function CatalogPage({
 
 function MetadataDialog({
   record,
+  hasActiveSimilarityQuery,
   onClose,
   onSignIn,
 }: {
   record: ResearchRecord;
+  hasActiveSimilarityQuery: boolean;
   onClose: () => void;
   onSignIn: () => void;
 }) {
   const [dialogRef, handleDialogKeyDown] = useDialogFocus<HTMLElement>(onClose);
+  const similarityScore = hasActiveSimilarityQuery
+    ? formatSimilarityPercentage(record.querySimilarityScore)
+    : null;
+  const similarityBand = hasActiveSimilarityQuery
+    ? similarityBandPercentage(record.querySimilarityScore)
+    : null;
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
       <section
@@ -312,12 +590,30 @@ function MetadataDialog({
             <dd>{record.category}</dd>
           </div>
           <div>
-            <dt>Research stage</dt>
-            <dd>{record.researchStage}</dd>
+            <dt>Similarity score</dt>
+            <dd
+              className={`metadata-similarity-score${
+                similarityScore ? "" : " is-unavailable"
+              }`}
+            >
+              {similarityScore ??
+                (hasActiveSimilarityQuery
+                  ? "Similarity unavailable"
+                  : "Search to calculate")}
+            </dd>
           </div>
+          {similarityBand !== null && (
+            <div>
+              <dt>Similarity band</dt>
+              <dd className="metadata-similarity-band">
+                <SimilarityRing score={similarityBand} size="small" />
+                <SimilarityBadge score={similarityBand} />
+              </dd>
+            </div>
+          )}
           {record.manuscriptDate && (
             <div>
-              <dt>Manuscript date</dt>
+              <dt>Final binding date</dt>
               <dd>{record.manuscriptDate}</dd>
             </div>
           )}
@@ -326,11 +622,6 @@ function MetadataDialog({
           <h3>Abstract</h3>
           <p>{record.abstract}</p>
         </div>
-        {record.abstractProvenance && (
-          <p className="metadata-provenance">
-            <strong>Abstract provenance:</strong> {record.abstractProvenance}
-          </p>
-        )}
         <div className="keyword-list">
           {record.keywords.map((keyword) => (
             <span key={keyword}>{keyword}</span>
@@ -348,3 +639,25 @@ function MetadataDialog({
     </div>
   );
 }
+
+function formatSimilarityPercentage(
+  normalizedScore: ResearchRecord["querySimilarityScore"],
+): string | null {
+  if (
+    normalizedScore === null ||
+    normalizedScore === undefined ||
+    (typeof normalizedScore === "string" && normalizedScore.trim() === "")
+  ) {
+    return null;
+  }
+
+  const score = Number(normalizedScore);
+  if (!Number.isFinite(score) || score < 0 || score > 1) return null;
+
+  return `${(score * 100).toFixed(4)}%`;
+}
+
+/**
+ * Whole-number band percentage for the ring/badge. The exact score stays visible
+ * separately, so no displayed value is ever rounded away or fabricated.
+ */

@@ -20,7 +20,6 @@ export const roleConfigs: RoleConfig[] = [
       "All Users",
       "Audit Logs",
       "System Settings",
-      "Notifications",
     ],
   },
   {
@@ -34,7 +33,6 @@ export const roleConfigs: RoleConfig[] = [
       "New Submission",
       "Similarity Check",
       "Related Studies",
-      "Notifications",
     ],
   },
   {
@@ -47,7 +45,6 @@ export const roleConfigs: RoleConfig[] = [
       "Pending Reviews",
       "Similarity Alerts",
       "Feedback History",
-      "Notifications",
     ],
   },
   {
@@ -60,7 +57,6 @@ export const roleConfigs: RoleConfig[] = [
       "Title Proposals",
       "Similarity Overview",
       "Class Reports",
-      "Notifications",
     ],
   },
   {
@@ -80,12 +76,7 @@ export const roleConfigs: RoleConfig[] = [
     label: "Statistician",
     shortLabel: "Statistician",
     description: "Review methodology and issue sign-offs.",
-    nav: [
-      "Review Queue",
-      "Methodology Checklist",
-      "Sign-offs Issued",
-      "Notifications",
-    ],
+    nav: ["Review Queue", "Methodology Checklist", "Sign-offs Issued"],
   },
   {
     id: "coordinator",
@@ -99,7 +90,6 @@ export const roleConfigs: RoleConfig[] = [
       "Adviser Load",
       "Account Roles",
       "Reports",
-      "Notifications",
     ],
   },
   {
@@ -112,13 +102,12 @@ export const roleConfigs: RoleConfig[] = [
       "Repository Catalog",
       "Metadata Standards",
       "Retention & Compliance",
-      "Notifications",
     ],
   },
   {
     id: "research-office",
     label: "Research Office",
-    shortLabel: "CAES administrator",
+    shortLabel: "Research Office personnel",
     description: "Manage compliance, reports, roles, and privacy.",
     nav: [
       "Institutional Overview",
@@ -126,7 +115,6 @@ export const roleConfigs: RoleConfig[] = [
       "User & Role Management",
       "Reports & Exports",
       "Data Privacy Log",
-      "Notifications",
     ],
   },
   {
@@ -134,6 +122,6 @@ export const roleConfigs: RoleConfig[] = [
     label: "Academics",
     shortLabel: "Faculty member",
     description: "Search, save, and cross-reference studies.",
-    nav: ["Search", "My Library", "Browse by Category", "Notifications"],
+    nav: ["Search", "My Library", "Browse by Category"],
   },
 ];
