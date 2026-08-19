@@ -70,6 +70,7 @@ import {
 import { Button, SimilarityBadge } from "./components";
 import { roleConfigs } from "./data";
 import { ConfirmDialog, Modal } from "./Modal";
+import ResearchActivity from "./ResearchActivity";
 import SimilarityResults from "./SimilarityResults";
 import type { ResearchRecord, Role } from "./types";
 import { useLiveFilters } from "./useLiveFilters";
@@ -375,6 +376,10 @@ function yesNo(value: boolean) {
 function AdviserAdvisees({ role }: { role: Role }) {
   const [attempt, reload] = useAttempt();
   const state = useLoad(() => listAdviserAdvisees(), attempt);
+  const [activityFor, setActivityFor] = useState<{
+    id: number | string;
+    title: string;
+  } | null>(null);
   return (
     <div className="workspace-content admin-sidebar-page">
       <RolePageHeader
@@ -421,6 +426,7 @@ function AdviserAdvisees({ role }: { role: Role }) {
                       <th>Stage</th>
                       <th>Status</th>
                       <th>Updated</th>
+                      <th>Activity</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -430,6 +436,19 @@ function AdviserAdvisees({ role }: { role: Role }) {
                         <td>{label(document.research_stage)}</td>
                         <td>{label(document.submission_status)}</td>
                         <td>{displayDate(document.updated_at)}</td>
+                        <td>
+                          <Button
+                            variant="secondary"
+                            onClick={() =>
+                              setActivityFor({
+                                id: document.research_document_id,
+                                title: document.title ?? "Research record",
+                              })
+                            }
+                          >
+                            Feedback &amp; activity
+                          </Button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -438,6 +457,18 @@ function AdviserAdvisees({ role }: { role: Role }) {
             </section>
           ))}
         </div>
+      )}
+      {activityFor && (
+        <Modal
+          label={`Feedback and activity for ${activityFor.title}`}
+          onClose={() => setActivityFor(null)}
+          size="large"
+        >
+          <ResearchActivity
+            researchDocumentId={activityFor.id}
+            title={activityFor.title}
+          />
+        </Modal>
       )}
     </div>
   );
@@ -3654,6 +3685,8 @@ function ResearcherSubmissions({ role }: { role: Role }) {
   const [error, setError] = useState("");
   const [editing, setEditing] =
     useState<ResearchDocumentSummaryResource | null>(null);
+  const [activityFor, setActivityFor] =
+    useState<ResearchDocumentSummaryResource | null>(null);
   const [editDirty, setEditDirty] = useState(false);
   const [loading, setLoading] = useState(true);
   const [attempt, reload] = useAttempt();
@@ -3750,29 +3783,37 @@ function ResearcherSubmissions({ role }: { role: Role }) {
                     <td>{label(document.archive_status)}</td>
                     <td>{displayDate(document.submitted_at)}</td>
                     <td>
-                      {document.submission_status === "draft" && (
-                        <span className="row-actions">
-                          <Button
-                            variant="secondary"
-                            onClick={() => {
-                              setEditDirty(false);
-                              setEditing(document);
-                            }}
-                            disabled={submitting === String(document.id)}
-                          >
-                            Edit
-                          </Button>
-                          <Button
-                            variant="secondary"
-                            onClick={() => void submit(document)}
-                            disabled={submitting === String(document.id)}
-                          >
-                            {submitting === String(document.id)
-                              ? "Submitting…"
-                              : "Submit"}
-                          </Button>
-                        </span>
-                      )}
+                      <span className="row-actions">
+                        <Button
+                          variant="secondary"
+                          onClick={() => setActivityFor(document)}
+                        >
+                          Feedback &amp; activity
+                        </Button>
+                        {document.submission_status === "draft" && (
+                          <>
+                            <Button
+                              variant="secondary"
+                              onClick={() => {
+                                setEditDirty(false);
+                                setEditing(document);
+                              }}
+                              disabled={submitting === String(document.id)}
+                            >
+                              Edit
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              onClick={() => void submit(document)}
+                              disabled={submitting === String(document.id)}
+                            >
+                              {submitting === String(document.id)
+                                ? "Submitting…"
+                                : "Submit"}
+                            </Button>
+                          </>
+                        )}
+                      </span>
                     </td>
                   </tr>
                 ))}
@@ -3787,6 +3828,18 @@ function ResearcherSubmissions({ role }: { role: Role }) {
             }}
           />
         </section>
+      )}
+      {activityFor && (
+        <Modal
+          label={`Feedback and activity for ${activityFor.title}`}
+          onClose={() => setActivityFor(null)}
+          size="large"
+        >
+          <ResearchActivity
+            researchDocumentId={activityFor.id}
+            title={activityFor.title}
+          />
+        </Modal>
       )}
       {editing && (
         <Modal
