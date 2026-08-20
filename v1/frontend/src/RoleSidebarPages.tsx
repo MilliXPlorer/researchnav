@@ -77,7 +77,7 @@ import {
 import { roleConfigs } from "./data";
 import { ConfirmDialog, Modal } from "./Modal";
 import ResearchActivity from "./ResearchActivity";
-import { similarityBandPercentage } from "./similarity";
+import { isZeroSimilarity, similarityBandPercentage } from "./similarity";
 import type { ResearchRecord, Role } from "./types";
 import { useLiveFilters } from "./useLiveFilters";
 
@@ -4379,13 +4379,21 @@ function ResearcherSimilarityCheck({ role }: { role: Role }) {
       );
   }
 
-  const flagged =
+  // A zero score means no comparable terms are shared, so the record is not a
+  // similarity result. Report how many were set aside instead of listing them.
+  // A missing score is kept and shown as unavailable rather than hidden.
+  const scored =
     state.status === "ready"
-      ? state.matches.filter((match) => {
-          const band = similarityBandPercentage(match.querySimilarityScore);
-          return band !== null && band >= 70;
-        })
+      ? state.matches.filter(
+          (match) => !isZeroSimilarity(match.querySimilarityScore),
+        )
       : [];
+  const omitted =
+    state.status === "ready" ? state.matches.length - scored.length : 0;
+  const flagged = scored.filter((match) => {
+    const band = similarityBandPercentage(match.querySimilarityScore);
+    return band !== null && band >= 70;
+  });
 
   return (
     <div className="workspace-content admin-sidebar-page">
@@ -4441,12 +4449,20 @@ function ResearcherSimilarityCheck({ role }: { role: Role }) {
             <div>
               <h2>Results for “{submitted}”</h2>
               <p>
-                {state.matches.length === 0
-                  ? "No archived studies were available to compare."
+                {scored.length === 0
+                  ? "No archived study shares any terms with these keywords."
                   : flagged.length > 0
                     ? `${flagged.length} archived ${flagged.length === 1 ? "study" : "studies"} reached the 70% review threshold. Discuss these with your adviser before proceeding.`
                     : "No archived study reached the 70% review threshold."}
               </p>
+              {omitted > 0 && (
+                <p className="similarity-omitted">
+                  {omitted} archived{" "}
+                  {omitted === 1 ? "study shares" : "studies share"} no terms
+                  with these keywords and {omitted === 1 ? "is" : "are"} not
+                  listed.
+                </p>
+              )}
             </div>
             {flagged.length > 0 && (
               <span className="pending-invite-count">
@@ -4454,7 +4470,7 @@ function ResearcherSimilarityCheck({ role }: { role: Role }) {
               </span>
             )}
           </div>
-          {state.matches.length > 0 && (
+          {scored.length > 0 && (
             <>
               <div className="admin-table-wrap">
                 <table>
@@ -4470,7 +4486,7 @@ function ResearcherSimilarityCheck({ role }: { role: Role }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {state.matches.map((match) => {
+                    {scored.map((match) => {
                       const band = similarityBandPercentage(
                         match.querySimilarityScore,
                       );

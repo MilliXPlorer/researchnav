@@ -1682,6 +1682,12 @@ p {
   font-family: var(--mono);
   font-size: 10px;
 }
+.similarity-omitted {
+  margin: 6px 0 0;
+  color: var(--slate);
+  font-size: 11px;
+  line-height: 1.55;
+}
 .research-activity {
   display: grid;
   gap: 22px;

@@ -18,7 +18,7 @@ import {
   SimilarityRing,
 } from "./components";
 import { searchPublicResearch, searchPublicResearchBySimilarity } from "./api";
-import { similarityBandPercentage } from "./similarity";
+import { isZeroSimilarity, similarityBandPercentage } from "./similarity";
 import type { ResearchRecord } from "./types";
 import { useDialogFocus } from "./useDialogFocus";
 
@@ -198,6 +198,15 @@ export default function CatalogPage({
 
     const filtered = base.filter((record) => {
       if (allowedIds && !allowedIds.has(record.id)) return false;
+      // A ranked record scoring zero shares no terms with the query, so it is
+      // not a search result. Listing it as 0.0000% only buries the real matches.
+      // A missing score is kept and reported as unavailable instead.
+      if (
+        hasActiveSimilarityQuery &&
+        isZeroSimilarity(record.querySimilarityScore, 4)
+      ) {
+        return false;
+      }
       // `institute` has no server-side filter, so it is always applied locally.
       return institute === "all" || record.institute === institute;
     });
@@ -431,10 +440,17 @@ export default function CatalogPage({
                 message="The repository did not return any public records."
               />
             ) : results.length === 0 ? (
-              <EmptyState
-                title="No studies match these filters"
-                message="Try a broader keyword or clear one of your filters."
-              />
+              hasActiveSimilarityQuery ? (
+                <EmptyState
+                  title="No studies share terms with this search"
+                  message="Nothing in the catalog matched these words. Try different or broader keywords."
+                />
+              ) : (
+                <EmptyState
+                  title="No studies match these filters"
+                  message="Try a broader keyword or clear one of your filters."
+                />
+              )
             ) : (
               results.map((record) => (
                 <article className="result-card" key={record.id}>

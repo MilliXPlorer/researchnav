@@ -113,7 +113,9 @@ export default function SimilarityResults({
       (
         result,
       ): result is { result: SimilarityResultResource; percentage: number } =>
-        result.percentage !== null,
+        // A stored match rounding to zero shares no comparable terms, so it is
+        // not a candidate worth presenting as a similarity result.
+        result.percentage !== null && result.percentage > 0,
     )
     .sort((first, second) => second.percentage - first.percentage);
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isZeroSimilarity,
   SIMILARITY_FLAG_THRESHOLD,
   similarityBand,
   similarityBandPercentage,
@@ -40,6 +41,33 @@ describe("similarityBandPercentage", () => {
   it("returns null rather than fabricating a score", () => {
     for (const value of [null, undefined, "", "   ", "abc", -0.1, 1.1, NaN]) {
       expect(similarityBandPercentage(value)).toBeNull();
+    }
+  });
+});
+
+describe("isZeroSimilarity", () => {
+  it("treats an exact zero score as zero", () => {
+    expect(isZeroSimilarity("0.000000")).toBe(true);
+    expect(isZeroSimilarity(0)).toBe(true);
+  });
+
+  it("treats any real overlap as non-zero", () => {
+    expect(isZeroSimilarity("0.500000")).toBe(false);
+    expect(isZeroSimilarity(1)).toBe(false);
+  });
+
+  it("respects the precision the surface will actually print", () => {
+    // 0.4% prints as "0%" for a whole-number surface but as "0.4000%" at four places.
+    expect(isZeroSimilarity(0.004)).toBe(true);
+    expect(isZeroSimilarity(0.004, 4)).toBe(false);
+    // Below four decimal places of a percent, even the detailed surface shows zero.
+    expect(isZeroSimilarity(0.0000001, 4)).toBe(true);
+  });
+
+  it("never reports an absent or invalid score as zero, so it stays visible as unavailable", () => {
+    for (const value of [null, undefined, "", "   ", "abc", -0.1, 1.1, NaN]) {
+      expect(isZeroSimilarity(value)).toBe(false);
+      expect(isZeroSimilarity(value, 4)).toBe(false);
     }
   });
 });

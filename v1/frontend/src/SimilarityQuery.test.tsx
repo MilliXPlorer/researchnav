@@ -182,6 +182,61 @@ describe("researcher similarity check", () => {
     expect(await screen.findByText("Unavailable")).toBeInTheDocument();
   });
 
+  it("hides zero-scoring studies and reports how many were set aside", async () => {
+    stubQuery([
+      archived(1, "A WEB-BASED RESEARCH REPOSITORY SYSTEM", "0.640000", [
+        "repository",
+      ]),
+      archived(2, "A MOBILE POND WATER QUALITY MONITOR", "0.000000"),
+      archived(3, "A GEOGRAPHIC MAPPING TOOL FOR EXTENSION", "0.000000"),
+    ]);
+    renderCheck();
+
+    fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
+      target: { value: "research repository" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Check for duplicates" }),
+    );
+
+    expect(
+      await screen.findByText("A WEB-BASED RESEARCH REPOSITORY SYSTEM"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("A MOBILE POND WATER QUALITY MONITOR"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("A GEOGRAPHIC MAPPING TOOL FOR EXTENSION"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("0%")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/2 archived studies share no terms/),
+    ).toBeInTheDocument();
+  });
+
+  it("reports plainly when every study scores zero", async () => {
+    stubQuery([
+      archived(1, "A MOBILE POND WATER QUALITY MONITOR", "0.000000"),
+      archived(2, "A GEOGRAPHIC MAPPING TOOL FOR EXTENSION", "0.000000"),
+    ]);
+    renderCheck();
+
+    fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
+      target: { value: "quantum cryptography" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Check for duplicates" }),
+    );
+
+    expect(
+      await screen.findByText(
+        "No archived study shares any terms with these keywords.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByText("0%")).not.toBeInTheDocument();
+  });
+
   it("surfaces a failed check as a retryable error", async () => {
     stubQuery([], undefined, 502);
     renderCheck();
