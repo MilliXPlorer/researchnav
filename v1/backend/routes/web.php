@@ -174,6 +174,9 @@ Route::prefix('api')
 
             Route::get('research/{researchDocument}/similarity', [SimilarityController::class, 'index']);
             Route::post('research/{researchDocument}/similarity/check', [SimilarityController::class, 'check'])->middleware(['origin.allowed', 'throttle:similarity-results']);
+            // Pre-submission duplicate check for a typed title or keywords. It
+            // needs no research record and writes nothing.
+            Route::post('similarity/query', [SimilarityController::class, 'query'])->middleware(['origin.allowed', 'throttle:similarity-query']);
 
             Route::get('research/{researchDocument}/feedback', [FeedbackController::class, 'index']);
             Route::post('research/{researchDocument}/feedback', [FeedbackController::class, 'store'])->middleware('origin.allowed');

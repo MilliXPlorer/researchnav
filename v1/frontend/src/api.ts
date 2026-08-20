@@ -825,11 +825,14 @@ export interface PublicResearchResource {
   manuscript_date_label?: string;
   abstract_provenance?: string;
   query_similarity_score?: number | string | null;
+  matched_terms?: string[] | null;
 }
 
 /** A public repository result ranked by the submitted query's similarity score. */
 export interface PublicRepositorySimilarityResource extends PublicResearchResource {
   query_similarity_score: number | string | null;
+  /** Terms shared between the submitted query and this title. */
+  matched_terms?: string[] | null;
 }
 
 export interface PublicRepositorySimilarityResponse {
@@ -889,6 +892,7 @@ export function toResearchRecord(
     manuscriptDate: resource.manuscript_date_label,
     abstractProvenance: resource.abstract_provenance,
     querySimilarityScore: resource.query_similarity_score,
+    matchedTerms: resource.matched_terms ?? null,
   };
 }
 
@@ -982,6 +986,27 @@ export async function searchPublicResearchBySimilarity(
       body: JSON.stringify({ q }),
       signal,
     },
+    fetcher,
+  );
+  return (response.data ?? []).map(toResearchRecord);
+}
+
+/**
+ * Scores a typed title or keywords against the archived repository for an
+ * authenticated account, without requiring an existing research record.
+ *
+ * This is the pre-submission duplicate check. It writes nothing, and its per
+ * account rate limit is high enough to refine a proposed title repeatedly,
+ * unlike the sessionless public endpoint.
+ */
+export async function checkTitleQuerySimilarity(
+  q: string,
+  fetcher: ApiFetch = globalThis.fetch,
+  signal?: AbortSignal,
+): Promise<ResearchRecord[]> {
+  const response = await apiRequest<PublicRepositorySimilarityResponse>(
+    "/api/similarity/query",
+    { method: "POST", body: JSON.stringify({ q }), signal },
     fetcher,
   );
   return (response.data ?? []).map(toResearchRecord);

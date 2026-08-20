@@ -1656,6 +1656,32 @@ p {
 }
 
 /* Research activity: feedback, revisions, monitoring */
+/* Pre-submission similarity check, driven by typed keywords */
+.similarity-query-form {
+  display: grid;
+  gap: 12px;
+}
+.similarity-query-form input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  background: var(--paper);
+  font-size: 13px;
+}
+.similarity-query-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.similarity-query-count {
+  margin-left: auto;
+  color: var(--slate);
+  font-family: var(--mono);
+  font-size: 10px;
+}
 .research-activity {
   display: grid;
   gap: 22px;

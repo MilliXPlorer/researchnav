@@ -38,6 +38,10 @@ export interface ResearchRecord {
   researchStage: string;
   manuscriptDate?: string;
   abstractProvenance?: string;
+  /** Normalized score calculated for the active public repository query only. */
+  querySimilarityScore?: number | string | null;
+  /** Terms shared with the submitted query, when the result came from a check. */
+  matchedTerms?: string[] | null;
 }
 
 export interface RoleConfig {

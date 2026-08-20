@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import {
   ApiError,
+  checkTitleQuerySimilarity,
   createCoordinatorSchedule,
   createInstructorSection,
   createResearchDraft,
@@ -67,11 +68,16 @@ import {
   type ResearchDocumentSummaryResource,
   type StatisticianQueueItem,
 } from "./api";
-import { Button, SimilarityBadge } from "./components";
+import {
+  Button,
+  SimilarityBadge,
+  SimilarityLegend,
+  SimilarityRing,
+} from "./components";
 import { roleConfigs } from "./data";
 import { ConfirmDialog, Modal } from "./Modal";
 import ResearchActivity from "./ResearchActivity";
-import SimilarityResults from "./SimilarityResults";
+import { similarityBandPercentage } from "./similarity";
 import type { ResearchRecord, Role } from "./types";
 import { useLiveFilters } from "./useLiveFilters";
 
@@ -4333,59 +4339,190 @@ function ResearcherNewSubmission({
   );
 }
 
+const MAX_SIMILARITY_QUERY_LENGTH = 200;
+
+/**
+ * Pre-submission duplicate check.
+ *
+ * The comparison is driven by the title or keywords typed into the search bar,
+ * not by an already-created research record, so a proposed title can be
+ * validated before any submission exists.
+ */
 function ResearcherSimilarityCheck({ role }: { role: Role }) {
-  const [attempt, reload] = useAttempt();
-  const state = useLoad(
-    () => listResearchDocuments({ mine: true, per_page: 100 }),
-    attempt,
-  );
-  const [selected, setSelected] = useState("");
-  const documents = state.status === "ready" ? state.data.data : [];
-  const selection =
-    documents.find((item) => String(item.id) === selected) ?? documents[0];
+  const [draft, setDraft] = useState("");
+  const [submitted, setSubmitted] = useState("");
+  const [state, setState] = useState<
+    | { status: "idle" }
+    | { status: "checking" }
+    | { status: "ready"; matches: ResearchRecord[] }
+    | { status: "error"; message: string }
+  >({ status: "idle" });
+
+  const trimmed = draft.trim();
+  const tooShort = trimmed.length > 0 && trimmed.length < 2;
+  const canCheck =
+    trimmed.length >= 2 &&
+    trimmed.length <= MAX_SIMILARITY_QUERY_LENGTH &&
+    state.status !== "checking";
+
+  function runCheck() {
+    if (!canCheck) return;
+    setSubmitted(trimmed);
+    setState({ status: "checking" });
+    void checkTitleQuerySimilarity(trimmed)
+      .then((matches) => setState({ status: "ready", matches }))
+      .catch((requestError: unknown) =>
+        setState({
+          status: "error",
+          message: similarityQueryError(requestError),
+        }),
+      );
+  }
+
+  const flagged =
+    state.status === "ready"
+      ? state.matches.filter((match) => {
+          const band = similarityBandPercentage(match.querySimilarityScore);
+          return band !== null && band >= 70;
+        })
+      : [];
 
   return (
     <div className="workspace-content admin-sidebar-page">
       <RolePageHeader
         role={role}
         title="Similarity check"
-        description="Run and review title-similarity results for one of your submissions."
-        action={
-          <Button variant="secondary" onClick={reload}>
-            <RefreshCw /> Refresh
-          </Button>
-        }
+        description="Type a proposed title or keywords to check it against the archived repository before you submit."
       />
-      {state.status === "loading" ? (
-        <Loading label="Loading your submissions" />
+
+      <section className="panel-card admin-provision-card">
+        <form
+          className="similarity-query-form"
+          role="search"
+          onSubmit={(event) => {
+            event.preventDefault();
+            runCheck();
+          }}
+        >
+          <label className="full-field" htmlFor="similarity-query">
+            Proposed title or keywords
+            <input
+              id="similarity-query"
+              type="search"
+              value={draft}
+              maxLength={MAX_SIMILARITY_QUERY_LENGTH}
+              placeholder="e.g. web-based inventory management system for small business"
+              onChange={(event) => setDraft(event.target.value)}
+            />
+          </label>
+          <div className="similarity-query-actions">
+            <span className="similarity-query-count">
+              {trimmed.length}/{MAX_SIMILARITY_QUERY_LENGTH}
+            </span>
+            <Button type="submit" disabled={!canCheck}>
+              {state.status === "checking"
+                ? "Checking…"
+                : "Check for duplicates"}
+            </Button>
+          </div>
+        </form>
+        {tooShort && (
+          <p className="admin-empty">Enter at least two characters to check.</p>
+        )}
+      </section>
+
+      {state.status === "checking" ? (
+        <Loading label="Comparing your keywords with the repository" />
       ) : state.status === "error" ? (
-        <InlineError message={state.message} retry={reload} />
-      ) : documents.length === 0 ? (
-        <p className="admin-empty">
-          You have no submissions to run a similarity check on.
-        </p>
-      ) : (
-        <>
-          <section className="panel-card admin-provision-card">
-            <label className="full-field">
-              Submission
-              <select
-                value={selection ? String(selection.id) : ""}
-                onChange={(event) => setSelected(event.target.value)}
-              >
-                {documents.map((document) => (
-                  <option key={document.id} value={document.id}>
-                    {document.title}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </section>
-          <SimilarityResults researchDocumentId={selection?.id} />
-        </>
-      )}
+        <InlineError message={state.message} retry={runCheck} />
+      ) : state.status === "ready" ? (
+        <section className="panel-card admin-data-card">
+          <div className="admin-card-heading">
+            <div>
+              <h2>Results for “{submitted}”</h2>
+              <p>
+                {state.matches.length === 0
+                  ? "No archived studies were available to compare."
+                  : flagged.length > 0
+                    ? `${flagged.length} archived ${flagged.length === 1 ? "study" : "studies"} reached the 70% review threshold. Discuss these with your adviser before proceeding.`
+                    : "No archived study reached the 70% review threshold."}
+              </p>
+            </div>
+            {flagged.length > 0 && (
+              <span className="pending-invite-count">
+                {flagged.length} flagged
+              </span>
+            )}
+          </div>
+          {state.matches.length > 0 && (
+            <>
+              <div className="admin-table-wrap">
+                <table>
+                  <caption className="sr-only">
+                    Archived studies ranked by similarity to your keywords
+                  </caption>
+                  <thead>
+                    <tr>
+                      <th>Similarity</th>
+                      <th>Archived title</th>
+                      <th>Year</th>
+                      <th>Shared terms</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {state.matches.map((match) => {
+                      const band = similarityBandPercentage(
+                        match.querySimilarityScore,
+                      );
+                      return (
+                        <tr key={match.id}>
+                          <td>
+                            {band === null ? (
+                              "Unavailable"
+                            ) : (
+                              <span className="score-cell">
+                                <SimilarityRing score={band} size="small" />
+                                <SimilarityBadge score={band} />
+                              </span>
+                            )}
+                          </td>
+                          <td className="serif-cell">{match.title}</td>
+                          <td>{match.year}</td>
+                          <td>
+                            {match.matchedTerms && match.matchedTerms.length > 0
+                              ? match.matchedTerms.join(", ")
+                              : "—"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <SimilarityLegend />
+            </>
+          )}
+        </section>
+      ) : null}
     </div>
   );
+}
+
+function similarityQueryError(error: unknown) {
+  if (error instanceof ApiError) {
+    if (error.status === 429)
+      return "Too many checks in a short time. Wait a moment and try again.";
+    if (error.status === 422)
+      return "Enter between 2 and 200 characters to check a title.";
+    if (error.code === "SIMILARITY_UNAVAILABLE")
+      return "The similarity engine is not available right now.";
+    if (error.code === "SIMILARITY_PROCESS_FAILED")
+      return "The similarity check could not be completed. No score was produced.";
+    if (error.status === 401)
+      return "Session expired. Sign out and sign in again.";
+    return `The similarity check is unavailable (${error.code}).`;
+  }
+  return "The similarity check is unavailable (REQUEST_FAILED).";
 }
 
 function ResearcherRelatedStudies({ role }: { role: Role }) {
