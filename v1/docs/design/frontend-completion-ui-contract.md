@@ -35,8 +35,14 @@ Existing labels and defaults are preserved unless they currently lead to a
 blank page. Instructor Title Proposals, Adviser Pending Reviews, Statistician
 Review Queue, Panelist Assigned Manuscripts, Research Office Compliance Review,
 and Librarian Archiving Queue must have reachable, visible content. Unsupported
-Administrator destinations must be removed or represented as an honest system
-status view, not a speculative form.
+Administrator destinations must be removed, not replaced with speculative
+forms. Retain only System Overview, Access Requests, Coordinator Accounts, All
+Users, Audit Logs, and the existing settings status surface renamed System
+Status.
+
+Academics remains an existing compatibility persona outside the mandated role
+implementation order. Preserve Search, My Library, and Browse by Category and
+include them in Guest/Public compatibility and final role-navigation checks.
 
 Coordinator and Research Office navigation remain separate. A coordinator must
 never receive Research Office controls. Unknown roles render "Workspace
@@ -50,6 +56,9 @@ Each data-backed destination keeps its heading and supports:
 - Live data using existing cards, tables, filters, and controls.
 - A destination-specific empty state for a successful empty response.
 - An in-context error with Retry for a failed request.
+- An in-context contract error with Retry when a successful response does not
+  match the required envelope; changed read models validate required arrays,
+  objects, and pagination before rendering.
 - A clearly labeled read-only fallback, when eligible, with the exact text
   "Demo data — read only".
 
@@ -59,10 +68,14 @@ live API. Account or role changes clear previous live, mock, selected-record,
 and mutation state.
 
 Fallback is eligible only after a live `GET` fails because of a network error or
-HTTP `5xx` and an exact reviewed fixture exists. It is never used for writes,
-similarity POST requests, authentication/session/profile, notifications,
-uploads, previews, downloads, aborts, malformed successful responses,
-successful empty responses, or HTTP `401`, `403`, `404`, `405`, or `429`.
+HTTP `5xx`, the exact endpoint/read model is on the default-deny allowlist, an
+exact typed deterministic anonymized fixture exists, and the request was not
+aborted. Fixtures use synthetic Demo/Sample identifiers and contain no action,
+preview, or download URLs. Fallback is never used for writes, similarity POST
+requests, authentication/session/profile, notifications, uploads, previews,
+downloads, malformed successful responses, successful empty responses, or HTTP
+`401`, `403`, `404`, `405`, or `429`. Tests must prove mock views issue no
+mutation, preview, download, or mock-ID-derived detail request.
 
 ## Similarity Messaging
 
@@ -82,14 +95,17 @@ Similarity POST requests never use mock results.
 
 ## Responsive Behavior
 
-- At 320px, retain the mobile bottom navigation, single-column content, usable
-  touch targets, wrapped labels, and no page-level horizontal clipping.
+- At 320px and 375px, retain the mobile bottom navigation, single-column
+  content, approximately 40–44px touch targets, wrapped labels, and no page-level
+  horizontal clipping.
 - At 768px, retain the compact rail/menu pattern and ensure no destination is
   hidden by compact labels.
-- On desktop, retain the existing full shelf rail and centered workspace.
+- At 1024px and 1440px, retain the existing rail behavior and centered
+  workspace without clipped controls.
 - Wide tables use a labeled horizontal scroll region instead of shrinking text.
 - Filters stack where needed; dialogs and drawers scroll internally.
-- At 200% zoom, content, controls, and focus indicators remain reachable.
+- At 200% zoom, content, controls, and focus indicators remain reachable; run a
+  forced-colors sanity check for focus, status, and active navigation.
 - Preserve the existing reduced-motion behavior.
 
 ## Accessibility
@@ -102,7 +118,10 @@ Similarity POST requests never use mock results.
   status semantics.
 - Dialogs retain accessible names, focus containment, Escape handling, and
   focus restoration.
-- Route selection moves focus to the destination heading.
+- Every destination change moves focus to its heading, including desktop rail,
+  mobile Workspace selection, Home, direct URL, and back/forward navigation.
+- The mobile Workspace menu closes on Escape and close-without-selection
+  restores focus to its trigger.
 - Similarity and status meaning never relies on color alone.
 
 ## Acceptance Checks
@@ -114,5 +133,9 @@ Similarity POST requests never use mock results.
   remain truthful and never fabricate success.
 - Role menus contain no unrelated-role controls.
 - Existing GSSO, session, profile, and sign-out behavior remains unchanged.
+- Existing consent and active, invited, blocked, and access-request gating
+  remains unchanged; protected authentication/access files remain no-touch.
 - Keyboard and responsive checks cover the sidebar, mobile workspace menu,
   tables, notification drawer, metadata dialog, and mutation dialogs.
+- Role isolation applies to page controls and `/research/{id}` deep links as
+  well as navigation labels.
