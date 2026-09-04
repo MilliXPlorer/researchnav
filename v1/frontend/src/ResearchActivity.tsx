@@ -4,6 +4,7 @@ import {
   listFeedback,
   listMonitoringLogs,
   listResearchRevisions,
+  recordResearcherFeedbackAction,
   type FeedbackResource,
   type MonitoringLogResource,
   type ResearchRevisionResource,
@@ -52,9 +53,13 @@ function activityError(error: unknown) {
 export default function ResearchActivity({
   researchDocumentId,
   title,
+  refreshKey = 0,
+  researcherActions = false,
 }: {
   researchDocumentId: string | number;
   title?: string;
+  refreshKey?: number;
+  researcherActions?: boolean;
 }) {
   const [state, setState] = useState<ActivityState>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);
@@ -79,7 +84,7 @@ export default function ResearchActivity({
     return () => {
       cancelled = true;
     };
-  }, [researchDocumentId, attempt]);
+  }, [researchDocumentId, attempt, refreshKey]);
 
   if (state.status === "loading") {
     return (
@@ -108,12 +113,45 @@ export default function ResearchActivity({
 
   const { feedback, revisions, monitoring } = state;
 
+  async function applyFeedbackAction(
+    item: FeedbackResource,
+    action: "acknowledge" | "address",
+  ) {
+    const remarks =
+      action === "address"
+        ? window.prompt("Briefly describe what you addressed:")?.trim()
+        : undefined;
+    if (action === "address" && !remarks) return;
+    try {
+      const updated = await recordResearcherFeedbackAction(
+        researchDocumentId,
+        item.id,
+        {
+          action,
+          ...(remarks ? { remarks } : {}),
+        },
+      );
+      setState((current) =>
+        current.status === "ready"
+          ? {
+              ...current,
+              feedback: current.feedback.map((feedbackItem) =>
+                feedbackItem.id === updated.id ? updated : feedbackItem,
+              ),
+            }
+          : current,
+      );
+    } catch (error) {
+      setState({ status: "error", message: activityError(error) });
+    }
+  }
+
   return (
     <div className="research-activity">
       {title && <p className="research-activity-title">{title}</p>}
 
       <section className="activity-block">
-        <h3>Adviser feedback and remarks</h3>
+        <h3>Reviewer feedback and remarks</h3>
         {feedback.length === 0 ? (
           <p className="admin-empty">No feedback has been recorded yet.</p>
         ) : (
@@ -132,6 +170,34 @@ export default function ResearchActivity({
                   <time>{activityDate(item.created_at)}</time>
                 </div>
                 <p className="activity-comment">{item.comment}</p>
+                {item.reviewer_name && <p>Reviewer: {item.reviewer_name}</p>}
+                {researcherActions && (
+                  <div className="row-actions">
+                    <Button
+                      variant="secondary"
+                      disabled={item.researcher_acknowledged_at != null}
+                      onClick={() =>
+                        void applyFeedbackAction(item, "acknowledge")
+                      }
+                    >
+                      {item.researcher_acknowledged_at
+                        ? "Acknowledged"
+                        : "Acknowledge"}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      disabled={item.researcher_addressed_at != null}
+                      onClick={() => void applyFeedbackAction(item, "address")}
+                    >
+                      {item.researcher_addressed_at
+                        ? "Addressed"
+                        : "Mark addressed"}
+                    </Button>
+                  </div>
+                )}
+                {item.researcher_action_remarks && (
+                  <p>Researcher action: {item.researcher_action_remarks}</p>
+                )}
               </li>
             ))}
           </ul>
@@ -159,6 +225,12 @@ export default function ResearchActivity({
                 <p className="activity-comment">
                   {revision.revision_remarks ?? "No remarks were recorded."}
                 </p>
+                {revision.requester_name && (
+                  <p>Requested by: {revision.requester_name}</p>
+                )}
+                {revision.lifecycle_status && (
+                  <p>Lifecycle: {humanize(revision.lifecycle_status)}</p>
+                )}
               </li>
             ))}
           </ul>
@@ -189,6 +261,9 @@ export default function ResearchActivity({
                 )}
                 {entry.remarks && (
                   <p className="activity-comment">{entry.remarks}</p>
+                )}
+                {entry.performed_by_name && (
+                  <p>By: {entry.performed_by_name}</p>
                 )}
               </li>
             ))}

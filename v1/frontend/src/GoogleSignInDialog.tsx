@@ -66,7 +66,9 @@ export default function GoogleSignInDialog({
           client_id: clientId,
           auto_select: false,
           cancel_on_tap_outside: true,
-          use_fedcm_for_prompt: true,
+          // Brave and privacy-hardened Chromium profiles can disable FedCM.
+          // The standard GIS popup flow still works without that browser API.
+          use_fedcm_for_prompt: false,
           callback: async ({ credential }) => {
             setSubmitting(true);
             setError("");
@@ -82,13 +84,17 @@ export default function GoogleSignInDialog({
           },
         });
         buttonRef.current.replaceChildren();
+        const buttonWidth = Math.min(
+          320,
+          Math.max(200, buttonRef.current.clientWidth || 320),
+        );
         window.google.accounts.id.renderButton(buttonRef.current, {
           type: "standard",
           theme: "outline",
           size: "large",
           text: "continue_with",
           shape: "rectangular",
-          width: 320,
+          width: buttonWidth,
         });
       })
       .catch(() =>

@@ -11,6 +11,8 @@ import {
   Search,
   ShieldAlert,
   X,
+  LogOut,
+  Pencil,
 } from "lucide-react";
 import { canEnterDashboard } from "./access";
 import AccessRequestPanel from "./AccessRequestPanel";
@@ -24,6 +26,7 @@ import {
 import AdminSidebarPage from "./AdminSidebarPages";
 import { Logo } from "./components";
 import { roleConfigs } from "./data";
+import ProfileDialog, { ProfileAvatar } from "./ProfileDialog";
 import RoleSidebarPage from "./RoleSidebarPages";
 import RoleWorkspace, { type RoleDashboardLoadState } from "./RoleWorkspaces";
 import type { Role, UserSession } from "./types";
@@ -43,17 +46,22 @@ const primaryNav: Record<Role, string> = {
 };
 
 const navIcons = [LayoutDashboard, BookOpen, Search, Home, Bell, Menu];
+const ignoreSessionChange = () => undefined;
 
 export default function Dashboard({
   session,
   navigate,
+  onSessionChange = ignoreSessionChange,
   onLogout,
   researchDocumentId,
+  initialNav,
 }: {
   session: UserSession;
   navigate: (path: string) => void;
+  onSessionChange?: (session: UserSession) => void;
   onLogout?: () => Promise<void> | void;
   researchDocumentId?: string | number;
+  initialNav?: string;
 }) {
   const role = session.role;
   const dashboardScope = `${role}:${session.email.trim().toLowerCase()}`;
@@ -63,12 +71,16 @@ export default function Dashboard({
   const [activeNav, setActiveNav] = useState({
     scope: dashboardScope,
     role,
-    item: primaryNav[role],
+    item:
+      initialNav && config.nav.includes(initialNav)
+        ? initialNav
+        : primaryNav[role],
   });
   const [drawer, setDrawer] = useState({
     scope: dashboardScope,
     open: false,
   });
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [notificationState, setNotificationState] = useState({
     scope: dashboardScope,
@@ -84,6 +96,27 @@ export default function Dashboard({
   const [dashboardAttempt, setDashboardAttempt] = useState(0);
   const selectedNav =
     activeNav.scope === dashboardScope ? activeNav.item : primaryNav[role];
+  useEffect(() => {
+    if (
+      initialNav &&
+      role === "researcher" &&
+      config.nav.includes(initialNav)
+    ) {
+      setActiveNav({ scope: dashboardScope, role, item: initialNav });
+    }
+  }, [config.nav, dashboardScope, initialNav, role]);
+  const showingRecordWorkspace =
+    researchDocumentId !== undefined &&
+    (
+      [
+        "researcher",
+        "admin",
+        "adviser",
+        "instructor",
+        "panel",
+        "statistician",
+      ] as Role[]
+    ).includes(role);
   const scopedDashboardState: RoleDashboardLoadState =
     dashboardState.scope === dashboardScope
       ? dashboardState
@@ -170,7 +203,14 @@ export default function Dashboard({
   }, [dashboardAttempt, dashboardScope, role, session.accessStatus]);
 
   if (!canEnterDashboard(session)) {
-    return <AccessBlocker session={session} navigate={navigate} />;
+    return (
+      <AccessBlocker
+        session={session}
+        navigate={navigate}
+        onSessionChange={onSessionChange}
+        onLogout={onLogout}
+      />
+    );
   }
 
   return (
@@ -203,6 +243,15 @@ export default function Dashboard({
         <div className="lamp-actions">
           <span className="term-label">Role workspace</span>
           <button
+            className="workspace-menu-button"
+            onClick={() => setWorkspaceMenuOpen((open) => !open)}
+            aria-label="Open workspace navigation"
+            aria-expanded={workspaceMenuOpen}
+            aria-controls="mobile-workspace-navigation"
+          >
+            <Menu />
+          </button>
+          <button
             className="notification-button"
             onClick={() => setDrawer({ scope: dashboardScope, open: true })}
             aria-label="Open notifications"
@@ -215,11 +264,9 @@ export default function Dashboard({
             onClick={() => setAccountOpen(true)}
             aria-label="Open account details"
           >
-            <span className="avatar account-icon">
-              <CircleUserRound />
-            </span>
+            <ProfileAvatar session={session} className="account-icon" />
             <span className="account-copy">
-              <strong>{config.label}</strong>
+              <strong>{session.displayName}</strong>
               <small>{session.email}</small>
             </span>
           </button>
@@ -252,21 +299,32 @@ export default function Dashboard({
           })}
         </nav>
         <div className="shelf-footer">
-          <div className="shelf-stamp">
-            <BookOpen />
-            <span>
-              <strong>ResearchNAV</strong>
-              <small>Repository workspace</small>
-            </span>
+          <div className="shelf-profile">
+            <ProfileAvatar session={session} className="shelf-profile-avatar" />
+            <div className="shelf-profile-copy">
+              <button
+                className="shelf-profile-trigger"
+                onClick={() => setAccountOpen(true)}
+                aria-label={`Open profile for ${session.displayName}`}
+              >
+                <strong>{session.displayName}</strong>
+                <small>{session.email}</small>
+              </button>
+              <div className="shelf-profile-menu" role="menu">
+                <button role="menuitem" onClick={() => setAccountOpen(true)}>
+                  <Pencil size={14} /> Edit profile
+                </button>
+                <button role="menuitem" onClick={() => void onLogout?.()}>
+                  <LogOut size={14} /> Log out
+                </button>
+              </div>
+            </div>
           </div>
-          <button onClick={() => navigate("/")}>
-            Return to public catalog
-          </button>
         </div>
       </aside>
 
       <main id="workspace" className="workspace">
-        {selectedNav === primaryNav[role] ? (
+        {showingRecordWorkspace || selectedNav === primaryNav[role] ? (
           <RoleWorkspace
             role={role}
             navigate={navigate}
@@ -292,8 +350,44 @@ export default function Dashboard({
         )}
       </main>
 
+      {workspaceMenuOpen && (
+        <div
+          className="workspace-menu-backdrop"
+          onMouseDown={() => setWorkspaceMenuOpen(false)}
+        >
+          <nav
+            id="mobile-workspace-navigation"
+            className="workspace-menu"
+            aria-label={`${config.label} workspace navigation`}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <p className="eyebrow">{config.label} workspace</p>
+            {config.nav.map((item, index) => {
+              const Icon = navIcons[index % navIcons.length];
+              const active = item === selectedNav;
+              return (
+                <button
+                  key={item}
+                  className={active ? "active" : ""}
+                  aria-current={active ? "page" : undefined}
+                  onClick={() => {
+                    setActiveNav({ scope: dashboardScope, role, item });
+                    setWorkspaceMenuOpen(false);
+                  }}
+                >
+                  <Icon aria-hidden="true" />
+                  <span>{item}</span>
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+      )}
+
       <nav className="mobile-tabs" aria-label="Mobile navigation">
         <button
+          className={selectedNav === primaryNav[role] ? "active" : ""}
+          aria-current={selectedNav === primaryNav[role] ? "page" : undefined}
           onClick={() =>
             setActiveNav({
               scope: dashboardScope,
@@ -310,17 +404,14 @@ export default function Dashboard({
           <span>Search</span>
         </button>
         <button
-          className="active"
-          onClick={() =>
-            setActiveNav({
-              scope: dashboardScope,
-              role,
-              item: primaryNav[role],
-            })
-          }
+          className={selectedNav !== primaryNav[role] ? "active" : ""}
+          aria-current={selectedNav !== primaryNav[role] ? "page" : undefined}
+          onClick={() => setWorkspaceMenuOpen(true)}
+          aria-expanded={workspaceMenuOpen}
+          aria-controls="mobile-workspace-navigation"
         >
           <LayoutDashboard />
-          <span>Dashboard</span>
+          <span>Workspace</span>
         </button>
         <button
           onClick={() => setDrawer({ scope: dashboardScope, open: true })}
@@ -404,11 +495,11 @@ export default function Dashboard({
         />
       )}
       {accountOpen && (
-        <AccountDialog
+        <ProfileDialog
           session={session}
-          roleLabel={config.label}
+          onSessionChange={onSessionChange}
           onClose={() => setAccountOpen(false)}
-          navigate={navigate}
+          onOpenWorkspace={() => setAccountOpen(false)}
           onLogout={onLogout}
         />
       )}
@@ -499,12 +590,16 @@ function NotificationsDrawer({
                     />
                     <span>
                       {item.title && <strong>{item.title}</strong>}
-                      {item.message && <small>{item.message}</small>}
-                      {item.created_at && <time>{item.created_at}</time>}
-                      {item.action_url && <small>{item.action_url}</small>}
-                      {item.research_document_id !== null && (
-                        <small>{item.research_document_id}</small>
+                      {(item.details ?? item.message) && (
+                        <small>{item.details ?? item.message}</small>
                       )}
+                      {item.research_title && (
+                        <small>{item.research_title}</small>
+                      )}
+                      {item.submission_reference && (
+                        <small>{item.submission_reference}</small>
+                      )}
+                      {item.created_at && <time>{item.created_at}</time>}
                     </span>
                   </button>
                 ))}
@@ -543,81 +638,19 @@ function isAllowedNotificationPath(path: string | null): path is string {
   );
 }
 
-function AccountDialog({
-  session,
-  roleLabel,
-  onClose,
-  navigate,
-  onLogout,
-}: {
-  session: UserSession;
-  roleLabel: string;
-  onClose: () => void;
-  navigate: (path: string) => void;
-  onLogout?: () => Promise<void> | void;
-}) {
-  const [dialogRef, handleDialogKeyDown] = useDialogFocus<HTMLElement>(onClose);
-  return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
-      <section
-        className="account-dialog"
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="account-title"
-        onKeyDown={handleDialogKeyDown}
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <button
-          className="icon-button dialog-close"
-          onClick={onClose}
-          aria-label="Close account"
-        >
-          <X />
-        </button>
-        <span className="avatar account-avatar">
-          <CircleUserRound />
-        </span>
-        <p className="eyebrow">Authenticated account</p>
-        <h2 id="account-title">Google account</h2>
-        <p>{session.email}</p>
-        <div className="assigned-role">
-          <span>{session.isAdmin ? "Access level" : "Assigned role"}</span>
-          <strong>
-            {session.isAdmin ? "Administrator · Full access" : roleLabel}
-          </strong>
-        </div>
-        <small>
-          Your dashboard is selected automatically from this assigned role.
-          Contact the Research Coordinator if your access needs to change.
-        </small>
-        <button
-          className="account-public-link"
-          onClick={() => {
-            onClose();
-            navigate("/");
-          }}
-        >
-          Return to public catalog
-        </button>
-        {onLogout && (
-          <button className="account-signout" onClick={() => void onLogout()}>
-            Sign out
-          </button>
-        )}
-      </section>
-    </div>
-  );
-}
-
 function AccessBlocker({
   session,
   navigate,
+  onSessionChange,
+  onLogout,
 }: {
   session: UserSession;
   navigate: (path: string) => void;
+  onSessionChange: (session: UserSession) => void;
+  onLogout?: () => Promise<void> | void;
 }) {
   const invited = session.accessStatus === "invited";
+  const [profileOpen, setProfileOpen] = useState(false);
   return (
     <div className="access-blocker-page">
       <header className="access-blocker-header">
@@ -672,6 +705,12 @@ function AccessBlocker({
               <RefreshCw />
               {invited ? "I already confirmed" : "Check approval status"}
             </button>
+            <button
+              className="button button-secondary"
+              onClick={() => setProfileOpen(true)}
+            >
+              <CircleUserRound /> Manage profile
+            </button>
           </div>
           <button className="use-another-account" onClick={() => navigate("/")}>
             Use another Google account
@@ -679,6 +718,14 @@ function AccessBlocker({
         </section>
         {!invited && <AccessRequestPanel />}
       </main>
+      {profileOpen && (
+        <ProfileDialog
+          session={session}
+          onSessionChange={onSessionChange}
+          onClose={() => setProfileOpen(false)}
+          onLogout={onLogout}
+        />
+      )}
     </div>
   );
 }

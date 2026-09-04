@@ -5,6 +5,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import { within } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import CatalogPage from "./CatalogPage";
@@ -91,6 +92,101 @@ beforeEach(() => {
 });
 
 describe("public catalog", () => {
+  it("shows the authenticated profile instead of sign-in on the landing page", async () => {
+    const user = {
+      email: "ada@example.test",
+      role: "researcher" as const,
+      accessStatus: "active" as const,
+      isAdmin: false,
+      firstName: "Ada",
+      middleName: null,
+      lastName: "Lovelace",
+      studentEmployeeId: "2026-001",
+      displayName: "Ada Lovelace",
+      profilePhotoUrl: null,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        if (String(input) === "/api/profile") {
+          return new Response(JSON.stringify({ user }));
+        }
+        return new Response(JSON.stringify({ error: "NOT_FOUND" }), {
+          status: 404,
+        });
+      }),
+    );
+
+    const { container } = render(
+      <App
+        initialState={{
+          version: 1,
+          url: { pathname: "/", search: "" },
+          session: { status: "authenticated", user },
+          repository: { status: "ready", records: [reviewedRecord] },
+        }}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Sign in" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Workspace" })).toHaveAttribute(
+      "href",
+      "/app",
+    );
+    expect(
+      screen.queryByText("or continue to your workspace"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Open your workspace" }),
+    ).not.toBeInTheDocument();
+    expect(container.querySelector(".hero")).toHaveClass("hero-authenticated");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open profile for Ada Lovelace" }),
+    );
+    expect(
+      await screen.findByRole("dialog", { name: "Edit profile" }),
+    ).toBeInTheDocument();
+  });
+
+  it("provides the profile menu from the workspace sidebar", async () => {
+    const user = {
+      email: "ada@example.test",
+      role: "researcher" as const,
+      accessStatus: "active" as const,
+      isAdmin: false,
+      firstName: "Ada",
+      middleName: null,
+      lastName: "Lovelace",
+      studentEmployeeId: "2026-001",
+      displayName: "Ada Lovelace",
+      profilePhotoUrl: null,
+    };
+    render(
+      <App
+        initialState={{
+          version: 1,
+          url: { pathname: "/app", search: "" },
+          session: { status: "authenticated", user },
+          repository: { status: "ready", records: [] },
+        }}
+      />,
+    );
+
+    const sidebar = document.querySelector(".shelf-rail");
+    expect(sidebar).not.toBeNull();
+    expect(
+      within(sidebar as HTMLElement).getByText("Ada Lovelace"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: "Edit profile" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: "Log out" }),
+    ).toBeInTheDocument();
+  });
+
   it("displays API metadata using the Laravel author resource shape", async () => {
     window.history.replaceState({}, "", "/catalog");
     render(<App />);
@@ -261,6 +357,134 @@ describe("role workspaces", () => {
 
   const dashboardScopeFor = (role: Role) => `${role}:fixture@example.test`;
 
+  it("exposes every role destination through the workspace menu", async () => {
+    const activeSession = {
+      email: "researcher@example.test",
+      role: "researcher" as const,
+      accessStatus: "active" as const,
+      isAdmin: false,
+      firstName: "Research",
+      middleName: null,
+      lastName: "Student",
+      studentEmployeeId: null,
+      displayName: "Research Student",
+      profilePhotoUrl: null,
+    };
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      if (String(input) === "/api/notifications") {
+        return new Response(
+          JSON.stringify({ data: [], links: { next: null } }),
+        );
+      }
+
+      return new Response(
+        JSON.stringify({
+          data: { schema_version: 1, role: "researcher", sections: [] },
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<Dashboard session={activeSession} navigate={vi.fn()} />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open workspace navigation" }),
+    );
+
+    const menu = screen.getByRole("navigation", {
+      name: "Researcher workspace navigation",
+    });
+    expect(menu).toHaveTextContent("My Submissions");
+    expect(menu).toHaveTextContent("Similarity Check");
+    expect(menu).toHaveTextContent("Related Studies");
+    fireEvent.click(
+      within(menu).getByRole("button", { name: "Similarity Check" }),
+    );
+    expect(menu).not.toBeInTheDocument();
+  });
+
+  it("opens a researcher record from My Submissions without a refresh", async () => {
+    const session = {
+      email: "researcher@example.test",
+      role: "researcher" as const,
+      accessStatus: "active" as const,
+      isAdmin: false,
+      firstName: "Research",
+      middleName: null,
+      lastName: "Student",
+      studentEmployeeId: null,
+      displayName: "Research Student",
+      profilePhotoUrl: null,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        if (url === "/api/notifications")
+          return new Response(JSON.stringify({ data: [] }));
+        if (url === "/api/dashboard?role=researcher")
+          return new Response(
+            JSON.stringify({
+              data: { schema_version: 1, role: "researcher", sections: [] },
+            }),
+          );
+        if (url.startsWith("/api/research?") && url.includes("mine=1"))
+          return new Response(
+            JSON.stringify({
+              data: [
+                {
+                  id: 77,
+                  title: "Open without refresh",
+                  submission_status: "draft",
+                  archive_status: "not_archived",
+                  research_stage: "ongoing",
+                  submitted_at: null,
+                },
+              ],
+              meta: { current_page: 1, last_page: 1 },
+            }),
+          );
+        if (url === "/api/research/77")
+          return new Response(
+            JSON.stringify({
+              data: {
+                id: 77,
+                title: "Open without refresh",
+                submission_status: "draft",
+                archive_status: "not_archived",
+                research_stage: "ongoing",
+                abstract: null,
+                keywords: null,
+                publication_year: null,
+                category: null,
+                authors: [],
+                submitted_at: null,
+              },
+            }),
+          );
+        if (url.includes("/api/research/77/"))
+          return new Response(JSON.stringify({ data: [] }));
+        return new Response(JSON.stringify({ error: "NOT_FOUND" }), {
+          status: 404,
+        });
+      }),
+    );
+
+    render(
+      <App
+        initialState={{
+          version: 1,
+          url: { pathname: "/app", search: "" },
+          session: { status: "authenticated", user: session },
+          repository: { status: "ready", records: [] },
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "My Submissions" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open record" }));
+
+    expect(await screen.findByText("Open without refresh")).toBeInTheDocument();
+  });
+
   const readyProps = (role: Exclude<Role, "researcher">, key: string) => ({
     role,
     selectNav: vi.fn(),
@@ -284,6 +508,18 @@ describe("role workspaces", () => {
       expect(
         screen.getByRole("heading", { level: 2, name: sectionHeading }),
       ).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { level: 2, name: "Statistics" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(sectionHeading, { selector: "dt" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { level: 3, name: "Current workload" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("meter", { name: sectionHeading }),
+      ).toHaveAttribute("aria-valuenow", "7");
       expect(screen.getByText("7")).toBeInTheDocument();
       expect(screen.getByText(`${role} API RECORD`)).toBeInTheDocument();
       expect(screen.getByText("Unavailable")).toBeInTheDocument();
@@ -548,7 +784,7 @@ describe("role workspaces", () => {
 
   it("renders live researcher sections from dashboard data", () => {
     const selectNav = vi.fn();
-    render(
+    const { container } = render(
       <RoleWorkspace
         role="researcher"
         selectNav={selectNav}
@@ -580,6 +816,36 @@ describe("role workspaces", () => {
                 ],
               },
             ],
+            analytics: {
+              title: "Research activity",
+              period: "Last 6 months",
+              series: [
+                {
+                  key: "created",
+                  label: "Created",
+                  points: [
+                    { key: "2026-03", label: "Mar", value: 0 },
+                    { key: "2026-04", label: "Apr", value: 1 },
+                    { key: "2026-05", label: "May", value: 2 },
+                    { key: "2026-06", label: "Jun", value: 1 },
+                    { key: "2026-07", label: "Jul", value: 3 },
+                    { key: "2026-08", label: "Aug", value: 2 },
+                  ],
+                },
+                {
+                  key: "archived",
+                  label: "Archived",
+                  points: [
+                    { key: "2026-03", label: "Mar", value: 0 },
+                    { key: "2026-04", label: "Apr", value: 0 },
+                    { key: "2026-05", label: "May", value: 1 },
+                    { key: "2026-06", label: "Jun", value: 0 },
+                    { key: "2026-07", label: "Jul", value: 1 },
+                    { key: "2026-08", label: "Aug", value: 1 },
+                  ],
+                },
+              ],
+            },
           },
         }}
         onRetry={vi.fn()}
@@ -592,8 +858,21 @@ describe("role workspaces", () => {
     expect(
       screen.getByRole("heading", { name: "Revision required" }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("img", {
+        name: "Research activity, Last 6 months",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("table", {
+        name: "Research activity, Last 6 months",
+      }),
+    ).toBeInTheDocument();
+    expect(container.querySelectorAll(".analytics-line polyline")).toHaveLength(
+      2,
+    );
     fireEvent.click(screen.getByRole("button", { name: /New submission/ }));
-    expect(selectNav).toHaveBeenCalledWith("New Submission");
+    expect(selectNav).toHaveBeenCalledWith("My Submissions");
   });
 });
 
@@ -614,6 +893,12 @@ describe("authenticated notifications", () => {
     role: "researcher" as const,
     accessStatus: "active" as const,
     isAdmin: false,
+    firstName: "Research",
+    middleName: null,
+    lastName: "Student",
+    studentEmployeeId: null,
+    displayName: "Research Student",
+    profilePhotoUrl: null,
   };
   const notification = {
     id: "f2bc7d6b-28d5-4ebc-8ac3-6d5e7c0b2fc0",
@@ -621,6 +906,9 @@ describe("authenticated notifications", () => {
     event: "RESEARCH_SUBMITTED",
     title: "Research activity",
     message: "Research was submitted for review.",
+    details: "Research was submitted for review. · Safe research title",
+    research_title: "Safe research title",
+    submission_reference: "RN-2026-ABCD1234",
     action_url: "/research/42",
     research_document_id: 42,
     read_at: null,
@@ -948,6 +1236,7 @@ describe("authenticated notifications", () => {
       ...notification,
       title: "ADVISER A SENSITIVE NOTIFICATION",
       message: "Only adviser A may view this message.",
+      details: "Only adviser A may view this message.",
     };
     let notificationRequests = 0;
     let resolveAdviserBNotifications!: (response: Response) => void;
@@ -1200,9 +1489,9 @@ describe("authenticated notifications", () => {
         busy: true,
       }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Title Proposals" })).toHaveClass(
-      "active",
-    );
+    expect(
+      screen.getByRole("button", { name: "Assigned Submissions" }),
+    ).toBeInTheDocument();
   });
 
   it("ignores stale dashboard responses after role changes", async () => {
@@ -1469,12 +1758,16 @@ describe("authenticated notifications", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open notifications" }));
 
     expect(await screen.findByText(notification.title)).toBeInTheDocument();
-    expect(screen.getByText(notification.message)).toBeInTheDocument();
-    expect(screen.getByText(notification.created_at)).toBeInTheDocument();
-    expect(screen.getByText(notification.action_url)).toBeInTheDocument();
+    expect(screen.getByText(notification.details)).toBeInTheDocument();
+    expect(screen.getByText(notification.research_title)).toBeInTheDocument();
     expect(
-      screen.getByText(String(notification.research_document_id)),
+      screen.getByText(notification.submission_reference),
     ).toBeInTheDocument();
+    expect(screen.getByText(notification.created_at)).toBeInTheDocument();
+    expect(screen.queryByText(notification.action_url)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(String(notification.research_document_id)),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Open notifications" }),
     ).toHaveTextContent("1");
@@ -1491,6 +1784,84 @@ describe("authenticated notifications", () => {
       expect.objectContaining({ method: "PATCH" }),
     );
   });
+
+  it.each([
+    ["adviser", false],
+    ["instructor", false],
+    ["panel", true],
+    ["statistician", true],
+  ] as const)(
+    "opens a notified %s assignment at an authorized %s workspace",
+    async (role, readOnly) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: string | URL | Request) => {
+          const path = String(input);
+          if (path === "/api/notifications")
+            return new Response(
+              JSON.stringify({ data: [], links: { next: null } }),
+            );
+          if (path === "/api/dashboard")
+            return new Response(
+              JSON.stringify({
+                data: { schema_version: 1, role, sections: [] },
+              }),
+            );
+          if (path === "/api/research/42")
+            return new Response(
+              JSON.stringify({
+                data: {
+                  id: 42,
+                  title: "Deep-linked assigned record",
+                  abstract: "Assigned review evidence.",
+                  keywords: null,
+                  publication_year: null,
+                  research_stage: "title_proposal",
+                  submission_status: "under_review",
+                  archive_status: "not_archived",
+                  visibility: "private",
+                },
+              }),
+            );
+          if (path.startsWith("/api/research/42/"))
+            return new Response(JSON.stringify({ data: [] }));
+          return new Response(JSON.stringify({ error: "NOT_FOUND" }), {
+            status: 404,
+          });
+        }),
+      );
+
+      render(
+        <Dashboard
+          session={{ ...activeSession, role }}
+          navigate={vi.fn()}
+          researchDocumentId={42}
+        />,
+      );
+
+      expect(
+        await screen.findByRole("heading", {
+          level: 2,
+          name: "Deep-linked assigned record",
+        }),
+      ).toBeInTheDocument();
+      if (readOnly) {
+        expect(
+          screen.getByText("Read-only assigned record."),
+        ).toBeInTheDocument();
+        expect(
+          screen.queryByRole("button", { name: "Add remark" }),
+        ).not.toBeInTheDocument();
+        expect(
+          screen.queryByRole("button", { name: "Request revision" }),
+        ).not.toBeInTheDocument();
+      } else {
+        expect(
+          screen.getByRole("button", { name: "Add remark" }),
+        ).toBeInTheDocument();
+      }
+    },
+  );
 });
 
 describe("sign out middleware", () => {
@@ -1504,6 +1875,12 @@ describe("sign out middleware", () => {
         role: "researcher",
         accessStatus: "active",
         isAdmin: false,
+        firstName: "Research",
+        middleName: null,
+        lastName: "Student",
+        studentEmployeeId: null,
+        displayName: "Research Student",
+        profilePhotoUrl: null,
       },
     },
     repository: { status: "unresolved", records: [] },

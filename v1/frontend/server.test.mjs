@@ -76,7 +76,7 @@ describe("SSR gateway", () => {
           appHtml: "<main>SSR content</main>",
           serializedState: '{"version":1}',
           statusCode: 200,
-          setCookies: ["researchnav.sid=renewed; HttpOnly; SameSite=Lax"],
+          setCookies: ["researchnav_sid=renewed; HttpOnly; SameSite=Lax"],
         }),
       },
     });
@@ -88,7 +88,7 @@ describe("SSR gateway", () => {
     expect(page.headers.get("content-security-policy")).toContain(
       "frame-ancestors 'none'",
     );
-    expect(page.headers.get("set-cookie")).toContain("researchnav.sid=renewed");
+    expect(page.headers.get("set-cookie")).toContain("researchnav_sid=renewed");
 
     const privateResponse = await fetch(
       `${origin}/backend/storage/app/%70rivate/research_studies/ics/file.docx`,
@@ -99,6 +99,39 @@ describe("SSR gateway", () => {
     const viteFsResponse = await fetch(`${origin}/@fs/C:/workspace/file.css`);
     expect(viteFsResponse.status).toBe(404);
     expect(await viteFsResponse.text()).not.toContain("SSR content");
+  });
+
+  it("redirects protected anonymous renders to the landing page", async () => {
+    const apiOrigin = await upstream((_request, response) => {
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ data: [], links: { next: null } }));
+    });
+    const app = await createApp({
+      production: true,
+      publicOrigin: "https://researchnav.example.test",
+      apiOrigin,
+      template,
+      renderer: {
+        render: async () => ({
+          appHtml: "",
+          serializedState: "{}",
+          statusCode: 302,
+          redirectTo: "/",
+          setCookies: [
+            "researchnav_sid=expired; Max-Age=0; HttpOnly; SameSite=Lax",
+          ],
+        }),
+      },
+    });
+    const origin = await listen(app);
+
+    const response = await fetch(`${origin}/app`, { redirect: "manual" });
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("/");
+    expect(response.headers.get("set-cookie")).toContain(
+      "researchnav_sid=expired",
+    );
+    expect(await response.text()).not.toContain("SSR content");
   });
 
   it("streams API method, body, cookie, origin, and response", async () => {
@@ -135,7 +168,7 @@ describe("SSR gateway", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        cookie: "researchnav.sid=abc",
+        cookie: "researchnav_sid=abc",
         origin: "https://researchnav.example.test",
       },
       body: '{"title":"SSR"}',
@@ -144,7 +177,7 @@ describe("SSR gateway", () => {
     await expect(response.json()).resolves.toEqual({
       method: "POST",
       body: '{"title":"SSR"}',
-      cookie: "researchnav.sid=abc",
+      cookie: "researchnav_sid=abc",
       origin: "https://researchnav.example.test",
     });
   });
@@ -209,6 +242,39 @@ describe("SSR gateway", () => {
     });
 
     expect(response.status).toBe(413);
+    expect(proxied).toBe(false);
+  });
+
+  it("applies the smaller transport limit to profile photos", async () => {
+    let proxied = false;
+    const apiOrigin = await upstream((_request, response) => {
+      proxied = true;
+      response.end();
+    });
+    const app = await createApp({
+      production: true,
+      publicOrigin: "https://researchnav.example.test",
+      apiOrigin,
+      template,
+      renderer: {
+        render: async () => ({
+          appHtml: "",
+          serializedState: "{}",
+          statusCode: 200,
+          setCookies: [],
+        }),
+      },
+    });
+    const origin = await listen(app);
+
+    for (const path of ["/api/profile/photo", "/api/profile/photo/"]) {
+      const response = await fetch(`${origin}${path}`, {
+        method: "POST",
+        headers: { "content-type": "multipart/form-data; boundary=test" },
+        body: Buffer.alloc(3 * 1024 * 1024 + 1),
+      });
+      expect(response.status).toBe(413);
+    }
     expect(proxied).toBe(false);
   });
 

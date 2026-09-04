@@ -1,8 +1,15 @@
 import { Archive, ArrowRight, LibraryBig, ShieldCheck } from "lucide-react";
 import { Button } from "./components";
 import AdminResearchWorkspace from "./AdminResearchWorkspace";
+import InstructorResearchReview from "./InstructorResearchReview";
+import ResearcherResearchWorkspace from "./ResearcherResearchWorkspace";
 import SimilarityResults from "./SimilarityResults";
-import { ApiError, type RoleDashboard, type RoleDashboardSection } from "./api";
+import {
+  ApiError,
+  type RoleDashboard,
+  type RoleDashboardAnalytics,
+  type RoleDashboardSection,
+} from "./api";
 import type { Role } from "./types";
 
 export type RoleDashboardLoadState =
@@ -36,6 +43,42 @@ export default function RoleWorkspace({
         researchDocumentId={researchDocumentId}
         navigate={navigate}
       />
+    );
+  }
+
+  if (role === "researcher" && researchDocumentId !== undefined) {
+    return (
+      <ResearcherResearchWorkspace
+        key={`${dashboardScope}:${researchDocumentId}`}
+        researchDocumentId={researchDocumentId}
+        navigate={navigate}
+      />
+    );
+  }
+
+  if (
+    researchDocumentId !== undefined &&
+    (["adviser", "instructor", "panel", "statistician"] as Role[]).includes(
+      role,
+    )
+  ) {
+    const readOnly = role === "panel" || role === "statistician";
+    return (
+      <div className="workspace-content">
+        <InstructorResearchReview
+          key={`${dashboardScope}:${researchDocumentId}`}
+          submission={{
+            research_document_id: Number(researchDocumentId),
+            title: "Assigned research",
+            research_stage: "title_proposal",
+            submission_status: "submitted",
+            submitter: null,
+            updated_at: null,
+          }}
+          readOnly={readOnly}
+          onUpdated={onRetry}
+        />
+      </div>
     );
   }
 
@@ -109,7 +152,7 @@ function ResearcherWorkspace({
         title={config.title}
         description={config.description}
         action={
-          <Button onClick={() => selectNav("New Submission")}>
+          <Button onClick={() => selectNav("My Submissions")}>
             New submission <ArrowRight />
           </Button>
         }
@@ -247,10 +290,12 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
       assigned_reviews: {
         title: "Assigned reviews",
         description: "Active research reviews assigned to you.",
+        internalRecord: true,
       },
       revision_requests: {
         title: "Revision requests",
         description: "Assigned research awaiting revisions.",
+        internalRecord: true,
       },
       repository_references: {
         title: "Repository references",
@@ -506,22 +551,283 @@ function DashboardSections({
   }
 
   return (
-    <div className="role-dashboard-sections">
-      {dashboardState.dashboard.sections.map((section) => (
-        <DashboardSection
-          key={section.key}
-          section={section}
-          config={
-            config.sections[section.key] ?? {
-              title: section.key,
-              description: "Role workspace data.",
-            }
-          }
-          navigate={navigate}
-          role={role}
+    <>
+      <DashboardStatistics
+        sections={dashboardState.dashboard.sections}
+        config={config}
+      />
+      <div className="dashboard-visualizations">
+        <DashboardWorkloadChart
+          sections={dashboardState.dashboard.sections}
+          config={config}
         />
-      ))}
-    </div>
+        {dashboardState.dashboard.analytics && (
+          <DashboardAnalytics analytics={dashboardState.dashboard.analytics} />
+        )}
+      </div>
+      <div className="role-dashboard-sections">
+        {dashboardState.dashboard.sections.map((section) => (
+          <DashboardSection
+            key={section.key}
+            section={section}
+            config={
+              config.sections[section.key] ?? {
+                title: section.key,
+                description: "Role workspace data.",
+              }
+            }
+            navigate={navigate}
+            role={role}
+          />
+        ))}
+      </div>
+    </>
+  );
+}
+
+const CHART_WIDTH = 620;
+const CHART_HEIGHT = 130;
+const CHART_LEFT = 38;
+const CHART_RIGHT = 12;
+const CHART_TOP = 12;
+const CHART_BOTTOM = 26;
+
+function DashboardAnalytics({
+  analytics,
+}: {
+  analytics: RoleDashboardAnalytics;
+}) {
+  const allValues = analytics.series.flatMap((series) =>
+    series.points.map((point) => point.value),
+  );
+  const maximum = Math.max(1, ...allValues);
+  const labels = analytics.series[0]?.points ?? [];
+  const plotWidth = CHART_WIDTH - CHART_LEFT - CHART_RIGHT;
+  const plotHeight = CHART_HEIGHT - CHART_TOP - CHART_BOTTOM;
+  const gridValues =
+    maximum <= 4
+      ? Array.from({ length: maximum + 1 }, (_, index) => maximum - index)
+      : [
+          ...new Set(
+            [maximum, 0.75, 0.5, 0.25, 0].map((value) =>
+              value <= 1 ? Math.round(maximum * value) : value,
+            ),
+          ),
+        ];
+  const x = (index: number) =>
+    CHART_LEFT + (index * plotWidth) / Math.max(labels.length - 1, 1);
+  const y = (value: number) =>
+    CHART_TOP + plotHeight - (value / maximum) * plotHeight;
+
+  return (
+    <figure
+      className="dashboard-analytics"
+      aria-labelledby="dashboard-analytics-title"
+    >
+      <figcaption>
+        <div>
+          <p className="eyebrow">Analytics</p>
+          <h2 id="dashboard-analytics-title">{analytics.title}</h2>
+          <p>{analytics.period}, based on records visible to this workspace.</p>
+        </div>
+        <div className="dashboard-analytics-legend" aria-label="Chart legend">
+          {analytics.series.map((series, index) => (
+            <span key={series.key} className={`analytics-series-${index + 1}`}>
+              <i aria-hidden="true" /> {series.label}
+            </span>
+          ))}
+        </div>
+      </figcaption>
+
+      <div className="dashboard-line-chart">
+        <svg
+          viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
+          role="img"
+          aria-label={`${analytics.title}, ${analytics.period}`}
+        >
+          {gridValues.map((value) => {
+            const gridY = y(value);
+            return (
+              <g key={value}>
+                <line
+                  className="analytics-grid-line"
+                  x1={CHART_LEFT}
+                  x2={CHART_WIDTH - CHART_RIGHT}
+                  y1={gridY}
+                  y2={gridY}
+                />
+                <text
+                  className="analytics-axis-value"
+                  x={CHART_LEFT - 10}
+                  y={gridY + 4}
+                >
+                  {value}
+                </text>
+              </g>
+            );
+          })}
+
+          {analytics.series.map((series, seriesIndex) => {
+            const points = series.points
+              .map((point, index) => `${x(index)},${y(point.value)}`)
+              .join(" ");
+            return (
+              <g
+                key={series.key}
+                className={`analytics-line analytics-series-${seriesIndex + 1}`}
+              >
+                <polyline points={points} />
+                {series.points.map((point, index) => (
+                  <circle
+                    key={point.key}
+                    cx={x(index)}
+                    cy={y(point.value)}
+                    r="4"
+                  >
+                    <title>{`${point.label} ${series.label}: ${point.value}`}</title>
+                  </circle>
+                ))}
+              </g>
+            );
+          })}
+
+          {labels.map((point, index) => (
+            <text
+              key={point.key}
+              className="analytics-axis-label"
+              x={x(index)}
+              y={CHART_HEIGHT - 13}
+            >
+              {point.label}
+            </text>
+          ))}
+        </svg>
+      </div>
+
+      <table className="sr-only">
+        <caption>{`${analytics.title}, ${analytics.period}`}</caption>
+        <thead>
+          <tr>
+            <th>Month</th>
+            {analytics.series.map((series) => (
+              <th key={series.key}>{series.label}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {labels.map((point, pointIndex) => (
+            <tr key={point.key}>
+              <th>{point.label}</th>
+              {analytics.series.map((series) => (
+                <td key={series.key}>
+                  {series.points[pointIndex]?.value ?? 0}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </figure>
+  );
+}
+
+function DashboardStatistics({
+  sections,
+  config,
+}: {
+  sections: RoleDashboardSection[];
+  config: WorkspaceConfig;
+}) {
+  const available = availableDashboardSections(sections);
+
+  if (available.length === 0) return null;
+
+  return (
+    <section
+      className="dashboard-statistics"
+      aria-labelledby="dashboard-statistics-title"
+    >
+      <header>
+        <div>
+          <p className="eyebrow">Live overview</p>
+          <h2 id="dashboard-statistics-title">Statistics</h2>
+        </div>
+        <p>Current totals for this role workspace.</p>
+      </header>
+      <dl className="dashboard-stat-grid">
+        {available.map((section) => (
+          <div key={section.key} className="dashboard-stat-card">
+            <dt>
+              {config.sections[section.key]?.title ?? humanize(section.key)}
+            </dt>
+            <dd>{section.total}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+function DashboardWorkloadChart({
+  sections,
+  config,
+}: {
+  sections: RoleDashboardSection[];
+  config: WorkspaceConfig;
+}) {
+  const available = availableDashboardSections(sections);
+  if (available.length === 0) return null;
+  const maximumTotal = Math.max(
+    1,
+    ...available.map((section) => section.total),
+  );
+
+  return (
+    <figure className="dashboard-chart">
+      <figcaption>
+        <div>
+          <p className="eyebrow">Distribution</p>
+          <h3>Current workload</h3>
+        </div>
+      </figcaption>
+      <div className="dashboard-chart-bars">
+        {available.map((section) => {
+          const title =
+            config.sections[section.key]?.title ?? humanize(section.key);
+
+          return (
+            <div key={section.key} className="dashboard-chart-row">
+              <div className="dashboard-chart-label">
+                <span>{title}</span>
+              </div>
+              <div
+                className="dashboard-chart-meter"
+                role="meter"
+                aria-label={title}
+                aria-valuemin={0}
+                aria-valuemax={maximumTotal}
+                aria-valuenow={section.total}
+                aria-valuetext={`${section.total} total`}
+              >
+                <span
+                  aria-hidden="true"
+                  style={{
+                    width: `${(section.total / maximumTotal) * 100}%`,
+                  }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </figure>
+  );
+}
+
+function availableDashboardSections(sections: RoleDashboardSection[]) {
+  return sections.filter(
+    (section): section is RoleDashboardSection & { total: number } =>
+      section.state === "ready" && section.total !== null,
   );
 }
 
@@ -559,14 +865,17 @@ function DashboardSection({
   const isPublicCatalogRecord = config.catalog && section.state === "ready";
 
   return (
-    <section className="panel-card dashboard-section">
+    <section
+      className={`panel-card dashboard-section${config.catalog ? " dashboard-section-catalog" : ""}`}
+    >
       <header>
         <div>
-          <p className="eyebrow">{config.title}</p>
+          <p className="eyebrow">
+            {config.catalog ? "Catalog collection" : config.title}
+          </p>
           <h2 className="dashboard-section-title">{config.title}</h2>
           <p>{config.description}</p>
         </div>
-        <strong className="dashboard-count">{section.total}</strong>
       </header>
       {section.total === 0 ? (
         <p className="dashboard-empty">No records are currently available.</p>
@@ -574,7 +883,7 @@ function DashboardSection({
         <ul className="dashboard-record-list">
           {section.items.map((item) => (
             <li key={item.research_document_id}>
-              <div>
+              <div className="dashboard-record-summary">
                 <h3>{item.title}</h3>
                 <p>
                   {humanize(item.research_stage)} ·{" "}
@@ -589,7 +898,8 @@ function DashboardSection({
                 )}
               </div>
               <div className="dashboard-record-access">
-                <span>
+                <span className="dashboard-record-visibility">
+                  <i aria-hidden="true" />
                   {isPublicCatalogRecord
                     ? item.visibility === "public"
                       ? "Public catalog"
@@ -599,6 +909,7 @@ function DashboardSection({
                 {isPublicCatalogRecord && item.visibility === "public" && (
                   <Button
                     variant="secondary"
+                    className="dashboard-catalog-action"
                     onClick={() =>
                       navigate(
                         `/catalog?q=${encodeURIComponent(
@@ -607,19 +918,22 @@ function DashboardSection({
                       )
                     }
                   >
-                    Open public catalog
+                    Open public catalog <ArrowRight aria-hidden="true" />
                   </Button>
                 )}
-                {role === "admin" && config.internalRecord && (
-                  <Button
-                    variant="secondary"
-                    onClick={() =>
-                      navigate(`/research/${item.research_document_id}`)
-                    }
-                  >
-                    Open internal record
-                  </Button>
-                )}
+                {(["admin", "adviser"] as Role[]).includes(role) &&
+                  config.internalRecord && (
+                    <Button
+                      variant="secondary"
+                      onClick={() =>
+                        navigate(`/research/${item.research_document_id}`)
+                      }
+                    >
+                      {role === "adviser"
+                        ? "Open review"
+                        : "Open internal record"}
+                    </Button>
+                  )}
               </div>
             </li>
           ))}

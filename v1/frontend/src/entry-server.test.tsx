@@ -27,13 +27,18 @@ describe("SSR entry", () => {
   it("does not apply literal repository filtering for an initial similarity query", async () => {
     const result = await render("/catalog?q=SERVER", {
       apiOrigin: "http://api.example.test",
-      fetcher: vi.fn(
-        async () =>
-          new Response(
-            JSON.stringify({ data: [record], links: { next: null } }),
-            { headers: { "Set-Cookie": "unexpected=1; Path=/" } },
-          ),
-      ),
+      fetcher: vi.fn(async (input: RequestInfo | URL) => {
+        if (new URL(String(input)).pathname === "/api/auth/session") {
+          return new Response(
+            JSON.stringify({ error: "AUTHENTICATION_REQUIRED" }),
+            { status: 401 },
+          );
+        }
+        return new Response(
+          JSON.stringify({ data: [record], links: { next: null } }),
+          { headers: { "Set-Cookie": "unexpected=1; Path=/" } },
+        );
+      }),
     });
 
     expect(result.statusCode).toBe(200);

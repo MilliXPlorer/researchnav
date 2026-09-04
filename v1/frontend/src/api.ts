@@ -29,6 +29,9 @@ export interface NotificationResource {
   event: string | null;
   title: string | null;
   message: string | null;
+  details: string | null;
+  research_title: string | null;
+  submission_reference: string | null;
   action_url: string | null;
   research_document_id: number | null;
   read_at: string | null;
@@ -54,10 +57,29 @@ export interface RoleDashboardSection {
   items: RoleDashboardItem[];
 }
 
+export interface RoleDashboardAnalyticsPoint {
+  key: string;
+  label: string;
+  value: number;
+}
+
+export interface RoleDashboardAnalyticsSeries {
+  key: "created" | "archived";
+  label: string;
+  points: RoleDashboardAnalyticsPoint[];
+}
+
+export interface RoleDashboardAnalytics {
+  title: string;
+  period: string;
+  series: RoleDashboardAnalyticsSeries[];
+}
+
 export interface RoleDashboard {
   schema_version: 1;
   role: Role;
   sections: RoleDashboardSection[];
+  analytics?: RoleDashboardAnalytics;
 }
 
 export interface RoleDashboardResponse {
@@ -173,21 +195,42 @@ export interface SimilarityResultResource {
   source_title: string;
   matched_title: string;
   tfidf_score: number | string | null;
-  cosine_score: number | string;
+  title_similarity_score: string | null;
+  title_similarity_percentage: string | null;
+  title_weight: string | null;
+  title_weighted_contribution: string | null;
+  content_similarity_score: string | null;
+  content_similarity_percentage: string | null;
+  content_weight: string | null;
+  content_weighted_contribution: string | null;
+  overall_similarity_score: string | null;
+  overall_similarity_percentage: string | null;
+  classification: "low" | "moderate" | "high" | null;
+  overall_flagged: boolean;
+  title_match_alert: boolean;
+  adviser_review_required: boolean;
+  flag_reason:
+    | "overall_high_similarity"
+    | "near_exact_title_match"
+    | "overall_and_title_match"
+    | "not_flagged";
+  cosine_score: number | string | null;
   fasttext_score: number | string | null;
-  final_similarity_score: number | string;
+  /** Historical score evidence; it is not a weighted overall for legacy rows. */
+  final_similarity_score: string | null;
+  score_status: "scored" | "content_unavailable";
   threshold: number | string;
-  is_flagged: boolean;
   contextual_analysis: string | null;
   matched_terms: string[] | null;
   analysis_type: string;
+  algorithm_version: string;
   analyzed_at: string | null;
 }
 
 /** Fields used by the administrator's internal research console. */
 export interface InternalResearchResource {
   id: number;
-  submitted_by: string;
+  submitted_by: string | null;
   title: string;
   abstract: string | null;
   keywords: string | null;
@@ -206,10 +249,19 @@ export interface InternalResearchResource {
 
 export interface ResearchRevisionResource {
   id: number;
+  research_document_id: number;
+  requested_by: string | null;
+  requester_name?: string | null;
+  document_file_id: number | null;
   revision_number: number;
   revision_remarks: string | null;
   revision_status:
     "requested" | "in_progress" | "resubmitted" | "under_review" | "accepted";
+  lifecycle_status?:
+    "researcher_action_required" | "awaiting_reviewer_review" | "completed";
+  requested_at: string | null;
+  submitted_at: string | null;
+  resolved_at: string | null;
 }
 
 export interface TitleValidationResource {
@@ -217,9 +269,17 @@ export interface TitleValidationResource {
   research_document_id: number;
   similarity_result_id: number | null;
   validated_by: string | null;
+  validator_name?: string | null;
+  similarity_result?: {
+    id: number;
+    matched_title: string;
+    analyzed_at: string | null;
+  } | null;
   validation_status: "pending" | "approved" | "revision_required" | "rejected";
   adviser_remarks: string | null;
   validated_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 export interface ResearchMetadataInput {
@@ -246,6 +306,7 @@ export type ResearchAuthorInput = Pick<
 export interface ReviewAssignmentResource {
   id: number;
   reviewer_id: string;
+  reviewer_name?: string | null;
   review_role: "adviser" | "instructor" | "panel" | "statistician";
   is_active: boolean;
   assigned_by: string;
@@ -275,10 +336,20 @@ export interface DocumentFileResource {
   uploaded_at: string | null;
 }
 
+export interface ResearchPeopleResource {
+  section: {
+    id: number;
+    name: string;
+    academic_year: string | null;
+    instructor_name: string | null;
+  } | null;
+  reviewers: Array<{ review_role: string; name: string | null }>;
+}
+
 export interface FeedbackResource {
   id: number;
   research_document_id: number;
-  user_id: string;
+  user_id: string | null;
   document_file_id: number | null;
   comment: string;
   feedback_type:
@@ -288,6 +359,10 @@ export interface FeedbackResource {
     | "approval_remark"
     | "general_feedback";
   feedback_status: "open" | "acknowledged" | "resolved";
+  reviewer_name?: string | null;
+  researcher_acknowledged_at?: string | null;
+  researcher_addressed_at?: string | null;
+  researcher_action_remarks?: string | null;
   created_at: string | null;
 }
 
@@ -300,7 +375,8 @@ export interface FeedbackInput {
 export interface MonitoringLogResource {
   id: number;
   research_document_id: number;
-  performed_by: string;
+  performed_by: string | null;
+  performed_by_name?: string | null;
   activity_type: string;
   remarks: string | null;
   previous_status: string | null;
@@ -357,6 +433,60 @@ export async function getCurrentSession(fetcher: ApiFetch = globalThis.fetch) {
   }
 }
 
+export interface UpdateOwnProfileInput {
+  first_name?: string | null;
+  middle_name?: string | null;
+  last_name?: string | null;
+}
+
+export async function getOwnProfile(
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<UserSession> {
+  return (await apiRequest<SessionResponse>("/api/profile", undefined, fetcher))
+    .user;
+}
+
+export async function updateOwnProfile(
+  input: UpdateOwnProfileInput,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<UserSession> {
+  return (
+    await apiRequest<SessionResponse>(
+      "/api/profile",
+      { method: "PATCH", body: JSON.stringify(input) },
+      fetcher,
+    )
+  ).user;
+}
+
+export async function uploadOwnProfilePhoto(
+  photo: File,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<UserSession> {
+  const body = new FormData();
+  body.append("photo", photo);
+
+  return (
+    await apiRequest<SessionResponse>(
+      "/api/profile/photo",
+      { method: "POST", body },
+      fetcher,
+    )
+  ).user;
+}
+
+export async function deleteOwnProfilePhoto(
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<UserSession> {
+  return (
+    await apiRequest<SessionResponse>(
+      "/api/profile/photo",
+      { method: "DELETE" },
+      fetcher,
+    )
+  ).user;
+}
+
 export async function getRoleDashboard(
   expectedRole: Role,
   fetcher: ApiFetch = globalThis.fetch,
@@ -385,9 +515,9 @@ function researchPath(researchDocumentId: string | number) {
 export async function getInternalResearch(
   researchDocumentId: string | number,
   fetcher: ApiFetch = globalThis.fetch,
-): Promise<InternalResearchResource> {
+): Promise<ResearchDocumentSummaryResource> {
   return (
-    await apiRequest<{ data: InternalResearchResource }>(
+    await apiRequest<{ data: ResearchDocumentSummaryResource }>(
       researchPath(researchDocumentId),
       undefined,
       fetcher,
@@ -462,6 +592,33 @@ export async function listResearchRevisions(
   return response.data;
 }
 
+export async function getResearchPeople(
+  researchDocumentId: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<ResearchPeopleResource> {
+  return (
+    await apiRequest<{ data: ResearchPeopleResource }>(
+      `${researchPath(researchDocumentId)}/people`,
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export async function requestResearchRevision(
+  researchDocumentId: string | number,
+  input: { revision_remarks: string; document_file_id?: number | null },
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<ResearchRevisionResource> {
+  return (
+    await apiRequest<{ data: ResearchRevisionResource }>(
+      `${researchPath(researchDocumentId)}/revisions`,
+      { method: "POST", body: JSON.stringify(input) },
+      fetcher,
+    )
+  ).data;
+}
+
 export async function resubmitResearchRevision(
   researchDocumentId: string | number,
   revisionId: string | number,
@@ -486,6 +643,40 @@ export async function listTitleValidations(
     fetcher,
   );
   return response.data;
+}
+
+export async function requestTitleValidation(
+  researchDocumentId: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<TitleValidationResource> {
+  return (
+    await apiRequest<{ data: TitleValidationResource }>(
+      `${researchPath(researchDocumentId)}/validation`,
+      { method: "POST", body: JSON.stringify({}) },
+      fetcher,
+    )
+  ).data;
+}
+
+export async function recommendResearchTitle(
+  researchDocumentId: string | number,
+  input: {
+    validation_status: Exclude<
+      TitleValidationResource["validation_status"],
+      "pending"
+    >;
+    adviser_remarks?: string;
+    similarity_result_id?: number | null;
+  },
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<TitleValidationResource> {
+  return (
+    await apiRequest<{ data: TitleValidationResource }>(
+      `${researchPath(researchDocumentId)}/recommendation`,
+      { method: "POST", body: JSON.stringify(input) },
+      fetcher,
+    )
+  ).data;
 }
 
 export async function updateTitleValidation(
@@ -580,6 +771,17 @@ export function researchFileDownloadUrl(
   return `${researchPath(researchDocumentId)}/files/${encodeURIComponent(String(fileId))}/download`;
 }
 
+export function researchFilePreviewUrl(
+  researchDocumentId: string | number,
+  fileId: string | number,
+) {
+  return `${researchPath(researchDocumentId)}/files/${encodeURIComponent(String(fileId))}/preview`;
+}
+
+export function repositoryDownloadUrl(researchDocumentId: string | number) {
+  return `/api/repository/${encodeURIComponent(String(researchDocumentId))}/download`;
+}
+
 export async function uploadResearchFile(
   researchDocumentId: string | number,
   file: File,
@@ -596,6 +798,36 @@ export async function uploadResearchFile(
       fetcher,
     )
   ).data;
+}
+
+export async function renameResearchFile(
+  researchDocumentId: string | number,
+  fileId: string | number,
+  originalFilename: string,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<DocumentFileResource> {
+  return (
+    await apiRequest<{ data: DocumentFileResource }>(
+      `${researchPath(researchDocumentId)}/files/${encodeURIComponent(String(fileId))}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ original_filename: originalFilename }),
+      },
+      fetcher,
+    )
+  ).data;
+}
+
+export async function deleteResearchFile(
+  researchDocumentId: string | number,
+  fileId: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<void> {
+  await apiRequest<void>(
+    `${researchPath(researchDocumentId)}/files/${encodeURIComponent(String(fileId))}`,
+    { method: "DELETE", body: "{}" },
+    fetcher,
+  );
 }
 
 export async function listFeedback(
@@ -640,6 +872,21 @@ export async function updateFeedbackStatus(
   ).data;
 }
 
+export async function recordResearcherFeedbackAction(
+  researchDocumentId: string | number,
+  feedbackId: string | number,
+  input: { action: "acknowledge" | "address"; remarks?: string },
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<FeedbackResource> {
+  return (
+    await apiRequest<{ data: FeedbackResource }>(
+      `${researchPath(researchDocumentId)}/feedback/${encodeURIComponent(String(feedbackId))}/researcher-action`,
+      { method: "PATCH", body: JSON.stringify(input) },
+      fetcher,
+    )
+  ).data;
+}
+
 export async function listMonitoringLogs(
   researchDocumentId: string | number,
   fetcher: ApiFetch = globalThis.fetch,
@@ -648,6 +895,24 @@ export async function listMonitoringLogs(
     await apiRequest<{ data: MonitoringLogResource[] }>(
       `${researchPath(researchDocumentId)}/monitoring`,
       undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export async function reportResearchProgress(
+  researchDocumentId: string | number,
+  input: {
+    progress_status: "on_track" | "at_risk" | "delayed" | "completed";
+    remarks: string;
+    activity_date?: string;
+  },
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<MonitoringLogResource> {
+  return (
+    await apiRequest<{ data: MonitoringLogResource }>(
+      `${researchPath(researchDocumentId)}/monitoring`,
+      { method: "POST", body: JSON.stringify(input) },
       fetcher,
     )
   ).data;
@@ -804,6 +1069,32 @@ export async function getSystemStatus(
   ).data;
 }
 
+export async function getAdminSettings(fetcher: ApiFetch = globalThis.fetch) {
+  return apiRequest<{ data: Record<string, string>; version: number }>(
+    "/api/admin/settings",
+    undefined,
+    fetcher,
+  );
+}
+
+export async function updateAdminSettings(
+  values: Record<string, string>,
+  version: number,
+  fetcher: ApiFetch = globalThis.fetch,
+) {
+  return apiRequest<{ data: Record<string, string>; version: number }>(
+    "/api/admin/settings",
+    { method: "PATCH", body: JSON.stringify({ values, version }) },
+    fetcher,
+  );
+}
+
+export async function requestAdminBackup(fetcher: ApiFetch = globalThis.fetch) {
+  return apiRequest<{
+    data: { id: number; status: string; message: string | null };
+  }>("/api/admin/backups", { method: "POST" }, fetcher);
+}
+
 export interface PublicResearchResource {
   id: string | number;
   title: string;
@@ -824,14 +1115,70 @@ export interface PublicResearchResource {
   research_stage?: string;
   manuscript_date_label?: string;
   abstract_provenance?: string;
-  query_similarity_score?: number | string | null;
+  query_title_similarity_score?: string | null;
+  query_title_similarity_percentage?: string | null;
+  query_content_similarity_score?: string | null;
+  query_content_similarity_percentage?: string | null;
+  query_similarity_score?: string | null;
+  query_similarity_percentage?: string | null;
+  title_similarity_score?: string | null;
+  title_similarity_percentage?: string | null;
+  title_weight?: string | null;
+  title_weighted_contribution?: string | null;
+  content_similarity_score?: string | null;
+  content_similarity_percentage?: string | null;
+  content_weight?: string | null;
+  content_weighted_contribution?: string | null;
+  overall_similarity_score?: string | null;
+  overall_similarity_percentage?: string | null;
+  classification?: "low" | "moderate" | "high" | null;
+  overall_flagged?: boolean;
+  title_match_alert?: boolean;
+  adviser_review_required?: boolean;
+  flag_reason?:
+    | "overall_high_similarity"
+    | "near_exact_title_match"
+    | "overall_and_title_match"
+    | "not_flagged";
+  algorithm_version?: string | null;
+  analyzed_at?: string | null;
+  score_status?: "scored" | "content_unavailable" | null;
   matched_terms?: string[] | null;
+  fasttext_support_score?: string | null;
+  has_downloadable_manuscript?: boolean;
 }
 
 /** A public repository result ranked by the submitted query's similarity score. */
 export interface PublicRepositorySimilarityResource extends PublicResearchResource {
-  query_similarity_score: number | string | null;
-  /** Terms shared between the submitted query and this title. */
+  query_title_similarity_score: string | null;
+  query_title_similarity_percentage: string | null;
+  query_content_similarity_score: string | null;
+  query_content_similarity_percentage: string | null;
+  query_similarity_score: string | null;
+  query_similarity_percentage: string | null;
+  title_similarity_score: string | null;
+  title_similarity_percentage: string | null;
+  title_weight: string | null;
+  title_weighted_contribution: string | null;
+  content_similarity_score: string | null;
+  content_similarity_percentage: string | null;
+  content_weight: string | null;
+  content_weighted_contribution: string | null;
+  overall_similarity_score: string | null;
+  overall_similarity_percentage: string | null;
+  classification: "low" | "moderate" | "high" | null;
+  overall_flagged: boolean;
+  title_match_alert: boolean;
+  adviser_review_required: boolean;
+  flag_reason:
+    | "overall_high_similarity"
+    | "near_exact_title_match"
+    | "overall_and_title_match"
+    | "not_flagged";
+  algorithm_version: string | null;
+  analyzed_at: string | null;
+  score_status: "scored" | "content_unavailable" | null;
+  /** Query terms shared with the archived title or indexed manuscript. */
   matched_terms?: string[] | null;
 }
 
@@ -891,8 +1238,34 @@ export function toResearchRecord(
     researchStage: toResearchStage(resource.research_stage),
     manuscriptDate: resource.manuscript_date_label,
     abstractProvenance: resource.abstract_provenance,
+    queryTitleSimilarityScore: resource.query_title_similarity_score,
+    queryTitleSimilarityPercentage: resource.query_title_similarity_percentage,
+    queryContentSimilarityScore: resource.query_content_similarity_score,
+    queryContentSimilarityPercentage:
+      resource.query_content_similarity_percentage,
     querySimilarityScore: resource.query_similarity_score,
+    querySimilarityPercentage: resource.query_similarity_percentage,
+    titleSimilarityScore: resource.title_similarity_score,
+    titleSimilarityPercentage: resource.title_similarity_percentage,
+    titleWeight: resource.title_weight,
+    titleWeightedContribution: resource.title_weighted_contribution,
+    contentSimilarityScore: resource.content_similarity_score,
+    contentSimilarityPercentage: resource.content_similarity_percentage,
+    contentWeight: resource.content_weight,
+    contentWeightedContribution: resource.content_weighted_contribution,
+    overallSimilarityScore: resource.overall_similarity_score,
+    overallSimilarityPercentage: resource.overall_similarity_percentage,
+    classification: resource.classification,
+    overallFlagged: resource.overall_flagged,
+    titleMatchAlert: resource.title_match_alert,
+    adviserReviewRequired: resource.adviser_review_required,
+    flagReason: resource.flag_reason,
+    algorithmVersion: resource.algorithm_version,
+    analyzedAt: resource.analyzed_at,
+    scoreStatus: resource.score_status,
     matchedTerms: resource.matched_terms ?? null,
+    fastTextSupportScore: resource.fasttext_support_score ?? null,
+    hasDownloadableManuscript: resource.has_downloadable_manuscript ?? false,
   };
 }
 
@@ -929,6 +1302,8 @@ export type PublicResearchFilters = {
   keywords?: string;
   category?: string;
   year?: string | number;
+  yearFrom?: string | number;
+  yearTo?: string | number;
   perPage?: number;
 };
 
@@ -949,6 +1324,8 @@ export async function searchPublicResearch(
   append("keywords", filters.keywords);
   append("category", filters.category);
   append("year", filters.year);
+  append("year_from", filters.yearFrom);
+  append("year_to", filters.yearTo);
   params.set("per_page", String(filters.perPage ?? 50));
 
   const records: ResearchRecord[] = [];
@@ -1063,7 +1440,8 @@ export interface CategoryResource {
 /** The exact fields returned by ResearchDocumentResource for authenticated actors. */
 export interface ResearchDocumentSummaryResource {
   id: number;
-  submitted_by: string;
+  submission_reference?: string | null;
+  submitted_by: string | null;
   category_id: number | null;
   title: string;
   normalized_title: string | null;
@@ -1126,11 +1504,13 @@ export interface AdviserPendingReviewItem {
 export interface AdviserSimilarityAlert {
   id: number;
   research_document_id: number;
+  matched_research_id: number;
   title: string | null;
   submission_status: string | null;
   matched_title: string;
-  final_similarity_score: number;
-  threshold: number;
+  overall_similarity_score: string | null;
+  classification: "low" | "moderate" | "high" | null;
+  adviser_review_required: boolean;
   analyzed_at: string | null;
 }
 
@@ -1225,12 +1605,22 @@ export interface InstructorTitleProposalItem {
   updated_at: string | null;
 }
 
+export interface InstructorAssignedSubmissionItem {
+  research_document_id: number;
+  title: string;
+  research_stage: InternalResearchResource["research_stage"];
+  submission_status: InternalResearchResource["submission_status"];
+  submitter: string | null;
+  updated_at: string | null;
+}
+
 export interface InstructorSimilarityOverviewItem {
   research_document_id: number;
   title: string | null;
   submission_status: string | null;
-  best_similarity: number;
-  is_flagged: boolean;
+  best_similarity: string | null;
+  classification: "low" | "moderate" | "high" | null;
+  adviser_review_required: boolean;
   matched_title: string;
 }
 
@@ -1249,6 +1639,18 @@ export async function listInstructorSections(
   return (
     await apiRequest<{ data: InstructorSectionResource[] }>(
       "/api/instructor/sections",
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export async function listInstructorAssignedSubmissions(
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<InstructorAssignedSubmissionItem[]> {
+  return (
+    await apiRequest<{ data: InstructorAssignedSubmissionItem[] }>(
+      "/api/instructor/submissions",
       undefined,
       fetcher,
     )
@@ -1295,6 +1697,19 @@ export async function listSectionDocuments(
   ).data;
 }
 
+export async function listAssignableSectionDocuments(
+  sectionId: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<InstructorSectionDocumentItem[]> {
+  return (
+    await apiRequest<{ data: InstructorSectionDocumentItem[] }>(
+      `/api/instructor/sections/${encodeURIComponent(String(sectionId))}/available-documents`,
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
 export async function assignSectionDocuments(
   sectionId: string | number,
   researchDocumentIds: number[],
@@ -1302,9 +1717,9 @@ export async function assignSectionDocuments(
 ): Promise<InstructorSectionResource> {
   return (
     await apiRequest<{ data: InstructorSectionResource }>(
-      `/api/instructor/sections/${encodeURIComponent(String(sectionId))}/assign`,
+      `/api/instructor/sections/${encodeURIComponent(String(sectionId))}/documents`,
       {
-        method: "POST",
+        method: "PUT",
         body: JSON.stringify({ research_document_ids: researchDocumentIds }),
       },
       fetcher,
@@ -1320,6 +1735,50 @@ export interface InstructorStudentResource {
   middle_name: string | null;
   last_name: string | null;
   added_at: string | null;
+}
+
+export async function listSectionDocumentMembers(
+  sectionId: string | number,
+  researchDocumentId: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<InstructorStudentResource[]> {
+  return (
+    await apiRequest<{ data: InstructorStudentResource[] }>(
+      `/api/instructor/sections/${encodeURIComponent(String(sectionId))}/documents/${encodeURIComponent(String(researchDocumentId))}/members`,
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export async function addSectionDocumentMember(
+  sectionId: string | number,
+  researchDocumentId: string | number,
+  userId: string,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<InstructorStudentResource[]> {
+  return (
+    await apiRequest<{ data: InstructorStudentResource[] }>(
+      `/api/instructor/sections/${encodeURIComponent(String(sectionId))}/documents/${encodeURIComponent(String(researchDocumentId))}/members/${encodeURIComponent(userId)}`,
+      { method: "PUT", body: JSON.stringify({}) },
+      fetcher,
+    )
+  ).data;
+}
+
+export async function removeSectionDocumentMember(
+  sectionId: string | number,
+  researchDocumentId: string | number,
+  userId: string,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<InstructorStudentResource[]> {
+  return (
+    await apiRequest<{ data: InstructorStudentResource[] }>(
+      `/api/instructor/sections/${encodeURIComponent(String(sectionId))}/documents/${encodeURIComponent(String(researchDocumentId))}/members/${encodeURIComponent(userId)}`,
+      { method: "DELETE" },
+      fetcher,
+    )
+  ).data;
 }
 
 export async function listSectionMembers(
@@ -1639,9 +2098,9 @@ export interface CoordinatorScheduleUpdateInput {
 
 export interface DuplicateFlagResource {
   id: number;
-  final_similarity_score: number;
-  threshold: number;
-  is_flagged: boolean;
+  overall_similarity_score: string | null;
+  classification: "low" | "moderate" | "high" | null;
+  adviser_review_required: boolean;
   analyzed_at: string | null;
   source: {
     research_document_id: number;
@@ -2149,8 +2608,9 @@ export interface RecommendationResource {
   research_document_id: number;
   title: string | null;
   publication_year: number | null;
-  final_similarity_score: number;
-  is_flagged: boolean;
+  overall_similarity_score: string | null;
+  classification: "low" | "moderate" | "high" | null;
+  adviser_review_required: boolean;
 }
 
 export interface CategoryCountResource {
@@ -2230,6 +2690,7 @@ export async function listCategoryCounts(
 export function listResearchDocuments(
   input: {
     mine?: boolean;
+    submission_status?: ResearchDocumentSummaryResource["submission_status"];
     page?: number;
     per_page?: number;
   } = {},

@@ -5,7 +5,10 @@ import {
   getRoleDashboard,
   getInternalResearch,
   archiveInternalResearch,
+  checkTitleQuerySimilarity,
   createFeedback,
+  deleteOwnProfilePhoto,
+  getOwnProfile,
   listNotifications,
   listAdminAuditLogs,
   listAdminCoordinators,
@@ -20,8 +23,13 @@ import {
   listReviewAssignments,
   listTitleValidations,
   listSectionMembers,
+  listSectionDocumentMembers,
   addSectionMembers,
+  addSectionDocumentMember,
+  assignSectionDocuments,
+  listAssignableSectionDocuments,
   removeSectionMember,
+  removeSectionDocumentMember,
   listInstructorStudents,
   markNotificationRead,
   normalizeNextPath,
@@ -35,13 +43,28 @@ import {
   submitInternalResearch,
   toResearchRecord,
   transitionInternalResearch,
+  updateOwnProfile,
   updateInternalResearch,
   updateAdminUser,
   updateFeedbackStatus,
   updateTitleValidation,
   uploadResearchFile,
+  uploadOwnProfilePhoto,
 } from "./api";
 import type { RoleDashboard } from "./api";
+
+const profileSession = {
+  email: "ada@example.test",
+  role: "researcher" as const,
+  accessStatus: "active" as const,
+  isAdmin: false,
+  firstName: "Ada",
+  middleName: null,
+  lastName: "Lovelace",
+  studentEmployeeId: "2026-001",
+  displayName: "Ada Lovelace",
+  profilePhotoUrl: "/api/profile/photo/version",
+};
 
 const resource = (id: number, authorName: string, authorOrder = 1) => ({
   id,
@@ -66,6 +89,7 @@ const resource = (id: number, authorName: string, authorOrder = 1) => ({
   abstract: "Public abstract.",
   keywords: ["public"],
   research_stage: "completed",
+  fasttext_support_score: "0.812345",
 });
 
 afterEach(() => vi.unstubAllGlobals());
@@ -74,6 +98,7 @@ describe("public repository API", () => {
   it("uses exact Laravel author fields and sorts by author_order", () => {
     const record = toResearchRecord(resource(1, "First Author"));
     expect(record.authors).toBe("First Author, Second Author");
+    expect(record.fastTextSupportScore).toBe("0.812345");
     expect(record).not.toHaveProperty("sourceFilename");
   });
 
@@ -173,7 +198,30 @@ describe("public repository API", () => {
             data: [
               {
                 ...resource(1, "First Author"),
+                query_title_similarity_score: "0.700000",
+                query_title_similarity_percentage: "70.000000",
+                query_content_similarity_score: "0.823456",
+                query_content_similarity_percentage: "82.345600",
                 query_similarity_score: "0.823456",
+                query_similarity_percentage: "82.345600",
+                title_similarity_score: "0.292100",
+                title_similarity_percentage: "29.210000",
+                title_weight: "0.300000000000",
+                title_weighted_contribution: "8.763000",
+                content_similarity_score: "0.234400",
+                content_similarity_percentage: "23.440000",
+                content_weight: "0.700000000000",
+                content_weighted_contribution: "16.408000",
+                overall_similarity_score: "0.251700",
+                overall_similarity_percentage: "25.170000",
+                classification: "low",
+                overall_flagged: false,
+                title_match_alert: false,
+                adviser_review_required: false,
+                flag_reason: "not_flagged",
+                algorithm_version: "weighted-v1",
+                analyzed_at: "2026-09-02T00:00:00.000000Z",
+                score_status: "scored",
               },
             ],
           }),
@@ -182,7 +230,18 @@ describe("public repository API", () => {
 
     await expect(
       searchPublicResearchBySimilarity("climate adaptation", fetchMock),
-    ).resolves.toMatchObject([{ id: "1", querySimilarityScore: "0.823456" }]);
+    ).resolves.toMatchObject([
+      {
+        id: "1",
+        queryTitleSimilarityScore: "0.700000",
+        queryContentSimilarityScore: "0.823456",
+        querySimilarityScore: "0.823456",
+        overallSimilarityPercentage: "25.170000",
+        titleWeight: "0.300000000000",
+        contentWeightedContribution: "16.408000",
+        classification: "low",
+      },
+    ]);
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/repository/similarity",
       expect.objectContaining({
@@ -767,8 +826,22 @@ describe("similarity API", () => {
     cosine_score: "0.710000",
     fasttext_score: "0.820000",
     final_similarity_score: "0.760000",
+    title_similarity_score: "0.760000",
+    title_similarity_percentage: "76.000000",
+    title_weight: "0.300000000000",
+    title_weighted_contribution: "22.800000",
+    content_similarity_score: "0.760000",
+    content_similarity_percentage: "76.000000",
+    content_weight: "0.700000000000",
+    content_weighted_contribution: "53.200000",
+    overall_similarity_score: "0.760000",
+    overall_similarity_percentage: "76.000000",
+    classification: "high",
+    overall_flagged: true,
+    title_match_alert: false,
+    adviser_review_required: true,
+    flag_reason: "overall_high_similarity",
     threshold: "0.700000",
-    is_flagged: true,
     contextual_analysis: "Related terms appear in the same research context.",
     matched_terms: ["research"],
     analysis_type: "title",
@@ -790,7 +863,13 @@ describe("similarity API", () => {
   });
 
   it("posts a title similarity check for the selected research document", async () => {
-    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        void input;
+        void init;
+        return new Response(null, { status: 204 });
+      },
+    );
 
     await expect(
       runTitleSimilarityCheck("42", fetchMock),
@@ -802,6 +881,106 @@ describe("similarity API", () => {
         body: JSON.stringify({}),
         credentials: "include",
       }),
+    );
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body).toEqual({});
+    expect(body).not.toHaveProperty("classification");
+    expect(body).not.toHaveProperty("overall_similarity_score");
+  });
+
+  it("posts only a submitted query to the authenticated duplicate-check endpoint", async () => {
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        void input;
+        void init;
+        return new Response(JSON.stringify({ data: [] }));
+      },
+    );
+
+    await expect(
+      checkTitleQuerySimilarity("inventory management", fetchMock),
+    ).resolves.toEqual([]);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/similarity/query",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ q: "inventory management" }),
+        credentials: "include",
+      }),
+    );
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body).not.toHaveProperty("overall_similarity_score");
+    expect(body).not.toHaveProperty("classification");
+    expect(body).not.toHaveProperty("overall_flagged");
+  });
+});
+
+describe("own profile API", () => {
+  it("reads and updates the current profile", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ user: profileSession })),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ user: profileSession })),
+      );
+
+    await expect(getOwnProfile(fetchMock)).resolves.toEqual(profileSession);
+    await expect(
+      updateOwnProfile(
+        { first_name: "Ada", middle_name: null, last_name: "Lovelace" },
+        fetchMock,
+      ),
+    ).resolves.toEqual(profileSession);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/profile",
+      expect.objectContaining({ credentials: "include" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/profile",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          first_name: "Ada",
+          middle_name: null,
+          last_name: "Lovelace",
+        }),
+      }),
+    );
+  });
+
+  it("uploads and removes the current profile photo", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ user: profileSession })),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            user: { ...profileSession, profilePhotoUrl: null },
+          }),
+        ),
+      );
+    const photo = new File(["image"], "avatar.png", { type: "image/png" });
+
+    await uploadOwnProfilePhoto(photo, fetchMock);
+    await deleteOwnProfilePhoto(fetchMock);
+
+    const uploadInit = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(uploadInit.method).toBe("POST");
+    expect(uploadInit.body).toBeInstanceOf(FormData);
+    expect((uploadInit.body as FormData).get("photo")).toBe(photo);
+    expect(new Headers(uploadInit.headers).has("Content-Type")).toBe(false);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/profile/photo",
+      expect.objectContaining({ method: "DELETE" }),
     );
   });
 });
@@ -884,6 +1063,74 @@ describe("instructor section member API", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/instructor/students",
       expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
+  it("assigns documents through the matching instructor endpoint", async () => {
+    const section = {
+      id: 7,
+      name: "CS-101",
+      academic_year: null,
+      is_active: true,
+      documents_count: 2,
+      members_count: 1,
+      created_at: null,
+    };
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ data: section })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(assignSectionDocuments(7, [42, 43])).resolves.toEqual(section);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/instructor/sections/7/documents",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({ research_document_ids: [42, 43] }),
+      }),
+    );
+  });
+
+  it("lists research titles available to a class section", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ data: [] })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(listAssignableSectionDocuments(7)).resolves.toEqual([]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/instructor/sections/7/available-documents",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
+  it("opens a research-title folder and manages its assigned students", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ data: [member] })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(listSectionDocumentMembers(7, 42)).resolves.toEqual([member]);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/instructor/sections/7/documents/42/members",
+      expect.objectContaining({ credentials: "include" }),
+    );
+    await expect(addSectionDocumentMember(7, 42, member.id)).resolves.toEqual([
+      member,
+    ]);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/instructor/sections/7/documents/42/members/student-id",
+      expect.objectContaining({ method: "PUT", body: JSON.stringify({}) }),
+    );
+    await expect(
+      removeSectionDocumentMember(7, 42, member.id),
+    ).resolves.toEqual([member]);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/instructor/sections/7/documents/42/members/student-id",
+      expect.objectContaining({ method: "DELETE" }),
     );
   });
 });

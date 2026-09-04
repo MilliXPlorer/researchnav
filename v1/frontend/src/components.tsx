@@ -1,6 +1,9 @@
 import type { CSSProperties, ReactNode } from "react";
 import { ArrowRight, Search, X } from "lucide-react";
-import { similarityBand, SIMILARITY_FLAG_THRESHOLD } from "./similarity";
+import {
+  classificationLabel,
+  type SimilarityClassification,
+} from "./similarity";
 import type { Status } from "./types";
 
 export function Logo({ compact = false }: { compact?: boolean }) {
@@ -45,64 +48,70 @@ export function StatusChip({ status }: { status: Status }) {
   );
 }
 
-/**
- * The single similarity banding rule for the whole product.
- * Mirrors the documented thresholds: 0–39 low, 40–69 moderate, 70–100 high/flagged.
- */
-/** Text band label, always paired with a numeric score so color is never the only signal. */
-export function SimilarityBadge({ score }: { score: number }) {
-  const band = similarityBand(score);
+/** API-provided classification, always rendered as text as well as color. */
+export function SimilarityBadge({
+  classification,
+}: {
+  classification: SimilarityClassification;
+}) {
+  const label = classificationLabel(classification);
   return (
-    <span className={`similarity-band similarity-band-${band.tone}`}>
-      {band.label}
+    <span className={`similarity-band similarity-band-${classification}`}>
+      Classification: {label}
     </span>
   );
 }
 
-/** Explains the 70% review threshold wherever similarity is shown. */
+/** Explains the service-provided categories without duplicating policy thresholds. */
 export function SimilarityLegend() {
   return (
     <ul className="similarity-legend" aria-label="Similarity score bands">
       <li>
         <span className="similarity-legend-dot similarity-band-low" />
-        Low 0–39%
+        Low classification
       </li>
       <li>
         <span className="similarity-legend-dot similarity-band-moderate" />
-        Moderate 40–69%
+        Moderate classification
       </li>
       <li>
         <span className="similarity-legend-dot similarity-band-high" />
-        High 70–100% · flagged for adviser review
+        High classification · review status is provided by the service
       </li>
     </ul>
   );
 }
 
 export function SimilarityRing({
-  score,
+  percentage,
+  classification,
   size = "regular",
+  label = "Similarity",
 }: {
-  score: number;
+  percentage: string;
+  classification?: SimilarityClassification | null;
   size?: "small" | "regular" | "large";
+  label?: string;
 }) {
-  const band = similarityBand(score);
-  const announced = band.name === "High" ? "flagged" : band.name.toLowerCase();
+  const colors: Record<SimilarityClassification, string> = {
+    low: "var(--fern)",
+    moderate: "var(--amber)",
+    high: "var(--rust)",
+  };
   const style = {
-    "--score": score,
-    "--ring-color": band.color,
+    "--score": percentage.replace("%", ""),
+    "--ring-color": classification ? colors[classification] : "var(--moss)",
   } as CSSProperties;
+  const classificationName = classificationLabel(classification);
 
   return (
     <div
-      className={`similarity-ring ring-${size} ${
-        score >= SIMILARITY_FLAG_THRESHOLD ? "ring-high" : ""
-      }`}
+      className={`similarity-ring ring-${size}${classification ? ` similarity-ring-${classification}` : " similarity-ring-neutral"}`}
       style={style}
       role="img"
-      aria-label={`Similarity: ${score} percent, ${announced}`}
+      aria-label={`${label}: ${percentage}${classificationName ? `, classification ${classificationName}` : ""}`}
     >
-      <span>{score}%</span>
+      <span>{percentage}</span>
     </div>
   );
 }

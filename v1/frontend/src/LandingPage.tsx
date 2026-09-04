@@ -10,23 +10,37 @@ import {
   Search,
 } from "lucide-react";
 import { Button, Logo, SearchBox } from "./components";
-import type { ResearchRecord } from "./types";
+import ProfileDialog, { ProfileAvatar } from "./ProfileDialog";
+import { instituteNames, roleConfigs } from "./data";
+import type { ResearchRecord, UserSession } from "./types";
 
 export default function LandingPage({
   onSignIn,
+  session,
+  onSessionChange,
+  onLogout,
   navigate,
   records,
   loading = false,
   error = null,
 }: {
   onSignIn: () => void;
+  session: UserSession | null | undefined;
+  onSessionChange: (session: UserSession) => void;
+  onLogout: () => Promise<void> | void;
   navigate: (path: string) => void;
   records: ResearchRecord[];
   loading?: boolean;
   error?: string | null;
 }) {
   const [query, setQuery] = useState("");
+  const [profileOpen, setProfileOpen] = useState(false);
   const recent = records.slice(0, 3);
+  const programCount = new Set(
+    records
+      .map((record) => record.degreeProgram.trim().toLowerCase())
+      .filter(Boolean),
+  ).size;
   const earliestYear = records.length
     ? Math.min(...records.map((record) => record.year))
     : null;
@@ -42,14 +56,45 @@ export default function LandingPage({
         <Logo />
         <nav aria-label="Public navigation">
           <a href="#archive">Browse archive</a>
-          <button className="signin-link" onClick={onSignIn}>
-            Sign in
-          </button>
+          {session?.accessStatus === "active" && (
+            <a
+              className="workspace-nav-link"
+              href="/app"
+              onClick={(event) => {
+                event.preventDefault();
+                navigate("/app");
+              }}
+            >
+              Workspace
+            </a>
+          )}
+          {session === undefined ? (
+            <span className="public-profile-placeholder" aria-hidden="true" />
+          ) : session ? (
+            <button
+              className="public-profile-trigger"
+              onClick={() => setProfileOpen(true)}
+              aria-label={`Open profile for ${session.displayName}`}
+            >
+              <ProfileAvatar session={session} />
+              <span>
+                <strong>{session.displayName}</strong>
+                <small>
+                  {roleConfigs.find((config) => config.id === session.role)
+                    ?.shortLabel ?? session.role}
+                </small>
+              </span>
+            </button>
+          ) : (
+            <button className="signin-link" onClick={onSignIn}>
+              Sign in
+            </button>
+          )}
         </nav>
       </header>
 
       <main id="main-content">
-        <section className="hero">
+        <section className={`hero${session ? " hero-authenticated" : ""}`}>
           <div className="hero-architecture" aria-hidden="true">
             <span className="arch arch-one" />
             <span className="arch arch-two" />
@@ -81,7 +126,9 @@ export default function LandingPage({
                   defaultValue=""
                   onChange={(event) =>
                     event.target.value &&
-                    navigate(`/catalog?year=${event.target.value}`)
+                    navigate(
+                      `/catalog?year_from=${event.target.value}&year_to=${event.target.value}`,
+                    )
                   }
                 >
                   <option value="">All years</option>
@@ -127,21 +174,21 @@ export default function LandingPage({
                   }
                 >
                   <option value="">All institutes</option>
-                  {[...new Set(records.map((record) => record.institute))].map(
-                    (institute) => (
-                      <option key={institute}>{institute}</option>
-                    ),
-                  )}
+                  {instituteNames.map((institute) => (
+                    <option key={institute}>{institute}</option>
+                  ))}
                 </select>
                 <ChevronDown />
               </label>
             </div>
-            <div className="hero-access">
-              <span>or continue to your workspace</span>
-              <Button variant="secondary" onClick={onSignIn}>
-                <span className="google-mark">G</span> Continue with Google
-              </Button>
-            </div>
+            {session === null && (
+              <div className="hero-access">
+                <span>or continue to your workspace</span>
+                <Button variant="secondary" onClick={onSignIn}>
+                  <span className="google-mark">G</span> Continue with Google
+                </Button>
+              </div>
+            )}
           </div>
           <div className="hero-index" aria-label="Repository statistics">
             <div>
@@ -149,10 +196,11 @@ export default function LandingPage({
               <span>public studies</span>
             </div>
             <div>
-              <strong>
-                {new Set(records.map((record) => record.program)).size}
-              </strong>
-              <span>academic programs</span>
+              <strong>{programCount}</strong>
+              <span>
+                academic {programCount === 1 ? "program" : "programs"}
+                {" represented"}
+              </span>
             </div>
             <div>
               <strong>{earliestYear ?? "—"}</strong>
@@ -245,6 +293,18 @@ export default function LandingPage({
           </div>
         </section>
       </main>
+      {session && profileOpen && (
+        <ProfileDialog
+          session={session}
+          onSessionChange={onSessionChange}
+          onClose={() => setProfileOpen(false)}
+          onOpenWorkspace={() => {
+            setProfileOpen(false);
+            navigate("/app");
+          }}
+          onLogout={onLogout}
+        />
+      )}
 
       <footer className="public-footer">
         <Logo />

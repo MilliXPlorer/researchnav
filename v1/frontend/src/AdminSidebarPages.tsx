@@ -20,6 +20,7 @@ import {
   type SystemStatusResource,
 } from "./api";
 import { Button } from "./components";
+import { DatePickerInput } from "./dateControls";
 import { useLiveFilters } from "./useLiveFilters";
 
 const roles: AdminRole[] = [
@@ -784,17 +785,19 @@ function AuditLogs() {
           </label>
           <label>
             From
-            <input
+            <DatePickerInput
               type="date"
               value={filters.created_from}
+              max={filters.created_to || undefined}
               onChange={(event) => change("created_from", event.target.value)}
             />
           </label>
           <label>
             To
-            <input
+            <DatePickerInput
               type="date"
               value={filters.created_to}
+              min={filters.created_from || undefined}
               onChange={(event) => change("created_to", event.target.value)}
             />
           </label>

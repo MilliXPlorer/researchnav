@@ -1,42 +1,32 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   listPersistedSimilarityResults,
   runTitleSimilarityCheck,
   type SimilarityResultResource,
 } from "./api";
+import { Button, EmptyState } from "./components";
 import {
-  Button,
-  EmptyState,
-  SimilarityBadge,
-  SimilarityLegend,
-  SimilarityRing,
-} from "./components";
+  classificationLabel,
+  formatSimilarityPercentage,
+  formatSimilarityValue,
+  formatSimilarityWeight,
+} from "./similarity";
 
 type SimilarityFetcher = (
   researchDocumentId: string | number,
 ) => Promise<SimilarityResultResource[]>;
 type SimilarityChecker = (researchDocumentId: string | number) => Promise<void>;
 
-function similarityPercentage(score: number | string): number | null {
-  const normalizedScore = Number(score);
-  if (
-    !Number.isFinite(normalizedScore) ||
-    normalizedScore < 0 ||
-    normalizedScore > 1
-  ) {
-    return null;
-  }
-  return Math.round(normalizedScore * 100);
-}
-
 export default function SimilarityResults({
   researchDocumentId,
   fetchPersistedResults = listPersistedSimilarityResults,
   checkTitleSimilarity = runTitleSimilarityCheck,
+  onOpenCatalog,
 }: {
   researchDocumentId?: string | number;
   fetchPersistedResults?: SimilarityFetcher;
   checkTitleSimilarity?: SimilarityChecker;
+  onOpenCatalog?: (matchedTitle: string) => void;
 }) {
   const hasSelectedResearch =
     researchDocumentId !== undefined && researchDocumentId !== null;
@@ -47,10 +37,14 @@ export default function SimilarityResults({
   const [loadErrorFor, setLoadErrorFor] = useState<string | number | null>(
     null,
   );
-  const [checking, setChecking] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [checkingFor, setCheckingFor] = useState<string | number | null>(null);
   const [checkErrorFor, setCheckErrorFor] = useState<string | number | null>(
     null,
   );
+  const currentResearchDocumentId = useRef(researchDocumentId);
+  const checkGeneration = useRef(0);
+  const checking = checkingFor !== null && checkingFor === researchDocumentId;
 
   useEffect(() => {
     let active = true;
@@ -66,6 +60,7 @@ export default function SimilarityResults({
         if (active) {
           setLoading(true);
           setLoadErrorFor(null);
+          setResults(null);
         }
         return fetchPersistedResults(researchDocumentId);
       })
@@ -85,39 +80,58 @@ export default function SimilarityResults({
     return () => {
       active = false;
     };
-  }, [fetchPersistedResults, hasSelectedResearch, researchDocumentId]);
+  }, [
+    fetchPersistedResults,
+    hasSelectedResearch,
+    loadAttempt,
+    researchDocumentId,
+  ]);
+
+  useLayoutEffect(() => {
+    currentResearchDocumentId.current = researchDocumentId;
+    const selectionGeneration = ++checkGeneration.current;
+    let active = true;
+    queueMicrotask(() => {
+      if (
+        !active ||
+        checkGeneration.current !== selectionGeneration ||
+        currentResearchDocumentId.current !== researchDocumentId
+      ) {
+        return;
+      }
+      setCheckingFor(null);
+      setCheckErrorFor(null);
+    });
+    return () => {
+      active = false;
+    };
+  }, [researchDocumentId]);
 
   const runCheck = async () => {
     if (!hasSelectedResearch || checking) return;
 
-    setChecking(true);
+    const selectedResearchDocumentId = researchDocumentId;
+    const requestGeneration = ++checkGeneration.current;
+    const isCurrentRequest = () =>
+      checkGeneration.current === requestGeneration &&
+      currentResearchDocumentId.current === selectedResearchDocumentId;
+    setCheckingFor(selectedResearchDocumentId);
     setCheckErrorFor(null);
     try {
-      await checkTitleSimilarity(researchDocumentId);
-      const persistedResults = await fetchPersistedResults(researchDocumentId);
+      await checkTitleSimilarity(selectedResearchDocumentId);
+      if (!isCurrentRequest()) return;
+      const persistedResults = await fetchPersistedResults(
+        selectedResearchDocumentId,
+      );
+      if (!isCurrentRequest()) return;
       setResults(persistedResults);
       setLoadErrorFor(null);
     } catch {
-      setCheckErrorFor(researchDocumentId);
+      if (isCurrentRequest()) setCheckErrorFor(selectedResearchDocumentId);
     } finally {
-      setChecking(false);
+      if (isCurrentRequest()) setCheckingFor(null);
     }
   };
-
-  const rankedResults = results
-    ?.map((result) => ({
-      result,
-      percentage: similarityPercentage(result.final_similarity_score),
-    }))
-    .filter(
-      (
-        result,
-      ): result is { result: SimilarityResultResource; percentage: number } =>
-        // A stored match rounding to zero shares no comparable terms, so it is
-        // not a candidate worth presenting as a similarity result.
-        result.percentage !== null && result.percentage > 0,
-    )
-    .sort((first, second) => second.percentage - first.percentage);
 
   return (
     <section
@@ -126,10 +140,11 @@ export default function SimilarityResults({
     >
       <div className="similarity-results-header">
         <div>
-          <p className="eyebrow">Title review</p>
+          <p className="eyebrow">Manuscript review</p>
           <h2 id="similarity-title">Similarity results</h2>
           <p>
-            Ranked persisted title matches use the server&apos;s review status.
+            Ranked results combine title and extracted manuscript text using
+            TF-IDF and cosine similarity.
           </p>
         </div>
         <Button
@@ -137,69 +152,196 @@ export default function SimilarityResults({
           disabled={!hasSelectedResearch || checking}
           onClick={() => void runCheck()}
         >
-          {checking ? "Checking title…" : "Run title similarity check"}
+          {checking
+            ? "Checking manuscript…"
+            : "Run manuscript similarity check"}
+        </Button>
+        <Button
+          variant="quiet"
+          disabled={!hasSelectedResearch || loading}
+          onClick={() => setLoadAttempt((attempt) => attempt + 1)}
+        >
+          Refresh results
+        </Button>
+        <Button
+          variant="quiet"
+          disabled={!hasSelectedResearch}
+          onClick={() => window.print()}
+        >
+          Print report
         </Button>
       </div>
 
       {!hasSelectedResearch ? (
         <EmptyState
-          title="Select a research record to review title similarity"
-          message="A research record must be selected before persisted matches can be loaded or a title similarity check can run."
+          title="Select a research record to review manuscript similarity"
+          message="Select a research record with a current PDF or DOCX manuscript before running the combined title and content check."
         />
       ) : loading ? (
         <p className="similarity-status" role="status">
-          Loading persisted title-similarity results…
+          Loading persisted manuscript-similarity results…
         </p>
       ) : loadErrorFor === researchDocumentId ? (
         <p className="similarity-error" role="alert">
           Persisted title-similarity results could not be loaded. Try again
-          after selecting the record again.
+          after selecting the record again.{" "}
+          <Button
+            variant="secondary"
+            onClick={() => setLoadAttempt((attempt) => attempt + 1)}
+          >
+            Retry
+          </Button>
         </p>
-      ) : rankedResults?.length === 0 ? (
+      ) : results?.length === 0 ? (
         <EmptyState
-          title="No persisted title-similarity candidates"
-          message="This selected research record has no stored title matches yet."
+          title="No persisted manuscript-similarity candidates"
+          message="This selected research record has no stored manuscript matches yet."
         />
       ) : (
-        <ol className="similarity-match-list" aria-label="Ranked title matches">
-          {rankedResults?.map(({ result, percentage }, index) => (
-            <li key={result.id} className="similarity-match">
-              <span
-                className="similarity-rank"
-                aria-label={`Rank ${index + 1}`}
-              >
-                {index + 1}
-              </span>
-              <SimilarityRing score={percentage} size="small" />
-              <div className="similarity-match-copy">
-                <h3>{result.matched_title}</h3>
-                <span className="similarity-match-tags">
-                  <SimilarityBadge score={percentage} />
-                  <span
-                    className={`similarity-flag ${result.is_flagged ? "is-flagged" : ""}`}
-                  >
-                    {result.is_flagged ? "Flagged for review" : "Not flagged"}
-                  </span>
+        <ol
+          className="similarity-match-list"
+          aria-label="Ranked manuscript matches"
+        >
+          {results?.map((result, index) => {
+            const overall = formatSimilarityPercentage(
+              result.overall_similarity_percentage,
+            );
+            const title = formatSimilarityPercentage(
+              result.title_similarity_percentage,
+            );
+            const content = formatSimilarityPercentage(
+              result.content_similarity_percentage,
+            );
+            const titleWeight = formatSimilarityWeight(result.title_weight);
+            const contentWeight = formatSimilarityWeight(result.content_weight);
+            const titleContribution = formatSimilarityValue(
+              result.title_weighted_contribution,
+            );
+            const contentContribution = formatSimilarityValue(
+              result.content_weighted_contribution,
+            );
+            const contentUnavailable =
+              result.score_status === "content_unavailable" || !content;
+            const showEquation =
+              !!overall &&
+              !contentUnavailable &&
+              titleContribution !== null &&
+              contentContribution !== null;
+            const classification = classificationLabel(result.classification);
+            return (
+              <li key={result.id} className="similarity-match">
+                <span
+                  className="similarity-rank"
+                  aria-label={`Rank ${index + 1}`}
+                >
+                  {index + 1}
                 </span>
-                <p>
-                  <strong>FastText supporting context:</strong>{" "}
-                  {result.contextual_analysis ??
-                    "No FastText supporting context was provided with this result."}
-                </p>
-              </div>
-            </li>
-          ))}
+                <div className="similarity-match-copy">
+                  <h3>{result.matched_title}</h3>
+                  <span className="similarity-match-tags">
+                    <span
+                      className={`similarity-band similarity-band-${result.classification ?? "unavailable"}`}
+                    >
+                      Classification: {classification ?? "Unavailable"}
+                    </span>
+                    {result.adviser_review_required && (
+                      <span className="similarity-flag is-flagged">
+                        Adviser review required
+                      </span>
+                    )}
+                    {result.title_match_alert && (
+                      <span className="similarity-flag is-title-alert">
+                        Near-exact title match alert
+                      </span>
+                    )}
+                  </span>
+                  <p>
+                    <strong>Overall Similarity:</strong>{" "}
+                    {overall ?? "Overall similarity unavailable"} ·{" "}
+                    <strong>Classification:</strong>{" "}
+                    {classification ?? "Unavailable"}
+                  </p>
+                  <p>
+                    <strong>Title:</strong>{" "}
+                    {title ?? "Title similarity unavailable"} ·{" "}
+                    <strong>Weight:</strong>{" "}
+                    {titleWeight ?? "Title weight unavailable"} ·{" "}
+                    <strong>Contribution:</strong>{" "}
+                    {titleContribution === null
+                      ? "Title contribution unavailable"
+                      : `${titleContribution} points`}
+                  </p>
+                  {contentUnavailable ? (
+                    <p>Content analysis unavailable</p>
+                  ) : (
+                    <p>
+                      <strong>Content:</strong> {content} ·{" "}
+                      <strong>Weight:</strong>{" "}
+                      {contentWeight ?? "Content weight unavailable"} ·{" "}
+                      <strong>Contribution:</strong>{" "}
+                      {contentContribution === null
+                        ? "Content contribution unavailable"
+                        : `${contentContribution} points`}
+                    </p>
+                  )}
+                  {showEquation && (
+                    <p>
+                      <strong>
+                        Displayed overall ≈ {titleContribution} +{" "}
+                        {contentContribution} ≈ {overall}
+                      </strong>
+                    </p>
+                  )}
+                  {result.classification === "low" && (
+                    <p>
+                      The system detected low similarity based on the configured
+                      comparison method. Low similarity does not prove
+                      originality.
+                    </p>
+                  )}
+                  {result.adviser_review_required && (
+                    <p className="similarity-review-copy">
+                      This result has been flagged for adviser review. The
+                      system does not automatically reject the research.
+                    </p>
+                  )}
+                  <p>
+                    <strong>Contextual similarity note:</strong>{" "}
+                    {result.contextual_analysis ??
+                      "No additional contextual note was recorded with this result."}
+                  </p>
+                  {result.matched_terms && result.matched_terms.length > 0 && (
+                    <p>
+                      <strong>Shared terms:</strong>{" "}
+                      {result.matched_terms.join(", ")}
+                    </p>
+                  )}
+                  <p>
+                    <strong>Analysis date:</strong>{" "}
+                    {result.analyzed_at
+                      ? new Date(result.analyzed_at).toLocaleString()
+                      : "Not recorded"}
+                  </p>
+                  {onOpenCatalog && (
+                    <Button
+                      variant="quiet"
+                      className="similarity-catalog-action"
+                      onClick={() => onOpenCatalog(result.matched_title)}
+                    >
+                      Search catalog
+                    </Button>
+                  )}
+                </div>
+              </li>
+            );
+          })}
         </ol>
       )}
 
-      {rankedResults !== undefined &&
-        rankedResults !== null &&
-        rankedResults.length > 0 && <SimilarityLegend />}
-
       {checkErrorFor === researchDocumentId && (
         <p className="similarity-error" role="alert">
-          The title similarity check could not be completed. No similarity score
-          was returned.
+          The manuscript similarity check could not be completed. Confirm that a
+          current text-based PDF or DOCX is available, then try again.
         </p>
       )}
     </section>

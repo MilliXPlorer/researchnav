@@ -1,11 +1,26 @@
 import type { RoleConfig, UserSession } from "./types";
 
+export const instituteNames = [
+  "Institute of Computer Studies",
+  "Institute of Health Sciences",
+  "Institute of Business and Financial Management",
+  "Institute of Arts and Sciences",
+  "Institute of Criminal Justice Education",
+  "Institute of Teacher Education",
+] as const;
+
 // New Google-authenticated accounts stay blocked until a coordinator activates an assignment.
 export const defaultUserSession: UserSession = {
   email: "researcher@gmail.com",
   role: "researcher",
   accessStatus: "blocked",
   isAdmin: false,
+  firstName: null,
+  middleName: null,
+  lastName: null,
+  studentEmployeeId: null,
+  displayName: "researcher@gmail.com",
+  profilePhotoUrl: null,
 };
 
 export const roleConfigs: RoleConfig[] = [
@@ -16,6 +31,11 @@ export const roleConfigs: RoleConfig[] = [
     description: "Provision coordinators and manage system-wide access.",
     nav: [
       "System Overview",
+      "Users & Onboarding",
+      "Roles & Permissions",
+      "Taxonomy",
+      "Backups",
+      "Reports & Exports",
       "Access Requests",
       "Coordinator Accounts",
       "All Users",
@@ -31,7 +51,6 @@ export const roleConfigs: RoleConfig[] = [
     nav: [
       "My Dashboard",
       "My Submissions",
-      "New Submission",
       "Similarity Check",
       "Related Studies",
     ],
@@ -55,7 +74,7 @@ export const roleConfigs: RoleConfig[] = [
     description: "Oversee class proposals and similarity trends.",
     nav: [
       "My Sections",
-      "Title Proposals",
+      "Assigned Submissions",
       "Similarity Overview",
       "Class Reports",
     ],

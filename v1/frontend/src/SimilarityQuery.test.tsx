@@ -28,6 +28,27 @@ const archived = (
   keywords: ["repository"],
   research_stage: "completed",
   query_similarity_score: score,
+  query_similarity_percentage:
+    score === null ? null : (Number(score) * 100).toFixed(6),
+  title_similarity_score: "0.292100",
+  title_similarity_percentage: "29.210000",
+  title_weight: "0.300000000000",
+  title_weighted_contribution: "8.763000",
+  content_similarity_score: "0.234400",
+  content_similarity_percentage: "23.440000",
+  content_weight: "0.700000000000",
+  content_weighted_contribution: "16.408000",
+  overall_similarity_score: score,
+  overall_similarity_percentage:
+    score === null ? null : (Number(score) * 100).toFixed(6),
+  classification: "low",
+  overall_flagged: false,
+  title_match_alert: false,
+  adviser_review_required: false,
+  flag_reason: "not_flagged",
+  algorithm_version: "weighted-v1",
+  analyzed_at: "2026-09-02T00:00:00.000000Z",
+  score_status: "scored",
   matched_terms: matchedTerms,
 });
 
@@ -97,18 +118,28 @@ describe("researcher similarity check", () => {
     await waitFor(() =>
       expect(sent).toEqual({ q: "inventory management system" }),
     );
+    expect(sent).not.toHaveProperty("overall_similarity_score");
+    expect(sent).not.toHaveProperty("classification");
     expect(
       await screen.findByText("INVENTORY MANAGEMENT SYSTEM FOR SMALL BUSINESS"),
     ).toBeInTheDocument();
-    expect(screen.getByText("84%")).toBeInTheDocument();
+    expect(screen.getByText("84.21%")).toBeInTheDocument();
+    expect(screen.getByText(/Weight 30\.00%/)).toBeInTheDocument();
+    expect(screen.getByText(/Weight 70\.00%/)).toBeInTheDocument();
     expect(
       screen.getByText("inventory, management, system"),
     ).toBeInTheDocument();
   });
 
-  it("announces when a match reaches the 70 percent review threshold", async () => {
+  it("uses the backend review decision rather than applying a local threshold", async () => {
     stubQuery([
-      archived(1, "A WEB-BASED RESEARCH REPOSITORY SYSTEM", "0.780000"),
+      {
+        ...archived(1, "A WEB-BASED RESEARCH REPOSITORY SYSTEM", "0.780000"),
+        classification: "high",
+        overall_flagged: true,
+        adviser_review_required: true,
+        flag_reason: "overall_high_similarity",
+      },
       archived(2, "A MOBILE POND WATER QUALITY MONITOR", "0.120000"),
     ]);
     renderCheck();
@@ -120,13 +151,15 @@ describe("researcher similarity check", () => {
       screen.getByRole("button", { name: "Check for duplicates" }),
     );
 
-    expect(await screen.findByText("1 flagged")).toBeInTheDocument();
+    expect(await screen.findByText("1 require review")).toBeInTheDocument();
     expect(
-      screen.getByText(/reached the 70% review threshold/),
+      screen.getByText(
+        "This result has been flagged for adviser review. The system does not automatically reject the research.",
+      ),
     ).toBeInTheDocument();
   });
 
-  it("reports when nothing reaches the threshold", async () => {
+  it("reports when the service requires no adviser review", async () => {
     stubQuery([archived(1, "A MOBILE POND WATER QUALITY MONITOR", "0.100000")]);
     renderCheck();
 
@@ -138,9 +171,7 @@ describe("researcher similarity check", () => {
     );
 
     expect(
-      await screen.findByText(
-        "No archived study reached the 70% review threshold.",
-      ),
+      await screen.findByText("No archived study requires adviser review."),
     ).toBeInTheDocument();
     expect(screen.queryByText(/^\d+ flagged$/)).not.toBeInTheDocument();
   });
@@ -179,10 +210,12 @@ describe("researcher similarity check", () => {
       screen.getByRole("button", { name: "Check for duplicates" }),
     );
 
-    expect(await screen.findByText("Unavailable")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Overall similarity unavailable"),
+    ).toBeInTheDocument();
   });
 
-  it("hides zero-scoring studies and reports how many were set aside", async () => {
+  it("shows all archived public studies including zero-scoring studies", async () => {
     stubQuery([
       archived(1, "A WEB-BASED RESEARCH REPOSITORY SYSTEM", "0.640000", [
         "repository",
@@ -203,18 +236,15 @@ describe("researcher similarity check", () => {
       await screen.findByText("A WEB-BASED RESEARCH REPOSITORY SYSTEM"),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText("A MOBILE POND WATER QUALITY MONITOR"),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("A GEOGRAPHIC MAPPING TOOL FOR EXTENSION"),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByText("0%")).not.toBeInTheDocument();
-    expect(
-      screen.getByText(/2 archived studies share no terms/),
+      screen.getByText("A MOBILE POND WATER QUALITY MONITOR"),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText("A GEOGRAPHIC MAPPING TOOL FOR EXTENSION"),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("0.00%")).toHaveLength(2);
   });
 
-  it("reports plainly when every study scores zero", async () => {
+  it("shows every archived public study when all scores are zero", async () => {
     stubQuery([
       archived(1, "A MOBILE POND WATER QUALITY MONITOR", "0.000000"),
       archived(2, "A GEOGRAPHIC MAPPING TOOL FOR EXTENSION", "0.000000"),
@@ -229,12 +259,10 @@ describe("researcher similarity check", () => {
     );
 
     expect(
-      await screen.findByText(
-        "No archived study shares any terms with these keywords.",
-      ),
+      await screen.findByText("No archived study requires adviser review."),
     ).toBeInTheDocument();
-    expect(screen.queryByRole("table")).not.toBeInTheDocument();
-    expect(screen.queryByText("0%")).not.toBeInTheDocument();
+    expect(screen.getByRole("table")).toBeInTheDocument();
+    expect(screen.getAllByText("0.00%")).toHaveLength(2);
   });
 
   it("surfaces a failed check as a retryable error", async () => {
