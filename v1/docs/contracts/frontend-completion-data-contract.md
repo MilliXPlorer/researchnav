@@ -49,6 +49,13 @@ Use `/api/office/*`, not `/api/research-office/*`, for compliance, users,
 reports, and privacy logs. Normalize the nested users paginator. This path
 correction does not grant Office access to Coordinators or Academics.
 
+Research Office fallback remains disabled until the deployed route family has
+passed integration tests proving that strict Office middleware is registered,
+the controller is available, the exact Research Office role can read permitted
+endpoints, and Coordinator and Academics receive `403` from every `/api/office/*`
+endpoint. A route or middleware configuration failure must remain visible and
+must not be concealed by demo data.
+
 ### Unsupported Or Unverified
 
 - Do not infer a replacement for `GET /api/instructor/submissions` without
@@ -129,6 +136,11 @@ Controls are gated by explicit `source === "mock"`, not merely by ID format. No
 mock ID may reach an API request. Safe local filtering, sorting, expansion, and
 Retry are allowed.
 
+Fixture selection uses the exact session role, not a shared canonical role slug.
+Only the explicit Research Office session role may select Research Office
+fixtures. Coordinator and Academics must never select Office fixtures or issue
+Office requests.
+
 ## Fallback Allowlist
 
 Only reviewed read models used by these existing endpoint families may consult
@@ -145,7 +157,8 @@ the matching role fixture:
 - Research Coordinator: schedules, duplicate flags, adviser load, reports, and
   instructor-account reads.
 - Research Office: compliance, users, reports, and privacy-log GETs under
-  `/api/office/*`.
+  `/api/office/*`, but only after the live authorization prerequisite above has
+  passed.
 - Librarian: archiving queue, `/api/librarian/catalog`, metadata standards, and
   retention-log reads.
 - Administrator: dashboard, coordinators, users, audit logs, system status, and
@@ -171,4 +184,11 @@ fixture, remains an error and must not borrow another role's data.
 - Mock mode displays its notice and issues zero write/download/preview requests.
 - Mock identifiers are rejected before dispatch.
 - Role/account changes clear stale live and mock state.
+- Coordinator and Academics never select Office fixtures, never call Office
+  paths, and receive authoritative `403` responses in backend integration tests.
+- Every fixture passes schema assertions for synthetic `Demo`/`Sample` names,
+  `.invalid` emails, mock/negative IDs, and the absence of tokens, credentials,
+  real personal data, private manuscript text, storage paths, action URLs,
+  preview URLs, and download URLs.
+- Fixture source and built frontend assets pass secret scanning.
 - Existing GSSO/session/profile tests pass unchanged.
