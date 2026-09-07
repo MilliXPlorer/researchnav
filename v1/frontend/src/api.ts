@@ -1,4 +1,5 @@
 import type { ResearchRecord, Role, UserSession } from "./types";
+import type { SdgNumber } from "./sdgApi";
 
 export type ApiFetch = typeof globalThis.fetch;
 
@@ -1315,6 +1316,7 @@ export type PublicResearchFilters = {
   year?: string | number;
   yearFrom?: string | number;
   yearTo?: string | number;
+  sdg?: SdgNumber;
   perPage?: number;
 };
 
@@ -1337,6 +1339,7 @@ export async function searchPublicResearch(
   append("year", filters.year);
   append("year_from", filters.yearFrom);
   append("year_to", filters.yearTo);
+  append("sdg", filters.sdg);
   params.set("per_page", String(filters.perPage ?? 50));
 
   const records: ResearchRecord[] = [];

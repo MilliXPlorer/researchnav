@@ -25,6 +25,11 @@ import ProfileDialog, { ProfileAvatar } from "./ProfileDialog";
 import { instituteNames } from "./data";
 import { PublicationYearInput } from "./dateControls";
 import { classificationLabel, formatSimilarityPercentage } from "./similarity";
+import {
+  fetchSdgTaxonomy,
+  type SdgNumber,
+  type SustainableDevelopmentGoal,
+} from "./sdgApi";
 import type { ResearchRecord, UserSession } from "./types";
 import { useDialogFocus } from "./useDialogFocus";
 
@@ -41,6 +46,19 @@ type SimilaritySearchResponse =
       status: "error";
       message: string;
     };
+
+function selectedSdg(searchParams: URLSearchParams): SdgNumber | null {
+  const values = searchParams.getAll("sdg");
+  if (values.length !== 1 || !/^(?:[1-9]|1[0-7])$/.test(values[0] ?? "")) {
+    return null;
+  }
+  return Number(values[0]) as SdgNumber;
+}
+
+function hasCanonicalSdg(searchParams: URLSearchParams) {
+  const values = searchParams.getAll("sdg");
+  return values.length === 0 || selectedSdg(searchParams) !== null;
+}
 
 export default function CatalogPage({
   onSignIn,
@@ -63,12 +81,16 @@ export default function CatalogPage({
   error?: string | null;
   initialSearch?: string;
 }) {
-  const [searchParams, setSearchParams] = useState(
-    () =>
-      new URLSearchParams(
-        initialSearch ??
-          (typeof window === "undefined" ? "" : window.location.search),
-      ),
+  const catalogSearch =
+    initialSearch ??
+    (typeof window === "undefined" ? "" : window.location.search);
+  const [searchParams, setSearchParams] = useState(() => {
+    const params = new URLSearchParams(catalogSearch);
+    if (!hasCanonicalSdg(params)) params.delete("sdg");
+    return params;
+  });
+  const [normalizesInitialSdg] = useState(
+    () => !hasCanonicalSdg(new URLSearchParams(catalogSearch)),
   );
   const [query, setQuery] = useState(searchParams.get("q") ?? "");
   const [selectedRecord, setSelectedRecord] = useState<ResearchRecord | null>(
@@ -80,12 +102,46 @@ export default function CatalogPage({
   const yearTo = searchParams.get("year_to") ?? exactYear;
   const category = searchParams.get("category") ?? "all";
   const institute = searchParams.get("institute") ?? "all";
+  const sdg = selectedSdg(searchParams);
+  const [sdgTaxonomy, setSdgTaxonomy] = useState<{
+    status: "loading" | "ready" | "error";
+    goals: SustainableDevelopmentGoal[];
+  }>({ status: "loading", goals: [] });
+  const [sdgTaxonomyRequest, setSdgTaxonomyRequest] = useState(0);
+
+  useEffect(() => {
+    if (!normalizesInitialSdg) return;
+    window.history.replaceState(
+      {},
+      "",
+      `/catalog${searchParams.size ? `?${searchParams.toString()}` : ""}`,
+    );
+  }, [normalizesInitialSdg, searchParams]);
+
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+
+    fetchSdgTaxonomy(globalThis.fetch, controller.signal)
+      .then((goals) => {
+        if (active) setSdgTaxonomy({ status: "ready", goals });
+      })
+      .catch(() => {
+        if (active) setSdgTaxonomy({ status: "error", goals: [] });
+      });
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [sdgTaxonomyRequest]);
   /**
    * Category and year matching run in SQL. `institute` has no server-side
    * filter and stays local.
    */
-  const hasServerFilters = Boolean(yearFrom || yearTo) || category !== "all";
-  const serverFilterKey = JSON.stringify({ yearFrom, yearTo, category });
+  const hasServerFilters =
+    Boolean(yearFrom || yearTo) || category !== "all" || sdg !== null;
+  const serverFilterKey = JSON.stringify({ yearFrom, yearTo, category, sdg });
   const [serverFiltered, setServerFiltered] = useState<{
     key: string;
     status: "ready" | "error";
@@ -108,6 +164,7 @@ export default function CatalogPage({
         category: category === "all" ? undefined : category,
         yearFrom: yearFrom || undefined,
         yearTo: yearTo || undefined,
+        sdg: sdg ?? undefined,
       },
       globalThis.fetch,
       controller.signal,
@@ -133,7 +190,7 @@ export default function CatalogPage({
       active = false;
       controller.abort();
     };
-  }, [category, hasServerFilters, serverFilterKey, yearFrom, yearTo]);
+  }, [category, hasServerFilters, sdg, serverFilterKey, yearFrom, yearTo]);
 
   const activeQuery = (searchParams.get("q") ?? "").trim();
   const hasActiveSimilarityQuery = activeQuery.length > 0;
@@ -347,6 +404,37 @@ export default function CatalogPage({
               )}
             </select>
           </label>
+          <label className="catalog-sdg-filter">
+            Sustainable Development Goal
+            <select
+              aria-describedby={
+                sdgTaxonomy.status === "ready"
+                  ? undefined
+                  : "sdg-taxonomy-status"
+              }
+              aria-label="Filter by Sustainable Development Goal"
+              disabled={sdgTaxonomy.status !== "ready"}
+              value={sdg === null ? "" : String(sdg)}
+              onChange={(event) => updateParam("sdg", event.target.value)}
+            >
+              {sdgTaxonomy.status === "ready" ? (
+                <>
+                  <option value="">All Sustainable Development Goals</option>
+                  {sdgTaxonomy.goals.map((goal) => (
+                    <option key={goal.number} value={goal.number}>
+                      SDG {goal.number} — {goal.title}
+                    </option>
+                  ))}
+                </>
+              ) : (
+                <option value={sdg === null ? "" : String(sdg)}>
+                  {sdgTaxonomy.status === "loading"
+                    ? "Loading Sustainable Development Goals…"
+                    : "Sustainable Development Goals unavailable"}
+                </option>
+              )}
+            </select>
+          </label>
           <label>
             Institute<span className="sr-only">Filter by institute</span>
             <select
@@ -359,6 +447,31 @@ export default function CatalogPage({
               ))}
             </select>
           </label>
+          <div
+            className="catalog-sdg-status"
+            id="sdg-taxonomy-status"
+            aria-live="polite"
+          >
+            {sdgTaxonomy.status === "loading" && (
+              <span>Loading Sustainable Development Goals…</span>
+            )}
+            {sdgTaxonomy.status === "error" && (
+              <>
+                <span role="alert">
+                  Sustainable Development Goals are unavailable.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSdgTaxonomy({ status: "loading", goals: [] });
+                    setSdgTaxonomyRequest((request) => request + 1);
+                  }}
+                >
+                  Retry Sustainable Development Goals
+                </button>
+              </>
+            )}
+          </div>
         </div>
         <aside className="aside-note catalog-search-tip">
           <strong>Search tip</strong>
