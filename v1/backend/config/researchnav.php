@@ -69,4 +69,9 @@ return [
         'maximum_text_characters' => (int) env('MANUSCRIPT_SEARCH_MAXIMUM_TEXT_CHARACTERS', 1000000),
         'extractor_version' => env('MANUSCRIPT_SEARCH_EXTRACTOR_VERSION', 'manuscript-text/1'),
     ],
+    'sdg' => [
+        // Changing this version makes persisted classifications stale so they
+        // can be deterministically rebuilt from an existing ready projection.
+        'detector_version' => 'sdg-declaration/1',
+    ],
 ];
