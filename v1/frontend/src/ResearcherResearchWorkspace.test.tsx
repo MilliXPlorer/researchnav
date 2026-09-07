@@ -298,10 +298,9 @@ describe("researcher research workspace", () => {
       screen.queryByRole("button", { name: "Save and submit" }),
     ).not.toBeInTheDocument();
 
-    fireEvent.change(
-      screen.getByLabelText("PDF, DOC, or DOCX (maximum 25 MB)"),
-      { target: { files: [new File(["revision"], "revision.docx")] } },
-    );
+    fireEvent.change(screen.getByLabelText("PDF or DOCX (maximum 25 MB)"), {
+      target: { files: [new File(["revision"], "revision.docx")] },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => {
       const uploadCall = fetchMock.mock.calls.find(
@@ -348,5 +347,130 @@ describe("researcher research workspace", () => {
     expect(
       screen.getByRole("button", { name: /Resubmit revision 2/ }),
     ).toBeDisabled();
+  });
+
+  it("shows an error instead of mock data when the live Researcher detail page fails", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ error: "RESEARCH_TABLE_UNAVAILABLE" }), {
+          status: 500,
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <RoleWorkspace
+        role="researcher"
+        navigate={vi.fn()}
+        selectNav={vi.fn()}
+        dashboardScope="researcher:researcher@example.test"
+        dashboardState={{
+          status: "loading",
+          scope: "researcher:researcher@example.test",
+        }}
+        onRetry={vi.fn()}
+        researchDocumentId="42"
+      />,
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Your research record could not be loaded",
+    );
+    expect(screen.queryByText("Demo data - read only")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "Download" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Resubmit revision/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps live record details when only the files endpoint is unavailable", async () => {
+    installApi();
+    const originalFetch = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request, init?: RequestInit) => {
+        if (String(input) === "/api/research/42/files" && !init?.method) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ error: "FILES_TABLE_UNAVAILABLE" }), {
+              status: 500,
+            }),
+          );
+        }
+        return originalFetch(input, init);
+      }),
+    );
+    render(
+      <RoleWorkspace
+        role="researcher"
+        navigate={vi.fn()}
+        selectNav={vi.fn()}
+        dashboardScope="researcher:researcher@example.test"
+        dashboardState={{
+          status: "loading",
+          scope: "researcher:researcher@example.test",
+        }}
+        onRetry={vi.fn()}
+        researchDocumentId="42"
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Revision-ready study" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Some research sections are unavailable: Files",
+    );
+    expect(
+      screen.getByText("No files have been uploaded."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "Download" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: /Rename/,
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("New file or replacement"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Resubmit revision 2/ }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Edit metadata and authors" }),
+    ).toBeEnabled();
+  });
+
+  it("keeps a missing Researcher record as not found instead of fabricating it", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ error: "NOT_FOUND" }), { status: 404 }),
+      ),
+    );
+    render(
+      <RoleWorkspace
+        role="researcher"
+        navigate={vi.fn()}
+        selectNav={vi.fn()}
+        dashboardScope="researcher:researcher@example.test"
+        dashboardState={{
+          status: "loading",
+          scope: "researcher:researcher@example.test",
+        }}
+        onRetry={vi.fn()}
+        researchDocumentId="999"
+      />,
+    );
+
+    expect(
+      await screen.findByText(
+        "Your research record could not be loaded. Please try again.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Demo data - read only")).not.toBeInTheDocument();
   });
 });

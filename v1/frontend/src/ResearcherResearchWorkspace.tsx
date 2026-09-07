@@ -34,8 +34,10 @@ type WorkspaceContext = {
   people: ResearchPeopleResource;
 };
 
+type ResearcherSection = "files" | "revisions" | "validations" | "people";
+
 const maxFileBytes = 25 * 1024 * 1024;
-const allowedExtensions = new Set(["pdf", "doc", "docx"]);
+const allowedExtensions = new Set(["pdf", "docx"]);
 const editableFileTypes: DocumentFileResource["document_type"][] = [
   "title_proposal",
   "draft",
@@ -67,10 +69,78 @@ function formatBytes(bytes: number) {
 function fileError(file: File | null) {
   if (!file) return "Choose a file to upload.";
   const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
-  if (!allowedExtensions.has(extension))
-    return "Choose a PDF, DOC, or DOCX file.";
+  if (!allowedExtensions.has(extension)) return "Choose a PDF or DOCX file.";
   if (file.size > maxFileBytes) return "The file must not exceed 25 MB.";
   return null;
+}
+
+function readArraySection<T>(
+  result: PromiseSettledResult<T[]>,
+  section: ResearcherSection,
+  sectionErrors: ResearcherSection[],
+) {
+  if (result.status === "fulfilled" && Array.isArray(result.value)) {
+    return result.value;
+  }
+  sectionErrors.push(section);
+  return [];
+}
+
+function ResearchWorkflow({
+  status,
+}: {
+  status: ResearchDocumentSummaryResource["submission_status"];
+}) {
+  const steps: Array<{
+    key: ResearchDocumentSummaryResource["submission_status"];
+    label: string;
+  }> = [
+    { key: "draft", label: "Draft" },
+    { key: "submitted", label: "Submitted" },
+    { key: "under_review", label: "Under review" },
+    { key: "revision_required", label: "Revision required" },
+    { key: "approved", label: "Approved" },
+    { key: "archived", label: "Archived" },
+  ];
+  const current = steps.findIndex((step) => step.key === status);
+  const completed = new Set<
+    ResearchDocumentSummaryResource["submission_status"]
+  >(
+    status === "archived"
+      ? ["draft", "submitted", "under_review", "approved", "archived"]
+      : status === "approved"
+        ? ["draft", "submitted", "under_review", "approved"]
+        : steps.slice(0, current + 1).map((step) => step.key),
+  );
+
+  return (
+    <section
+      className="panel-card researcher-workflow"
+      aria-labelledby="workflow-title"
+    >
+      <p className="eyebrow">Submission timeline</p>
+      <h2 id="workflow-title">Research progress</h2>
+      <ol>
+        {steps.map((step, index) => (
+          <li
+            key={step.key}
+            className={completed.has(step.key) ? "complete" : ""}
+            aria-current={index === current ? "step" : undefined}
+          >
+            <span aria-hidden="true">{index + 1}</span>
+            <strong>{step.label}</strong>
+          </li>
+        ))}
+      </ol>
+      {status === "revision_required" && (
+        <p>
+          Adviser review is required before this record can continue toward
+          approval. Upload the requested revision and resubmit it for human
+          review.
+        </p>
+      )}
+    </section>
+  );
 }
 
 export default function ResearcherResearchWorkspace({
@@ -82,6 +152,9 @@ export default function ResearcherResearchWorkspace({
 }) {
   const [context, setContext] = useState<WorkspaceContext | null>(null);
   const [loading, setLoading] = useState(true);
+  const [source, setSource] = useState<"live" | "mock">("live");
+  const [mockSections, setMockSections] = useState<ResearcherSection[]>([]);
+  const [sectionErrors, setSectionErrors] = useState<ResearcherSection[]>([]);
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [message, setMessage] = useState("");
@@ -116,25 +189,55 @@ export default function ResearcherResearchWorkspace({
     setLoading(true);
     setError("");
     try {
-      const [research, files, revisions, validations, people] =
-        await Promise.all([
-          getInternalResearch(researchDocumentId),
+      const research = await getInternalResearch(researchDocumentId);
+      if (!research || !Array.isArray(research.authors)) {
+        throw new Error("RESEARCHER_RECORD_INVALID");
+      }
+
+      const [filesResult, revisionsResult, validationsResult, peopleResult] =
+        await Promise.allSettled([
           listResearchFiles(researchDocumentId),
           listResearchRevisions(researchDocumentId),
           listTitleValidations(researchDocumentId),
-          getResearchPeople(researchDocumentId).catch(() => emptyPeople),
+          getResearchPeople(researchDocumentId),
         ]);
       if (!mounted.current || generation.current !== request) return;
+
+      const nextMockSections: ResearcherSection[] = [];
+      const nextSectionErrors: ResearcherSection[] = [];
+      const files = readArraySection(filesResult, "files", nextSectionErrors);
+      const revisions = readArraySection(
+        revisionsResult,
+        "revisions",
+        nextSectionErrors,
+      );
+      const validations = readArraySection(
+        validationsResult,
+        "validations",
+        nextSectionErrors,
+      );
+      let people = emptyPeople;
+      if (peopleResult.status === "fulfilled" && peopleResult.value) {
+        people = {
+          section: peopleResult.value.section ?? null,
+          reviewers: Array.isArray(peopleResult.value.reviewers)
+            ? peopleResult.value.reviewers
+            : [],
+        };
+      } else {
+        nextSectionErrors.push("people");
+      }
+
       setContext({
         research,
         files,
         revisions,
         validations,
-        people: {
-          section: people?.section ?? null,
-          reviewers: people?.reviewers ?? [],
-        },
+        people,
       });
+      setSource("live");
+      setMockSections(nextMockSections);
+      setSectionErrors(nextSectionErrors);
       setUploadType(
         research.submission_status === "revision_required"
           ? "revised_manuscript"
@@ -158,15 +261,29 @@ export default function ResearcherResearchWorkspace({
   const reload = () => setAttempt((current) => current + 1);
   const research = context?.research;
   const editable =
-    research?.submission_status === "draft" ||
-    research?.submission_status === "revision_required";
+    source === "live" &&
+    (research?.submission_status === "draft" ||
+      research?.submission_status === "revision_required");
+  const canRequestValidation =
+    research !== undefined &&
+    ["draft", "submitted", "under_review", "revision_required"].includes(
+      research.submission_status,
+    );
+  const canReportProgress =
+    research?.research_stage === "ongoing" &&
+    research.submission_status !== "archived";
   const revisions = [...(context?.revisions ?? [])].sort(
     (first, second) => second.revision_number - first.revision_number,
   );
   const latestRevision = revisions.find((revision) =>
     ["requested", "in_progress"].includes(revision.revision_status),
   );
+  const filesAreLive =
+    source === "live" &&
+    !mockSections.includes("files") &&
+    !sectionErrors.includes("files");
   const hasCurrentRevisedManuscript = Boolean(
+    filesAreLive &&
     latestRevision &&
     (context?.files ?? []).some(
       (file) =>
@@ -189,7 +306,7 @@ export default function ResearcherResearchWorkspace({
     )[0]?.id;
 
   async function runMutation(label: string, action: () => Promise<unknown>) {
-    if (mutation) return;
+    if (mutation || source === "mock") return;
     setMutation(label);
     setMessage("");
     try {
@@ -265,7 +382,65 @@ export default function ResearcherResearchWorkspace({
         </p>
       )}
 
+      {source === "mock" && (
+        <section className="researcher-demo-notice" role="status">
+          <div>
+            <strong>Demo data - read only</strong>
+            <span>
+              This sample record is shown because the live research details
+              could not be loaded. Editing, uploads, actions, previews, and
+              downloads are disabled.
+            </span>
+          </div>
+          <Button variant="secondary" onClick={reload}>
+            Retry live data
+          </Button>
+        </section>
+      )}
+
+      {source === "live" && mockSections.length > 0 && (
+        <section className="researcher-demo-notice" role="status">
+          <div>
+            <strong>Some sections use demo data</strong>
+            <span>
+              Live {mockSections.map(humanize).join(", ")} could not be loaded.
+              Those sections are read only; your live research details are
+              preserved.
+            </span>
+          </div>
+          <Button variant="secondary" onClick={reload}>
+            Retry live data
+          </Button>
+        </section>
+      )}
+
+      {sectionErrors.length > 0 && (
+        <section className="panel-card dashboard-error" role="alert">
+          <p>
+            Some research sections are unavailable:{" "}
+            {sectionErrors.map(humanize).join(", ")}.
+          </p>
+          <Button variant="secondary" onClick={reload}>
+            Retry
+          </Button>
+        </section>
+      )}
+
+      <nav
+        className="researcher-section-nav"
+        aria-label="Research record sections"
+      >
+        <a href="#submission-status">Status</a>
+        <a href="#revision-history">Revisions</a>
+        <a href="#research-files">Files</a>
+        <a href="#research-progress">Progress</a>
+        <a href="#research-feedback">Feedback</a>
+      </nav>
+
+      <ResearchWorkflow status={research.submission_status} />
+
       <section
+        id="submission-status"
         className="panel-card researcher-record-summary"
         aria-labelledby="researcher-summary-title"
       >
@@ -372,24 +547,27 @@ export default function ResearcherResearchWorkspace({
               </p>
             )}
           </div>
-          {latestRevision && (
-            <Button
-              disabled={Boolean(mutation) || !hasCurrentRevisedManuscript}
-              onClick={() =>
-                void runMutation("resubmit", () =>
-                  resubmitResearchRevision(research.id, latestRevision.id),
-                )
-              }
-            >
-              {mutation === "resubmit"
-                ? "Resubmitting…"
-                : `Resubmit revision ${latestRevision.revision_number}`}
-            </Button>
-          )}
+          {latestRevision &&
+            source === "live" &&
+            !mockSections.includes("revisions") && (
+              <Button
+                disabled={Boolean(mutation) || !hasCurrentRevisedManuscript}
+                onClick={() =>
+                  void runMutation("resubmit", () =>
+                    resubmitResearchRevision(research.id, latestRevision.id),
+                  )
+                }
+              >
+                {mutation === "resubmit"
+                  ? "Resubmitting…"
+                  : `Resubmit revision ${latestRevision.revision_number}`}
+              </Button>
+            )}
         </section>
       )}
 
       <section
+        id="revision-history"
         className="panel-card researcher-history"
         aria-labelledby="revision-history-title"
       >
@@ -408,6 +586,9 @@ export default function ResearcherResearchWorkspace({
                 <p>
                   {revision.revision_remarks ?? "No remarks were recorded."}
                 </p>
+                {revision.required_action && (
+                  <p>Required action: {revision.required_action}</p>
+                )}
                 <time>
                   Requested {formatDate(revision.requested_at)} · Submitted{" "}
                   {formatDate(revision.submitted_at)}
@@ -426,6 +607,11 @@ export default function ResearcherResearchWorkspace({
         <h2 id="validation-history-title">Title-validation history</h2>
         <Button
           variant="secondary"
+          hidden={
+            !canRequestValidation ||
+            source === "mock" ||
+            mockSections.includes("validations")
+          }
           disabled={
             Boolean(mutation) ||
             context.validations.some(
@@ -473,6 +659,7 @@ export default function ResearcherResearchWorkspace({
       </section>
 
       <section
+        id="research-files"
         className="panel-card researcher-files"
         aria-labelledby="researcher-files-title"
       >
@@ -500,7 +687,9 @@ export default function ResearcherResearchWorkspace({
               <tbody>
                 {context.files.map((file) => {
                   const fileEditable =
-                    editable && file.document_type !== "final_manuscript";
+                    editable &&
+                    filesAreLive &&
+                    file.document_type !== "final_manuscript";
                   return (
                     <tr key={file.id}>
                       <td>{file.original_filename}</td>
@@ -511,13 +700,18 @@ export default function ResearcherResearchWorkspace({
                       <td>{formatDate(file.uploaded_at)}</td>
                       <td>
                         <span className="row-actions">
-                          <a
-                            className="text-action"
-                            href={researchFileDownloadUrl(research.id, file.id)}
-                          >
-                            Download
-                          </a>
-                          {file.id === previewFileId && (
+                          {filesAreLive && (
+                            <a
+                              className="text-action"
+                              href={researchFileDownloadUrl(
+                                research.id,
+                                file.id,
+                              )}
+                            >
+                              Download
+                            </a>
+                          )}
+                          {filesAreLive && file.id === previewFileId && (
                             <a
                               className="text-action"
                               href={researchFilePreviewUrl(
@@ -529,6 +723,10 @@ export default function ResearcherResearchWorkspace({
                             >
                               <Eye size={15} /> Preview PDF
                             </a>
+                          )}
+                          {(source === "mock" ||
+                            mockSections.includes("files")) && (
+                            <span>Demo file</span>
                           )}
                           {fileEditable && (
                             <>
@@ -562,14 +760,14 @@ export default function ResearcherResearchWorkspace({
             </table>
           </div>
         )}
-        {editable && (
+        {editable && filesAreLive && (
           <div className="researcher-file-upload">
             <label>
               New file or replacement
               <input
                 aria-label="New file or replacement"
                 type="file"
-                accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 onChange={(event) => setUpload(event.target.files?.[0] ?? null)}
                 disabled={Boolean(mutation)}
               />
@@ -603,58 +801,65 @@ export default function ResearcherResearchWorkspace({
       </section>
 
       <section
+        id="research-progress"
         className="panel-card researcher-progress"
         aria-labelledby="progress-title"
       >
         <p className="eyebrow">Progress monitoring</p>
         <h2 id="progress-title">Report your research progress</h2>
-        <form
-          className="admin-inline-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (!progressRemarks.trim()) {
-              setMessage(
-                "Describe your progress before submitting the report.",
-              );
-              return;
-            }
-            void runMutation("progress", () =>
-              reportResearchProgress(research.id, {
-                progress_status: progressStatus,
-                remarks: progressRemarks.trim(),
-              }),
-            ).then(() => setProgressRemarks(""));
-          }}
-        >
-          <label>
-            Progress status
-            <select
-              value={progressStatus}
-              onChange={(event) =>
-                setProgressStatus(event.target.value as typeof progressStatus)
+        {!canReportProgress ? (
+          <p className="admin-empty">
+            Progress updates are available for ongoing, non-archived research.
+          </p>
+        ) : (
+          <form
+            className="admin-inline-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!progressRemarks.trim()) {
+                setMessage(
+                  "Describe your progress before submitting the report.",
+                );
+                return;
               }
-              disabled={Boolean(mutation)}
-            >
-              <option value="on_track">On track</option>
-              <option value="at_risk">At risk</option>
-              <option value="delayed">Delayed</option>
-              <option value="completed">Completed</option>
-            </select>
-          </label>
-          <label className="submission-abstract-field">
-            Progress details
-            <textarea
-              value={progressRemarks}
-              onChange={(event) => setProgressRemarks(event.target.value)}
-              maxLength={10000}
-              rows={3}
-              disabled={Boolean(mutation)}
-            />
-          </label>
-          <Button disabled={Boolean(mutation) || !progressRemarks.trim()}>
-            {mutation === "progress" ? "Saving…" : "Save progress report"}
-          </Button>
-        </form>
+              void runMutation("progress", () =>
+                reportResearchProgress(research.id, {
+                  progress_status: progressStatus,
+                  remarks: progressRemarks.trim(),
+                }),
+              ).then(() => setProgressRemarks(""));
+            }}
+          >
+            <label>
+              Progress status
+              <select
+                value={progressStatus}
+                onChange={(event) =>
+                  setProgressStatus(event.target.value as typeof progressStatus)
+                }
+                disabled={Boolean(mutation)}
+              >
+                <option value="on_track">On track</option>
+                <option value="at_risk">At risk</option>
+                <option value="delayed">Delayed</option>
+                <option value="completed">Completed</option>
+              </select>
+            </label>
+            <label className="submission-abstract-field">
+              Progress details
+              <textarea
+                value={progressRemarks}
+                onChange={(event) => setProgressRemarks(event.target.value)}
+                maxLength={10000}
+                rows={3}
+                disabled={Boolean(mutation)}
+              />
+            </label>
+            <Button disabled={Boolean(mutation) || !progressRemarks.trim()}>
+              {mutation === "progress" ? "Saving…" : "Save progress report"}
+            </Button>
+          </form>
+        )}
       </section>
 
       <ResearchActivity
@@ -662,13 +867,25 @@ export default function ResearcherResearchWorkspace({
         title={research.title}
         refreshKey={attempt}
         researcherActions
+        forceMock={source === "mock"}
       />
-      <SimilarityResults
-        researchDocumentId={research.id}
-        onOpenCatalog={(title) =>
-          navigate(`/catalog?q=${encodeURIComponent(title)}`)
-        }
-      />
+      {source === "live" ? (
+        <SimilarityResults
+          researchDocumentId={research.id}
+          onOpenCatalog={(title) =>
+            navigate(`/catalog?q=${encodeURIComponent(title)}`)
+          }
+        />
+      ) : (
+        <section className="panel-card">
+          <p className="eyebrow">Similarity</p>
+          <h2>Live similarity results unavailable</h2>
+          <p>
+            Similarity results are never fabricated. Use the existing Similarity
+            Check when the live service is available.
+          </p>
+        </section>
+      )}
 
       {editing && (
         <Modal

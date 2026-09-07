@@ -72,6 +72,16 @@ class AccountService
         return User::query()->where('role', $role)->latest('created_at')->get()->all();
     }
 
+    /** @return list<User> */
+    public function listProvisionedAccounts(): array
+    {
+        return User::query()
+            ->whereNotNull('invitation_sent_at')
+            ->latest('created_at')
+            ->get()
+            ->all();
+    }
+
     public function provisionUser(string $emailInput, string $role, string $invitedBy): User
     {
         $email = $this->normalizeEmail($emailInput);

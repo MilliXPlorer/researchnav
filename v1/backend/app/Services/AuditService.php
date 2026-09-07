@@ -8,9 +8,11 @@ use Illuminate\Http\Request;
 
 class AuditService
 {
+    public function __construct(private readonly ConsolidationShadowService $shadow) {}
+
     public function log(?User $user, string $action, object|string|null $entity, ?string $description, ?Request $request = null): AuditLog
     {
-        return AuditLog::query()->create([
+        $log = AuditLog::query()->create([
             'user_id' => $user?->id,
             'action' => $action,
             'entity_type' => is_object($entity) ? $entity::class : $entity,
@@ -20,5 +22,9 @@ class AuditService
             'ip_address' => $request?->ip(),
             'user_agent' => $request?->userAgent(),
         ]);
+
+        $this->shadow->mirrorAudit($log);
+
+        return $log;
     }
 }

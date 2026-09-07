@@ -9,6 +9,7 @@ use App\Models\SimilarityResult;
 use App\Models\TitleValidation;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Tests\TestCase;
 
 class DashboardTest extends TestCase
@@ -101,7 +102,7 @@ class DashboardTest extends TestCase
         $this->assign($assignedToOtherAdviser, $other, 'adviser');
 
         $adviserSections = $this->sections($this->dashboard($adviser)->assertOk());
-        $this->assertSame(2, $adviserSections['assigned_reviews']['total']);
+        $this->assertSame(1, $adviserSections['assigned_reviews']['total']);
         $this->assertNotContains($assignedToOtherAdviser->id, array_column($adviserSections['assigned_reviews']['items'], 'research_document_id'));
         $this->assertSame([$revision->id], array_column($adviserSections['revision_requests']['items'], 'research_document_id'));
 
@@ -209,8 +210,8 @@ class DashboardTest extends TestCase
 
         TitleValidation::query()->create(['research_document_id' => $validationResearch->id, 'validated_by' => $admin->id, 'validation_status' => 'pending']);
         TitleValidation::query()->create(['research_document_id' => $validationResearch->id, 'validated_by' => $admin->id, 'validation_status' => 'pending']);
-        SimilarityResult::factory()->create(['source_research_id' => $flaggedResearch->id, 'matched_research_id' => $draft->id, 'final_similarity_score' => '0.800000']);
-        SimilarityResult::factory()->create(['source_research_id' => $flaggedResearch->id, 'matched_research_id' => $submitted->id, 'final_similarity_score' => '0.900000']);
+        SimilarityResult::factory()->create(['source_research_id' => $flaggedResearch->id, 'matched_research_id' => $draft->id, 'title_similarity_score' => '0.800000000000', 'content_similarity_score' => '0.800000000000']);
+        SimilarityResult::factory()->create(['source_research_id' => $flaggedResearch->id, 'matched_research_id' => $submitted->id, 'title_similarity_score' => '0.900000000000', 'content_similarity_score' => '0.900000000000']);
 
         $sections = $this->sections($this->dashboard($admin)->assertOk());
 
@@ -228,6 +229,29 @@ class DashboardTest extends TestCase
         $this->assertSame('private', $privatePreview['visibility']);
         $this->assertArrayNotHasKey('abstract', $privatePreview);
         $this->assertSame(9, $sections['recent_research']['total']);
+    }
+
+    public function test_similarity_queues_use_only_the_latest_pair_decision(): void
+    {
+        $admin = $this->user('admin');
+        $source = $this->document();
+        $matched = $this->document();
+
+        SimilarityResult::factory()->create([
+            'source_research_id' => $source->id, 'matched_research_id' => $matched->id,
+            'title_similarity_score' => '0.800000000000', 'content_similarity_score' => '0.800000000000',
+        ]);
+        SimilarityResult::factory()->create([
+            'source_research_id' => $source->id, 'matched_research_id' => $matched->id,
+            'title_similarity_score' => '0.100000000000', 'content_similarity_score' => '0.100000000000',
+        ]);
+        $this->assertSame(0, $this->sections($this->dashboard($admin))['flagged_similarity']['total']);
+
+        SimilarityResult::factory()->create([
+            'source_research_id' => $source->id, 'matched_research_id' => $matched->id,
+            'title_similarity_score' => '0.800000000000', 'content_similarity_score' => '0.800000000000',
+        ]);
+        $this->assertSame(1, $this->sections($this->dashboard($admin))['flagged_similarity']['total']);
     }
 
     public function test_research_previews_are_capped_ordered_and_not_cached(): void
@@ -265,6 +289,39 @@ class DashboardTest extends TestCase
         $this->dashboard($rawAdmin)
             ->assertForbidden()
             ->assertExactJson(['error' => 'ROLE_NOT_AUTHORIZED']);
+    }
+
+    public function test_research_analytics_are_monthly_and_scoped_to_the_current_role(): void
+    {
+        Carbon::setTestNow('2026-08-22 12:00:00');
+        try {
+            $researcher = $this->user('researcher');
+            $other = $this->user('researcher');
+
+            $march = $this->document(['submitted_by' => $researcher->id]);
+            $march->forceFill(['created_at' => '2026-03-10 10:00:00'])->save();
+            $july = $this->document(['submitted_by' => $researcher->id]);
+            $july->forceFill(['created_at' => '2026-07-15 10:00:00'])->save();
+            $foreign = $this->document(['submitted_by' => $other->id]);
+            $foreign->forceFill(['created_at' => '2026-07-16 10:00:00'])->save();
+            $archived = $this->document(['submitted_by' => $researcher->id]);
+            $archived->forceFill([
+                'created_at' => '2026-02-01 10:00:00',
+                'archived_at' => '2026-08-05 10:00:00',
+            ])->save();
+
+            $analytics = $this->dashboard($researcher)->assertOk()->json('data.analytics');
+
+            $this->assertSame('Research activity', $analytics['title']);
+            $this->assertSame('Last 6 months', $analytics['period']);
+            $this->assertSame(['Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug'], array_column($analytics['series'][0]['points'], 'label'));
+            $this->assertSame([1, 0, 0, 0, 1, 0], array_column($analytics['series'][0]['points'], 'value'));
+            $this->assertSame([0, 0, 0, 0, 0, 1], array_column($analytics['series'][1]['points'], 'value'));
+            $this->assertSame('Created', $analytics['series'][0]['label']);
+            $this->assertSame('Archived', $analytics['series'][1]['label']);
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     private function user(string $role, string $accessStatus = 'active'): User

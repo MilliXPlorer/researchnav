@@ -6,9 +6,9 @@ import {
   getSystemStatus,
   listAccessRequests,
   listAdminAuditLogs,
-  listAdminCoordinators,
+  listAdminProvisionedAccounts,
   listAdminUsers,
-  provisionCoordinator,
+  provisionAdminAccount,
   REQUESTABLE_ROLES,
   updateAdminUser,
   type AccessRequestResource,
@@ -21,6 +21,7 @@ import {
 } from "./api";
 import { Button } from "./components";
 import { DatePickerInput } from "./dateControls";
+import ResearchOfficeBulkImport from "./ResearchOfficeBulkImport";
 import { useLiveFilters } from "./useLiveFilters";
 
 const roles: AdminRole[] = [
@@ -32,6 +33,7 @@ const roles: AdminRole[] = [
   "statistician",
   "coordinator",
   "librarian",
+  "research_editor",
   "research-office",
   "academics",
 ];
@@ -45,12 +47,14 @@ export default function AdminSidebarPage({
   switch (selectedNav) {
     case "Access Requests":
       return <AccessRequests />;
-    case "Coordinator Accounts":
-      return <CoordinatorAccounts />;
+    case "Account Provisioning":
+      return <AccountProvisioning />;
     case "All Users":
       return <AllUsers />;
     case "Audit Logs":
       return <AuditLogs />;
+    case "Import Manuscript":
+      return <ResearchOfficeBulkImport contextLabel="System Administrator" />;
     case "System Settings":
       return <SystemStatus />;
     default:
@@ -312,12 +316,13 @@ function AccessRequests() {
   );
 }
 
-function CoordinatorAccounts() {
+function AccountProvisioning() {
   const [users, setUsers] = useState<Awaited<
-    ReturnType<typeof listAdminCoordinators>
+    ReturnType<typeof listAdminProvisionedAccounts>
   > | null>(null);
   const [error, setError] = useState("");
   const [email, setEmail] = useState("");
+  const [role, setRole] = useState<RequestableRole>("researcher");
   const [provisioning, setProvisioning] = useState(false);
   const [notice, setNotice] = useState("");
   const [attempt, setAttempt] = useState(0);
@@ -331,7 +336,7 @@ function CoordinatorAccounts() {
 
   useEffect(() => {
     let cancelled = false;
-    void listAdminCoordinators()
+    void listAdminProvisionedAccounts()
       .then((result) => {
         if (cancelled) return;
         setUsers(result);
@@ -341,7 +346,7 @@ function CoordinatorAccounts() {
       .catch((requestError) => {
         if (cancelled) return;
         setError(
-          friendlyError(requestError, "Coordinator accounts are unavailable"),
+          friendlyError(requestError, "Provisioned accounts are unavailable"),
         );
         setLoading(false);
       });
@@ -355,16 +360,13 @@ function CoordinatorAccounts() {
     setNotice("");
     setProvisioning(true);
     try {
-      await provisionCoordinator(email.trim());
+      await provisionAdminAccount(email.trim(), role);
       setEmail("");
-      setNotice("Coordinator account provisioned.");
+      setNotice("Account provisioned.");
       reload();
     } catch (requestError) {
       setNotice(
-        friendlyError(
-          requestError,
-          "Coordinator account could not be provisioned",
-        ),
+        friendlyError(requestError, "Account could not be provisioned"),
       );
     } finally {
       setProvisioning(false);
@@ -374,14 +376,14 @@ function CoordinatorAccounts() {
   return (
     <div className="workspace-content admin-sidebar-page">
       <PageHeader
-        title="Coordinator accounts"
-        description="Provision and review Research Coordinator accounts."
+        title="Account provisioning"
+        description="Invite users and assign any supported workspace role."
       />
       <section className="panel-card admin-provision-card">
-        <h2>Provision coordinator</h2>
+        <h2>Provision account</h2>
         <form onSubmit={submit} className="admin-inline-form">
           <label>
-            Coordinator email
+            Account email
             <input
               type="email"
               value={email}
@@ -389,6 +391,21 @@ function CoordinatorAccounts() {
               required
               autoComplete="email"
             />
+          </label>
+          <label>
+            Workspace role
+            <select
+              value={role}
+              onChange={(event) =>
+                setRole(event.target.value as RequestableRole)
+              }
+            >
+              {REQUESTABLE_ROLES.map((roleOption) => (
+                <option key={roleOption} value={roleOption}>
+                  {label(roleOption)}
+                </option>
+              ))}
+            </select>
           </label>
           <Button type="submit" disabled={provisioning}>
             {provisioning ? "Provisioning…" : "Provision account"}
@@ -408,7 +425,7 @@ function CoordinatorAccounts() {
       <section className="panel-card admin-data-card">
         <div className="admin-card-heading">
           <div>
-            <h2>Provisioned coordinators</h2>
+            <h2>Provisioned accounts</h2>
             <p>Only role and account-access information is listed.</p>
           </div>
           <Button variant="secondary" onClick={reload}>
@@ -418,17 +435,13 @@ function CoordinatorAccounts() {
         {error ? (
           <InlineError message={error} retry={reload} />
         ) : loading || users === null ? (
-          <Loading label="Loading coordinator accounts" />
+          <Loading label="Loading provisioned accounts" />
         ) : users.length === 0 ? (
-          <p className="admin-empty">
-            No coordinator accounts have been provisioned.
-          </p>
+          <p className="admin-empty">No accounts have been provisioned.</p>
         ) : (
           <div className="admin-table-wrap">
             <table>
-              <caption className="sr-only">
-                Provisioned coordinator accounts
-              </caption>
+              <caption className="sr-only">Provisioned accounts</caption>
               <thead>
                 <tr>
                   <th>Email</th>

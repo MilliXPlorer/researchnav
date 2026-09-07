@@ -21,11 +21,20 @@ Laravel is a web application framework with expressive, elegant syntax. We belie
 
 Laravel is accessible, powerful, and provides tools required for large, robust applications.
 
+## Scope: Google-only authentication and no AI workflow
+
+The active API accepts Google ID tokens only; it has no local-password or
+alternative identity-provider login. AI-generated content, recommendations, and
+AI-driven workflow decisions are excluded. Similarity output is supporting
+evidence only and every validation, feedback, revision, and approval action is
+recorded by a human account.
+
 ## Similarity worker setup
 
-The title-only similarity worker uses scikit-learn sparse TF-IDF and cosine for
-its final score. FastText provides supporting context only. It never reads
-manuscripts during a title comparison.
+The similarity worker computes independent title and extracted-manuscript
+TF-IDF cosine scores. Laravel applies the authoritative 30% title / 70% content
+weighted policy documented in `../docs/SIMILARITY_SCORING.md`. FastText provides
+supporting context only and never changes the official score or review status.
 
 Create the Python environment from `backend`:
 
@@ -94,9 +103,73 @@ therefore leaves no usable margin; set it to at least 60 s when FastText is
 configured, or expect intermittent `502 SIMILARITY_PROCESS_FAILED` on a cold
 page cache.
 
-Public catalog search is unaffected. `POST /api/repository/similarity` passes no
-model to the worker by design, stays pure TF-IDF/cosine, and returns
-`fasttext_support_score: null`.
+Public catalog search always uses TF-IDF/cosine for official ranking. When the
+FastText package and configured model are available, the same request also
+returns a semantic `fasttext_support_score`; otherwise that field is `null` and
+search continues with TF-IDF/cosine. Because the short-lived worker loads the
+model per request, the same timeout and memory guidance applies to search.
+
+## Manuscript search projection
+
+Manuscript-content search is retrieval, not plagiarism detection or similarity
+scoring. `GET /api/repository?q=` searches metadata (title, abstract, keywords,
+and authors) and `ready` extracted bodies, but returns metadata only: no body,
+snippet, or score. Eligible records are non-deleted records with
+`archive_status = archived`, `visibility = public`, and `submission_status` of
+`approved` or `archived`.
+
+On MariaDB, the body projection is searched with FULLTEXT natural-language
+ranking (a BM25-family relevance ranking). The source resolver selects the
+latest current `final_manuscript`. Only when that source is absent does it use
+the canonical import fallback, and only after its checksum, path, metadata, and
+file identity have been verified. PDF and DOCX extraction is supported; DOC is
+unsupported and scanned/OCR-dependent PDFs produce `NO_TEXT`.
+
+The migration creates one private `LONGTEXT` projection row per research
+document. A successful extraction is `ready`; other states are `pending`,
+`no_source`, `unsupported`, or `failed`. Failed extraction clears stale body
+text, so metadata search remains available. `NO_SOURCE`, `UNSUPPORTED_SOURCE`,
+`NO_TEXT`, and `EXTRACTION_FAILED` are recorded as internal projection
+outcomes; they are not exposed as manuscript content by the public API.
+
+After deploying the migration, perform the initial backfill once:
+
+```powershell
+php artisan repository:reindex-manuscripts
+```
+
+The scheduled maintenance command retries failed projections every ten minutes
+with `--retry-failed` and does not overlap. Production must run Laravel's
+scheduler, for example `php artisan schedule:run` every minute; a worker that
+never invokes `schedule:run` will not maintain the projection.
+
+The supported configuration is in `backend/.env.example`:
+`MANUSCRIPT_SEARCH_PYTHON_BINARY`, `MANUSCRIPT_SEARCH_CLI_PATH`,
+`MANUSCRIPT_SEARCH_TIMEOUT_SECONDS`, `MANUSCRIPT_SEARCH_MAXIMUM_INPUT_BYTES`,
+`MANUSCRIPT_SEARCH_MAXIMUM_OUTPUT_BYTES`,
+`MANUSCRIPT_SEARCH_MAXIMUM_TEXT_CHARACTERS`, and
+`MANUSCRIPT_SEARCH_EXTRACTOR_VERSION`. Use a fixed, controlled Python
+executable rather than an ambiguous PATH lookup. The worker receives only a
+PHP-verified private path and bounded JSON; parser isolation at the OS or
+container level is recommended.
+
+Term probing is possible: a caller can submit terms and infer whether indexed
+content contains them from result presence. Treat public search as a privacy
+disclosure surface and do not index material that is not intended for public
+repository retrieval.
+
+## Private file deletion recovery
+
+Deleting a document commits its database version promotion and an internal
+pending-deletion record in the same transaction. Storage deletion is attempted
+immediately; a false result or storage exception leaves that record for retry,
+so a successful API deletion never claims that private storage was synchronously
+removed. The record contains a private storage reference and is not exposed by
+any API or log.
+
+The scheduler retries up to 100 records every ten minutes. Ensure production
+runs `php artisan schedule:run` every minute. Operators can run a bounded retry
+manually with `php artisan repository:retry-private-file-deletions --limit=100`.
 
 ## Learning Laravel
 

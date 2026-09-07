@@ -26,6 +26,8 @@ class UserRole extends Model
 
     public const RESEARCH_PANELIST = 'research_panelist';
 
+    public const RESEARCH_EDITOR = 'research_editor';
+
     protected $fillable = ['name', 'slug', 'description', 'is_active'];
 
     protected function casts(): array

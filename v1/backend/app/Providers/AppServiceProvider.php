@@ -31,7 +31,28 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('auth-google', fn (Request $request) => Limit::perMinute(20)->by($request->ip()));
         RateLimiter::for('provision-coordinators', fn (Request $request) => Limit::perHour(30)->by($request->ip()));
         RateLimiter::for('provision-instructors', fn (Request $request) => Limit::perHour(60)->by($request->ip()));
-        RateLimiter::for('research-upload', fn (Request $request) => Limit::perMinute(10)->by((string) $request->ip()));
+        RateLimiter::for('research-upload', function (Request $request): array {
+            $actor = $request->attributes->get('current_user');
+            $userKey = $actor instanceof User ? 'user:'.$actor->id : 'user:'.$request->session()->get('user_id', $request->ip());
+
+            return [Limit::perMinute(10)->by($userKey), Limit::perMinute(30)->by('ip:'.$request->ip())];
+        });
+        RateLimiter::for('research-bulk-import', function (Request $request): array {
+            $actor = $request->attributes->get('current_user');
+            $userKey = $actor instanceof User ? 'user:'.$actor->id : 'user:'.$request->session()->get('user_id', $request->ip());
+
+            return [Limit::perMinute(50)->by($userKey), Limit::perMinute(100)->by('ip:'.$request->ip())];
+        });
+        RateLimiter::for('profile-upload', function (Request $request): array {
+            $actor = $request->attributes->get('current_user');
+            $userKey = $actor instanceof User ? 'user:'.$actor->id : 'user:'.$request->session()->get('user_id', $request->ip());
+
+            return [
+                Limit::perMinute(10)->by($userKey),
+                Limit::perHour(60)->by($userKey),
+                Limit::perHour(120)->by('ip:'.$request->ip()),
+            ];
+        });
         RateLimiter::for('similarity-results', function (Request $request): array {
             $source = $request->route('researchDocument');
             $sourceId = $source instanceof ResearchDocument ? $source->getKey() : (string) $source;
@@ -58,5 +79,29 @@ class AppServiceProvider extends ServiceProvider
             return [Limit::perMinute(15)->by($key), Limit::perHour(180)->by($key)];
         });
         RateLimiter::for('domain-mutations', fn (Request $request) => Limit::perMinute(30)->by((string) $request->ip()));
+        RateLimiter::for('researcher-mutations', function (Request $request): array {
+            $actor = $request->attributes->get('current_user');
+            $userKey = $actor instanceof User ? 'user:'.$actor->id : 'user:'.$request->session()->get('user_id', $request->ip());
+
+            return [Limit::perMinute(20)->by($userKey), Limit::perMinute(60)->by('ip:'.$request->ip())];
+        });
+        RateLimiter::for('research-file-access', function (Request $request): array {
+            $actor = $request->attributes->get('current_user');
+            $userKey = $actor instanceof User ? 'user:'.$actor->id : 'user:'.$request->session()->get('user_id', $request->ip());
+
+            return [Limit::perMinute(30)->by($userKey), Limit::perMinute(90)->by('ip:'.$request->ip())];
+        });
+        RateLimiter::for('researcher-file-mutations', function (Request $request): array {
+            $actor = $request->attributes->get('current_user');
+            $userKey = $actor instanceof User ? 'user:'.$actor->id : 'user:'.$request->session()->get('user_id', $request->ip());
+
+            return [Limit::perMinute(15)->by($userKey), Limit::perMinute(45)->by('ip:'.$request->ip())];
+        });
+        RateLimiter::for('catalog-download', function (Request $request): array {
+            $actor = $request->attributes->get('current_user');
+            $userKey = $actor instanceof User ? 'user:'.$actor->id : 'user:'.$request->session()->get('user_id', $request->ip());
+
+            return [Limit::perMinute(10)->by($userKey), Limit::perHour(60)->by('ip:'.$request->ip())];
+        });
     }
 }

@@ -19,6 +19,8 @@ secrets/
 /storage/logs/
 /storage/framework/
 /storage/app/private/
+/backend/storage/app/private/**
+!/backend/storage/app/private/**/.gitignore
 /storage/app/uploads/
 /bootstrap/cache/
 /.phpunit.result.cache
@@ -91,3 +93,11 @@ Desktop.ini
 # Local document corpora (potentially confidential; never commit)
 /Forms/
 /algorithm/Research Studies/
+
+# Local handoffs, archives, and nested workspace copies
+*.rar
+*.zip
+*.7z
+/v1/
+/backend/storage/logs/
+/backend/check_candidates_now.php

@@ -10,6 +10,7 @@ import {
   listResearchFiles,
   renameResearchFile,
   deleteResearchFile,
+  deleteInternalResearch,
   listResearchRevisions,
   listReviewAssignments,
   listPersistedSimilarityResults,
@@ -404,9 +405,9 @@ export default function AdminResearchWorkspace({
     );
   }
 
-  const editable = ["draft", "revision_required"].includes(
-    research.submission_status,
-  );
+  const editable =
+    research.is_imported === true ||
+    ["draft", "revision_required"].includes(research.submission_status);
   const allowedUploadTypes = uploadTypesFor(research.submission_status);
   const canUpload = allowedUploadTypes.length > 0;
   const canArchive =
@@ -517,6 +518,30 @@ export default function AdminResearchWorkspace({
         <Button variant="secondary" onClick={() => navigate("/app")}>
           <ArrowLeft aria-hidden="true" /> Back to overview
         </Button>
+        {research.is_imported && (
+          <Button
+            variant="secondary"
+            disabled={isMutating}
+            onClick={() => {
+              if (
+                !window.confirm(`Delete imported research ${research.title}?`)
+              )
+                return;
+              setMutation("delete-record");
+              void deleteInternalResearch(research.id)
+                .then(() => navigate("/app"))
+                .catch(() => {
+                  setMutation(null);
+                  setMessage({
+                    type: "error",
+                    text: "The imported research record could not be deleted.",
+                  });
+                });
+            }}
+          >
+            <Trash2 aria-hidden="true" /> Delete imported record
+          </Button>
+        )}
       </header>
       {message && (
         <p

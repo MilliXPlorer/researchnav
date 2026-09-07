@@ -24,3 +24,19 @@ secrets/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Root-local logs, archives, corpora, backups, and build bundles
+/*.log
+/*.rar
+/*.zip
+/*.7z
+/test_research_studies/
+/backup/
+/backups/
+/build-bundles/
+/zip/
+
+# Backend-local probes and private storage (preserve tracked placeholders)
+/v1/backend/check_candidates_now.php
+/v1/backend/storage/app/private/**
+!/v1/backend/storage/app/private/**/.gitignore

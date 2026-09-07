@@ -560,38 +560,24 @@ function MetadataDialog({
         >
           ×
         </button>
-        <p className="eyebrow">Public record · {record.id}</p>
         <h2 id="metadata-title">{record.title}</h2>
-        <p className="metadata-authors">{record.authors}</p>
+        <p className="metadata-authors">
+          {apaAuthors(record.authorNames ?? [record.authors])}
+        </p>
         <dl className="metadata-grid">
           <div>
             <dt>Year</dt>
             <dd>{record.year}</dd>
           </div>
           <div>
-            <dt>Program</dt>
-            <dd>{record.degreeProgram}</dd>
+            <dt>Institute</dt>
+            <dd>{record.institutionName}</dd>
           </div>
           <div>
-            <dt>Institution</dt>
-            <dd>
-              {record.institutionName}
-              {record.institutionLocation
-                ? ` · ${record.institutionLocation}`
-                : ""}
-            </dd>
+            <dt>Researchers</dt>
+            <dd>{(record.authorNames ?? [record.authors]).join(", ")}</dd>
           </div>
-          <div>
-            <dt>Academic unit</dt>
-            <dd>{record.academicUnit}</dd>
-          </div>
-          <div>
-            <dt>Category</dt>
-            <dd>{record.category}</dd>
-          </div>
-          {hasActiveSimilarityQuery ? (
-            <SimilarityBreakdown record={record} />
-          ) : (
+          {!hasActiveSimilarityQuery && (
             <div>
               <dt>Similarity score</dt>
               <dd className="metadata-similarity-score is-unavailable">
@@ -642,28 +628,29 @@ function MetadataDialog({
   );
 }
 
-function SimilarityBreakdown({ record }: { record: ResearchRecord }) {
-  const details = [
-    [
-      "Classification",
-      classificationLabel(record.classification) ??
-        "Classification unavailable",
-    ],
-  ];
+function apaAuthors(authors: string[]): string {
+  const formatted = authors.map((author) => {
+    const parts = author.trim().split(/\s+/).filter(Boolean);
+    // A long flattened row cannot be separated reliably without changing data.
+    if (parts.length < 2 || parts.length > 5) return author;
+    const surname = parts.at(-1) ?? "";
+    const initials = parts
+      .slice(0, -1)
+      .map(
+        (part) =>
+          `${part
+            .replace(/[^\p{L}]/gu, "")
+            .charAt(0)
+            .toUpperCase()}.`,
+      )
+      .filter((part) => part !== ".")
+      .join(" ");
+    return `${surname}, ${initials}`;
+  });
 
-  if (record.adviserReviewRequired) {
-    details.push(["Review status", "Adviser review required"]);
-  }
-  if (record.titleMatchAlert) {
-    details.push(["Title safeguard", "Near-exact title match alert"]);
-  }
-
-  return details.map(([label, value]) => (
-    <div key={label}>
-      <dt>{label}</dt>
-      <dd className="metadata-similarity-score">{value}</dd>
-    </div>
-  ));
+  if (formatted.length < 2) return formatted[0] ?? "";
+  if (formatted.length === 2) return `${formatted[0]}, & ${formatted[1]}`;
+  return `${formatted.slice(0, -1).join(", ")}, & ${formatted.at(-1)}`;
 }
 
 function SimilarityOverview({ record }: { record: ResearchRecord }) {

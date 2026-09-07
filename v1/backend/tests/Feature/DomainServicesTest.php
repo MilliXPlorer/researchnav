@@ -3,20 +3,27 @@
 namespace Tests\Feature;
 
 use App\Http\Resources\DocumentFileResource;
+use App\Models\AuditLog;
 use App\Models\Category;
+use App\Models\DocumentFile;
+use App\Models\MonitoringLog;
 use App\Models\ResearchAuthor;
 use App\Models\ResearchDocument;
 use App\Models\ReviewAssignment;
+use App\Models\Revision;
+use App\Models\TitleValidation;
 use App\Models\User;
 use App\Services\DocumentService;
 use App\Services\FeedbackService;
 use App\Services\PublicRepositoryService;
 use App\Services\ResearchService;
+use App\Services\ReviewAssignmentService;
 use App\Services\RevisionService;
 use App\Services\SimilarityService;
 use App\Services\TitleValidationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
@@ -85,9 +92,17 @@ class DomainServicesTest extends TestCase
         } catch (ValidationException) {
             $this->assertSame('revision_required', $research->refresh()->submission_status);
         }
+        $this->uploadCurrentRevisionManuscript($research, $actor, $revision);
         app(RevisionService::class)->resubmit($actor, $revision);
         $this->assertSame('under_review', $research->refresh()->submission_status);
-        $service->transition($reviewer, $research, 'approved');
+        try {
+            $service->transition($reviewer, $research, 'approved');
+            $this->fail('Assigned reviewers must not grant final approval.');
+        } catch (ValidationException) {
+            $this->assertSame('under_review', $research->refresh()->submission_status);
+        }
+        $office = User::factory()->create(['role' => 'research-office']);
+        $service->transition($office, $research, 'approved');
         $this->assertSame('approved', $research->refresh()->submission_status);
     }
 
@@ -108,20 +123,23 @@ class DomainServicesTest extends TestCase
         $this->assertArrayNotHasKey('uploaded_by', $payload);
     }
 
-    public function test_mock_storage_rule_scores_flag_at_point_seven_but_do_not_change_submission_status(): void
+    public function test_weighted_component_scores_flag_at_point_seven_but_do_not_change_submission_status(): void
     {
         [$actor, $source] = $this->research();
         [, $matched] = $this->research();
+        $matched->update(['submission_status' => 'archived', 'archive_status' => 'archived', 'visibility' => 'public']);
         $reviewer = User::factory()->create(['role' => 'adviser']);
+        $this->assignReviewer($source, $reviewer);
         $service = app(SimilarityService::class);
-        // Mock storage-rule values only; no algorithm is being exercised.
-        $flagged = $service->storeResult($reviewer, $source, ['matched_research_id' => $matched->id, 'final_similarity_score' => .70, 'analysis_type' => 'title']);
-        $notFlagged = $service->storeResult($reviewer, $source, ['matched_research_id' => $matched->id, 'final_similarity_score' => .6999, 'analysis_type' => 'title']);
-        $this->assertTrue($flagged->is_flagged);
-        $this->assertFalse($notFlagged->is_flagged);
+        $flagged = $service->storeResult($reviewer, $source, ['matched_research_id' => $matched->id, 'title_similarity_score' => '0.700000000000', 'content_similarity_score' => '0.700000000000', 'analysis_type' => 'title']);
+        $notFlagged = $service->storeResult($reviewer, $source, ['matched_research_id' => $matched->id, 'title_similarity_score' => '0.699900000000', 'content_similarity_score' => '0.699900000000', 'analysis_type' => 'title']);
+        $this->assertTrue($flagged->overall_flagged);
+        $this->assertFalse($notFlagged->overall_flagged);
+        $this->assertSame('0.700000', $flagged->threshold);
+        $this->assertSame('0.700000', $notFlagged->threshold);
         $this->assertSame('draft', $source->refresh()->submission_status);
         $this->expectException(ValidationException::class);
-        $service->storeResult($reviewer, $source, ['matched_research_id' => $source->id, 'final_similarity_score' => .75, 'analysis_type' => 'title']);
+        $service->storeResult($reviewer, $source, ['matched_research_id' => $source->id, 'title_similarity_score' => '0.750000000000', 'content_similarity_score' => '0.750000000000', 'analysis_type' => 'title']);
     }
 
     public function test_feedback_revision_and_human_validation_keep_separate_history_rows(): void
@@ -134,14 +152,14 @@ class DomainServicesTest extends TestCase
         app(ResearchService::class)->submit($actor, $research);
         app(ResearchService::class)->transition($reviewer, $research, 'under_review');
         $revision = app(RevisionService::class)->request($reviewer, $research, ['revision_remarks' => 'Revise methodology.']);
+        $this->uploadCurrentRevisionManuscript($research, $actor, $revision);
         app(RevisionService::class)->resubmit($actor, $revision);
-        $validation = app(TitleValidationService::class)->createPending($reviewer, $research, ['validated_by' => $reviewer->id]);
-        app(TitleValidationService::class)->record($reviewer, $validation, ['validation_status' => 'revision_required', 'adviser_remarks' => 'Use a narrower title.']);
+        $validation = app(TitleValidationService::class)->recommend($reviewer, $research, ['validation_status' => 'revision_required', 'adviser_remarks' => 'Use a narrower title.']);
 
         $this->assertDatabaseHas('feedback_comments', ['id' => $feedback->id, 'feedback_status' => 'acknowledged']);
         $this->assertDatabaseHas('revisions', ['id' => $revision->id, 'revision_number' => 1, 'revision_status' => 'resubmitted']);
         $this->assertDatabaseHas('title_validations', ['id' => $validation->id, 'validation_status' => 'revision_required']);
-        $this->assertDatabaseCount('notifications', 6);
+        $this->assertDatabaseCount('notifications', 7);
     }
 
     public function test_locked_services_reject_revoked_reviewer_and_stale_status_bypasses(): void
@@ -171,7 +189,7 @@ class DomainServicesTest extends TestCase
         }
     }
 
-    public function test_title_validation_cannot_be_recorded_by_another_assigned_reviewer(): void
+    public function test_title_recommendations_require_a_current_matching_assignment(): void
     {
         [$owner, $research] = $this->research();
         $firstReviewer = User::factory()->create(['role' => 'adviser']);
@@ -179,18 +197,118 @@ class DomainServicesTest extends TestCase
         $firstAssignment = $this->assignReviewer($research, $firstReviewer, 'adviser');
         $this->assignReviewer($research, $secondReviewer, 'instructor');
         $service = app(TitleValidationService::class);
-        $validation = $service->createPending($firstReviewer, $research, ['validated_by' => $firstReviewer->id]);
-
-        try {
-            $service->record($secondReviewer, $validation, ['validation_status' => 'approved']);
-            $this->fail('A different assigned reviewer must not record this decision.');
-        } catch (ValidationException) {
-            $this->assertSame('pending', $validation->refresh()->validation_status);
-        }
+        app(ResearchService::class)->submit($owner, $research);
+        $validation = $service->recommend($firstReviewer, $research, ['validation_status' => 'approved']);
+        $this->assertSame('approved', $validation->validation_status);
+        $this->assertSame('revision_required', $service->recommend($secondReviewer, $research, [
+            'validation_status' => 'revision_required',
+            'adviser_remarks' => 'Narrow the title.',
+        ])->validation_status);
 
         $firstAssignment->update(['is_active' => false]);
         $this->expectException(ValidationException::class);
-        $service->record($firstReviewer, $validation, ['validation_status' => 'approved']);
+        $service->recommend($firstReviewer, $research, ['validation_status' => 'approved']);
+    }
+
+    public function test_title_validation_uses_its_locked_parent_not_a_stale_callers_parent_relation(): void
+    {
+        [, $realParent] = $this->research();
+        [, $staleParent] = $this->research();
+        $realReviewer = User::factory()->create(['role' => 'adviser']);
+        $staleReviewer = User::factory()->create(['role' => 'adviser']);
+        $this->assignReviewer($realParent, $realReviewer);
+        $this->assignReviewer($staleParent, $staleReviewer);
+        $validation = TitleValidation::query()->create([
+            'research_document_id' => $realParent->id,
+            'validated_by' => $realReviewer->id,
+            'validation_status' => 'pending',
+        ]);
+        $staleValidation = $validation->replicate();
+        $staleValidation->id = $validation->id;
+        $staleValidation->exists = true;
+        $staleValidation->research_document_id = $staleParent->id;
+        $auditLogs = AuditLog::query()->count();
+        $monitoringLogs = MonitoringLog::query()->count();
+
+        try {
+            app(TitleValidationService::class)->record($staleReviewer, $staleValidation, ['validation_status' => 'approved']);
+            $this->fail('A stale parent relation must not authorize title validation.');
+        } catch (ValidationException $exception) {
+            $this->assertArrayHasKey('authorization', $exception->errors());
+        }
+
+        $this->assertDatabaseHas('title_validations', ['id' => $validation->id, 'research_document_id' => $realParent->id, 'validation_status' => 'pending']);
+        $this->assertDatabaseCount('audit_logs', $auditLogs);
+        $this->assertDatabaseCount('monitoring_logs', $monitoringLogs);
+    }
+
+    public function test_revision_resubmit_uses_its_current_database_parent_not_a_stale_callers_parent_relation(): void
+    {
+        [$owner, $research] = $this->research();
+        [, $staleParent] = $this->research();
+        $research->update(['submission_status' => 'revision_required']);
+        $revision = Revision::query()->create([
+            'research_document_id' => $research->id,
+            'requested_by' => $owner->id,
+            'revision_number' => 1,
+            'revision_remarks' => 'Please revise.',
+            'revision_status' => 'requested',
+            'requested_at' => now(),
+        ]);
+        $staleRevision = $revision->replicate();
+        $staleRevision->id = $revision->id;
+        $staleRevision->exists = true;
+        $staleRevision->research_document_id = $staleParent->id;
+
+        $this->uploadCurrentRevisionManuscript($research, $owner, $revision);
+        app(RevisionService::class)->resubmit($owner, $staleRevision);
+
+        $this->assertDatabaseHas('revisions', ['id' => $revision->id, 'research_document_id' => $research->id, 'revision_status' => 'resubmitted']);
+        $this->assertDatabaseHas('research_documents', ['id' => $research->id, 'submission_status' => 'under_review']);
+        $this->assertDatabaseHas('research_documents', ['id' => $staleParent->id, 'submission_status' => 'draft']);
+    }
+
+    public function test_revision_resubmit_revalidates_its_parent_after_locking_the_revision(): void
+    {
+        [$owner, $research] = $this->research();
+        [, $newParent] = $this->research();
+        $research->update(['submission_status' => 'revision_required']);
+        $revision = Revision::query()->create([
+            'research_document_id' => $research->id,
+            'requested_by' => $owner->id,
+            'revision_number' => 1,
+            'revision_remarks' => 'Please revise.',
+            'revision_status' => 'requested',
+            'requested_at' => now(),
+        ]);
+        $auditLogs = AuditLog::query()->count();
+        $monitoringLogs = MonitoringLog::query()->count();
+        $originalDispatcher = Revision::getEventDispatcher();
+        $dispatcher = clone $originalDispatcher;
+        $moved = false;
+        Revision::setEventDispatcher($dispatcher);
+        Revision::retrieved(function (Revision $loaded) use (&$moved, $revision, $newParent): void {
+            if (! $moved && (string) $loaded->research_document_id === (string) $revision->research_document_id) {
+                $moved = true;
+                Revision::query()->whereKey($revision->id)->update(['research_document_id' => $newParent->id]);
+            }
+        });
+
+        try {
+            app(RevisionService::class)->resubmit($owner, $revision);
+            $this->fail('A revision moved after its parent is read must be rejected.');
+        } catch (ValidationException $exception) {
+            $this->assertArrayHasKey('revision_status', $exception->errors());
+            $this->assertSame(['The revision no longer belongs to this research.'], $exception->errors()['revision_status']);
+        } finally {
+            Revision::setEventDispatcher($originalDispatcher);
+        }
+
+        $this->assertTrue($moved);
+        $this->assertDatabaseHas('revisions', ['id' => $revision->id, 'research_document_id' => $research->id, 'revision_status' => 'requested']);
+        $this->assertDatabaseHas('research_documents', ['id' => $research->id, 'submission_status' => 'revision_required']);
+        $this->assertDatabaseCount('audit_logs', $auditLogs);
+        $this->assertDatabaseCount('monitoring_logs', $monitoringLogs);
     }
 
     public function test_only_owner_or_office_can_upload_in_their_allowed_workflow_states(): void
@@ -224,6 +342,100 @@ class DomainServicesTest extends TestCase
         $service->upload($office, $research, UploadedFile::fake()->createWithContent('attachment.pdf', '%PDF test'), 'attachment');
     }
 
+    public function test_archive_rejects_an_already_archived_record_without_side_effects(): void
+    {
+        $office = User::factory()->create(['role' => 'research-office']);
+        [, $research] = $this->research();
+        $research->update(['submission_status' => 'approved', 'archive_status' => 'archived']);
+        $auditLogs = AuditLog::query()->count();
+        $monitoringLogs = MonitoringLog::query()->count();
+        $notifications = DB::table('notifications')->count();
+
+        try {
+            app(ResearchService::class)->archive($office, $research, 'public');
+            $this->fail('Already archived research must not be archived twice.');
+        } catch (ValidationException $exception) {
+            $this->assertArrayHasKey('archive_status', $exception->errors());
+        }
+
+        $this->assertDatabaseHas('research_documents', ['id' => $research->id, 'submission_status' => 'approved', 'archive_status' => 'archived']);
+        $this->assertDatabaseCount('audit_logs', $auditLogs);
+        $this->assertDatabaseCount('monitoring_logs', $monitoringLogs);
+        $this->assertDatabaseCount('notifications', $notifications);
+    }
+
+    public function test_revision_and_feedback_reject_a_document_file_from_another_research_inside_the_service_transaction(): void
+    {
+        Storage::fake('researchnav_private');
+        [, $research] = $this->research();
+        $research->update(['submission_status' => 'under_review']);
+        $reviewer = User::factory()->create(['role' => 'adviser']);
+        $this->assignReviewer($research, $reviewer);
+        [, $otherResearch] = $this->research();
+        $foreignFile = app(DocumentService::class)->upload($otherResearch->submitter, $otherResearch, UploadedFile::fake()->createWithContent('other.pdf', '%PDF test'), 'draft');
+
+        foreach ([
+            fn () => app(RevisionService::class)->request($reviewer, $research, ['revision_remarks' => 'Wrong file.', 'document_file_id' => $foreignFile->id]),
+            fn () => app(FeedbackService::class)->create($reviewer, $research, ['comment' => 'Wrong file.', 'feedback_type' => 'comment', 'document_file_id' => $foreignFile->id]),
+        ] as $call) {
+            try {
+                $call();
+                $this->fail('Cross-research document files must be rejected.');
+            } catch (ValidationException $exception) {
+                $this->assertArrayHasKey('document_file_id', $exception->errors());
+            }
+        }
+
+        $this->assertSame('under_review', $research->refresh()->submission_status);
+        $this->assertDatabaseCount('revisions', 0);
+        $this->assertDatabaseCount('feedback_comments', 0);
+    }
+
+    public function test_review_assignment_reloads_and_rejects_a_deactivated_reviewer(): void
+    {
+        $office = User::factory()->create(['role' => 'research-office']);
+        [, $research] = $this->research();
+        $reviewer = User::factory()->create(['role' => 'adviser']);
+        User::query()->whereKey($reviewer->id)->update(['account_status' => 'inactive']);
+
+        try {
+            app(ReviewAssignmentService::class)->replace($office, $research, [['reviewer_id' => $reviewer->id, 'review_role' => 'adviser']]);
+            $this->fail('Deactivated reviewers must not be assigned.');
+        } catch (ValidationException $exception) {
+            $this->assertArrayHasKey('reviewers', $exception->errors());
+        }
+
+        $this->assertDatabaseCount('research_review_assignments', 0);
+    }
+
+    public function test_direct_services_reject_inactive_owners_office_users_and_reviewers(): void
+    {
+        $inactiveOwner = User::factory()->create(['account_status' => 'inactive']);
+        $ownerResearch = ResearchDocument::factory()->create(['submitted_by' => $inactiveOwner->id]);
+        $inactiveOffice = User::factory()->create(['role' => 'research-office', 'account_status' => 'inactive']);
+        $approvedResearch = ResearchDocument::factory()->create(['submission_status' => 'approved']);
+        $inactiveReviewer = User::factory()->create(['role' => 'adviser', 'account_status' => 'inactive']);
+        $reviewResearch = ResearchDocument::factory()->create();
+        $this->assignReviewer($reviewResearch, $inactiveReviewer);
+
+        foreach ([
+            fn () => app(ResearchService::class)->submit($inactiveOwner, $ownerResearch),
+            fn () => app(ResearchService::class)->archive($inactiveOffice, $approvedResearch, 'public'),
+            fn () => app(FeedbackService::class)->create($inactiveReviewer, $reviewResearch, ['comment' => 'Blocked.', 'feedback_type' => 'comment']),
+        ] as $call) {
+            try {
+                $call();
+                $this->fail('Inactive actors must be rejected by direct service calls.');
+            } catch (ValidationException $exception) {
+                $this->assertArrayHasKey('authorization', $exception->errors());
+            }
+        }
+
+        $this->assertDatabaseHas('research_documents', ['id' => $ownerResearch->id, 'submission_status' => 'draft']);
+        $this->assertDatabaseHas('research_documents', ['id' => $approvedResearch->id, 'submission_status' => 'approved', 'archive_status' => 'not_archived']);
+        $this->assertDatabaseCount('feedback_comments', 0);
+    }
+
     public function test_public_repository_only_exposes_archived_public_research_and_filters(): void
     {
         [$actor, $public] = $this->research(['title' => 'Public Climate Study', 'keywords' => 'climate, water', 'publication_year' => 2025]);
@@ -249,26 +461,37 @@ class DomainServicesTest extends TestCase
         $this->assertSame([$public->id], $filtered->pluck('id')->all());
         $detail = $this->getJson('/api/repository/'.$public->id)
             ->assertOk()
-            ->assertCookieMissing('researchnav.sid')
+            ->assertCookieMissing('researchnav_sid')
             ->assertJsonPath('data.authors', [
                 ['author_name' => 'First Author', 'author_order' => 1, 'is_corresponding_author' => false],
                 ['author_name' => 'Second Author', 'author_order' => 2, 'is_corresponding_author' => false],
             ]);
         $this->assertArrayNotHasKey('submitted_by', $detail->json('data'));
         $this->assertArrayNotHasKey('submission_status', $detail->json('data'));
-        $this->getJson('/api/repository/'.$private->id)->assertNotFound()->assertJsonPath('error', 'NOT_FOUND')->assertCookieMissing('researchnav.sid');
+        $this->getJson('/api/repository/'.$private->id)->assertNotFound()->assertJsonPath('error', 'NOT_FOUND')->assertCookieMissing('researchnav_sid');
         $this->postJson('/api/research/'.$public->id.'/similarity/check', [], ['Origin' => 'http://localhost:5173'])->assertUnauthorized();
     }
 
-    public function test_algorithm_endpoint_is_an_explicit_authenticated_501_without_fake_scores(): void
+    public function test_public_repository_list_loads_without_per_document_queries(): void
     {
-        [$actor, $research] = $this->research();
+        foreach (range(1, 3) as $number) {
+            [, $document] = $this->research(['title' => "Public Study {$number}"]);
+            $document->update(['submission_status' => 'archived', 'archive_status' => 'archived', 'visibility' => 'public']);
+        }
 
-        $this->withSession(['user_id' => $actor->id])
-            ->postJson('/api/research/'.$research->id.'/similarity/check', [], ['Origin' => 'http://localhost:5173'])
-            ->assertStatus(501)
-            ->assertExactJson(['error' => 'ALGORITHM_NOT_IMPLEMENTED']);
-        $this->assertDatabaseCount('similarity_results', 0);
+        DB::enableQueryLog();
+        try {
+            $this->getJson('/api/repository?per_page=1')->assertOk();
+            $singleResultQueryCount = count(DB::getQueryLog());
+            DB::flushQueryLog();
+
+            $this->getJson('/api/repository?per_page=3')->assertOk();
+            $multipleResultQueryCount = count(DB::getQueryLog());
+        } finally {
+            DB::disableQueryLog();
+        }
+
+        $this->assertSame($singleResultQueryCount, $multipleResultQueryCount);
     }
 
     /** @return array{User, ResearchDocument} */
@@ -298,6 +521,24 @@ class DomainServicesTest extends TestCase
             'assigned_by' => User::factory()->create(['role' => 'research-office'])->id,
             'review_role' => $role,
             'is_active' => true,
+        ]);
+    }
+
+    private function uploadCurrentRevisionManuscript(ResearchDocument $research, User $owner, Revision $revision): void
+    {
+        DocumentFile::query()->create([
+            'research_document_id' => $research->id,
+            'uploaded_by' => $owner->id,
+            'document_type' => 'revised_manuscript',
+            'version_number' => 1,
+            'original_filename' => 'revision.pdf',
+            'stored_filename' => 'revision.pdf',
+            'file_path' => 'research/'.$research->id.'/revision.pdf',
+            'file_extension' => 'pdf',
+            'mime_type' => 'application/pdf',
+            'file_size' => 1,
+            'is_current' => true,
+            'uploaded_at' => $revision->requested_at->copy()->addSecond(),
         ]);
     }
 }

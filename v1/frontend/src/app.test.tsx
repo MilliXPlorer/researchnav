@@ -318,6 +318,7 @@ describe("role workspaces", () => {
     librarian: "archiving_queue",
     "research-office": "pending_archiving",
     academics: "saved_library",
+    research_editor: "assigned_reviews",
   };
 
   const dashboardFor = (
@@ -393,9 +394,13 @@ describe("role workspaces", () => {
     const menu = screen.getByRole("navigation", {
       name: "Researcher workspace navigation",
     });
-    expect(menu).toHaveTextContent("My Submissions");
+    expect(menu).toHaveTextContent("My Research");
+    expect(menu).not.toHaveTextContent("Create Research");
     expect(menu).toHaveTextContent("Similarity Check");
-    expect(menu).toHaveTextContent("Related Studies");
+    expect(menu).not.toHaveTextContent("Feedback & Revisions");
+    expect(menu).not.toHaveTextContent("Research Progress");
+    expect(menu).not.toHaveTextContent("Notifications");
+    expect(menu).not.toHaveTextContent("Profile");
     fireEvent.click(
       within(menu).getByRole("button", { name: "Similarity Check" }),
     );
@@ -440,7 +445,7 @@ describe("role workspaces", () => {
                   submitted_at: null,
                 },
               ],
-              meta: { current_page: 1, last_page: 1 },
+              meta: { current_page: 1, last_page: 1, total: 1 },
             }),
           );
         if (url === "/api/research/77")
@@ -479,7 +484,7 @@ describe("role workspaces", () => {
         }}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "My Submissions" }));
+    fireEvent.click(screen.getByRole("button", { name: "My Research" }));
     fireEvent.click(await screen.findByRole("button", { name: "Open record" }));
 
     expect(await screen.findByText("Open without refresh")).toBeInTheDocument();
@@ -854,10 +859,14 @@ describe("role workspaces", () => {
     expect(
       screen.getByRole("heading", { name: /My research/ }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Returned study")).toBeInTheDocument();
+    expect(screen.queryByText("Returned study")).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "View Revision required" }),
+    );
     expect(
-      screen.getByRole("heading", { name: "Revision required" }),
+      screen.getByRole("dialog", { name: "Revision required" }),
     ).toBeInTheDocument();
+    expect(screen.getByText("Returned study")).toBeInTheDocument();
     expect(
       screen.getByRole("img", {
         name: "Research activity, Last 6 months",
@@ -872,7 +881,7 @@ describe("role workspaces", () => {
       2,
     );
     fireEvent.click(screen.getByRole("button", { name: /New submission/ }));
-    expect(selectNav).toHaveBeenCalledWith("My Submissions");
+    expect(selectNav).toHaveBeenCalledWith("Create Research");
   });
 });
 
@@ -992,8 +1001,11 @@ describe("authenticated notifications", () => {
     render(<Dashboard session={activeSession} navigate={navigate} />);
     fireEvent.click(screen.getByRole("button", { name: "Open notifications" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Notifications are unavailable (NOTIFICATIONS_DOWN).",
+      "Notifications are unavailable",
     );
+    expect(
+      screen.getByRole("button", { name: "Open notifications" }),
+    ).not.toHaveTextContent("1");
     expect(
       screen.queryByText("This shelf is being cataloged."),
     ).not.toBeInTheDocument();
@@ -1180,6 +1192,33 @@ describe("authenticated notifications", () => {
         ),
       ).toBe(true);
     });
+  });
+
+  it("shows a retryable error instead of mock Researcher data after a server failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        if (String(input) === "/api/notifications") {
+          return new Response(
+            JSON.stringify({ data: [], links: { next: null } }),
+          );
+        }
+        return new Response(
+          JSON.stringify({ error: "RESEARCH_TABLE_UNAVAILABLE" }),
+          { status: 500 },
+        );
+      }),
+    );
+
+    render(<Dashboard session={activeSession} navigate={vi.fn()} />);
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        /Campus Service Announcement and Deadline Management System/,
+      ),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 
   it("loads notifications independently while a staff dashboard is loading", async () => {
@@ -1478,7 +1517,7 @@ describe("authenticated notifications", () => {
       <Dashboard session={adviserSession} navigate={vi.fn()} />,
     );
     expect(await screen.findByText("ADVISER ASSIGNMENT")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "My Advisees" }));
+    fireEvent.click(screen.getByRole("button", { name: "Assigned Research" }));
 
     rerender(<Dashboard session={instructorSession} navigate={vi.fn()} />);
 
@@ -1490,7 +1529,7 @@ describe("authenticated notifications", () => {
       }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Assigned Submissions" }),
+      screen.getByRole("button", { name: "Assigned Research" }),
     ).toBeInTheDocument();
   });
 
@@ -1649,7 +1688,7 @@ describe("authenticated notifications", () => {
       <Dashboard session={adviserA} navigate={vi.fn()} />,
     );
     expect(await screen.findByText("ADVISER A ASSIGNMENT")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "My Advisees" }));
+    fireEvent.click(screen.getByRole("button", { name: "Assigned Research" }));
 
     rerender(<Dashboard session={adviserB} navigate={vi.fn()} />);
 
@@ -1660,7 +1699,7 @@ describe("authenticated notifications", () => {
         busy: true,
       }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Pending Reviews" })).toHaveClass(
+    expect(screen.getByRole("button", { name: "Dashboard" })).toHaveClass(
       "active",
     );
     await waitFor(() => expect(dashboardRequests).toBe(2));

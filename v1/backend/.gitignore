@@ -18,7 +18,16 @@
 /public/storage
 /storage/*.key
 /storage/pail
+/storage/app/private/**
+!/storage/app/private/**/.gitignore
+/models/
 /vendor
 Homestead.json
 Homestead.yaml
 Thumbs.db
+*.rar
+*.zip
+*.7z
+/storage/logs/
+/database/backups/
+/check_candidates_now.php

@@ -14,8 +14,6 @@ class ProvisioningPolicy
             return false;
         }
 
-        return $provisionedRole === 'coordinator'
-            ? in_array($existingRole, ['researcher', 'coordinator'], true)
-            : in_array($existingRole, ['researcher', 'instructor'], true);
+        return $existingRole === 'researcher' || $existingRole === $provisionedRole;
     }
 }

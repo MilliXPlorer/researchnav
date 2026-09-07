@@ -90,7 +90,7 @@ describe("administrator sidebar pages", () => {
             data: { schema_version: 1, role: "admin", sections: [] },
           }),
         );
-      if (path === "/api/admin/coordinators")
+      if (path === "/api/admin/accounts")
         return new Response(
           JSON.stringify({
             users: [
@@ -182,7 +182,7 @@ describe("administrator sidebar pages", () => {
       />,
     );
     fireEvent.click(
-      screen.getByRole("button", { name: "Coordinator Accounts" }),
+      screen.getByRole("button", { name: "Account Provisioning" }),
     );
     expect(
       await screen.findByText("coordinator@example.test"),
@@ -191,6 +191,10 @@ describe("administrator sidebar pages", () => {
     expect(await screen.findByText("member@example.test")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Audit Logs" }));
     expect(await screen.findByText("Signed in.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Import Manuscript" }));
+    expect(
+      await screen.findByRole("heading", { name: "Import Manuscript" }),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "System Settings" }));
     expect(
       await screen.findByRole("heading", {
@@ -199,11 +203,11 @@ describe("administrator sidebar pages", () => {
     ).toBeInTheDocument();
   });
 
-  it("loads coordinator accounts and provisions through the administrator endpoint", async () => {
+  it("loads provisioned accounts and provisions a selected role", async () => {
     const fetchMock = vi.fn(
       async (input: string | URL | Request, init?: RequestInit) => {
         if (
-          String(input) === "/api/admin/coordinators" &&
+          String(input) === "/api/admin/accounts" &&
           init?.method === "POST"
         ) {
           return new Response(
@@ -233,32 +237,33 @@ describe("administrator sidebar pages", () => {
       },
     );
     vi.stubGlobal("fetch", fetchMock);
-    render(<AdminSidebarPage selectedNav="Coordinator Accounts" />);
+    render(<AdminSidebarPage selectedNav="Account Provisioning" />);
     expect(
       await screen.findByText("coordinator@example.test"),
     ).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Coordinator email"), {
+    fireEvent.change(screen.getByLabelText("Account email"), {
       target: { value: "new@example.test" },
     });
+    fireEvent.change(screen.getByLabelText("Workspace role"), {
+      target: { value: "librarian" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Provision account" }));
-    expect(
-      await screen.findByText("Coordinator account provisioned."),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("Account provisioned.")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/admin/coordinators",
+      "/api/admin/accounts",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ email: "new@example.test" }),
+        body: JSON.stringify({ email: "new@example.test", role: "librarian" }),
       }),
     );
   });
 
   it.each([
     {
-      selectedNav: "Coordinator Accounts",
-      loadingLabel: "Loading coordinator accounts",
+      selectedNav: "Account Provisioning",
+      loadingLabel: "Loading provisioned accounts",
       successfulResponse: { users: [] },
-      successText: "No coordinator accounts have been provisioned.",
+      successText: "No accounts have been provisioned.",
     },
     {
       selectedNav: "All Users",

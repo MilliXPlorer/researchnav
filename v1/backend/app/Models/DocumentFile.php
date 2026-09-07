@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use InvalidArgumentException;
 
 class DocumentFile extends Model
@@ -27,6 +28,11 @@ class DocumentFile extends Model
         return $this->belongsTo(ResearchDocument::class);
     }
 
+    public function manuscriptSearchDocument(): HasOne
+    {
+        return $this->hasOne(ManuscriptSearchDocument::class, 'source_document_file_id');
+    }
+
     protected static function booted(): void
     {
         static::saving(function (self $file): void {
@@ -43,12 +49,12 @@ class DocumentFile extends Model
 
     public function feedbackComments(): HasMany
     {
-        return $this->hasMany(FeedbackComment::class);
+        return $this->hasMany(FeedbackComment::class, FeedbackComment::column('document_file_id'));
     }
 
     public function revisions(): HasMany
     {
-        return $this->hasMany(Revision::class);
+        return $this->hasMany(Revision::class, Revision::column('document_file_id'));
     }
 
     public function scopeCurrent(Builder $query): Builder

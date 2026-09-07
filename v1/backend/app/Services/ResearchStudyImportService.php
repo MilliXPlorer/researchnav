@@ -29,6 +29,8 @@ class ResearchStudyImportService
 
     private const WORDPROCESSINGML_NAMESPACE = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 
+    public function __construct(private readonly ManuscriptSearchProjectionService $manuscriptSearch) {}
+
     /**
      * @return array{imported: int, updated: int, skipped_duplicates: int}
      */
@@ -101,6 +103,7 @@ class ResearchStudyImportService
 
                     $this->replaceAuthors($document, $study['authors']);
                     $this->storeCanonicalFile($document, $owner, $study, $newStoragePaths);
+                    $this->manuscriptSearch->invalidate((int) $document->id);
                     $this->createImportLogs($document, $owner);
 
                     $result[$isNew ? 'imported' : 'updated']++;

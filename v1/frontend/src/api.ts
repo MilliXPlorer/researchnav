@@ -182,7 +182,7 @@ export interface SystemStatusResource {
       disk: string;
       driver: string | null;
       status: "operational" | "unavailable";
-      capabilities: { read: boolean; write: boolean } | null;
+      capabilities: { read: boolean; write: boolean; delete: boolean } | null;
     };
   };
 }
@@ -245,6 +245,7 @@ export interface InternalResearchResource {
     | "archived";
   archive_status: "not_archived" | "pending_archiving" | "archived";
   visibility: "private" | "registered_only" | "public";
+  is_imported?: boolean;
 }
 
 export interface ResearchRevisionResource {
@@ -255,6 +256,7 @@ export interface ResearchRevisionResource {
   document_file_id: number | null;
   revision_number: number;
   revision_remarks: string | null;
+  required_action?: string | null;
   revision_status:
     "requested" | "in_progress" | "resubmitted" | "under_review" | "accepted";
   lifecycle_status?:
@@ -537,6 +539,17 @@ export async function updateInternalResearch(
       fetcher,
     )
   ).data;
+}
+
+export async function deleteInternalResearch(
+  researchDocumentId: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<void> {
+  await apiRequest<void>(
+    researchPath(researchDocumentId),
+    { method: "DELETE" },
+    fetcher,
+  );
 }
 
 export async function submitInternalResearch(
@@ -932,7 +945,10 @@ export async function logout() {
 }
 
 export async function listProvisionedAccounts(
-  endpoint: "/api/admin/coordinators" | "/api/coordinator/instructors",
+  endpoint:
+    | "/api/admin/accounts"
+    | "/api/admin/coordinators"
+    | "/api/coordinator/instructors",
   fetcher: ApiFetch = globalThis.fetch,
 ) {
   return (
@@ -969,8 +985,12 @@ export async function markNotificationRead(
 }
 
 export async function provisionAccount(
-  endpoint: "/api/admin/coordinators" | "/api/coordinator/instructors",
+  endpoint:
+    | "/api/admin/accounts"
+    | "/api/admin/coordinators"
+    | "/api/coordinator/instructors",
   email: string,
+  role?: RequestableRole,
   fetcher: ApiFetch = globalThis.fetch,
 ) {
   return (
@@ -978,7 +998,7 @@ export async function provisionAccount(
       endpoint,
       {
         method: "POST",
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, ...(role ? { role } : {}) }),
       },
       fetcher,
     )
@@ -997,7 +1017,21 @@ export function provisionCoordinator(
   email: string,
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<UserSession> {
-  return provisionAccount("/api/admin/coordinators", email, fetcher);
+  return provisionAccount("/api/admin/coordinators", email, undefined, fetcher);
+}
+
+export function listAdminProvisionedAccounts(
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<UserSession[]> {
+  return listProvisionedAccounts("/api/admin/accounts", fetcher);
+}
+
+export function provisionAdminAccount(
+  email: string,
+  role: RequestableRole,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<UserSession> {
+  return provisionAccount("/api/admin/accounts", email, role, fetcher);
 }
 
 function adminQuery(
@@ -1067,32 +1101,6 @@ export async function getSystemStatus(
       fetcher,
     )
   ).data;
-}
-
-export async function getAdminSettings(fetcher: ApiFetch = globalThis.fetch) {
-  return apiRequest<{ data: Record<string, string>; version: number }>(
-    "/api/admin/settings",
-    undefined,
-    fetcher,
-  );
-}
-
-export async function updateAdminSettings(
-  values: Record<string, string>,
-  version: number,
-  fetcher: ApiFetch = globalThis.fetch,
-) {
-  return apiRequest<{ data: Record<string, string>; version: number }>(
-    "/api/admin/settings",
-    { method: "PATCH", body: JSON.stringify({ values, version }) },
-    fetcher,
-  );
-}
-
-export async function requestAdminBackup(fetcher: ApiFetch = globalThis.fetch) {
-  return apiRequest<{
-    data: { id: number; status: string; message: string | null };
-  }>("/api/admin/backups", { method: "POST" }, fetcher);
 }
 
 export interface PublicResearchResource {
@@ -1225,6 +1233,9 @@ export function toResearchRecord(
     id: String(resource.id),
     title: resource.title,
     authors: toAuthors(resource.authors),
+    authorNames: [...resource.authors]
+      .sort((first, second) => first.author_order - second.author_order)
+      .map((author) => author.author_name),
     year: Number(resource.publication_year ?? resource.year ?? 0),
     institutionName: resource.institution_name ?? "",
     institutionLocation: resource.institution_location,
@@ -1572,6 +1583,51 @@ export async function listAdviserFeedbackHistory(
   ).data;
 }
 
+export async function listAdviserReviewHistory(
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<InstructorReviewHistoryItem[]> {
+  return (
+    await apiRequest<{ data: InstructorReviewHistoryItem[] }>(
+      "/api/adviser/review-history",
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export async function listAdviserMonitoring(
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<InstructorMonitoringEntry[]> {
+  return (
+    await apiRequest<{ data: InstructorMonitoringEntry[] }>(
+      "/api/adviser/monitoring",
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export async function saveAdviserMonitoring(
+  researchDocumentId: string | number,
+  input: {
+    monitoring_stage: InstructorMonitoringEntry["monitoring_stage"];
+    activity_date: string;
+    activity: string;
+    remarks?: string | null;
+    status: "pending" | "completed";
+    signature_status: "unsigned" | "signed";
+  },
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<InstructorMonitoringEntry> {
+  return (
+    await apiRequest<{ data: InstructorMonitoringEntry }>(
+      `/api/adviser/research/${encodeURIComponent(String(researchDocumentId))}/monitoring`,
+      { method: "PUT", body: JSON.stringify(input) },
+      fetcher,
+    )
+  ).data;
+}
+
 /* ------------------------------ Instructor APIs ------------------------------ */
 
 export interface InstructorSectionResource {
@@ -1631,6 +1687,38 @@ export interface InstructorClassReport {
   documents_count: number;
   statuses: Record<string, number>;
   similarity_buckets: { low: number; moderate: number; high: number };
+}
+
+export interface InstructorReviewHistoryItem {
+  id: number;
+  research_document_id: number;
+  title: string;
+  document_file_id: number | null;
+  review_type: string;
+  remarks: string | null;
+  required_action: string | null;
+  status: string;
+  reviewed_at: string | null;
+  created_at: string | null;
+}
+
+export interface InstructorMonitoringEntry {
+  id: number;
+  research_document_id: number;
+  title: string;
+  reviewer_id: string | null;
+  reviewer_role: string;
+  monitoring_stage: "before_proposal_defense" | "after_proposal_defense";
+  designation: string | null;
+  activity_date: string | null;
+  activity: string | null;
+  remarks: string | null;
+  status: string;
+  signature_status: string;
+  verified_by: string | null;
+  verified_at: string | null;
+  reviewer_email: string | null;
+  verifier_email: string | null;
 }
 
 export async function listInstructorSections(
@@ -1874,6 +1962,105 @@ export async function listInstructorClassReports(
   ).data;
 }
 
+export async function listInstructorPanelists(
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<
+  Array<{
+    id: string;
+    name: string;
+    email: string;
+    unavailable_dates: string[];
+    availability_persistence_supported: boolean;
+  }>
+> {
+  return (
+    await apiRequest<{
+      data: Array<{
+        id: string;
+        name: string;
+        email: string;
+        unavailable_dates: string[];
+        availability_persistence_supported: boolean;
+      }>;
+    }>("/api/instructor/panelists", undefined, fetcher)
+  ).data;
+}
+export async function assignInstructorPanelist(
+  researchId: number,
+  panelistId: string,
+  designation: "panel_member" | "panel_chair",
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<unknown> {
+  return apiRequest(
+    `/api/instructor/research/${researchId}/panelists`,
+    {
+      method: "POST",
+      body: JSON.stringify({ panelist_id: panelistId, designation }),
+    },
+    fetcher,
+  );
+}
+
+export async function listInstructorReviewHistory(
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<InstructorReviewHistoryItem[]> {
+  return (
+    await apiRequest<{ data: InstructorReviewHistoryItem[] }>(
+      "/api/instructor/review-history",
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export async function listInstructorMonitoring(
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<InstructorMonitoringEntry[]> {
+  return (
+    await apiRequest<{ data: InstructorMonitoringEntry[] }>(
+      "/api/instructor/monitoring",
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export async function saveInstructorMonitoring(
+  researchDocumentId: string | number,
+  input: {
+    monitoring_stage: InstructorMonitoringEntry["monitoring_stage"];
+    activity_date: string;
+    activity: string;
+    remarks?: string | null;
+    status: "pending" | "completed";
+    signature_status: "unsigned" | "signed";
+  },
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<InstructorMonitoringEntry> {
+  return (
+    await apiRequest<{ data: InstructorMonitoringEntry }>(
+      `/api/instructor/research/${encodeURIComponent(String(researchDocumentId))}/monitoring`,
+      { method: "PUT", body: JSON.stringify(input) },
+      fetcher,
+    )
+  ).data;
+}
+
+export async function verifyInstructorMonitoring(
+  researchDocumentId: string | number,
+  monitoringStage: InstructorMonitoringEntry["monitoring_stage"],
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<void> {
+  await apiRequest(
+    `/api/instructor/research/${encodeURIComponent(String(researchDocumentId))}/monitoring/verify`,
+    {
+      method: "POST",
+      body: JSON.stringify({ monitoring_stage: monitoringStage }),
+    },
+    fetcher,
+  );
+}
+
 /* -------------------------------- Panel APIs -------------------------------- */
 
 export interface DefenseScheduleResource {
@@ -2034,7 +2221,7 @@ export async function saveStatisticianChecklist(
 ): Promise<MethodologyReviewResource> {
   return (
     await apiRequest<{ data: MethodologyReviewResource }>(
-      `/api/statistician/queue/${encodeURIComponent(String(researchDocumentId))}/checklist`,
+      `/api/statistician/methodology/${encodeURIComponent(String(researchDocumentId))}`,
       { method: "PUT", body: JSON.stringify(input) },
       fetcher,
     )
@@ -2047,8 +2234,349 @@ export async function signOffMethodology(
 ): Promise<MethodologyReviewResource> {
   return (
     await apiRequest<{ data: MethodologyReviewResource }>(
-      `/api/statistician/queue/${encodeURIComponent(String(researchDocumentId))}/sign-off`,
+      `/api/statistician/methodology/${encodeURIComponent(String(researchDocumentId))}/sign-off`,
       { method: "POST", body: JSON.stringify({}) },
+      fetcher,
+    )
+  ).data;
+}
+
+export async function markStatisticalReviewNotApplicable(
+  researchDocumentId: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<MethodologyReviewResource> {
+  return (
+    await apiRequest<{ data: MethodologyReviewResource }>(
+      `/api/statistician/methodology/${encodeURIComponent(String(researchDocumentId))}/not-applicable`,
+      { method: "POST", body: JSON.stringify({}) },
+      fetcher,
+    )
+  ).data;
+}
+
+export interface SupportAssignmentResource {
+  id: number;
+  research_document_id: number;
+  research_title: string | null;
+  researchers: string[];
+  user_id: string;
+  name: string | null;
+  assignment_role: "statistician" | "librarian" | "research_editor";
+  status: string;
+  created_at: string | null;
+}
+
+export async function listSupportAssignmentInbox(
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<SupportAssignmentResource[]> {
+  return (
+    await apiRequest<{ data: SupportAssignmentResource[] }>(
+      "/api/support-assignments/inbox",
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export async function respondToSupportAssignment(
+  id: number,
+  decision: "accept" | "decline",
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<SupportAssignmentResource> {
+  return (
+    await apiRequest<{ data: SupportAssignmentResource }>(
+      `/api/support-assignments/${id}/respond`,
+      { method: "PATCH", body: JSON.stringify({ decision }) },
+      fetcher,
+    )
+  ).data;
+}
+
+export async function listResearchSupportAssignments(
+  researchId: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<SupportAssignmentResource[]> {
+  return (
+    await apiRequest<{ data: SupportAssignmentResource[] }>(
+      `/api/research/${encodeURIComponent(String(researchId))}/support-assignments`,
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export async function listEligibleSupportUsers(
+  role: SupportAssignmentResource["assignment_role"],
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<Array<{ id: string; name: string; email: string }>> {
+  return (
+    await apiRequest<{
+      data: Array<{ id: string; name: string; email: string }>;
+    }>(
+      `/api/support-assignments/eligible?role=${encodeURIComponent(role)}`,
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export async function requestResearchSupport(
+  researchId: string | number,
+  userId: string,
+  assignmentRole: SupportAssignmentResource["assignment_role"],
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<SupportAssignmentResource> {
+  return (
+    await apiRequest<{ data: SupportAssignmentResource }>(
+      `/api/research/${encodeURIComponent(String(researchId))}/support-assignments`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          user_id: userId,
+          assignment_role: assignmentRole,
+        }),
+      },
+      fetcher,
+    )
+  ).data;
+}
+
+export interface LibrarianResearchItem {
+  research_document_id: number;
+  title: string;
+  researchers: string[];
+  program: string | null;
+  category: string | null;
+  academic_year: number | null;
+  research_stage: string;
+  submission_status: string;
+  latest_manuscript: string | null;
+  updated_at: string | null;
+}
+
+export async function listLibrarianAssignedResearch(
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<LibrarianResearchItem[]> {
+  return (
+    await apiRequest<{ data: LibrarianResearchItem[] }>(
+      "/api/librarian/assigned-research",
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export async function saveLibrarianReferenceReview(
+  researchId: number,
+  input: {
+    document_file_id?: number | null;
+    review_type: "comment" | "revision_request" | "clearance";
+    remarks: string;
+    required_action?: string | null;
+  },
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<unknown> {
+  return await apiRequest(
+    `/api/librarian/research/${researchId}/reference-review`,
+    { method: "POST", body: JSON.stringify(input) },
+    fetcher,
+  );
+}
+
+export async function listLibrarianReviewHistory(
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<InstructorReviewHistoryItem[]> {
+  return (
+    await apiRequest<{ data: InstructorReviewHistoryItem[] }>(
+      "/api/librarian/review-history",
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export async function listLibrarianMonitoring(
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<InstructorMonitoringEntry[]> {
+  return (
+    await apiRequest<{ data: InstructorMonitoringEntry[] }>(
+      "/api/librarian/monitoring",
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export async function saveLibrarianMonitoring(
+  researchId: number,
+  input: {
+    monitoring_stage: InstructorMonitoringEntry["monitoring_stage"];
+    activity_date: string;
+    activity: string;
+    remarks?: string | null;
+    status: "pending" | "completed";
+    signature_status: "unsigned" | "signed";
+  },
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<unknown> {
+  return apiRequest(
+    `/api/librarian/research/${researchId}/monitoring`,
+    { method: "PUT", body: JSON.stringify(input) },
+    fetcher,
+  );
+}
+
+export async function listEditorAssignedResearch(
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<LibrarianResearchItem[]> {
+  return (
+    await apiRequest<{ data: LibrarianResearchItem[] }>(
+      "/api/editor/assigned-research",
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+export async function saveEditorReview(
+  researchId: number,
+  input: {
+    review_type: "comment" | "revision_request" | "clearance";
+    remarks: string;
+    required_action?: string | null;
+  },
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<unknown> {
+  return apiRequest(
+    `/api/editor/research/${researchId}/review`,
+    { method: "POST", body: JSON.stringify(input) },
+    fetcher,
+  );
+}
+export async function listEditorHistory(
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<InstructorReviewHistoryItem[]> {
+  return (
+    await apiRequest<{ data: InstructorReviewHistoryItem[] }>(
+      "/api/editor/review-history",
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+export async function listEditorMonitoring(
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<InstructorMonitoringEntry[]> {
+  return (
+    await apiRequest<{ data: InstructorMonitoringEntry[] }>(
+      "/api/editor/monitoring",
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+export async function saveEditorMonitoring(
+  researchId: number,
+  input: {
+    monitoring_stage: InstructorMonitoringEntry["monitoring_stage"];
+    activity_date: string;
+    activity: string;
+    remarks?: string | null;
+    status: "pending" | "completed";
+    signature_status: "unsigned" | "signed";
+  },
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<unknown> {
+  return apiRequest(
+    `/api/editor/research/${researchId}/monitoring`,
+    { method: "PUT", body: JSON.stringify(input) },
+    fetcher,
+  );
+}
+
+export interface SharedMonitoringResearch {
+  id: number;
+  title: string;
+  research_stage: string;
+  researchers: string[];
+}
+export interface SharedMonitoringEntry {
+  id: number;
+  activity_date: string | null;
+  activity: string | null;
+  remarks: string | null;
+  status: string;
+  signature_status: string;
+  verified_by: string | null;
+  verified_at: string | null;
+}
+export interface SharedMonitoringData {
+  research_document_id: number;
+  title: string;
+  researchers: string[];
+  stages: Record<
+    "before_proposal_defense" | "after_proposal_defense",
+    {
+      sections: Array<{
+        designation: string;
+        entry: SharedMonitoringEntry | null;
+      }>;
+      verified_by: string | null;
+      verified_at: string | null;
+    }
+  >;
+}
+export async function listSharedMonitoringResearch(
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<SharedMonitoringResearch[]> {
+  return (
+    await apiRequest<{ data: SharedMonitoringResearch[] }>(
+      "/api/monitoring/research",
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+export async function getSharedMonitoring(
+  id: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<SharedMonitoringData> {
+  return (
+    await apiRequest<{ data: SharedMonitoringData }>(
+      `/api/research/${id}/shared-monitoring`,
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+export async function saveSharedMonitoring(
+  id: string | number,
+  input: {
+    monitoring_stage: string;
+    activity_date: string;
+    activity: string;
+    remarks: string | null;
+    status: string;
+    signature_status: string;
+  },
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<SharedMonitoringData> {
+  return (
+    await apiRequest<{ data: SharedMonitoringData }>(
+      `/api/research/${id}/shared-monitoring`,
+      { method: "PUT", body: JSON.stringify(input) },
+      fetcher,
+    )
+  ).data;
+}
+export async function verifySharedMonitoring(
+  id: string | number,
+  monitoring_stage: string,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<SharedMonitoringData> {
+  return (
+    await apiRequest<{ data: SharedMonitoringData }>(
+      `/api/research/${id}/shared-monitoring/verify`,
+      { method: "POST", body: JSON.stringify({ monitoring_stage }) },
       fetcher,
     )
   ).data;
@@ -2061,7 +2589,7 @@ export async function returnMethodologyForClarification(
 ): Promise<MethodologyReviewResource> {
   return (
     await apiRequest<{ data: MethodologyReviewResource }>(
-      `/api/statistician/queue/${encodeURIComponent(String(researchDocumentId))}/return`,
+      `/api/statistician/methodology/${encodeURIComponent(String(researchDocumentId))}/return`,
       { method: "POST", body: JSON.stringify({ remarks }) },
       fetcher,
     )
@@ -2338,7 +2866,7 @@ export function listRepositoryCatalog(
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<LaravelPaginatedResponse<RepositoryCatalogRow>> {
   return apiRequest(
-    adminQuery("/api/librarian/repository-catalog", input),
+    adminQuery("/api/librarian/catalog", input),
     undefined,
     fetcher,
   );
@@ -2479,7 +3007,7 @@ export async function listComplianceQueue(
 ): Promise<ComplianceQueueItem[]> {
   return (
     await apiRequest<{ data: ComplianceQueueItem[] }>(
-      "/api/research-office/compliance",
+      "/api/office/compliance",
       undefined,
       fetcher,
     )
@@ -2493,14 +3021,14 @@ export async function decideCompliance(
 ): Promise<ComplianceReviewResource> {
   return (
     await apiRequest<{ data: ComplianceReviewResource }>(
-      `/api/research-office/compliance/${encodeURIComponent(String(researchDocumentId))}`,
+      `/api/office/compliance/${encodeURIComponent(String(researchDocumentId))}`,
       { method: "PUT", body: JSON.stringify(input) },
       fetcher,
     )
   ).data;
 }
 
-export function listOfficeUsers(
+export async function listOfficeUsers(
   input: {
     search?: string;
     role?: AdminRole;
@@ -2510,11 +3038,49 @@ export function listOfficeUsers(
   } = {},
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<LaravelPaginatedResponse<OfficeUserRow>> {
-  return apiRequest(
-    adminQuery("/api/research-office/users", input),
-    undefined,
-    fetcher,
-  );
+  const response = await apiRequest<
+    | LaravelPaginatedResponse<OfficeUserRow>
+    | {
+        data: {
+          data: OfficeUserRow[];
+          current_page: number;
+          from: number | null;
+          last_page: number;
+          links: Array<{ url: string | null; label: string; active: boolean }>;
+          path: string;
+          per_page: number;
+          to: number | null;
+          total: number;
+          first_page_url: string | null;
+          last_page_url: string | null;
+          prev_page_url: string | null;
+          next_page_url: string | null;
+        };
+      }
+  >(adminQuery("/api/office/users", input), undefined, fetcher);
+  if ("meta" in response) return response;
+
+  const page = response.data;
+
+  return {
+    data: page.data,
+    links: {
+      first: page.first_page_url,
+      last: page.last_page_url,
+      prev: page.prev_page_url,
+      next: page.next_page_url,
+    },
+    meta: {
+      current_page: page.current_page,
+      from: page.from,
+      last_page: page.last_page,
+      links: page.links,
+      path: page.path,
+      per_page: page.per_page,
+      to: page.to,
+      total: page.total,
+    },
+  };
 }
 
 export async function updateOfficeUserAccess(
@@ -2536,7 +3102,7 @@ export async function updateOfficeUserAccess(
         access_status: AccessStatus;
       };
     }>(
-      `/api/research-office/users/${encodeURIComponent(userId)}`,
+      `/api/office/users/${encodeURIComponent(userId)}`,
       { method: "PATCH", body: JSON.stringify({ access_status }) },
       fetcher,
     )
@@ -2548,7 +3114,7 @@ export async function getInstitutionalReport(
 ): Promise<InstitutionalReport> {
   return (
     await apiRequest<{ data: InstitutionalReport }>(
-      "/api/research-office/reports",
+      "/api/office/reports",
       undefined,
       fetcher,
     )
@@ -2560,7 +3126,7 @@ export async function listPrivacyLogs(
 ): Promise<PrivacyLogEntry[]> {
   return (
     await apiRequest<{ data: PrivacyLogEntry[] }>(
-      "/api/research-office/privacy-logs",
+      "/api/office/privacy-logs",
       undefined,
       fetcher,
     )
@@ -2587,7 +3153,7 @@ export async function recordPrivacyLog(
         activity_date: string | null;
       };
     }>(
-      "/api/research-office/privacy-logs",
+      "/api/office/privacy-logs",
       { method: "POST", body: JSON.stringify(input) },
       fetcher,
     )

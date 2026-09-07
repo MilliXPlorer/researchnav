@@ -1,9 +1,18 @@
-import { Archive, ArrowRight, LibraryBig, ShieldCheck } from "lucide-react";
+import {
+  Archive,
+  ArrowRight,
+  ExternalLink,
+  LibraryBig,
+  ShieldCheck,
+} from "lucide-react";
+import { useState } from "react";
 import { Button } from "./components";
+import { Modal } from "./Modal";
 import AdminResearchWorkspace from "./AdminResearchWorkspace";
 import InstructorResearchReview from "./InstructorResearchReview";
 import ResearcherResearchWorkspace from "./ResearcherResearchWorkspace";
 import SimilarityResults from "./SimilarityResults";
+import ResearchOfficeBulkImport from "./ResearchOfficeBulkImport";
 import {
   ApiError,
   type RoleDashboard,
@@ -14,7 +23,12 @@ import type { Role } from "./types";
 
 export type RoleDashboardLoadState =
   | { scope: string; status: "loading" }
-  | { scope: string; status: "ready"; dashboard: RoleDashboard }
+  | {
+      scope: string;
+      status: "ready";
+      dashboard: RoleDashboard;
+      source?: "live" | "mock";
+    }
   | { scope: string; status: "error"; error: ApiError };
 
 type WorkspaceProps = {
@@ -36,7 +50,10 @@ export default function RoleWorkspace({
   onRetry,
   researchDocumentId,
 }: WorkspaceProps) {
-  if (role === "admin" && researchDocumentId !== undefined) {
+  if (
+    ["admin", "research-office"].includes(role) &&
+    researchDocumentId !== undefined
+  ) {
     return (
       <AdminResearchWorkspace
         key={`${dashboardScope}:${researchDocumentId}`}
@@ -93,6 +110,10 @@ export default function RoleWorkspace({
         onRetry={onRetry}
       />
     );
+  }
+
+  if (role === "research-office" && dashboardScope === "bulk_import") {
+    return <ResearchOfficeBulkImport />;
   }
 
   return (
@@ -152,7 +173,13 @@ function ResearcherWorkspace({
         title={config.title}
         description={config.description}
         action={
-          <Button onClick={() => selectNav("My Submissions")}>
+          <Button
+            onClick={() => selectNav("Create Research")}
+            disabled={
+              dashboardState.status === "ready" &&
+              dashboardState.source === "mock"
+            }
+          >
             New submission <ArrowRight />
           </Button>
         }
@@ -185,6 +212,12 @@ type WorkspaceConfig = {
 };
 
 const workspaceConfigs: Record<Role, WorkspaceConfig> = {
+  research_editor: {
+    eyebrow: "Research Editor / Dashboard",
+    title: "Editorial review",
+    description: "Assigned manuscripts, editorial corrections, and monitoring.",
+    sections: {},
+  },
   researcher: {
     eyebrow: "My dashboard / Overview",
     title: "My research.",
@@ -421,6 +454,11 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
         title: "Submission queue",
         description: "Submitted research awaiting institutional review.",
       },
+      bulk_import: {
+        title: "Import Manuscript",
+        description:
+          "Upload multiple research manuscripts and extract metadata.",
+      },
       revision_requests: {
         title: "Revision requests",
         description: "Research awaiting revisions.",
@@ -433,6 +471,7 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
         title: "Archived repository",
         description: "Archived research records.",
         catalog: true,
+        internalRecord: true,
       },
     },
   },
@@ -513,6 +552,9 @@ function DashboardSections({
   dashboardState: RoleDashboardLoadState;
   onRetry: () => void;
 }) {
+  const [selectedSectionKey, setSelectedSectionKey] = useState<string | null>(
+    null,
+  );
   if (
     dashboardState.scope !== dashboardScope ||
     dashboardState.status === "loading" ||
@@ -552,9 +594,25 @@ function DashboardSections({
 
   return (
     <>
+      {role === "researcher" && dashboardState.source === "mock" && (
+        <section className="researcher-demo-notice" role="status">
+          <div>
+            <strong>Demo data - read only</strong>
+            <span>The live Researcher dashboard could not be loaded.</span>
+          </div>
+          <Button variant="secondary" onClick={onRetry}>
+            Retry live data
+          </Button>
+        </section>
+      )}
       <DashboardStatistics
         sections={dashboardState.dashboard.sections}
         config={config}
+        onSelect={
+          role === "researcher"
+            ? (section) => setSelectedSectionKey(section.key)
+            : undefined
+        }
       />
       <div className="dashboard-visualizations">
         <DashboardWorkloadChart
@@ -565,22 +623,51 @@ function DashboardSections({
           <DashboardAnalytics analytics={dashboardState.dashboard.analytics} />
         )}
       </div>
-      <div className="role-dashboard-sections">
-        {dashboardState.dashboard.sections.map((section) => (
-          <DashboardSection
-            key={section.key}
-            section={section}
-            config={
-              config.sections[section.key] ?? {
-                title: section.key,
-                description: "Role workspace data.",
+      {role !== "researcher" && (
+        <div className="role-dashboard-sections">
+          {dashboardState.dashboard.sections.map((section) => (
+            <DashboardSection
+              key={section.key}
+              section={section}
+              config={
+                config.sections[section.key] ?? {
+                  title: section.key,
+                  description: "Role workspace data.",
+                }
               }
-            }
-            navigate={navigate}
-            role={role}
-          />
-        ))}
-      </div>
+              navigate={navigate}
+              role={role}
+            />
+          ))}
+        </div>
+      )}
+      {role === "researcher" && selectedSectionKey !== null && (
+        <Modal
+          label={config.sections[selectedSectionKey]?.title ?? "Research"}
+          onClose={() => setSelectedSectionKey(null)}
+          size="large"
+        >
+          {(() => {
+            const section = dashboardState.dashboard.sections.find(
+              (item) => item.key === selectedSectionKey,
+            );
+            if (!section) return null;
+            return (
+              <DashboardSection
+                section={section}
+                config={
+                  config.sections[section.key] ?? {
+                    title: section.key,
+                    description: "Research records.",
+                  }
+                }
+                navigate={navigate}
+                role={role}
+              />
+            );
+          })()}
+        </Modal>
+      )}
     </>
   );
 }
@@ -734,9 +821,11 @@ function DashboardAnalytics({
 function DashboardStatistics({
   sections,
   config,
+  onSelect,
 }: {
   sections: RoleDashboardSection[];
   config: WorkspaceConfig;
+  onSelect?: (section: RoleDashboardSection) => void;
 }) {
   const available = availableDashboardSections(sections);
 
@@ -755,14 +844,29 @@ function DashboardStatistics({
         <p>Current totals for this role workspace.</p>
       </header>
       <dl className="dashboard-stat-grid">
-        {available.map((section) => (
-          <div key={section.key} className="dashboard-stat-card">
-            <dt>
-              {config.sections[section.key]?.title ?? humanize(section.key)}
-            </dt>
-            <dd>{section.total}</dd>
-          </div>
-        ))}
+        {available.map((section) => {
+          return onSelect ? (
+            <button
+              key={section.key}
+              type="button"
+              className="dashboard-stat-card dashboard-stat-card-button"
+              onClick={() => onSelect(section)}
+              aria-label={`View ${config.sections[section.key]?.title ?? humanize(section.key)}`}
+            >
+              <span className="dashboard-stat-label">
+                {config.sections[section.key]?.title ?? humanize(section.key)}
+              </span>
+              <strong className="dashboard-stat-value">{section.total}</strong>
+            </button>
+          ) : (
+            <div key={section.key} className="dashboard-stat-card">
+              <dt>
+                {config.sections[section.key]?.title ?? humanize(section.key)}
+              </dt>
+              <dd>{section.total}</dd>
+            </div>
+          );
+        })}
       </dl>
     </section>
   );
@@ -907,9 +1011,10 @@ function DashboardSection({
                     : "Internal workspace"}
                 </span>
                 {isPublicCatalogRecord && item.visibility === "public" && (
-                  <Button
-                    variant="secondary"
-                    className="dashboard-catalog-action"
+                  <button
+                    className="icon-button dashboard-record-icon-action"
+                    aria-label="Open public catalog"
+                    title="Open public catalog"
                     onClick={() =>
                       navigate(
                         `/catalog?q=${encodeURIComponent(
@@ -918,21 +1023,31 @@ function DashboardSection({
                       )
                     }
                   >
-                    Open public catalog <ArrowRight aria-hidden="true" />
-                  </Button>
+                    <ExternalLink size={17} aria-hidden="true" />
+                  </button>
                 )}
-                {(["admin", "adviser"] as Role[]).includes(role) &&
+                {(["admin", "adviser", "research-office"] as Role[]).includes(
+                  role,
+                ) &&
                   config.internalRecord && (
-                    <Button
-                      variant="secondary"
+                    <button
+                      className="icon-button dashboard-record-icon-action"
+                      aria-label={
+                        role === "adviser"
+                          ? "Open review"
+                          : "Open internal record"
+                      }
+                      title={
+                        role === "adviser"
+                          ? "Open review"
+                          : "Open internal record"
+                      }
                       onClick={() =>
                         navigate(`/research/${item.research_document_id}`)
                       }
                     >
-                      {role === "adviser"
-                        ? "Open review"
-                        : "Open internal record"}
-                    </Button>
+                      <ExternalLink size={17} aria-hidden="true" />
+                    </button>
                   )}
               </div>
             </li>

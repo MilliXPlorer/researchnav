@@ -8,7 +8,8 @@ export type Role =
   | "coordinator"
   | "librarian"
   | "research-office"
-  | "academics";
+  | "academics"
+  | "research_editor";
 
 export type Status =
   | "Draft"
@@ -23,6 +24,7 @@ export interface ResearchRecord {
   id: string;
   title: string;
   authors: string;
+  authorNames?: string[];
   year: number;
   institutionName: string;
   institutionLocation?: string;

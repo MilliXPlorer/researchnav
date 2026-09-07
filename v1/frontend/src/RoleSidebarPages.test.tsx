@@ -149,13 +149,13 @@ function roleRoutes(): Array<[RegExp, Handler]> {
       /\/api\/coordinator\/instructors$/,
       () => new Response(JSON.stringify({ users: [] })),
     ],
-    [/\/api\/librarian\/repository-catalog(\?|$)/, emptyPage],
+    [/\/api\/librarian\/catalog(\?|$)/, emptyPage],
     [/\/api\/librarian\/metadata-standards$/, emptyData],
     [/\/api\/librarian\/retention-logs$/, emptyData],
-    [/\/api\/research-office\/reports$/, institutionalReport],
-    [/\/api\/research-office\/users(\?|$)/, emptyPage],
-    [/\/api\/research-office\/privacy-logs$/, emptyData],
-    [/\/api\/research-office\/compliance$/, emptyData],
+    [/\/api\/office\/reports$/, institutionalReport],
+    [/\/api\/office\/users(\?|$)/, emptyPage],
+    [/\/api\/office\/privacy-logs$/, emptyData],
+    [/\/api\/office\/compliance$/, emptyData],
     [/\/api\/academics\/(categories|recommendations)$/, emptyData],
     [/\/api\/academics\/library$/, emptyData],
     [/\/api\/repository\?per_page=50/, emptyPage],
@@ -257,6 +257,7 @@ describe("role workspace pages", () => {
       role: "research-office",
       destinations: [
         ["Institutional Overview", "Institutional overview"],
+        ["Import Manuscript", "Import Manuscript"],
         ["User & Role Management", "User & role management"],
         ["Reports & Exports", "Reports & exports"],
         ["Data Privacy Log", "Data privacy log"],
@@ -272,7 +273,7 @@ describe("role workspace pages", () => {
     {
       role: "researcher",
       destinations: [
-        ["My Submissions", "My submissions"],
+        ["My Research", "My submissions"],
         ["Similarity Check", "Similarity check"],
         ["Related Studies", "Related studies"],
       ],
@@ -550,10 +551,9 @@ describe("role workspace pages", () => {
     const manuscript = new File(["%PDF test"], "proposal.pdf", {
       type: "application/pdf",
     });
-    fireEvent.change(
-      screen.getByLabelText("PDF, DOC, or DOCX (maximum 25 MB)"),
-      { target: { files: [manuscript] } },
-    );
+    fireEvent.change(screen.getByLabelText("PDF or DOCX (maximum 25 MB)"), {
+      target: { files: [manuscript] },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Save and submit" }));
 
     expect(
@@ -655,16 +655,13 @@ describe("role workspace pages", () => {
     fireEvent.change(screen.getByLabelText("Author name"), {
       target: { value: "Ada Lovelace" },
     });
-    fireEvent.change(
-      screen.getByLabelText("PDF, DOC, or DOCX (maximum 25 MB)"),
-      { target: { files: [new File(["bad"], "payload.exe")] } },
-    );
+    fireEvent.change(screen.getByLabelText("PDF or DOCX (maximum 25 MB)"), {
+      target: { files: [new File(["bad"], "payload.exe")] },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
 
     expect(
-      await screen.findByText(
-        "The manuscript must be a PDF, DOC, or DOCX file.",
-      ),
+      await screen.findByText("The manuscript must be a PDF or DOCX file."),
     ).toBeInTheDocument();
     expect(
       fetchMock.mock.calls.filter(
@@ -880,6 +877,45 @@ describe("role workspace pages", () => {
     expect(navigate).toHaveBeenCalledWith("/catalog?q=Catalog%20match");
   });
 
+  it("shows an error instead of mock submissions after a failed Researcher list request", async () => {
+    const fetchMock = stubFetch([
+      [
+        /\/api\/research\?/,
+        () =>
+          new Response(
+            JSON.stringify({ error: "RESEARCH_TABLE_UNAVAILABLE" }),
+            {
+              status: 500,
+            },
+          ),
+      ],
+    ]);
+    render(
+      <RoleSidebarPage
+        role="researcher"
+        selectedNav="My Submissions"
+        navigate={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Your submissions are unavailable",
+    );
+    expect(
+      screen.queryByText(/ResearchNAV: A Web-Based Research Repository System/),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Open record" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "New submission" }),
+    ).toBeEnabled();
+    expect(
+      screen.queryByRole("button", { name: "Submit" }),
+    ).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("labels one-cent rounded similarity contributions as an approximate displayed equation", async () => {
     stubFetch([
       [
@@ -1040,7 +1076,7 @@ describe("role workspace pages", () => {
           ]),
       ],
       [
-        /\/api\/statistician\/queue\/7\/checklist$/,
+        /\/api\/statistician\/methodology\/7$/,
         () =>
           new Response(
             JSON.stringify({
@@ -1074,7 +1110,7 @@ describe("role workspace pages", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save checklist" }));
     expect(await screen.findByText("Checklist saved.")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/statistician/queue/7/checklist",
+      "/api/statistician/methodology/7",
       expect.objectContaining({
         method: "PUT",
         body: JSON.stringify({
@@ -1306,14 +1342,31 @@ describe("role workspace pages", () => {
     let requests = 0;
     stubFetch([
       [
-        /\/api\/research-office\/users(\?|$)/,
+        /\/api\/office\/users(\?|$)/,
         (input) => {
           requests += 1;
           const hasSearch = String(input).includes("search=");
           return new Response(
-            JSON.stringify(
-              pageResponse(
-                hasSearch
+            JSON.stringify({
+              data: {
+                ...pageResponse(
+                  hasSearch
+                    ? []
+                    : [
+                        {
+                          id: "user-id",
+                          email: "member@example.test",
+                          first_name: "Member",
+                          middle_name: null,
+                          last_name: "Example",
+                          role: "researcher",
+                          access_status: "active",
+                          created_at: null,
+                          updated_at: null,
+                        },
+                      ],
+                ).meta,
+                data: hasSearch
                   ? []
                   : [
                       {
@@ -1328,8 +1381,12 @@ describe("role workspace pages", () => {
                         updated_at: null,
                       },
                     ],
-              ),
-            ),
+                first_page_url: null,
+                last_page_url: null,
+                prev_page_url: null,
+                next_page_url: null,
+              },
+            }),
           );
         },
       ],

@@ -10,11 +10,20 @@ import {
   type ResearchRevisionResource,
 } from "./api";
 import { Button } from "./components";
+import { isResearcherMockEligible } from "./researcherMockData";
+
+type ActivityData = {
+  feedback: FeedbackResource[];
+  revisions: ResearchRevisionResource[];
+  monitoring: MonitoringLogResource[];
+};
 
 type ActivityState =
   | { status: "loading" }
   | {
       status: "ready";
+      mockSections: Array<keyof ActivityData>;
+      unavailableSections: Array<keyof ActivityData>;
       feedback: FeedbackResource[];
       revisions: ResearchRevisionResource[];
       monitoring: MonitoringLogResource[];
@@ -45,6 +54,28 @@ function activityError(error: unknown) {
   return "Research activity is unavailable (REQUEST_FAILED).";
 }
 
+function activitySection<T>(
+  result: PromiseSettledResult<T[]>,
+  key: keyof ActivityData,
+  fallback: T[] | undefined,
+  mockSections: Array<keyof ActivityData>,
+  unavailableSections: Array<keyof ActivityData>,
+) {
+  if (result.status === "fulfilled" && Array.isArray(result.value)) {
+    return result.value;
+  }
+  if (
+    result.status === "rejected" &&
+    fallback &&
+    isResearcherMockEligible(result.reason)
+  ) {
+    mockSections.push(key);
+    return fallback;
+  }
+  unavailableSections.push(key);
+  return [];
+}
+
 /**
  * Adviser feedback, revision requests, and monitoring history for one research
  * record. The server authorizes the owning researcher and every assigned
@@ -55,11 +86,17 @@ export default function ResearchActivity({
   title,
   refreshKey = 0,
   researcherActions = false,
+  partialFallback = false,
+  fallbackData,
+  forceMock = false,
 }: {
   researchDocumentId: string | number;
   title?: string;
   refreshKey?: number;
   researcherActions?: boolean;
+  partialFallback?: boolean;
+  fallbackData?: ActivityData;
+  forceMock?: boolean;
 }) {
   const [state, setState] = useState<ActivityState>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);
@@ -67,14 +104,70 @@ export default function ResearchActivity({
   useEffect(() => {
     let cancelled = false;
 
-    void Promise.all([
+    if (forceMock) return;
+
+    if (!partialFallback) {
+      void Promise.all([
+        listFeedback(researchDocumentId),
+        listResearchRevisions(researchDocumentId),
+        listMonitoringLogs(researchDocumentId),
+      ])
+        .then(([feedback, revisions, monitoring]) => {
+          if (!cancelled)
+            setState({
+              status: "ready",
+              mockSections: [],
+              unavailableSections: [],
+              feedback,
+              revisions,
+              monitoring,
+            });
+        })
+        .catch((error: unknown) => {
+          if (!cancelled)
+            setState({ status: "error", message: activityError(error) });
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void Promise.allSettled([
       listFeedback(researchDocumentId),
       listResearchRevisions(researchDocumentId),
       listMonitoringLogs(researchDocumentId),
     ])
-      .then(([feedback, revisions, monitoring]) => {
-        if (!cancelled)
-          setState({ status: "ready", feedback, revisions, monitoring });
+      .then(([feedbackResult, revisionsResult, monitoringResult]) => {
+        if (!cancelled) {
+          const mockSections: Array<keyof ActivityData> = [];
+          const unavailableSections: Array<keyof ActivityData> = [];
+          setState({
+            status: "ready",
+            mockSections,
+            unavailableSections,
+            feedback: activitySection(
+              feedbackResult,
+              "feedback",
+              fallbackData?.feedback,
+              mockSections,
+              unavailableSections,
+            ),
+            revisions: activitySection(
+              revisionsResult,
+              "revisions",
+              fallbackData?.revisions,
+              mockSections,
+              unavailableSections,
+            ),
+            monitoring: activitySection(
+              monitoringResult,
+              "monitoring",
+              fallbackData?.monitoring,
+              mockSections,
+              unavailableSections,
+            ),
+          });
+        }
       })
       .catch((error: unknown) => {
         if (!cancelled)
@@ -84,9 +177,26 @@ export default function ResearchActivity({
     return () => {
       cancelled = true;
     };
-  }, [researchDocumentId, attempt, refreshKey]);
+  }, [
+    researchDocumentId,
+    attempt,
+    refreshKey,
+    partialFallback,
+    fallbackData,
+    forceMock,
+  ]);
 
-  if (state.status === "loading") {
+  const displayedState =
+    forceMock && fallbackData
+      ? ({
+          status: "ready",
+          mockSections: ["feedback", "revisions", "monitoring"],
+          unavailableSections: [],
+          ...fallbackData,
+        } as const)
+      : state;
+
+  if (displayedState.status === "loading") {
     return (
       <p className="admin-empty" aria-busy="true">
         Loading feedback, revisions, and monitoring history…
@@ -94,10 +204,10 @@ export default function ResearchActivity({
     );
   }
 
-  if (state.status === "error") {
+  if (displayedState.status === "error") {
     return (
       <div className="dashboard-error panel-card" role="alert">
-        <p>{state.message}</p>
+        <p>{displayedState.message}</p>
         <Button
           variant="secondary"
           onClick={() => {
@@ -111,7 +221,8 @@ export default function ResearchActivity({
     );
   }
 
-  const { feedback, revisions, monitoring } = state;
+  const { feedback, revisions, monitoring, mockSections, unavailableSections } =
+    displayedState;
 
   async function applyFeedbackAction(
     item: FeedbackResource,
@@ -147,8 +258,46 @@ export default function ResearchActivity({
   }
 
   return (
-    <div className="research-activity">
+    <div className="research-activity" id="research-feedback">
       {title && <p className="research-activity-title">{title}</p>}
+      {mockSections.length > 0 && (
+        <section className="researcher-demo-notice" role="status">
+          <div>
+            <strong>Demo data - read only</strong>
+            <span>
+              Live {mockSections.map(humanize).join(", ")} could not be loaded.
+            </span>
+          </div>
+          {!forceMock && (
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setState({ status: "loading" });
+                setAttempt((current) => current + 1);
+              }}
+            >
+              Retry live data
+            </Button>
+          )}
+        </section>
+      )}
+      {unavailableSections.length > 0 && (
+        <section className="dashboard-error panel-card" role="alert">
+          <p>
+            Some activity is unavailable:{" "}
+            {unavailableSections.map(humanize).join(", ")}.
+          </p>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setState({ status: "loading" });
+              setAttempt((current) => current + 1);
+            }}
+          >
+            Retry
+          </Button>
+        </section>
+      )}
 
       <section className="activity-block">
         <h3>Reviewer feedback and remarks</h3>
@@ -171,7 +320,7 @@ export default function ResearchActivity({
                 </div>
                 <p className="activity-comment">{item.comment}</p>
                 {item.reviewer_name && <p>Reviewer: {item.reviewer_name}</p>}
-                {researcherActions && (
+                {researcherActions && !mockSections.includes("feedback") && (
                   <div className="row-actions">
                     <Button
                       variant="secondary"

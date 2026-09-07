@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -34,7 +35,10 @@ class User extends Authenticatable
         'invited_by', 'invitation_sent_at', 'confirmed_at', 'last_login_at', 'remember_token',
     ];
 
-    protected $hidden = ['password', 'remember_token', 'google_sub'];
+    protected $hidden = [
+        'password', 'remember_token', 'google_sub',
+        'profile_photo_path', 'profile_photo_mime_type', 'profile_photo_size', 'profile_photo_version',
+    ];
 
     protected function casts(): array
     {
@@ -103,6 +107,7 @@ class User extends Authenticatable
             UserRole::STATISTICIAN => 'statistician',
             UserRole::LIBRARIAN => 'librarian',
             UserRole::RESEARCH_PANELIST => 'panel',
+            UserRole::RESEARCH_EDITOR => 'academics',
             default => throw new InvalidArgumentException("Unknown canonical role [{$slug}]."),
         };
     }
@@ -129,6 +134,20 @@ class User extends Authenticatable
     public function newUniqueId(): string
     {
         return (string) Str::uuid();
+    }
+
+    public function displayName(): string
+    {
+        $name = trim(implode(' ', array_filter([$this->first_name, $this->middle_name, $this->last_name])));
+
+        return $name !== '' ? $name : $this->email;
+    }
+
+    public function profileName(): ?string
+    {
+        $name = trim(implode(' ', array_filter([$this->first_name, $this->middle_name, $this->last_name])));
+
+        return $name !== '' ? $name : null;
     }
 
     protected static function newFactory(): UserFactory
@@ -158,7 +177,7 @@ class User extends Authenticatable
 
     public function feedbackComments(): HasMany
     {
-        return $this->hasMany(FeedbackComment::class);
+        return $this->hasMany(FeedbackComment::class, FeedbackComment::column('user_id'));
     }
 
     public function uploadedFiles(): HasMany
@@ -168,22 +187,22 @@ class User extends Authenticatable
 
     public function requestedRevisions(): HasMany
     {
-        return $this->hasMany(Revision::class, 'requested_by');
+        return $this->hasMany(Revision::class, Revision::column('requested_by'));
     }
 
     public function monitoringLogs(): HasMany
     {
-        return $this->hasMany(MonitoringLog::class, 'performed_by');
+        return $this->hasMany(MonitoringLog::class, MonitoringLog::column('performed_by'));
     }
 
     public function titleValidations(): HasMany
     {
-        return $this->hasMany(TitleValidation::class, 'validated_by');
+        return $this->hasMany(TitleValidation::class, TitleValidation::column('validated_by'));
     }
 
     public function auditLogs(): HasMany
     {
-        return $this->hasMany(AuditLog::class);
+        return $this->hasMany(AuditLog::class, AuditLog::column('user_id'));
     }
 
     public function reviewAssignments(): HasMany
@@ -194,6 +213,52 @@ class User extends Authenticatable
     public function assignedReviewers(): HasMany
     {
         return $this->hasMany(ReviewAssignment::class, 'assigned_by');
+    }
+
+    public function classSections(): HasMany
+    {
+        return $this->hasMany(ClassSection::class, 'instructor_id');
+    }
+
+    public function enrolledSections(): BelongsToMany
+    {
+        return $this->belongsToMany(ClassSection::class, 'class_section_members')
+            ->withTimestamps();
+    }
+
+    public function createdSchedules(): HasMany
+    {
+        return $this->hasMany(DefenseSchedule::class, 'created_by');
+    }
+
+    public function evaluations(): HasMany
+    {
+        return $this->hasMany(Evaluation::class, Evaluation::column('panelist_id'));
+    }
+
+    public function methodologyReviews(): HasMany
+    {
+        return $this->hasMany(MethodologyReview::class, MethodologyReview::column('statistician_id'));
+    }
+
+    public function savedLibraryItems(): HasMany
+    {
+        return $this->hasMany(SavedLibraryItem::class);
+    }
+
+    public function complianceReviews(): HasMany
+    {
+        return $this->hasMany(ComplianceReview::class, ComplianceReview::column('reviewed_by'));
+    }
+
+    public function metadataReviews(): HasMany
+    {
+        return $this->hasMany(MetadataReview::class, MetadataReview::column('reviewed_by'));
+    }
+
+    public function retentionLogs(): HasMany
+    {
+        return $this->hasMany(RetentionLog::class, RetentionLog::column('performed_by'));
     }
 
     public function scopeActive(Builder $query): Builder

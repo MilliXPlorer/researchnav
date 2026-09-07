@@ -37,12 +37,23 @@ import {
   searchPublicResearch,
   searchPublicResearchBySimilarity,
   resubmitResearchRevision,
+  returnMethodologyForClarification,
   replaceResearchAuthors,
   replaceReviewAssignments,
   researchFileDownloadUrl,
+  recordPrivacyLog,
+  saveStatisticianChecklist,
+  signOffMethodology,
   submitInternalResearch,
   toResearchRecord,
   transitionInternalResearch,
+  listComplianceQueue,
+  decideCompliance,
+  getInstitutionalReport,
+  listOfficeUsers,
+  listPrivacyLogs,
+  listRepositoryCatalog,
+  updateOfficeUserAccess,
   updateOwnProfile,
   updateInternalResearch,
   updateAdminUser,
@@ -462,6 +473,113 @@ describe("role dashboard API", () => {
     await expect(getRoleDashboard("adviser", roleMismatch)).rejects.toThrow(
       "DASHBOARD_ROLE_MISMATCH",
     );
+  });
+});
+
+describe("specialist workspace API routes", () => {
+  it("uses canonical statistician, librarian, and office paths with exact methods", async () => {
+    const fetchMock = vi.fn(
+      async (path: RequestInfo | URL, init?: RequestInit) => {
+        void path;
+        void init;
+        return new Response(JSON.stringify({ data: {} }));
+      },
+    );
+
+    await saveStatisticianChecklist(
+      "7/8",
+      { design_fit: true, remarks: "Suitable design." },
+      fetchMock,
+    );
+    await signOffMethodology("7/8", fetchMock);
+    await returnMethodologyForClarification(
+      "7/8",
+      "Clarify the sample frame.",
+      fetchMock,
+    );
+    await listRepositoryCatalog(
+      { search: "records", category: 2, page: 3, per_page: 25 },
+      fetchMock,
+    );
+    await listComplianceQueue(fetchMock);
+    await decideCompliance(
+      42,
+      { review_status: "endorsed", format_compliant: true },
+      fetchMock,
+    );
+    await listOfficeUsers(
+      { search: "Ada", role: "researcher", page: 2, per_page: 50 },
+      fetchMock,
+    );
+    await updateOfficeUserAccess("office/user", "active", fetchMock);
+    await getInstitutionalReport(fetchMock);
+    await listPrivacyLogs(fetchMock);
+    await recordPrivacyLog(
+      { action: "data_export", details: "Requested export." },
+      fetchMock,
+    );
+
+    expect(
+      fetchMock.mock.calls.map(([path, init]) => ({
+        path: String(path),
+        method: (init as RequestInit).method ?? "GET",
+        body: (init as RequestInit).body,
+      })),
+    ).toEqual([
+      {
+        path: "/api/statistician/methodology/7%2F8",
+        method: "PUT",
+        body: JSON.stringify({ design_fit: true, remarks: "Suitable design." }),
+      },
+      {
+        path: "/api/statistician/methodology/7%2F8/sign-off",
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+      {
+        path: "/api/statistician/methodology/7%2F8/return",
+        method: "POST",
+        body: JSON.stringify({ remarks: "Clarify the sample frame." }),
+      },
+      {
+        path: "/api/librarian/catalog?search=records&category=2&page=3&per_page=25",
+        method: "GET",
+        body: undefined,
+      },
+      { path: "/api/office/compliance", method: "GET", body: undefined },
+      {
+        path: "/api/office/compliance/42",
+        method: "PUT",
+        body: JSON.stringify({
+          review_status: "endorsed",
+          format_compliant: true,
+        }),
+      },
+      {
+        path: "/api/office/users?search=Ada&role=researcher&page=2&per_page=50",
+        method: "GET",
+        body: undefined,
+      },
+      {
+        path: "/api/office/users/office%2Fuser",
+        method: "PATCH",
+        body: JSON.stringify({ access_status: "active" }),
+      },
+      { path: "/api/office/reports", method: "GET", body: undefined },
+      {
+        path: "/api/office/privacy-logs",
+        method: "GET",
+        body: undefined,
+      },
+      {
+        path: "/api/office/privacy-logs",
+        method: "POST",
+        body: JSON.stringify({
+          action: "data_export",
+          details: "Requested export.",
+        }),
+      },
+    ]);
   });
 });
 

@@ -24,6 +24,8 @@ MariaDB (127.0.0.1:3307)
 
 Laravel owns authentication, authorization, validation, database access, and private document storage. The Node frontend server renders React, serves the browser bundle, and streams `/api` traffic to Laravel without becoming an authorization boundary. Private import documents live under `backend/storage/app/private/research_studies/<institute>/` and are never frontend assets. The current corpus is under `ics/`.
 
+Authentication is **Google ID-token SSO only**. AI-generated content, AI recommendations, and AI workflow decisions are excluded from this project; review, title validation, progress, and feedback decisions remain human-recorded actions.
+
 Production should expose only the SSR frontend service on the public HTTPS origin. Its `/api/*` gateway reaches Laravel on a private network and preserves method, body, cookies, origin, status, and streamed downloads. SSR HTML is not cached, and Laravel remains the sole session and authorization authority.
 
 ## Requirements
@@ -115,7 +117,7 @@ The gateway exposes `/_health`, sends `Cache-Control: no-store` and a restrictiv
 1. React receives a Google ID token.
 2. React sends it to `POST /api/auth/google`.
 3. Laravel verifies the audience and verified email.
-4. Laravel stores the user ID in an HTTP-only database session named `researchnav.sid`.
+4. Laravel stores the user ID in an HTTP-only database session named `researchnav_sid`.
 5. New users remain blocked until an authorized account provisions a role.
 
 Register `http://localhost:5173` as an authorized JavaScript origin for the Google OAuth Web Client ID.
@@ -145,3 +147,25 @@ npm run dev:legacy-api
 ```
 
 Do not run Laravel and Express on the same port. Do not run legacy migrations against important PostgreSQL data without a separate data-handling plan. See `server/README.md`.
+
+## Manuscript-content retrieval
+
+`GET /api/repository?q=` is retrieval, not plagiarism detection or similarity
+scoring. It searches title, abstract, keywords, and authors, plus `ready`
+extracted manuscript bodies, while returning metadata only: no snippets,
+scores, or body text. Only non-deleted records with `archive_status = archived`,
+`visibility = public`, and `submission_status` of `approved` or `archived` are
+eligible.
+
+On MariaDB, body matches use the `manuscript_search_documents` FULLTEXT index in
+natural-language mode (BM25-family relevance). The authoritative source is the
+latest current `final_manuscript`; a cryptographically and path-verified
+canonical import is used only as the fallback. PDF and DOCX are supported. DOC
+files and scanned/OCR-dependent PDFs produce no searchable body text. See
+`backend/DATABASE_SETUP.md` for indexing, scheduler, environment, privacy, and
+deployment requirements.
+
+Content-search deployments must provide private-storage ACLs that prevent direct
+web access, encrypt the database and its backups, and use a fixed, controlled
+`MANUSCRIPT_SEARCH_PYTHON_BINARY`. The parser already runs behind a bounded JSON
+process boundary; OS/container parser isolation is recommended.

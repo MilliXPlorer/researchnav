@@ -38,9 +38,9 @@ class SimilarityQueryTest extends TestCase
             ->assertExactJson(['error' => 'ACCOUNT_ACCESS_PENDING']);
     }
 
-    public function test_it_scores_a_typed_query_without_any_research_record(): void
+    public function test_it_omits_exact_zero_results_for_a_typed_query_without_any_research_record(): void
     {
-        $archived = $this->archived('INVENTORY MANAGEMENT SYSTEM FOR SMALL BUSINESS');
+        $this->archived('INVENTORY MANAGEMENT SYSTEM FOR SMALL BUSINESS');
         $researcher = $this->researcher();
 
         $this->assertSame(0, ResearchDocument::query()->where('submitted_by', $researcher->id)->count());
@@ -49,11 +49,7 @@ class SimilarityQueryTest extends TestCase
             ->postJson('/api/similarity/query', ['q' => 'inventory management system'], $this->origin())
             ->assertOk();
 
-        $response->assertJsonPath('data.0.id', $archived->id);
-        $response->assertJsonPath('data.0.query_similarity_score', '0.000000');
-        $response->assertJsonPath('data.0.query_similarity_percentage', '0.000000');
-        $response->assertJsonPath('data.0.fasttext_support_score', null);
-        $this->assertNotNull($response->json('data.0.title'));
+        $response->assertExactJson(['data' => []]);
     }
 
     public function test_it_never_writes_a_similarity_result_audit_entry_or_notification(): void

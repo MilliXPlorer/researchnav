@@ -16,6 +16,7 @@ class RevisionPolicy
 
     public function resubmit(User $user, Revision $revision): bool
     {
-        return $revision->researchDocument->submitted_by === $user->id;
+        return DomainAuthorization::isResearcherParticipant($user, $revision->researchDocument)
+            || DomainAuthorization::isActiveAdministrator($user);
     }
 }

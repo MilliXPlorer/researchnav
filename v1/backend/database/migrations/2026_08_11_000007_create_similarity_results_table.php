@@ -16,7 +16,7 @@ return new class extends Migration
             $table->string('source_title', 500);
             $table->string('matched_title', 500);
             $table->decimal('tfidf_score', 8, 6)->nullable();
-            $table->decimal('cosine_score', 8, 6)->default(0);
+            $table->decimal('cosine_score', 8, 6);
             $table->decimal('fasttext_score', 8, 6)->nullable();
             $table->decimal('final_similarity_score', 8, 6);
             $table->decimal('threshold', 8, 6)->default(0.700000);

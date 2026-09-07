@@ -33,16 +33,17 @@ import type { Role, UserSession } from "./types";
 import { useDialogFocus } from "./useDialogFocus";
 
 const primaryNav: Record<Role, string> = {
-  admin: "System Overview",
-  researcher: "My Dashboard",
-  adviser: "Pending Reviews",
-  instructor: "Title Proposals",
-  panel: "Assigned Manuscripts",
-  statistician: "Review Queue",
+  admin: "Access Requests",
+  researcher: "Dashboard",
+  adviser: "Dashboard",
+  instructor: "Dashboard",
+  panel: "Dashboard",
+  statistician: "Dashboard",
   coordinator: "Program Overview",
-  librarian: "Archiving Queue",
+  librarian: "Dashboard",
   "research-office": "Compliance Review",
   academics: "My Library",
+  research_editor: "Dashboard",
 };
 
 const navIcons = [LayoutDashboard, BookOpen, Search, Home, Bell, Menu];
@@ -87,6 +88,7 @@ export default function Dashboard({
     status: "loading" as "loading" | "ready" | "error",
     items: [] as NotificationResource[],
     error: "",
+    source: "live" as "live" | "mock",
   });
   const [notificationAttempt, setNotificationAttempt] = useState(0);
   const [dashboardState, setDashboardState] = useState<RoleDashboardLoadState>({
@@ -115,6 +117,7 @@ export default function Dashboard({
         "instructor",
         "panel",
         "statistician",
+        "research-office",
       ] as Role[]
     ).includes(role);
   const scopedDashboardState: RoleDashboardLoadState =
@@ -129,10 +132,12 @@ export default function Dashboard({
           status: "loading" as const,
           items: [],
           error: "",
+          source: "live" as const,
         };
   const notifications = scopedNotificationState.items;
   const unreadCount = notifications.filter(
-    (item) => item.read_at === null,
+    (item) =>
+      scopedNotificationState.source === "live" && item.read_at === null,
   ).length;
   const notificationDrawerOpen = drawer.open && drawer.scope === dashboardScope;
 
@@ -146,6 +151,7 @@ export default function Dashboard({
       status: "loading",
       items: [],
       error: "",
+      source: "live",
     });
     void listNotifications()
       .then((items) => {
@@ -155,6 +161,7 @@ export default function Dashboard({
             status: "ready",
             items,
             error: "",
+            source: "live",
           });
       })
       .catch((error: unknown) => {
@@ -164,13 +171,14 @@ export default function Dashboard({
             status: "error",
             items: [],
             error: notificationErrorMessage(error),
+            source: "live",
           });
       });
 
     return () => {
       cancelled = true;
     };
-  }, [dashboardScope, notificationAttempt, session.accessStatus]);
+  }, [dashboardScope, notificationAttempt, role, session.accessStatus]);
 
   useEffect(() => {
     if (session.accessStatus !== "active") return;
@@ -183,6 +191,7 @@ export default function Dashboard({
             scope: dashboardScope,
             status: "ready",
             dashboard,
+            source: "live",
           });
         }
       })
@@ -288,9 +297,17 @@ export default function Dashboard({
                 className={active ? "active" : ""}
                 aria-label={item}
                 title={item}
-                onClick={() =>
-                  setActiveNav({ scope: dashboardScope, role, item })
-                }
+                onClick={() => {
+                  if (item === "Notifications") {
+                    setDrawer({ scope: dashboardScope, open: true });
+                    return;
+                  }
+                  if (item === "Profile") {
+                    setAccountOpen(true);
+                    return;
+                  }
+                  setActiveNav({ scope: dashboardScope, role, item });
+                }}
               >
                 <Icon aria-hidden="true" />
                 <span>{item}</span>
@@ -324,7 +341,13 @@ export default function Dashboard({
       </aside>
 
       <main id="workspace" className="workspace">
-        {showingRecordWorkspace || selectedNav === primaryNav[role] ? (
+        {role === "research_editor" && selectedNav === "Dashboard" ? (
+          <RoleSidebarPage
+            role={role}
+            selectedNav="Dashboard"
+            navigate={navigate}
+          />
+        ) : showingRecordWorkspace || selectedNav === primaryNav[role] ? (
           <RoleWorkspace
             role={role}
             navigate={navigate}
@@ -371,7 +394,13 @@ export default function Dashboard({
                   className={active ? "active" : ""}
                   aria-current={active ? "page" : undefined}
                   onClick={() => {
-                    setActiveNav({ scope: dashboardScope, role, item });
+                    if (item === "Notifications") {
+                      setDrawer({ scope: dashboardScope, open: true });
+                    } else if (item === "Profile") {
+                      setAccountOpen(true);
+                    } else {
+                      setActiveNav({ scope: dashboardScope, role, item });
+                    }
                     setWorkspaceMenuOpen(false);
                   }}
                 >
@@ -431,6 +460,7 @@ export default function Dashboard({
           notifications={notifications}
           state={scopedNotificationState.status}
           error={scopedNotificationState.error}
+          source={scopedNotificationState.source}
           onRetry={() => setNotificationAttempt((attempt) => attempt + 1)}
           onMarkAll={async () => {
             const requestScope = dashboardScope;
@@ -511,6 +541,7 @@ function NotificationsDrawer({
   notifications,
   state,
   error,
+  source,
   onRetry,
   onMarkAll,
   onOpen,
@@ -519,6 +550,7 @@ function NotificationsDrawer({
   notifications: NotificationResource[];
   state: "loading" | "ready" | "error";
   error: string;
+  source: "live" | "mock";
   onRetry: () => void;
   onMarkAll: () => Promise<void>;
   onOpen: (item: NotificationResource) => Promise<void>;
@@ -552,6 +584,7 @@ function NotificationsDrawer({
         <button
           className="mark-read"
           disabled={
+            source === "mock" ||
             state !== "ready" ||
             !notifications.some((item) => item.read_at === null)
           }
@@ -559,6 +592,15 @@ function NotificationsDrawer({
         >
           Mark all as read
         </button>
+        {source === "mock" && (
+          <div className="researcher-demo-notice" role="status">
+            <div>
+              <strong>Demo data - read only</strong>
+              <span>Live notifications could not be loaded.</span>
+            </div>
+            <button onClick={onRetry}>Retry live data</button>
+          </div>
+        )}
         {state === "loading" ? (
           <p className="notification-empty" aria-busy="true">
             Loading notifications…
@@ -583,7 +625,8 @@ function NotificationsDrawer({
                   <button
                     className="notification-item"
                     key={item.id}
-                    onClick={() => void onOpen(item)}
+                    onClick={() => source === "live" && void onOpen(item)}
+                    disabled={source === "mock"}
                   >
                     <span
                       className={item.read_at === null ? "unread-dot" : ""}

@@ -133,6 +133,8 @@ describe("CatalogPage public similarity search", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /View full metadata/ }));
     const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("Author, F.")).toBeInTheDocument();
+    expect(within(dialog).getByText("Fallback Author")).toBeInTheDocument();
     expect(
       within(dialog).getByText("Final manuscript unavailable"),
     ).toBeInTheDocument();
@@ -339,11 +341,15 @@ describe("CatalogPage public similarity search", () => {
       (label) => label.textContent,
     );
     expect(metadataLabels.indexOf("Similarity overview")).toBeGreaterThan(
-      metadataLabels.indexOf("Title safeguard"),
-    );
-    expect(metadataLabels.indexOf("Similarity overview")).toBeGreaterThan(
       metadataLabels.indexOf("Final binding date"),
     );
+    expect(metadataLabels).toEqual([
+      "Year",
+      "Institute",
+      "Researchers",
+      "Final binding date",
+      "Similarity overview",
+    ]);
     expect(within(dialog).queryByText("Title Weight")).not.toBeInTheDocument();
     expect(
       within(dialog).queryByText("Content Weight"),

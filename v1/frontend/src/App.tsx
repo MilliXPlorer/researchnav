@@ -140,12 +140,10 @@ export default function App({ initialState }: { initialState?: InitialState }) {
           researchDocumentId={selectedResearchDocumentId}
           initialNav={
             researcherSection === "submissions"
-              ? "My Submissions"
+              ? "My Research"
               : researcherSection === "similarity"
                 ? "Similarity Check"
-                : researcherSection === "related-studies"
-                  ? "Related Studies"
-                  : undefined
+                : undefined
           }
           onLogout={signOut}
         />

@@ -16,14 +16,18 @@ class FeedbackCommentPolicy
 
     public function update(User $user, FeedbackComment $feedback): bool
     {
-        return ($feedback->user_id === $user->id && $this->isAssignedReviewer($user, $feedback->researchDocument))
+        return (DomainAuthorization::isActiveAccount($user) && $feedback->user_id === $user->id && $this->isAssignedReviewer($user, $feedback->researchDocument))
             || DomainAuthorization::isOffice($user)
             || $this->isAssignedReviewer($user, $feedback->researchDocument);
     }
 
+    public function researcherAction(User $user, FeedbackComment $feedback): bool
+    {
+        return DomainAuthorization::isResearcherParticipant($user, $feedback->researchDocument);
+    }
+
     private function isAssignedReviewer(User $user, ResearchDocument $research): bool
     {
-        return DomainAuthorization::isReviewer($user)
-            && $research->reviewAssignments()->where('reviewer_id', $user->id)->where('is_active', true)->exists();
+        return DomainAuthorization::isAssignedReviewer($user, $research);
     }
 }

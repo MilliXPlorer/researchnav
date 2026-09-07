@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { Plus, RefreshCw } from "lucide-react";
+import {
+  ExternalLink,
+  MessageSquareText,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Send,
+} from "lucide-react";
 import {
   ApiError,
   checkTitleQuerySimilarity,
@@ -9,6 +16,9 @@ import {
   getCoordinatorProgramReport,
   getInstitutionalReport,
   listAdviserAdvisees,
+  listAdviserMonitoring,
+  listAdviserPendingReviews,
+  listAdviserReviewHistory,
   listAdviserFeedbackHistory,
   listAdviserSimilarityAlerts,
   listCategories,
@@ -17,6 +27,9 @@ import {
   listDuplicateFlags,
   listAdviserLoad,
   listInstructorClassReports,
+  listInstructorMonitoring,
+  listInstructorPanelists,
+  listInstructorReviewHistory,
   listInstructorAssignedSubmissions,
   listInstructorSections,
   listInstructorSimilarityOverview,
@@ -37,6 +50,14 @@ import {
   listSectionMembers,
   listStatisticianQueue,
   listStatisticianSignoffs,
+  listSupportAssignmentInbox,
+  listLibrarianAssignedResearch,
+  listLibrarianMonitoring,
+  listLibrarianReviewHistory,
+  listEditorAssignedResearch,
+  listEditorHistory,
+  listEditorMonitoring,
+  markStatisticalReviewNotApplicable,
   provisionAccount,
   recordPrivacyLog,
   recordRetentionLog,
@@ -44,13 +65,22 @@ import {
   addSectionDocumentMember,
   removeSectionDocumentMember,
   returnMethodologyForClarification,
+  respondToSupportAssignment,
+  saveLibrarianMonitoring,
+  saveLibrarianReferenceReview,
+  saveEditorMonitoring,
+  saveEditorReview,
   saveLibraryItem,
+  saveAdviserMonitoring,
   saveMetadataReview,
   saveStatisticianChecklist,
   searchPublicResearchBySimilarity,
   signOffMethodology,
+  saveInstructorMonitoring,
+  assignInstructorPanelist,
   submitPanelEvaluation,
   submitResearchDocument,
+  verifyInstructorMonitoring,
   updateResearchDraft,
   updateCoordinatorSchedule,
   updateInstructorSection,
@@ -68,6 +98,7 @@ import {
   type InstructorAssignedSubmissionItem,
   type InstructorSectionResource,
   type InstructorStudentResource,
+  type InstructorMonitoringEntry,
   type LaravelPaginatedResponse,
   type MetadataStandardsItem,
   type PanelAssignmentResource,
@@ -103,9 +134,12 @@ const roles: AdminRole[] = [
   "statistician",
   "coordinator",
   "librarian",
+  "research_editor",
   "research-office",
   "academics",
 ];
+import ResearchOfficeBulkImport from "./ResearchOfficeBulkImport";
+
 const accessStatuses: AccessStatus[] = ["active", "invited", "blocked"];
 const researchStages = ["title_proposal", "ongoing", "completed"];
 const scheduleStatuses = ["scheduled", "completed", "cancelled"] as const;
@@ -157,10 +191,36 @@ export default function RoleSidebarPage({
   navigate: (path: string) => void;
 }) {
   switch (role) {
+    case "research_editor":
+      switch (selectedNav) {
+        case "Dashboard":
+          return <EditorDashboard role={role} />;
+        case "Assigned Research":
+        case "Editorial Review":
+          return <EditorReview role={role} />;
+        case "Monitoring":
+          return <EditorMonitoring role={role} />;
+        case "Review History":
+          return <EditorHistory role={role} navigate={navigate} />;
+        default:
+          return null;
+      }
     case "adviser":
       switch (selectedNav) {
+        case "Assigned Research":
         case "My Advisees":
           return <AdviserAdvisees role={role} navigate={navigate} />;
+        case "Pending Reviews":
+        case "Title Review":
+          return (
+            <AdviserPendingReviews role={role} navigate={navigate} titleOnly />
+          );
+        case "Manuscript Review":
+          return <AdviserPendingReviews role={role} navigate={navigate} />;
+        case "Monitoring":
+          return <AdviserMonitoring role={role} />;
+        case "Review History":
+          return <AdviserReviewHistory role={role} navigate={navigate} />;
         case "Similarity Alerts":
           return <AdviserSimilarityAlerts role={role} navigate={navigate} />;
         case "Feedback History":
@@ -175,7 +235,16 @@ export default function RoleSidebarPage({
         case "My Sections":
           return <InstructorSections role={role} />;
         case "Assigned Submissions":
+        case "Assigned Research":
           return <InstructorAssignedSubmissions role={role} />;
+        case "Review Submissions":
+          return <InstructorAssignedSubmissions role={role} titleOnly />;
+        case "Monitoring":
+          return <InstructorMonitoring role={role} />;
+        case "Review History":
+          return <InstructorReviewHistory role={role} navigate={navigate} />;
+        case "Panelist Availability":
+          return <InstructorPanelists role={role} />;
         case "Similarity Overview":
           return <InstructorSimilarityOverview role={role} />;
         case "Class Reports":
@@ -185,10 +254,16 @@ export default function RoleSidebarPage({
       }
     case "panel":
       switch (selectedNav) {
+        case "Assigned Defenses":
         case "Defense Schedule":
           return <PanelDefenseSchedule role={role} />;
+        case "Defense Evaluation":
         case "Evaluation Form":
           return <PanelEvaluationForm role={role} />;
+        case "Availability Calendar":
+          return <PanelAvailability role={role} />;
+        case "Monitoring":
+        case "Evaluation History":
         case "Panel History":
           return <PanelHistory role={role} />;
         default:
@@ -196,8 +271,12 @@ export default function RoleSidebarPage({
       }
     case "statistician":
       switch (selectedNav) {
+        case "Assigned Research":
+        case "Statistical Review":
         case "Methodology Checklist":
           return <StatisticianMethodologyChecklist role={role} />;
+        case "Monitoring":
+        case "Review History":
         case "Sign-offs Issued":
           return <StatisticianSignoffs role={role} />;
         default:
@@ -220,6 +299,15 @@ export default function RoleSidebarPage({
       }
     case "librarian":
       switch (selectedNav) {
+        case "Assignment Requests":
+          return <LibrarianAssignmentRequests role={role} />;
+        case "Assigned Research":
+        case "Reference Review":
+          return <LibrarianReferenceReview role={role} />;
+        case "Monitoring":
+          return <LibrarianMonitoring role={role} />;
+        case "Review History":
+          return <LibrarianReviewHistory role={role} navigate={navigate} />;
         case "Repository Catalog":
           return <LibrarianRepositoryCatalog role={role} navigate={navigate} />;
         case "Metadata Standards":
@@ -233,12 +321,19 @@ export default function RoleSidebarPage({
       switch (selectedNav) {
         case "Institutional Overview":
           return <OfficeInstitutionalOverview role={role} />;
+
+        case "Import Manuscript":
+          return <ResearchOfficeBulkImport />;
+
         case "User & Role Management":
           return <OfficeUsers role={role} />;
+
         case "Reports & Exports":
           return <OfficeReports role={role} />;
+
         case "Data Privacy Log":
           return <OfficePrivacyLogs role={role} />;
+
         default:
           return null;
       }
@@ -254,7 +349,12 @@ export default function RoleSidebarPage({
     case "researcher":
       switch (selectedNav) {
         case "My Submissions":
+        case "My Research":
+        case "Feedback & Revisions":
+        case "Research Progress":
           return <ResearcherSubmissions role={role} navigate={navigate} />;
+        case "Create Research":
+          return <ResearcherNewSubmission role={role} />;
         case "Similarity Check":
           return <ResearcherSimilarityCheck role={role} />;
         case "Related Studies":
@@ -265,6 +365,39 @@ export default function RoleSidebarPage({
     default:
       return null;
   }
+}
+
+function PanelAvailability({ role }: { role: Role }) {
+  const [selected, setSelected] = useState("");
+  return (
+    <div className="workspace-content admin-sidebar-page">
+      <RolePageHeader
+        role={role}
+        title="Availability calendar"
+        description="Select dates you are unavailable. Defense scheduling remains with the Coordinator."
+      />
+      <section className="panel-card">
+        <label>
+          Unavailable date
+          <input
+            type="date"
+            value={selected}
+            onChange={(event) => setSelected(event.target.value)}
+          />
+        </label>
+        {selected && (
+          <p className="admin-error">
+            {displayDate(selected)} marked unavailable for this browser session
+            only.
+          </p>
+        )}
+        <p className="admin-empty">
+          Unavailable dates cannot persist after refresh because the locked
+          database has no safe Panelist availability field.
+        </p>
+      </section>
+    </div>
+  );
 }
 
 function RolePageHeader({
@@ -377,6 +510,22 @@ function friendlyError(error: unknown, fallback: string) {
     : `${fallback} (${error.code}).`;
 }
 
+function requireResearcherPage(
+  response: LaravelPaginatedResponse<ResearchDocumentSummaryResource>,
+) {
+  if (
+    !response ||
+    !Array.isArray(response.data) ||
+    !response.meta ||
+    !Number.isFinite(response.meta.current_page) ||
+    !Number.isFinite(response.meta.last_page) ||
+    !Number.isFinite(response.meta.total)
+  ) {
+    throw new Error("RESEARCHER_PAGE_INVALID");
+  }
+  return response;
+}
+
 function displayDate(value: string | null) {
   return value ? new Date(value).toLocaleString() : "—";
 }
@@ -393,6 +542,327 @@ function yesNo(value: boolean) {
 }
 
 /* ---------------------------------- Adviser ---------------------------------- */
+
+function AdviserPendingReviews({
+  role,
+  navigate,
+  titleOnly = false,
+}: {
+  role: Role;
+  navigate: (path: string) => void;
+  titleOnly?: boolean;
+}) {
+  const [attempt, reload] = useAttempt();
+  const state = useLoad(() => listAdviserPendingReviews(), attempt);
+  const rows =
+    state.status === "ready"
+      ? state.data.filter(
+          (item) => !titleOnly || item.research_stage === "title_proposal",
+        )
+      : [];
+  return (
+    <div className="workspace-content admin-sidebar-page">
+      <RolePageHeader
+        role={role}
+        title={titleOnly ? "Title review" : "Manuscript review"}
+        description={
+          titleOnly
+            ? "Review proposed titles, similarity evidence, and related studies."
+            : "Review current and previous manuscript versions for assigned research."
+        }
+        action={<Button onClick={reload}>Refresh</Button>}
+      />
+      {state.status === "loading" ? (
+        <Loading label="Loading pending reviews" />
+      ) : state.status === "error" ? (
+        <InlineError message={state.message} retry={reload} />
+      ) : rows.length === 0 ? (
+        <p className="admin-empty">
+          No assigned research currently requires this review.
+        </p>
+      ) : (
+        <section className="panel-card admin-data-card">
+          <div className="admin-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Research</th>
+                  <th>Stage</th>
+                  <th>Status</th>
+                  <th>Open revisions</th>
+                  <th>Updated</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((item) => (
+                  <tr key={item.research_document_id}>
+                    <td>{item.title}</td>
+                    <td>{label(item.research_stage)}</td>
+                    <td>{label(item.submission_status)}</td>
+                    <td>{item.open_revisions}</td>
+                    <td>{displayDate(item.updated_at)}</td>
+                    <td>
+                      <Button
+                        variant="secondary"
+                        onClick={() =>
+                          navigate(`/research/${item.research_document_id}`)
+                        }
+                      >
+                        Open review
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function AdviserReviewHistory({
+  role,
+  navigate,
+}: {
+  role: Role;
+  navigate: (path: string) => void;
+}) {
+  const [attempt, reload] = useAttempt();
+  const state = useLoad(() => listAdviserReviewHistory(), attempt);
+  return (
+    <div className="workspace-content admin-sidebar-page">
+      <RolePageHeader
+        role={role}
+        title="Review history"
+        description="Your persisted title and manuscript review actions."
+        action={<Button onClick={reload}>Refresh</Button>}
+      />
+      {state.status === "loading" ? (
+        <Loading label="Loading review history" />
+      ) : state.status === "error" ? (
+        <InlineError message={state.message} retry={reload} />
+      ) : state.data.length === 0 ? (
+        <p className="admin-empty">No Adviser review history is available.</p>
+      ) : (
+        <section className="panel-card admin-data-card">
+          <div className="admin-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Research</th>
+                  <th>Stage</th>
+                  <th>Type</th>
+                  <th>Remarks</th>
+                  <th>Required action</th>
+                  <th>Status</th>
+                  <th>Date</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {state.data.map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.title}</td>
+                    <td>
+                      {label(
+                        (item as typeof item & { research_stage?: string })
+                          .research_stage ?? "",
+                      )}
+                    </td>
+                    <td>{label(item.review_type)}</td>
+                    <td>{item.remarks ?? "—"}</td>
+                    <td>{item.required_action ?? "—"}</td>
+                    <td>{label(item.status)}</td>
+                    <td>{displayDate(item.reviewed_at ?? item.created_at)}</td>
+                    <td>
+                      <Button
+                        variant="secondary"
+                        onClick={() =>
+                          navigate(`/research/${item.research_document_id}`)
+                        }
+                      >
+                        Open research
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function AdviserMonitoring({ role }: { role: Role }) {
+  const [attempt, reload] = useAttempt();
+  const entries = useLoad(() => listAdviserMonitoring(), attempt);
+  const advisees = useLoad(() => listAdviserAdvisees(), attempt);
+  const documents =
+    advisees.status === "ready"
+      ? advisees.data.flatMap((group) => group.documents)
+      : [];
+  const [researchId, setResearchId] = useState("");
+  const [stage, setStage] = useState<
+    InstructorMonitoringEntry["monitoring_stage"]
+  >("before_proposal_defense");
+  const [activity, setActivity] = useState("");
+  const [remarks, setRemarks] = useState("");
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function save(event: React.FormEvent) {
+    event.preventDefault();
+    if (!researchId || !activity.trim()) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      await saveAdviserMonitoring(researchId, {
+        monitoring_stage: stage,
+        activity_date: new Date().toISOString().slice(0, 10),
+        activity: activity.trim(),
+        remarks: remarks.trim() || null,
+        status: "completed",
+        signature_status: "signed",
+      });
+      setActivity("");
+      setRemarks("");
+      setNotice("Adviser monitoring entry saved.");
+      reload();
+    } catch (error) {
+      setNotice(friendlyError(error, "Monitoring could not be saved"));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="workspace-content admin-sidebar-page">
+      <RolePageHeader
+        role={role}
+        title="Monitoring"
+        description="Record your Adviser participation before and after proposal defense. Final verification remains with the Research Instructor."
+      />
+      {notice && (
+        <p
+          role="status"
+          className={
+            notice.includes("could not") ? "admin-error" : "admin-success"
+          }
+        >
+          {notice}
+        </p>
+      )}
+      {documents.length > 0 && (
+        <section className="panel-card">
+          <form className="admin-inline-form" onSubmit={save}>
+            <label>
+              Assigned research
+              <select
+                required
+                value={researchId}
+                onChange={(event) => setResearchId(event.target.value)}
+              >
+                <option value="">Select research</option>
+                {documents.map((item) => (
+                  <option
+                    key={item.research_document_id}
+                    value={item.research_document_id}
+                  >
+                    {item.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Monitoring stage
+              <select
+                value={stage}
+                onChange={(event) =>
+                  setStage(
+                    event.target
+                      .value as InstructorMonitoringEntry["monitoring_stage"],
+                  )
+                }
+              >
+                <option value="before_proposal_defense">
+                  Before Proposal Defense
+                </option>
+                <option value="after_proposal_defense">
+                  After Proposal Defense
+                </option>
+              </select>
+            </label>
+            <label>
+              Activity
+              <textarea
+                required
+                value={activity}
+                onChange={(event) => setActivity(event.target.value)}
+              />
+            </label>
+            <label>
+              Remarks
+              <textarea
+                value={remarks}
+                onChange={(event) => setRemarks(event.target.value)}
+              />
+            </label>
+            <Button disabled={busy}>
+              {busy ? "Saving…" : "Save signed Adviser entry"}
+            </Button>
+          </form>
+        </section>
+      )}
+      {entries.status === "loading" ? (
+        <Loading label="Loading monitoring" />
+      ) : entries.status === "error" ? (
+        <InlineError message={entries.message} retry={reload} />
+      ) : entries.data.length === 0 ? (
+        <p className="admin-empty">No monitoring entries are available.</p>
+      ) : (
+        <section className="panel-card admin-data-card">
+          <div className="admin-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Research</th>
+                  <th>Stage</th>
+                  <th>Designation</th>
+                  <th>Activity</th>
+                  <th>Remarks</th>
+                  <th>Status</th>
+                  <th>Signature</th>
+                  <th>Verification</th>
+                </tr>
+              </thead>
+              <tbody>
+                {entries.data.map((entry) => (
+                  <tr key={entry.id}>
+                    <td>{entry.title}</td>
+                    <td>{label(entry.monitoring_stage)}</td>
+                    <td>{entry.designation ?? entry.reviewer_role}</td>
+                    <td>{entry.activity ?? "—"}</td>
+                    <td>{entry.remarks ?? "—"}</td>
+                    <td>{label(entry.status)}</td>
+                    <td>{label(entry.signature_status)}</td>
+                    <td>
+                      {entry.verified_at
+                        ? displayDate(entry.verified_at)
+                        : "Pending Instructor verification"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
 
 function AdviserAdvisees({
   role,
@@ -893,6 +1363,361 @@ function InstructorAssignedSubmissions({
             onBusyChange={setReviewBusy}
           />
         </Modal>
+      )}
+    </div>
+  );
+}
+
+function InstructorPanelists({ role }: { role: Role }) {
+  const [attempt, reload] = useAttempt();
+  const panelists = useLoad(() => listInstructorPanelists(), attempt);
+  const research = useLoad(() => listInstructorAssignedSubmissions(), attempt);
+  const [researchId, setResearchId] = useState(0);
+  const [panelistId, setPanelistId] = useState("");
+  const [designation, setDesignation] = useState<
+    "panel_member" | "panel_chair"
+  >("panel_member");
+  return (
+    <div className="workspace-content admin-sidebar-page">
+      <RolePageHeader
+        role={role}
+        title="Panelist availability"
+        description="View eligible Panelists and assign Panel Members or a Panel Chair to an assigned research study."
+      />
+      {panelists.status === "loading" ? (
+        <Loading label="Loading Panelists" />
+      ) : panelists.status === "error" ? (
+        <InlineError message={panelists.message} retry={reload} />
+      ) : (
+        <>
+          <section className="panel-card admin-data-card">
+            {panelists.data.map((item) => (
+              <p key={item.id}>
+                <strong>{item.name}</strong> · {item.email} · Availability dates
+                unavailable because the locked schema has no persistence
+                support.
+              </p>
+            ))}
+          </section>
+          <section className="panel-card">
+            <form
+              className="admin-inline-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void assignInstructorPanelist(
+                  researchId,
+                  panelistId,
+                  designation,
+                ).then(reload);
+              }}
+            >
+              <label>
+                Research
+                <select
+                  required
+                  value={researchId || ""}
+                  onChange={(event) =>
+                    setResearchId(Number(event.target.value))
+                  }
+                >
+                  <option value="">Select</option>
+                  {research.status === "ready" &&
+                    research.data.map((item) => (
+                      <option
+                        key={item.research_document_id}
+                        value={item.research_document_id}
+                      >
+                        {item.title}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <label>
+                Panelist
+                <select
+                  required
+                  value={panelistId}
+                  onChange={(event) => setPanelistId(event.target.value)}
+                >
+                  <option value="">Select</option>
+                  {panelists.data.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Designation
+                <select
+                  value={designation}
+                  onChange={(event) =>
+                    setDesignation(event.target.value as typeof designation)
+                  }
+                >
+                  <option value="panel_member">Panel Member</option>
+                  <option value="panel_chair">Panel Chair</option>
+                </select>
+              </label>
+              <Button>Assign Panelist</Button>
+            </form>
+          </section>
+        </>
+      )}
+    </div>
+  );
+}
+
+function InstructorReviewHistory({
+  role,
+  navigate,
+}: {
+  role: Role;
+  navigate: (path: string) => void;
+}) {
+  const [attempt, reload] = useAttempt();
+  const state = useLoad(() => listInstructorReviewHistory(), attempt);
+  return (
+    <div className="workspace-content admin-sidebar-page">
+      <RolePageHeader
+        role={role}
+        title="Review history"
+        description="Your persisted comments, revision requests, and recommendations."
+        action={<Button onClick={reload}>Refresh</Button>}
+      />
+      {state.status === "loading" ? (
+        <Loading label="Loading review history" />
+      ) : state.status === "error" ? (
+        <InlineError message={state.message} retry={reload} />
+      ) : state.data.length === 0 ? (
+        <p className="admin-empty">
+          No Instructor review history is available.
+        </p>
+      ) : (
+        <section className="panel-card admin-data-card">
+          <div className="admin-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Research</th>
+                  <th>Type</th>
+                  <th>Remarks</th>
+                  <th>Required action</th>
+                  <th>Status</th>
+                  <th>Date</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {state.data.map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.title}</td>
+                    <td>{label(item.review_type)}</td>
+                    <td>{item.remarks ?? "—"}</td>
+                    <td>{item.required_action ?? "—"}</td>
+                    <td>{label(item.status)}</td>
+                    <td>{displayDate(item.reviewed_at ?? item.created_at)}</td>
+                    <td>
+                      <Button
+                        variant="secondary"
+                        onClick={() =>
+                          navigate(`/research/${item.research_document_id}`)
+                        }
+                      >
+                        Open research
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function InstructorMonitoring({ role }: { role: Role }) {
+  const [attempt, reload] = useAttempt();
+  const entries = useLoad(() => listInstructorMonitoring(), attempt);
+  const assignments = useLoad(
+    () => listInstructorAssignedSubmissions(),
+    attempt,
+  );
+  const [researchId, setResearchId] = useState("");
+  const [stage, setStage] = useState<
+    InstructorMonitoringEntry["monitoring_stage"]
+  >("before_proposal_defense");
+  const [activity, setActivity] = useState("");
+  const [remarks, setRemarks] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  async function save(event: React.FormEvent) {
+    event.preventDefault();
+    if (!researchId || !activity.trim()) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      await saveInstructorMonitoring(researchId, {
+        monitoring_stage: stage,
+        activity_date: new Date().toISOString().slice(0, 10),
+        activity: activity.trim(),
+        remarks: remarks.trim() || null,
+        status: "completed",
+        signature_status: "signed",
+      });
+      setActivity("");
+      setRemarks("");
+      setNotice("Monitoring entry saved.");
+      reload();
+    } catch (error) {
+      setNotice(friendlyError(error, "Monitoring could not be saved"));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function verify() {
+    if (!researchId) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      await verifyInstructorMonitoring(researchId, stage);
+      setNotice("Monitoring verified.");
+      reload();
+    } catch (error) {
+      setNotice(friendlyError(error, "Monitoring could not be verified"));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="workspace-content admin-sidebar-page">
+      <RolePageHeader
+        role={role}
+        title="Monitoring"
+        description="Before and after proposal defense monitoring verified by the Research Instructor."
+      />
+      {notice && (
+        <p
+          role="status"
+          className={
+            notice.includes("could not") ? "admin-error" : "admin-success"
+          }
+        >
+          {notice}
+        </p>
+      )}
+      {assignments.status === "ready" && assignments.data.length > 0 && (
+        <section className="panel-card">
+          <form className="admin-inline-form" onSubmit={save}>
+            <label>
+              Research
+              <select
+                value={researchId}
+                onChange={(event) => setResearchId(event.target.value)}
+                required
+              >
+                <option value="">Select assigned research</option>
+                {assignments.data.map((item) => (
+                  <option
+                    key={item.research_document_id}
+                    value={item.research_document_id}
+                  >
+                    {item.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Monitoring stage
+              <select
+                value={stage}
+                onChange={(event) =>
+                  setStage(
+                    event.target
+                      .value as InstructorMonitoringEntry["monitoring_stage"],
+                  )
+                }
+              >
+                <option value="before_proposal_defense">
+                  Before Proposal Defense
+                </option>
+                <option value="after_proposal_defense">
+                  After Proposal Defense
+                </option>
+              </select>
+            </label>
+            <label>
+              Activity
+              <textarea
+                value={activity}
+                onChange={(event) => setActivity(event.target.value)}
+                required
+              />
+            </label>
+            <label>
+              Remarks
+              <textarea
+                value={remarks}
+                onChange={(event) => setRemarks(event.target.value)}
+              />
+            </label>
+            <div className="row-actions">
+              <Button disabled={busy}>Save signed entry</Button>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={busy || !researchId}
+                onClick={() => void verify()}
+              >
+                Verify monitoring
+              </Button>
+            </div>
+          </form>
+        </section>
+      )}
+      {entries.status === "loading" || assignments.status === "loading" ? (
+        <Loading label="Loading monitoring" />
+      ) : entries.status === "error" ? (
+        <InlineError message={entries.message} retry={reload} />
+      ) : entries.data.length === 0 ? (
+        <p className="admin-empty">No monitoring records are available.</p>
+      ) : (
+        <section className="panel-card admin-data-card">
+          <div className="admin-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Research</th>
+                  <th>Stage</th>
+                  <th>Designation</th>
+                  <th>Activity</th>
+                  <th>Status</th>
+                  <th>Signature</th>
+                  <th>Verified</th>
+                </tr>
+              </thead>
+              <tbody>
+                {entries.data.map((entry) => (
+                  <tr key={entry.id}>
+                    <td>{entry.title}</td>
+                    <td>{label(entry.monitoring_stage)}</td>
+                    <td>{entry.designation ?? entry.reviewer_role}</td>
+                    <td>{entry.activity ?? "—"}</td>
+                    <td>{label(entry.status)}</td>
+                    <td>{label(entry.signature_status)}</td>
+                    <td>
+                      {entry.verified_at
+                        ? displayDate(entry.verified_at)
+                        : "Not verified"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
       )}
     </div>
   );
@@ -2122,6 +2947,7 @@ function ScheduleTable({
 function StatisticianMethodologyChecklist({ role }: { role: Role }) {
   const [attempt, reload] = useAttempt();
   const state = useLoad(() => listStatisticianQueue(), attempt);
+  const requests = useLoad(() => listSupportAssignmentInbox(), attempt);
   const [selected, setSelected] = useState("");
   const [checklist, setChecklist] = useState<Record<string, boolean | null>>({
     design_fit: null,
@@ -2152,7 +2978,9 @@ function StatisticianMethodologyChecklist({ role }: { role: Role }) {
     setNotice("");
   }
 
-  async function save(mode: "checklist" | "signoff" | "return") {
+  async function save(
+    mode: "checklist" | "signoff" | "return" | "not_applicable",
+  ) {
     if (!selection) return;
     setNotice("");
     if (mode === "return" && !remarks.trim()) {
@@ -2171,18 +2999,23 @@ function StatisticianMethodologyChecklist({ role }: { role: Role }) {
         });
       } else if (mode === "signoff") {
         await signOffMethodology(selection.research_document_id);
-      } else {
+      } else if (mode === "return") {
         await returnMethodologyForClarification(
           selection.research_document_id,
           remarks.trim(),
         );
-      }
+      } else
+        await markStatisticalReviewNotApplicable(
+          selection.research_document_id,
+        );
       setNotice(
         mode === "checklist"
           ? "Checklist saved."
           : mode === "signoff"
             ? "Methodology signed off."
-            : "Returned for clarification.",
+            : mode === "return"
+              ? "Returned for clarification."
+              : "Not Applicable – Statistical review not required.",
       );
       reload();
     } catch (error) {
@@ -2206,6 +3039,43 @@ function StatisticianMethodologyChecklist({ role }: { role: Role }) {
           </Button>
         }
       />
+      {requests.status === "ready" && requests.data.length > 0 && (
+        <section className="panel-card admin-data-card">
+          <h2>Pending support requests</h2>
+          {requests.data.map((request) => (
+            <div className="admin-card-heading" key={request.id}>
+              <div>
+                <strong>{request.research_title}</strong>
+                <p>
+                  {request.researchers.join(", ") || "Researcher"} · Statistical
+                  review requested
+                </p>
+              </div>
+              <div className="row-actions">
+                <Button
+                  onClick={() =>
+                    void respondToSupportAssignment(request.id, "accept").then(
+                      reload,
+                    )
+                  }
+                >
+                  Accept
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() =>
+                    void respondToSupportAssignment(request.id, "decline").then(
+                      reload,
+                    )
+                  }
+                >
+                  Decline
+                </Button>
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
       {state.status === "loading" ? (
         <Loading label="Loading methodology queue" />
       ) : state.status === "error" ? (
@@ -2302,6 +3172,13 @@ function StatisticianMethodologyChecklist({ role }: { role: Role }) {
                   disabled={busy !== ""}
                 >
                   {busy === "checklist" ? "Saving…" : "Save checklist"}
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => void save("not_applicable")}
+                  disabled={busy !== ""}
+                >
+                  Mark Not Applicable
                 </Button>
                 <Button
                   variant="secondary"
@@ -2947,6 +3824,681 @@ function ProgramCounts({ report }: { report: CoordinatorProgramReport }) {
 }
 
 /* ---------------------------------- Librarian ---------------------------------- */
+
+function EditorDashboard({ role }: { role: Role }) {
+  const [attempt, reload] = useAttempt();
+  const requests = useLoad(() => listSupportAssignmentInbox(), attempt);
+  const assigned = useLoad(() => listEditorAssignedResearch(), attempt);
+  async function respond(id: number, decision: "accept" | "decline") {
+    await respondToSupportAssignment(id, decision);
+    reload();
+  }
+  return (
+    <div className="workspace-content admin-sidebar-page">
+      <RolePageHeader
+        role={role}
+        title="Editor dashboard"
+        description="Pending requests and accepted editorial assignments."
+      />
+      <div className="score-grid">
+        <section className="panel-card admin-stat">
+          <strong>
+            {requests.status === "ready" ? requests.data.length : 0}
+          </strong>
+          <span>Pending requests</span>
+        </section>
+        <section className="panel-card admin-stat">
+          <strong>
+            {assigned.status === "ready" ? assigned.data.length : 0}
+          </strong>
+          <span>Assigned research</span>
+        </section>
+      </div>
+      <section className="panel-card admin-data-card">
+        <h2>Pending requests</h2>
+        {requests.status === "loading" ? (
+          <Loading label="Loading Editor requests" />
+        ) : requests.status === "error" ? (
+          <InlineError message={requests.message} retry={reload} />
+        ) : requests.data.length === 0 ? (
+          <p className="admin-empty">No pending Editor requests.</p>
+        ) : (
+          requests.data.map((item) => (
+            <div className="admin-card-heading" key={item.id}>
+              <div>
+                <strong>{item.research_title}</strong>
+                <p>
+                  {item.researchers.join(", ") || "Researcher"} ·{" "}
+                  {displayDate(item.created_at)}
+                </p>
+              </div>
+              <div className="row-actions">
+                <Button onClick={() => void respond(item.id, "accept")}>
+                  Accept
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => void respond(item.id, "decline")}
+                >
+                  Decline
+                </Button>
+              </div>
+            </div>
+          ))
+        )}
+      </section>
+    </div>
+  );
+}
+
+function EditorReview({ role }: { role: Role }) {
+  const [attempt, reload] = useAttempt();
+  const state = useLoad(() => listEditorAssignedResearch(), attempt);
+  const [id, setId] = useState(0);
+  const [type, setType] = useState<
+    "comment" | "revision_request" | "clearance"
+  >("comment");
+  const [remarks, setRemarks] = useState("");
+  const [required, setRequired] = useState("");
+  async function save(event: React.FormEvent) {
+    event.preventDefault();
+    await saveEditorReview(id, {
+      review_type: type,
+      remarks,
+      required_action: required || null,
+    });
+    setRemarks("");
+    setRequired("");
+    reload();
+  }
+  return (
+    <div className="workspace-content admin-sidebar-page">
+      <RolePageHeader
+        role={role}
+        title="Editorial review"
+        description="Review grammar, spelling, language, clarity, organization, formatting, and citation presentation."
+      />
+      {state.status === "loading" ? (
+        <Loading label="Loading assigned research" />
+      ) : state.status === "error" ? (
+        <InlineError message={state.message} retry={reload} />
+      ) : state.data.length === 0 ? (
+        <p className="admin-empty">No accepted Editor assignments.</p>
+      ) : (
+        <>
+          <section className="panel-card admin-data-card">
+            <div className="admin-table-wrap">
+              <table>
+                <tbody>
+                  {state.data.map((item) => (
+                    <tr key={item.research_document_id}>
+                      <td>{item.title}</td>
+                      <td>{item.researchers.join(", ")}</td>
+                      <td>{item.latest_manuscript ?? "No manuscript"}</td>
+                      <td>
+                        <Button
+                          onClick={() => setId(item.research_document_id)}
+                        >
+                          Review
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+          {id > 0 && (
+            <section className="panel-card">
+              <form className="admin-inline-form" onSubmit={save}>
+                <label>
+                  Action
+                  <select
+                    value={type}
+                    onChange={(event) =>
+                      setType(event.target.value as typeof type)
+                    }
+                  >
+                    <option value="comment">Editor comment</option>
+                    <option value="revision_request">
+                      Request corrections
+                    </option>
+                    <option value="clearance">
+                      Editorial Review Completed
+                    </option>
+                  </select>
+                </label>
+                <label>
+                  Editor remarks
+                  <textarea
+                    required
+                    value={remarks}
+                    onChange={(event) => setRemarks(event.target.value)}
+                  />
+                </label>
+                {type === "revision_request" && (
+                  <label>
+                    Required corrections
+                    <textarea
+                      required
+                      value={required}
+                      onChange={(event) => setRequired(event.target.value)}
+                    />
+                  </label>
+                )}
+                <Button>Save editorial review</Button>
+              </form>
+            </section>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+function EditorMonitoring({ role }: { role: Role }) {
+  const [attempt, reload] = useAttempt();
+  const records = useLoad(() => listEditorMonitoring(), attempt);
+  const assigned = useLoad(() => listEditorAssignedResearch(), attempt);
+  const [id, setId] = useState(0);
+  const [stage, setStage] = useState<
+    InstructorMonitoringEntry["monitoring_stage"]
+  >("before_proposal_defense");
+  const [activity, setActivity] = useState("");
+  return (
+    <div className="workspace-content admin-sidebar-page">
+      <RolePageHeader
+        role={role}
+        title="Monitoring"
+        description="Record and sign Editor activity before or after proposal defense."
+      />
+      {assigned.status === "ready" && assigned.data.length > 0 && (
+        <section className="panel-card">
+          <form
+            className="admin-inline-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveEditorMonitoring(id, {
+                monitoring_stage: stage,
+                activity_date: new Date().toISOString().slice(0, 10),
+                activity,
+                status: "completed",
+                signature_status: "signed",
+              }).then(reload);
+            }}
+          >
+            <label>
+              Research
+              <select
+                required
+                value={id || ""}
+                onChange={(event) => setId(Number(event.target.value))}
+              >
+                <option value="">Select</option>
+                {assigned.data.map((item) => (
+                  <option
+                    key={item.research_document_id}
+                    value={item.research_document_id}
+                  >
+                    {item.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Stage
+              <select
+                value={stage}
+                onChange={(event) =>
+                  setStage(event.target.value as typeof stage)
+                }
+              >
+                <option value="before_proposal_defense">Pre-Defense</option>
+                <option value="after_proposal_defense">Post-Defense</option>
+              </select>
+            </label>
+            <label>
+              Activity
+              <textarea
+                required
+                value={activity}
+                onChange={(event) => setActivity(event.target.value)}
+              />
+            </label>
+            <Button>Save and sign my entry</Button>
+          </form>
+        </section>
+      )}
+      {records.status === "loading" ? (
+        <Loading label="Loading monitoring" />
+      ) : records.status === "error" ? (
+        <InlineError message={records.message} retry={reload} />
+      ) : records.data.length === 0 ? (
+        <p className="admin-empty">No Editor monitoring entries.</p>
+      ) : (
+        <section className="panel-card admin-data-card">
+          {records.data.map((item) => (
+            <p key={item.id}>
+              {item.title} · {label(item.monitoring_stage)} · {item.activity}
+            </p>
+          ))}
+        </section>
+      )}
+    </div>
+  );
+}
+function EditorHistory({
+  role,
+  navigate,
+}: {
+  role: Role;
+  navigate: (path: string) => void;
+}) {
+  const [attempt, reload] = useAttempt();
+  const state = useLoad(() => listEditorHistory(), attempt);
+  return (
+    <div className="workspace-content admin-sidebar-page">
+      <RolePageHeader
+        role={role}
+        title="Review history"
+        description="Previous editorial comments, corrections, and completed reviews."
+      />
+      {state.status === "loading" ? (
+        <Loading label="Loading history" />
+      ) : state.status === "error" ? (
+        <InlineError message={state.message} retry={reload} />
+      ) : state.data.length === 0 ? (
+        <p className="admin-empty">No editorial review history.</p>
+      ) : (
+        <section className="panel-card admin-data-card">
+          {state.data.map((item) => (
+            <p key={item.id}>
+              {item.title} · {label(item.review_type)} · {item.remarks}{" "}
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  navigate(`/research/${item.research_document_id}`)
+                }
+              >
+                Open
+              </Button>
+            </p>
+          ))}
+        </section>
+      )}
+    </div>
+  );
+}
+
+function LibrarianAssignmentRequests({ role }: { role: Role }) {
+  const [attempt, reload] = useAttempt();
+  const state = useLoad(() => listSupportAssignmentInbox(), attempt);
+  const [notice, setNotice] = useState("");
+  async function respond(id: number, decision: "accept" | "decline") {
+    try {
+      await respondToSupportAssignment(id, decision);
+      setNotice(`Request ${decision === "accept" ? "accepted" : "declined"}.`);
+      reload();
+    } catch (error) {
+      setNotice(friendlyError(error, "The request could not be updated"));
+    }
+  }
+  return (
+    <div className="workspace-content admin-sidebar-page">
+      <RolePageHeader
+        role={role}
+        title="Assignment requests"
+        description="Librarian reference-review requests sent by researchers."
+      />
+      {notice && <p role="status">{notice}</p>}
+      {state.status === "loading" ? (
+        <Loading label="Loading requests" />
+      ) : state.status === "error" ? (
+        <InlineError message={state.message} retry={reload} />
+      ) : state.data.length === 0 ? (
+        <p className="admin-empty">No pending Librarian assignment requests.</p>
+      ) : (
+        <section className="panel-card admin-data-card">
+          <div className="admin-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Research</th>
+                  <th>Researchers</th>
+                  <th>Requested</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {state.data.map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.research_title}</td>
+                    <td>{item.researchers.join(", ") || "—"}</td>
+                    <td>{displayDate(item.created_at)}</td>
+                    <td>
+                      <Button onClick={() => void respond(item.id, "accept")}>
+                        Accept
+                      </Button>{" "}
+                      <Button
+                        variant="secondary"
+                        onClick={() => void respond(item.id, "decline")}
+                      >
+                        Decline
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function LibrarianReferenceReview({ role }: { role: Role }) {
+  const [attempt, reload] = useAttempt();
+  const state = useLoad(() => listLibrarianAssignedResearch(), attempt);
+  const [selected, setSelected] = useState(0);
+  const [type, setType] = useState<
+    "comment" | "revision_request" | "clearance"
+  >("comment");
+  const [remarks, setRemarks] = useState("");
+  const [required, setRequired] = useState("");
+  const [notice, setNotice] = useState("");
+  async function save(event: React.FormEvent) {
+    event.preventDefault();
+    if (!selected || !remarks.trim()) return;
+    try {
+      await saveLibrarianReferenceReview(selected, {
+        review_type: type,
+        remarks: remarks.trim(),
+        required_action: required.trim() || null,
+      });
+      setNotice(
+        type === "clearance"
+          ? "Reference Review Cleared."
+          : "Reference review saved.",
+      );
+      setRemarks("");
+      setRequired("");
+      reload();
+    } catch (error) {
+      setNotice(friendlyError(error, "Reference review could not be saved"));
+    }
+  }
+  return (
+    <div className="workspace-content admin-sidebar-page">
+      <RolePageHeader
+        role={role}
+        title="Reference review"
+        description="Review citations, references, formatting, spacing, indentation, links, URLs, DOIs, and hyperlinks using the citation style selected by the researchers."
+      />
+      {notice && <p role="status">{notice}</p>}
+      {state.status === "loading" ? (
+        <Loading label="Loading assigned research" />
+      ) : state.status === "error" ? (
+        <InlineError message={state.message} retry={reload} />
+      ) : state.data.length === 0 ? (
+        <p className="admin-empty">
+          No accepted Librarian assignments are available.
+        </p>
+      ) : (
+        <>
+          <section className="panel-card admin-data-card">
+            <div className="admin-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Research</th>
+                    <th>Researchers</th>
+                    <th>Program</th>
+                    <th>Stage</th>
+                    <th>Latest manuscript</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {state.data.map((item) => (
+                    <tr key={item.research_document_id}>
+                      <td>{item.title}</td>
+                      <td>{item.researchers.join(", ")}</td>
+                      <td>{item.program ?? "—"}</td>
+                      <td>{label(item.research_stage)}</td>
+                      <td>{item.latest_manuscript ?? "No manuscript"}</td>
+                      <td>
+                        <Button
+                          variant="secondary"
+                          onClick={() => setSelected(item.research_document_id)}
+                        >
+                          Review references
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+          {selected > 0 && (
+            <section className="panel-card">
+              <form className="admin-inline-form" onSubmit={save}>
+                <label>
+                  Review action
+                  <select
+                    value={type}
+                    onChange={(event) =>
+                      setType(event.target.value as typeof type)
+                    }
+                  >
+                    <option value="comment">Reference comment</option>
+                    <option value="revision_request">
+                      Request corrections
+                    </option>
+                    <option value="clearance">
+                      Reference Review Clearance
+                    </option>
+                  </select>
+                </label>
+                <label>
+                  Librarian comments
+                  <textarea
+                    required
+                    value={remarks}
+                    onChange={(event) => setRemarks(event.target.value)}
+                    placeholder="Record citation style, missing references, URL/DOI, spacing, indentation, or hyperlink findings."
+                  />
+                </label>
+                {type === "revision_request" && (
+                  <label>
+                    Required corrections
+                    <textarea
+                      required
+                      value={required}
+                      onChange={(event) => setRequired(event.target.value)}
+                    />
+                  </label>
+                )}
+                <Button>Save reference review</Button>
+              </form>
+            </section>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function LibrarianMonitoring({ role }: { role: Role }) {
+  const [attempt, reload] = useAttempt();
+  const entries = useLoad(() => listLibrarianMonitoring(), attempt);
+  const assigned = useLoad(() => listLibrarianAssignedResearch(), attempt);
+  const [id, setId] = useState(0);
+  const [stage, setStage] = useState<
+    InstructorMonitoringEntry["monitoring_stage"]
+  >("before_proposal_defense");
+  const [activity, setActivity] = useState("");
+  const [remarks, setRemarks] = useState("");
+  async function save(event: React.FormEvent) {
+    event.preventDefault();
+    await saveLibrarianMonitoring(id, {
+      monitoring_stage: stage,
+      activity_date: new Date().toISOString().slice(0, 10),
+      activity,
+      remarks: remarks || null,
+      status: "completed",
+      signature_status: "signed",
+    });
+    setActivity("");
+    setRemarks("");
+    reload();
+  }
+  return (
+    <div className="workspace-content admin-sidebar-page">
+      <RolePageHeader
+        role={role}
+        title="Monitoring"
+        description="Record and sign your Pre-Defense and Post-Defense reference-review activity."
+      />
+      {assigned.status === "ready" && assigned.data.length > 0 && (
+        <section className="panel-card">
+          <form className="admin-inline-form" onSubmit={save}>
+            <label>
+              Research
+              <select
+                required
+                value={id || ""}
+                onChange={(event) => setId(Number(event.target.value))}
+              >
+                <option value="">Select research</option>
+                {assigned.data.map((item) => (
+                  <option
+                    value={item.research_document_id}
+                    key={item.research_document_id}
+                  >
+                    {item.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Stage
+              <select
+                value={stage}
+                onChange={(event) =>
+                  setStage(event.target.value as typeof stage)
+                }
+              >
+                <option value="before_proposal_defense">Pre-Defense</option>
+                <option value="after_proposal_defense">Post-Defense</option>
+              </select>
+            </label>
+            <label>
+              Activity
+              <textarea
+                required
+                value={activity}
+                onChange={(event) => setActivity(event.target.value)}
+              />
+            </label>
+            <label>
+              Remarks
+              <textarea
+                value={remarks}
+                onChange={(event) => setRemarks(event.target.value)}
+              />
+            </label>
+            <Button>Save and sign my entry</Button>
+          </form>
+        </section>
+      )}
+      {entries.status === "loading" ? (
+        <Loading label="Loading monitoring" />
+      ) : entries.status === "error" ? (
+        <InlineError message={entries.message} retry={reload} />
+      ) : entries.data.length === 0 ? (
+        <p className="admin-empty">No Librarian monitoring records.</p>
+      ) : (
+        <section className="panel-card admin-data-card">
+          <div className="admin-table-wrap">
+            <table>
+              <tbody>
+                {entries.data.map((entry) => (
+                  <tr key={entry.id}>
+                    <td>{entry.title}</td>
+                    <td>{label(entry.monitoring_stage)}</td>
+                    <td>{entry.activity}</td>
+                    <td>{label(entry.signature_status)}</td>
+                    <td>
+                      {entry.verified_at
+                        ? displayDate(entry.verified_at)
+                        : "Pending Instructor verification"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function LibrarianReviewHistory({
+  role,
+  navigate,
+}: {
+  role: Role;
+  navigate: (path: string) => void;
+}) {
+  const [attempt, reload] = useAttempt();
+  const state = useLoad(() => listLibrarianReviewHistory(), attempt);
+  return (
+    <div className="workspace-content admin-sidebar-page">
+      <RolePageHeader
+        role={role}
+        title="Review history"
+        description="Previous Librarian comments, correction requests, and reference clearances."
+      />
+      {state.status === "loading" ? (
+        <Loading label="Loading history" />
+      ) : state.status === "error" ? (
+        <InlineError message={state.message} retry={reload} />
+      ) : state.data.length === 0 ? (
+        <p className="admin-empty">No Librarian review history.</p>
+      ) : (
+        <section className="panel-card admin-data-card">
+          <div className="admin-table-wrap">
+            <table>
+              <tbody>
+                {state.data.map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.title}</td>
+                    <td>{label(item.review_type)}</td>
+                    <td>{item.remarks}</td>
+                    <td>{item.required_action ?? "—"}</td>
+                    <td>{label(item.status)}</td>
+                    <td>
+                      <Button
+                        variant="secondary"
+                        onClick={() =>
+                          navigate(`/research/${item.research_document_id}`)
+                        }
+                      >
+                        Open research
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
 
 function LibrarianRepositoryCatalog({
   role,
@@ -4197,7 +5749,20 @@ function ResearcherSubmissions({
     useState<ResearchDocumentSummaryResource | null>(null);
   const [editDirty, setEditDirty] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [source, setSource] = useState<"live" | "mock">("live");
   const [attempt, reload] = useAttempt();
+
+  function beginLoad() {
+    setLoading(true);
+    setCreating(false);
+    setEditing(null);
+    setActivityFor(null);
+  }
+
+  function refresh() {
+    beginLoad();
+    reload();
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -4209,7 +5774,8 @@ function ResearcherSubmissions({
     })
       .then((response) => {
         if (cancelled) return;
-        setResult(response);
+        setResult(requireResearcherPage(response));
+        setSource("live");
         setError("");
         setLoading(false);
       })
@@ -4218,6 +5784,9 @@ function ResearcherSubmissions({
         setError(
           friendlyError(requestError, "Your submissions are unavailable"),
         );
+        setCreating(false);
+        setEditing(null);
+        setActivityFor(null);
         setLoading(false);
       });
     return () => {
@@ -4231,7 +5800,7 @@ function ResearcherSubmissions({
     try {
       await submitResearchDocument(document.id);
       setNotice(`"${document.title}" has been submitted.`);
-      reload();
+      refresh();
     } catch (requestError) {
       setNotice(
         friendlyError(requestError, "The submission could not be completed"),
@@ -4249,7 +5818,7 @@ function ResearcherSubmissions({
         description="Your research records and their current workflow status."
         action={
           <div className="submission-page-actions">
-            <Button variant="secondary" onClick={reload}>
+            <Button variant="secondary" onClick={refresh}>
               <RefreshCw /> Refresh
             </Button>
             <Button
@@ -4257,6 +5826,7 @@ function ResearcherSubmissions({
                 setCreateDirty(false);
                 setCreating(true);
               }}
+              disabled={loading || source === "mock"}
             >
               <Plus /> New submission
             </Button>
@@ -4273,6 +5843,20 @@ function ResearcherSubmissions({
           {notice}
         </p>
       )}
+      {source === "mock" && (
+        <section className="researcher-demo-notice" role="status">
+          <div>
+            <strong>Demo data - read only</strong>
+            <span>
+              Your live submissions could not be loaded. Editing, submission,
+              files, feedback actions, and record links are unavailable.
+            </span>
+          </div>
+          <Button variant="secondary" onClick={refresh}>
+            Retry live data
+          </Button>
+        </section>
+      )}
       <div className="admin-filters">
         <label>
           Research status
@@ -4280,6 +5864,7 @@ function ResearcherSubmissions({
             aria-label="Research status"
             value={statusFilter}
             onChange={(event) => {
+              beginLoad();
               setStatusFilter(
                 event.target.value as
                   ResearchDocumentSummaryResource["submission_status"] | "",
@@ -4304,7 +5889,7 @@ function ResearcherSubmissions({
         </label>
       </div>
       {error ? (
-        <InlineError message={error} retry={reload} />
+        <InlineError message={error} retry={refresh} />
       ) : loading || result === null ? (
         <Loading label="Loading your submissions" />
       ) : result.data.length === 0 ? (
@@ -4317,6 +5902,7 @@ function ResearcherSubmissions({
               setCreateDirty(false);
               setCreating(true);
             }}
+            disabled={source === "mock"}
           >
             <Plus /> Create submission
           </Button>
@@ -4346,45 +5932,61 @@ function ResearcherSubmissions({
                     <td>{displayDate(document.submitted_at)}</td>
                     <td>
                       <span className="row-actions">
-                        <Button
-                          variant="secondary"
-                          onClick={() => setActivityFor(document)}
-                        >
-                          Feedback &amp; activity
-                        </Button>
-                        <Button
-                          variant="secondary"
-                          onClick={() => navigate(`/research/${document.id}`)}
-                        >
-                          Open record
-                        </Button>
-                        {["draft", "revision_required"].includes(
-                          document.submission_status,
-                        ) && (
-                          <>
-                            <Button
-                              variant="secondary"
-                              onClick={() => {
-                                setEditDirty(false);
-                                setEditing(document);
-                              }}
-                              disabled={submitting === String(document.id)}
-                            >
-                              Edit
-                            </Button>
-                            {document.submission_status === "draft" && (
-                              <Button
-                                variant="secondary"
-                                onClick={() => void submit(document)}
+                        {source === "live" && !loading && (
+                          <button
+                            className="icon-button"
+                            aria-label="Feedback & activity"
+                            title="Feedback & activity"
+                            onClick={() => setActivityFor(document)}
+                          >
+                            <MessageSquareText size={17} aria-hidden="true" />
+                          </button>
+                        )}
+                        {source === "live" && !loading && (
+                          <button
+                            className="icon-button"
+                            aria-label="Open record"
+                            title="Open record"
+                            onClick={() => navigate(`/research/${document.id}`)}
+                          >
+                            <ExternalLink size={17} aria-hidden="true" />
+                          </button>
+                        )}
+                        {source === "live" &&
+                          !loading &&
+                          ["draft", "revision_required"].includes(
+                            document.submission_status,
+                          ) && (
+                            <>
+                              <button
+                                className="icon-button"
+                                aria-label="Edit"
+                                title="Edit"
+                                onClick={() => {
+                                  setEditDirty(false);
+                                  setEditing(document);
+                                }}
                                 disabled={submitting === String(document.id)}
                               >
-                                {submitting === String(document.id)
-                                  ? "Submitting…"
-                                  : "Submit"}
-                              </Button>
-                            )}
-                          </>
-                        )}
+                                <Pencil size={17} aria-hidden="true" />
+                              </button>
+                              {document.submission_status === "draft" && (
+                                <button
+                                  className="icon-button"
+                                  aria-label={
+                                    submitting === String(document.id)
+                                      ? "Submitting…"
+                                      : "Submit"
+                                  }
+                                  title="Submit"
+                                  onClick={() => void submit(document)}
+                                  disabled={submitting === String(document.id)}
+                                >
+                                  <Send size={17} aria-hidden="true" />
+                                </button>
+                              )}
+                            </>
+                          )}
                       </span>
                     </td>
                   </tr>
@@ -4395,13 +5997,13 @@ function ResearcherSubmissions({
           <Pagination
             meta={result.meta}
             onPage={(nextPage) => {
+              beginLoad();
               setPage(nextPage);
-              reload();
             }}
           />
         </section>
       )}
-      {activityFor && (
+      {activityFor && source === "live" && !loading && (
         <Modal
           label={`Feedback and activity for ${activityFor.title}`}
           onClose={() => setActivityFor(null)}
@@ -4410,10 +6012,11 @@ function ResearcherSubmissions({
           <ResearchActivity
             researchDocumentId={activityFor.id}
             title={activityFor.title}
+            researcherActions
           />
         </Modal>
       )}
-      {creating && (
+      {creating && source === "live" && !loading && (
         <Modal
           label="Create a new submission"
           onClose={() => setCreating(false)}
@@ -4432,13 +6035,16 @@ function ResearcherSubmissions({
                   : `Draft "${document.title}" has been created.`,
               );
               setCreating(false);
-              if (page === 1) reload();
-              else setPage(1);
+              if (page === 1) refresh();
+              else {
+                beginLoad();
+                setPage(1);
+              }
             }}
           />
         </Modal>
       )}
-      {editing && (
+      {editing && source === "live" && !loading && (
         <Modal
           label={`Edit ${editing.title}`}
           onClose={() => setEditing(null)}
@@ -4459,7 +6065,7 @@ function ResearcherSubmissions({
                   : `Draft "${document.title}" has been updated.`,
               );
               setEditing(null);
-              reload();
+              refresh();
             }}
           />
         </Modal>
@@ -4475,7 +6081,7 @@ type AuthorDraft = {
 };
 
 const MAX_SUBMISSION_FILE_BYTES = 25 * 1024 * 1024;
-const submissionFileExtensions = new Set(["pdf", "doc", "docx"]);
+const submissionFileExtensions = new Set(["pdf", "docx"]);
 const submissionDocumentTypes: Array<{
   value: DocumentFileResource["document_type"];
   label: string;
@@ -4614,7 +6220,7 @@ export function ResearcherNewSubmission({
     if (file === null) return null;
     const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
     if (!submissionFileExtensions.has(extension)) {
-      return "The manuscript must be a PDF, DOC, or DOCX file.";
+      return "The manuscript must be a PDF or DOCX file.";
     }
     if (file.size > MAX_SUBMISSION_FILE_BYTES) {
       return "The manuscript must not exceed 25 MB.";
@@ -4899,11 +6505,11 @@ export function ResearcherNewSubmission({
                   </select>
                 </label>
                 <label>
-                  PDF, DOC, or DOCX (maximum 25 MB)
+                  PDF or DOCX (maximum 25 MB)
                   <input
                     ref={fileInput}
                     type="file"
-                    accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                     onChange={(event) =>
                       setManuscript(event.target.files?.[0] ?? null)
                     }
@@ -4915,10 +6521,16 @@ export function ResearcherNewSubmission({
               <Button
                 type="button"
                 variant="secondary"
-                onClick={() => (dirty ? setConfirmCancel(true) : onCancel?.())}
+                onClick={() =>
+                  dirty
+                    ? setConfirmCancel(true)
+                    : onCancel
+                      ? onCancel()
+                      : resetForm()
+                }
                 disabled={saving}
               >
-                Cancel
+                {onCancel ? "Cancel" : "Reset"}
               </Button>
               <Button type="submit" value="draft" disabled={saving}>
                 {saving
@@ -5225,7 +6837,10 @@ function ResearcherRelatedStudies({
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const state = useLoad(
-    () => listResearchDocuments({ mine: true, page, per_page: 10 }),
+    () =>
+      listResearchDocuments({ mine: true, page, per_page: 10 }).then(
+        requireResearcherPage,
+      ),
     attempt,
   );
   const selected =
