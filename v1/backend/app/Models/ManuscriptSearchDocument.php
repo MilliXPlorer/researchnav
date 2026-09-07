@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class ManuscriptSearchDocument extends Model
 {
@@ -51,5 +52,10 @@ class ManuscriptSearchDocument extends Model
     public function sourceDocumentFile(): BelongsTo
     {
         return $this->belongsTo(DocumentFile::class, 'source_document_file_id');
+    }
+
+    public function sdgClassification(): HasOne
+    {
+        return $this->hasOne(ManuscriptSdgClassification::class);
     }
 }
