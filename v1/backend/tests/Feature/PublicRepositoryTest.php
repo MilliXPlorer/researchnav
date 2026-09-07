@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use App\Models\Category;
 use App\Models\DocumentFile;
+use App\Models\ManuscriptSdgClassification;
+use App\Models\ManuscriptSearchDocument;
 use App\Models\ResearchAuthor;
 use App\Models\ResearchDocument;
 use App\Models\User;
@@ -131,6 +133,30 @@ class PublicRepositoryTest extends TestCase
             ->assertJsonValidationErrors(['year_from', 'year_to']);
     }
 
+    public function test_index_filters_only_public_documents_with_a_current_ready_sdg_classification(): void
+    {
+        $category = $this->category('SDG');
+        $match = $this->document($category, ['title' => 'Current SDG match']);
+        $staleProjection = $this->document($category, ['title' => 'Stale projection']);
+        $staleVersion = $this->document($category, ['title' => 'Stale detector']);
+        $notReady = $this->document($category, ['title' => 'Not ready']);
+        $private = $this->document($category, ['title' => 'Private SDG match', 'visibility' => 'private']);
+
+        $this->classification($this->projection($match), 4);
+        $this->classification($this->projection($staleProjection), 4, now()->subSecond());
+        $this->classification($this->projection($staleVersion), 4, null, 'sdg-declaration/older');
+        $this->classification($this->projection($notReady, 'failed'), 4);
+        $this->classification($this->projection($private), 4);
+
+        $response = $this->getJson('/api/repository?sdg=4')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $match->id);
+
+        $response->assertJsonMissingPath('data.0.sdg')
+            ->assertJsonMissingPath('data.0.sdgs');
+    }
+
     public function test_index_orders_and_paginates_by_year_then_title(): void
     {
         $category = $this->category('Ordering');
@@ -227,6 +253,8 @@ class PublicRepositoryTest extends TestCase
             '/api/repository?year=1900',
             '/api/repository?publication_year=2156',
             '/api/repository?category_id=999999',
+            '/api/repository?sdg=0',
+            '/api/repository?sdg=18',
             '/api/repository?q='.str_repeat('x', 201),
         ] as $path) {
             $this->getJson($path)->assertUnprocessable()->assertJsonPath('error', 'VALIDATION_FAILED');
@@ -247,5 +275,28 @@ class PublicRepositoryTest extends TestCase
             'archive_status' => 'archived',
             'visibility' => 'public',
         ], $attributes));
+    }
+
+    private function projection(ResearchDocument $document, string $status = 'ready'): ManuscriptSearchDocument
+    {
+        return ManuscriptSearchDocument::query()->create([
+            'research_document_id' => $document->id,
+            'body_text' => $status === 'ready' ? 'SDG 4' : null,
+            'body_text_bytes' => $status === 'ready' ? 5 : null,
+            'body_text_chars' => $status === 'ready' ? 5 : null,
+            'extraction_status' => $status,
+            'indexed_at' => now(),
+        ]);
+    }
+
+    private function classification(ManuscriptSearchDocument $projection, int $sdgNumber, mixed $indexedAt = null, ?string $detectorVersion = null): void
+    {
+        $classification = ManuscriptSdgClassification::query()->create([
+            'manuscript_search_document_id' => $projection->id,
+            'detector_version' => $detectorVersion ?? (string) config('researchnav.sdg.detector_version'),
+            'projection_indexed_at' => $indexedAt ?? $projection->indexed_at,
+            'classified_at' => now(),
+        ]);
+        $classification->detections()->create(['sdg_number' => $sdgNumber]);
     }
 }

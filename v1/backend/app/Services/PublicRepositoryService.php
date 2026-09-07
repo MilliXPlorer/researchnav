@@ -62,6 +62,17 @@ class PublicRepositoryService
                 $query->where('publication_year', '<=', $yearTo);
             }
         }
+        if (isset($filters['sdg'])) {
+            $query->whereHas('manuscriptSearchDocument', function (Builder $projection) use ($filters): void {
+                $projection->where('extraction_status', 'ready')
+                    ->whereNotNull('indexed_at')
+                    ->whereHas('sdgClassification', function (Builder $classification) use ($filters): void {
+                        $classification->where('detector_version', (string) config('researchnav.sdg.detector_version'))
+                            ->whereColumn('manuscript_sdg_classifications.projection_indexed_at', 'manuscript_search_documents.indexed_at')
+                            ->whereHas('detections', fn (Builder $detections) => $detections->where('sdg_number', $filters['sdg']));
+                    });
+            });
+        }
 
         return $query->orderByDesc('research_documents.publication_year')->orderBy('research_documents.title')->orderBy('research_documents.id')->paginate(min((int) ($filters['per_page'] ?? 15), 50));
     }

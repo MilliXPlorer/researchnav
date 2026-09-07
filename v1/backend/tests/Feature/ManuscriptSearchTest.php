@@ -3,10 +3,12 @@
 namespace Tests\Feature;
 
 use App\Models\DocumentFile;
+use App\Models\ManuscriptSdgClassification;
 use App\Models\ManuscriptSearchDocument;
 use App\Models\ResearchDocument;
 use App\Models\User;
 use App\Services\DocumentService;
+use App\Services\ManuscriptSdgClassificationService;
 use App\Services\ManuscriptSearchProjectionService;
 use App\Services\ManuscriptTextExtractionException;
 use App\Services\ManuscriptTextExtractor;
@@ -199,6 +201,72 @@ class ManuscriptSearchTest extends TestCase
             'research_document_id' => $document->id,
             'body_text' => 'second body',
             'extractor_version' => 'test/v2',
+        ]);
+    }
+
+    public function test_indexing_a_ready_projection_classifies_it_and_invalidation_removes_its_classification(): void
+    {
+        config()->set('researchnav.manuscript_search.extractor_version', 'test');
+        $document = $this->document();
+        $this->finalFile($document);
+        $extractor = $this->mock(ManuscriptTextExtractor::class);
+        $extractor->shouldReceive('extract')->once()->andReturn('SDGs 4 and 13');
+
+        $this->assertSame('indexed', app(ManuscriptSearchProjectionService::class)->reindex($document->id));
+
+        $projection = ManuscriptSearchDocument::query()->where('research_document_id', $document->id)->sole();
+        $classification = ManuscriptSdgClassification::query()->where('manuscript_search_document_id', $projection->id)->sole();
+        $this->assertSame([4, 13], $classification->detections()->orderBy('sdg_number')->pluck('sdg_number')->all());
+        $this->assertTrue(app(ManuscriptSdgClassificationService::class)->isCurrent($projection));
+
+        app(ManuscriptSearchProjectionService::class)->invalidate($document->id);
+
+        $this->assertDatabaseMissing('manuscript_sdg_classifications', ['id' => $classification->id]);
+        $this->assertDatabaseCount('manuscript_sdg_detections', 0);
+    }
+
+    public function test_current_ready_projection_refreshes_a_stale_sdg_classification_without_reextracting(): void
+    {
+        config()->set('researchnav.manuscript_search.extractor_version', 'test');
+        config()->set('researchnav.sdg.detector_version', 'test-detector/1');
+        $document = $this->document();
+        $this->finalFile($document);
+        $extractor = $this->mock(ManuscriptTextExtractor::class);
+        $extractor->shouldReceive('extract')->once()->andReturn('SDG 4');
+        $projections = app(ManuscriptSearchProjectionService::class);
+
+        $this->assertSame('indexed', $projections->reindex($document->id));
+        config()->set('researchnav.sdg.detector_version', 'test-detector/2');
+        Storage::shouldReceive('disk')->never();
+
+        $this->assertSame('skipped', $projections->reindex($document->id));
+
+        $projection = ManuscriptSearchDocument::query()->where('research_document_id', $document->id)->sole();
+        $this->assertTrue(app(ManuscriptSdgClassificationService::class)->isCurrent($projection));
+        $this->assertDatabaseHas('manuscript_sdg_classifications', [
+            'manuscript_search_document_id' => $projection->id,
+            'detector_version' => 'test-detector/2',
+        ]);
+    }
+
+    public function test_current_ready_projection_refreshes_a_missing_sdg_classification_without_storage_access(): void
+    {
+        config()->set('researchnav.manuscript_search.extractor_version', 'test');
+        $document = $this->document();
+        $this->finalFile($document);
+        $extractor = $this->mock(ManuscriptTextExtractor::class);
+        $extractor->shouldReceive('extract')->once()->andReturn('SDG 4');
+        $projections = app(ManuscriptSearchProjectionService::class);
+
+        $this->assertSame('indexed', $projections->reindex($document->id));
+        $projection = ManuscriptSearchDocument::query()->where('research_document_id', $document->id)->sole();
+        ManuscriptSdgClassification::query()->where('manuscript_search_document_id', $projection->id)->delete();
+        Storage::shouldReceive('disk')->never();
+
+        $this->assertSame('skipped', $projections->reindex($document->id));
+
+        $this->assertDatabaseHas('manuscript_sdg_classifications', [
+            'manuscript_search_document_id' => $projection->id,
         ]);
     }
 
