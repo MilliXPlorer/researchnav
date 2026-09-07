@@ -14,7 +14,10 @@ class ManuscriptSearchProjectionService
 
     private const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
-    public function __construct(private readonly ManuscriptTextExtractor $extractor) {}
+    public function __construct(
+        private readonly ManuscriptTextExtractor $extractor,
+        private readonly ManuscriptSdgClassificationService $classifications,
+    ) {}
 
     /** @return 'indexed'|'skipped'|'failed'|'no_source'|'unsupported'|'ineligible' */
     public function reindex(int $documentId, bool $force = false, bool $retryFailed = false): string
@@ -26,12 +29,22 @@ class ManuscriptSearchProjectionService
             return 'ineligible';
         }
 
-        $source = $this->resolveSource($document);
         $projection = ManuscriptSearchDocument::query()->where('research_document_id', $documentId)->first();
+        if (! $force && $this->hasStaleReadyClassification($projection)) {
+            $this->refreshReadyClassification($projection);
+
+            return 'skipped';
+        }
+
+        $source = $this->resolveSource($document);
         if (! $force && $this->isCurrentReadyProjection($projection, $source)) {
+            $this->refreshReadyClassification($projection);
+
             return 'skipped';
         }
         if (! $force && ! $retryFailed && $this->isCurrentFailedProjection($projection, $source)) {
+            $this->invalidateClassification($projection);
+
             return 'skipped';
         }
 
@@ -56,10 +69,11 @@ class ManuscriptSearchProjectionService
 
     public function invalidate(int $documentId): void
     {
-        ManuscriptSearchDocument::query()->updateOrCreate(
+        $projection = ManuscriptSearchDocument::query()->updateOrCreate(
             ['research_document_id' => $documentId],
             $this->clearedValues(null, 'pending', null),
         );
+        $this->invalidateClassification($projection);
     }
 
     public function purgeIneligible(): int
@@ -87,7 +101,7 @@ class ManuscriptSearchProjectionService
                 return 'skipped';
             }
 
-            ManuscriptSearchDocument::query()->updateOrCreate(
+            $projection = ManuscriptSearchDocument::query()->updateOrCreate(
                 ['research_document_id' => $documentId],
                 $this->sourceValues($source) + [
                     'body_text' => $bodyText,
@@ -100,6 +114,7 @@ class ManuscriptSearchProjectionService
                     'indexed_at' => now(),
                 ],
             );
+            $this->classifications->classify($projection);
 
             return 'indexed';
         });
@@ -119,10 +134,11 @@ class ManuscriptSearchProjectionService
 
                 return 'skipped';
             }
-            ManuscriptSearchDocument::query()->updateOrCreate(
+            $projection = ManuscriptSearchDocument::query()->updateOrCreate(
                 ['research_document_id' => $documentId],
                 $this->clearedValues($source, $status, $errorCode),
             );
+            $this->invalidateClassification($projection);
 
             return $status === 'unsupported' ? 'unsupported' : 'failed';
         });
@@ -142,10 +158,11 @@ class ManuscriptSearchProjectionService
 
                 return 'skipped';
             }
-            ManuscriptSearchDocument::query()->updateOrCreate(
+            $projection = ManuscriptSearchDocument::query()->updateOrCreate(
                 ['research_document_id' => $documentId],
                 $this->clearedValues(null, 'no_source', 'NO_SOURCE'),
             );
+            $this->invalidateClassification($projection);
 
             return 'no_source';
         });
@@ -291,6 +308,29 @@ class ManuscriptSearchProjectionService
                 'size' => $projection->source_size_bytes,
                 'updated_at' => $projection->source_file_updated_at?->format('Y-m-d H:i:s.u'),
             ], false);
+    }
+
+    private function refreshReadyClassification(ManuscriptSearchDocument $projection): void
+    {
+        if (! $this->classifications->isCurrent($projection)) {
+            $this->classifications->classify($projection);
+        }
+    }
+
+    private function hasStaleReadyClassification(?ManuscriptSearchDocument $projection): bool
+    {
+        return $projection !== null
+            && $projection->extraction_status === 'ready'
+            && is_string($projection->body_text)
+            && $projection->indexed_at !== null
+            && ! $this->classifications->isCurrent($projection);
+    }
+
+    private function invalidateClassification(?ManuscriptSearchDocument $projection): void
+    {
+        if ($projection !== null) {
+            $this->classifications->invalidate($projection);
+        }
     }
 
     private function sameSource(array $left, ?array $right, bool $includePath = true): bool

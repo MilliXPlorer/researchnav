@@ -1349,6 +1349,25 @@ p {
   min-width: 110px;
   flex: 0 1 135px;
 }
+.catalog-toolbar > .catalog-sdg-filter {
+  min-width: 230px;
+}
+.catalog-sdg-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--slate);
+  font-size: 10px;
+}
+.catalog-sdg-status button {
+  padding: 0;
+  border: 0;
+  color: var(--moss);
+  background: transparent;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+}
 .catalog-toolbar select,
 .table-actions select {
   height: 34px;

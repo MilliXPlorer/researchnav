@@ -40,6 +40,11 @@ const authenticatedSession: UserSession = {
   profilePhotoUrl: null,
 };
 
+const sdgTaxonomy = Array.from({ length: 17 }, (_, index) => ({
+  number: index + 1,
+  title: `Goal ${index + 1}`,
+}));
+
 function resource(
   id: number,
   title: string,
@@ -106,7 +111,13 @@ function renderCatalog(initialSearch?: string, session?: UserSession | null) {
   );
 }
 
-beforeEach(() => window.history.replaceState({}, "", "/catalog"));
+beforeEach(() => {
+  window.history.replaceState({}, "", "/catalog");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => new Promise<Response>(() => {})),
+  );
+});
 afterEach(() => vi.unstubAllGlobals());
 
 describe("CatalogPage public similarity search", () => {
@@ -448,14 +459,14 @@ describe("CatalogPage public similarity search", () => {
   });
 
   it("does not calculate a score until search is submitted", () => {
-    const fetchMock = vi.fn();
+    const fetchMock = vi.fn(() => new Promise<Response>(() => {}));
     vi.stubGlobal("fetch", fetchMock);
     renderCatalog();
 
     fireEvent.change(screen.getByLabelText("Search the repository"), {
       target: { value: "typed but not submitted" },
     });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith("/api/sdgs", expect.anything());
     expect(screen.getByText("Search to calculate")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /View full metadata/ }));
     expect(
@@ -508,13 +519,17 @@ describe("CatalogPage public similarity search", () => {
 
   it("ignores an older request when a newer submitted query wins the race", async () => {
     const pending = new Map<string, (response: Response) => void>();
-    const fetchMock = vi.fn(
-      (_path: string, init?: RequestInit) =>
-        new Promise<Response>((resolve) => {
-          const q = JSON.parse(String(init?.body)).q as string;
-          pending.set(q, resolve);
-        }),
-    );
+    const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+      if (path === "/api/sdgs") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ data: sdgTaxonomy })),
+        );
+      }
+      return new Promise<Response>((resolve) => {
+        const q = JSON.parse(String(init?.body)).q as string;
+        pending.set(q, resolve);
+      });
+    });
     vi.stubGlobal("fetch", fetchMock);
     renderCatalog();
 
@@ -540,5 +555,188 @@ describe("CatalogPage public similarity search", () => {
       );
     });
     expect(screen.queryByText("Older result")).not.toBeInTheDocument();
+  });
+});
+
+describe("CatalogPage Sustainable Development Goal filter", () => {
+  it("renders the API taxonomy in an accessible native select and keeps its URL state singular", async () => {
+    const fetchMock = vi.fn(async (path: string) => {
+      if (path === "/api/sdgs") {
+        return new Response(JSON.stringify({ data: sdgTaxonomy }));
+      }
+      return new Response(JSON.stringify({ data: [], links: { next: null } }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderCatalog();
+
+    const select = await screen.findByRole("combobox", {
+      name: "Filter by Sustainable Development Goal",
+    });
+    expect(select).toBeEnabled();
+    expect(within(select).getAllByRole("option")).toHaveLength(18);
+    expect(
+      within(select).getByRole("option", { name: "SDG 13 — Goal 13" }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(select, { target: { value: "13" } });
+    await waitFor(() => expect(window.location.search).toBe("?sdg=13"));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/repository?sdg=13&per_page=50",
+      expect.anything(),
+    );
+
+    fireEvent.change(select, { target: { value: "" } });
+    expect(window.location.search).not.toContain("sdg");
+  });
+
+  it("normalizes invalid SDG URL values without requesting them", async () => {
+    const fetchMock = vi.fn(async (path: string) => {
+      if (path === "/api/sdgs") {
+        return new Response(JSON.stringify({ data: sdgTaxonomy }));
+      }
+      return new Response(JSON.stringify({ data: [] }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderCatalog("?q=water&sdg=04&sdg=4&sort=newest");
+
+    await waitFor(() =>
+      expect(window.location.search).toBe("?q=water&sort=newest"),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/repository/similarity",
+      expect.objectContaining({ body: JSON.stringify({ q: "water" }) }),
+    );
+    expect(
+      fetchMock.mock.calls.some(([path]) => String(path).includes("sdg=")),
+    ).toBe(false);
+  });
+
+  it("keeps taxonomy failure and retry scoped to the SDG control", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: "SERVICE_UNAVAILABLE" }), {
+          status: 503,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: sdgTaxonomy })),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    renderCatalog();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Sustainable Development Goals are unavailable.",
+    );
+    const select = screen.getByRole("combobox", {
+      name: "Filter by Sustainable Development Goal",
+    });
+    expect(select).toBeDisabled();
+    expect(screen.getByText("Literal fallback result")).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Retry Sustainable Development Goals",
+      }),
+    );
+    await waitFor(() => expect(select).toBeEnabled());
+  });
+
+  it("intersects q and SDG results without changing the similarity request or rank", async () => {
+    const fetchMock = vi.fn(async (path: string) => {
+      if (path === "/api/sdgs") {
+        return new Response(JSON.stringify({ data: sdgTaxonomy }));
+      }
+      if (path === "/api/repository/similarity") {
+        return new Response(
+          JSON.stringify({
+            data: [
+              resource(3, "Ranked first", "0.900000"),
+              resource(1, "Ranked second", "0.100000"),
+              resource(2, "Excluded rank", "0.800000"),
+            ],
+          }),
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          data: [resource(1, "Allowed second"), resource(3, "Allowed first")],
+          links: { next: null },
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderCatalog("?q=water&sdg=4");
+
+    await screen.findByRole("heading", { name: "Ranked first" });
+    expect(
+      screen
+        .getAllByRole("heading", { level: 2 })
+        .map((heading) => heading.textContent),
+    ).toEqual(["Ranked first", "Ranked second"]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/repository/similarity",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ q: "water" }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/repository?sdg=4&per_page=50",
+      expect.anything(),
+    );
+  });
+
+  it("does not let an aborted older SDG filter response replace the current result", async () => {
+    const pending = new Map<string, (response: Response) => void>();
+    const fetchMock = vi.fn((path: string) => {
+      if (path === "/api/sdgs") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ data: sdgTaxonomy })),
+        );
+      }
+      const sdg = new URL(path, "http://researchnav.local").searchParams.get(
+        "sdg",
+      );
+      return new Promise<Response>((resolve) =>
+        pending.set(sdg ?? "", resolve),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderCatalog();
+
+    const select = await screen.findByRole("combobox", {
+      name: "Filter by Sustainable Development Goal",
+    });
+    fireEvent.change(select, { target: { value: "4" } });
+    await waitFor(() => expect(pending.has("4")).toBe(true));
+    fireEvent.change(select, { target: { value: "5" } });
+    await waitFor(() => expect(pending.has("5")).toBe(true));
+
+    await act(async () => {
+      pending.get("5")?.(
+        new Response(
+          JSON.stringify({
+            data: [resource(5, "Current SDG result")],
+            links: { next: null },
+          }),
+        ),
+      );
+    });
+    expect(await screen.findByText("Current SDG result")).toBeInTheDocument();
+
+    await act(async () => {
+      pending.get("4")?.(
+        new Response(
+          JSON.stringify({
+            data: [resource(4, "Stale SDG result")],
+            links: { next: null },
+          }),
+        ),
+      );
+    });
+    expect(screen.queryByText("Stale SDG result")).not.toBeInTheDocument();
   });
 });
