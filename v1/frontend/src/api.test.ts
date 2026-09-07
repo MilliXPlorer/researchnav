@@ -154,7 +154,7 @@ describe("public repository API", () => {
     await expect(listPublicResearch()).resolves.toEqual([]);
   });
 
-  it("sends author, keyword, category, and year filtering to the repository endpoint", async () => {
+  it("sends author, keyword, category, year, and SDG filtering to the repository endpoint", async () => {
     let requestedUrl = "";
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       requestedUrl = String(input);
@@ -173,6 +173,7 @@ describe("public repository API", () => {
         keywords: "inventory",
         category: "Web-based",
         year: 2024,
+        sdg: 13,
       }),
     ).resolves.toMatchObject([{ id: "1" }]);
 
@@ -182,6 +183,7 @@ describe("public repository API", () => {
     expect(requested.searchParams.get("keywords")).toBe("inventory");
     expect(requested.searchParams.get("category")).toBe("Web-based");
     expect(requested.searchParams.get("year")).toBe("2024");
+    expect(requested.searchParams.get("sdg")).toBe("13");
   });
 
   it("omits blank filters instead of sending empty query parameters", async () => {
