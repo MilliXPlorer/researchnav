@@ -27,6 +27,7 @@ use App\Http\Controllers\SharedMonitoringController;
 use App\Http\Controllers\SimilarityController;
 use App\Http\Controllers\StatisticianController;
 use App\Http\Controllers\SupportAssignmentController;
+use App\Http\Controllers\SustainableDevelopmentGoalController;
 use App\Http\Controllers\TitleValidationController;
 use App\Http\Middleware\AddApiSecurityHeaders;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
@@ -200,6 +201,7 @@ Route::prefix('api')
         // and can never initialize a browser session for repository visitors.
         Route::middleware([])->withoutMiddleware([StartSession::class, ShareErrorsFromSession::class, PreventRequestForgery::class])->group(function (): void {
             Route::get('categories', [CategoryController::class, 'index']);
+            Route::get('sdgs', [SustainableDevelopmentGoalController::class, 'index']);
             Route::get('repository', [PublicRepositoryController::class, 'index'])->middleware('throttle:public-search');
             Route::post('repository/similarity', [PublicRepositoryController::class, 'similarity'])->middleware('throttle:public-repository-similarity');
             Route::get('repository/{researchDocument}', [PublicRepositoryController::class, 'show']);

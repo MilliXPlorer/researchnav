@@ -33,6 +33,7 @@ class PublicRepositoryController extends Controller
             'year' => ['nullable', 'integer', 'between:1901,2155'],
             'year_from' => ['nullable', 'integer', 'between:1901,2155'],
             'year_to' => ['nullable', 'integer', 'between:1901,2155'],
+            'sdg' => ['nullable', 'integer', 'between:1,17'],
             'per_page' => ['nullable', 'integer', 'between:1,50'],
         ]);
         if (isset($filters['year_from'], $filters['year_to']) && $filters['year_from'] > $filters['year_to']) {
