@@ -114,6 +114,25 @@ class AdminNavigationApiTest extends TestCase
         $this->as($actor)->patchJson('/api/admin/users/'.$otherAdmin->id, ['access_status' => 'blocked'], $this->origin())->assertOk();
     }
 
+    public function test_administrator_can_soft_delete_users_but_not_their_own_account(): void
+    {
+        $actor = $this->user(['role' => 'admin', 'access_status' => 'active']);
+        $target = $this->user(['role' => 'panel', 'access_status' => 'active']);
+
+        $this->as($actor)->deleteJson('/api/admin/users/'.$target->id, [], $this->origin())->assertNoContent();
+
+        $this->assertSoftDeleted('users', ['id' => $target->id]);
+        $this->assertDatabaseHas('audit_logs', [
+            'user_id' => $actor->id,
+            'action' => 'ADMIN_USER_DELETED',
+            'entity_id' => $target->id,
+        ]);
+
+        $this->as($actor)->deleteJson('/api/admin/users/'.$actor->id, [], $this->origin())
+            ->assertConflict()
+            ->assertExactJson(['error' => 'SELF_MODIFICATION_NOT_ALLOWED']);
+    }
+
     public function test_audit_logs_are_filtered_without_transport_or_raw_class_metadata(): void
     {
         $admin = $this->user(['role' => 'admin', 'access_status' => 'active']);
@@ -253,6 +272,23 @@ class AdminNavigationApiTest extends TestCase
         $this->assertDatabaseHas('audit_logs', [
             'user_id' => $admin->id,
             'action' => 'LIBRARIAN_PROVISIONED',
+        ]);
+
+        UserRole::query()->firstOrCreate(
+            ['slug' => UserRole::RESEARCH_EDITOR],
+            ['name' => 'Research Editor', 'description' => 'Editorial reviewer.', 'is_active' => true],
+        );
+        $this->as($admin)->postJson('/api/admin/accounts', [
+            'email' => 'editor@example.edu',
+            'role' => 'research_editor',
+        ], $this->origin())
+            ->assertCreated()
+            ->assertJsonPath('user.role', 'research_editor');
+
+        $this->assertDatabaseHas('users', [
+            'email' => 'editor@example.edu',
+            'role' => 'research_editor',
+            'role_id' => UserRole::query()->where('slug', UserRole::RESEARCH_EDITOR)->value('id'),
         ]);
     }
 

@@ -20,7 +20,7 @@ class EnsureOfficeAuthority
 
         // Office authority is granted to active administrators and to the
         // legacy research-office string only. Compatibility roles such as
-        // coordinator or academics map to the canonical research_office slug
+        // coordinator map to the canonical research_office slug
         // for identity purposes but must never inherit office authority; the
         // service layer already agrees via DomainAuthorization::isOffice().
         if (! DomainAuthorization::isOffice($user)) {

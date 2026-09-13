@@ -1,3 +1,3 @@
 <?php
 
-echo '{"status":"ready","text":"normalized manuscript text"}';
+echo '{"status":"ready","parts":["normalized ","manuscript text"]}';

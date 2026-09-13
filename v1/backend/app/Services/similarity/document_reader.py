@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import BinaryIO
 import logging
@@ -10,7 +10,7 @@ import warnings
 from xml.etree import ElementTree
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from pypdf import PdfReader
+import pymupdf  # type: ignore[import-untyped]
 
 
 MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
@@ -58,29 +58,58 @@ def extract_text(document_path: str | Path) -> str:
     return text
 
 
+def extract_parts(document_path: str | Path, maximum_part_characters: int) -> list[str]:
+    """Extract sequential bounded parts without materializing one full text string."""
+    if maximum_part_characters < 1:
+        raise DocumentReadError("Document could not be read.")
+    try:
+        path = Path(document_path)
+        if not path.is_file() or path.is_symlink() or path.stat().st_size > MAX_DOCUMENT_BYTES:
+            raise DocumentReadError("Document could not be read.")
+        with path.open("rb") as stream:
+            if path.suffix.casefold() == ".pdf":
+                units = _pdf_units(stream)
+            elif path.suffix.casefold() == ".docx":
+                units = _docx_units(stream)
+            else:
+                raise DocumentReadError("Document type is not supported.")
+            return _parts_from_units(units, maximum_part_characters)
+    except DocumentReadError:
+        raise
+    except Exception:
+        raise DocumentReadError("Document could not be read.") from None
+
+
 def _pdf_text(stream: BinaryIO) -> str:
-    # pypdf emits parser warnings for malformed input. This is the private
-    # reader boundary, so suppress them here and let extract_text return its
-    # intentionally sanitized failure instead of leaking parser diagnostics.
-    # pypdf uses child loggers (for example ``pypdf._reader``), so disabling
-    # only the named parent does not suppress records captured by an embedding
-    # process. Suppress logging for this private parser call and restore it.
+    return _join_text(_pdf_units(stream))
+
+
+def _pdf_units(stream: BinaryIO) -> Iterator[str]:
+    # This is the private reader boundary. Suppress parser diagnostics here and
+    # let extract_text return its intentionally sanitized failure instead of
+    # leaking document details.
     previous_disable_level = logging.root.manager.disable
     logging.disable(logging.CRITICAL)
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            reader = PdfReader(stream)
-            if reader.is_encrypted and reader.decrypt("") == 0:
-                raise DocumentReadError("Document could not be read.")
-            if len(reader.pages) > MAX_PDF_PAGES:
-                raise DocumentReadError("Document could not be read.")
-            return _join_text(page.extract_text() or "" for page in reader.pages)
+            stream.seek(0)
+            with pymupdf.open(stream=stream.read(), filetype="pdf") as document:
+                if document.needs_pass and document.authenticate("") == 0:
+                    raise DocumentReadError("Document could not be read.")
+                if document.page_count > MAX_PDF_PAGES:
+                    raise DocumentReadError("Document could not be read.")
+                for index in range(document.page_count):
+                    yield document.load_page(index).get_text("text", sort=True)
     finally:
         logging.disable(previous_disable_level)
 
 
 def _docx_text(stream: BinaryIO) -> str:
+    return _join_text(_docx_units(stream))
+
+
+def _docx_units(stream: BinaryIO) -> Iterator[str]:
     _validate_docx_zip(stream)
     stream.seek(0)
     with ZipFile(stream) as archive:
@@ -91,11 +120,30 @@ def _docx_text(stream: BinaryIO) -> str:
 
     root = ElementTree.fromstring(document_xml)
     word_namespace = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
-    parts = [
-        "".join(node.text or "" for node in paragraph.iter(f"{word_namespace}t"))
-        for paragraph in root.iter(f"{word_namespace}p")
-    ]
-    return _join_text(parts)
+    for paragraph in root.iter(f"{word_namespace}p"):
+        yield "".join(node.text or "" for node in paragraph.iter(f"{word_namespace}t"))
+
+
+def _parts_from_units(units: Iterable[object], limit: int) -> list[str]:
+    parts: list[str] = []
+    current = ""
+    total = 0
+    for unit in units:
+        if not isinstance(unit, str):
+            continue
+        for word in unit.split():
+            addition = word if not current else f" {word}"
+            if current and len(current) + len(addition) > limit:
+                parts.append(current + " ")
+                total += len(current) + 1
+                current = word
+            else:
+                current += addition
+            if total + len(current) > MAX_EXTRACTED_CHARACTERS:
+                raise DocumentReadError("Document could not be read.")
+    if current:
+        parts.append(current)
+    return parts
 
 
 def _join_text(parts: Iterable[object]) -> str:

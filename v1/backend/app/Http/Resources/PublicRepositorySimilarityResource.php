@@ -9,15 +9,21 @@ class PublicRepositorySimilarityResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        $research = $this->resource['research'];
+        $institute = $research->institute ?? $research->academic_unit;
+        if ($institute === null && is_string($research->institution_name) && str_starts_with($research->institution_name, 'Institute of ')) {
+            $institute = $research->institution_name;
+        }
+
         return [
-            'id' => $this->resource['research']->id,
+            'id' => $research->id,
             'title' => $this->resource['research']->title,
             'abstract' => $this->resource['research']->abstract,
             'keywords' => $this->resource['research']->keywords,
             'publication_year' => $this->resource['research']->publication_year,
             'institution_name' => $this->resource['research']->institution_name,
             'institution_location' => $this->resource['research']->institution_location,
-            'academic_unit' => $this->resource['research']->academic_unit,
+            'institute' => $institute,
             'degree_program' => $this->resource['research']->degree_program,
             'manuscript_date_label' => $this->resource['research']->manuscript_date_label,
             'abstract_provenance' => $this->resource['research']->abstract_provenance,

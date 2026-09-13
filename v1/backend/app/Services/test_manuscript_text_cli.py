@@ -15,16 +15,16 @@ class ManuscriptTextCliTest(unittest.TestCase):
 
         self.assertEqual(1, code)
         self.assertEqual(
-            {"status": "failed", "text": ""}, json.loads(output.getvalue())
+            {"status": "failed", "parts": []}, json.loads(output.getvalue())
         )
 
     def test_success_normalizes_extracted_text(self):
         output = io.StringIO()
-        with patch("manuscript_text_cli.extract_text", return_value="  body\n\ttext  "):
+        with patch("manuscript_text_cli.extract_parts", return_value=["body ", "text"]):
             with redirect_stdout(output):
                 code = manuscript_text_cli.main(["worker", "/owned/path"])
 
         self.assertEqual(0, code)
         self.assertEqual(
-            {"status": "ready", "text": "body text"}, json.loads(output.getvalue())
+            {"status": "ready", "parts": ["body ", "text"]}, json.loads(output.getvalue())
         )

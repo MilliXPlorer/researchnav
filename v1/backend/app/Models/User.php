@@ -19,7 +19,7 @@ class User extends Authenticatable
 {
     use HasFactory, HasUuids, Notifiable, SoftDeletes;
 
-    public const LEGACY_ROLES = ['admin', 'researcher', 'adviser', 'instructor', 'panel', 'statistician', 'coordinator', 'librarian', 'research-office', 'academics'];
+    public const LEGACY_ROLES = ['admin', 'researcher', 'adviser', 'instructor', 'panel', 'statistician', 'coordinator', 'librarian', 'research-office', 'research_editor'];
 
     public const ACCOUNT_STATUSES = ['active', 'inactive', 'suspended', 'pending'];
 
@@ -91,7 +91,8 @@ class User extends Authenticatable
             'panel' => UserRole::RESEARCH_PANELIST,
             'statistician' => UserRole::STATISTICIAN,
             'librarian' => UserRole::LIBRARIAN,
-            'coordinator', 'research-office', 'academics' => UserRole::RESEARCH_OFFICE,
+            'coordinator', 'research-office' => UserRole::RESEARCH_OFFICE,
+            'research_editor' => UserRole::RESEARCH_EDITOR,
             default => throw new InvalidArgumentException("Unknown legacy role [{$role}]."),
         };
     }
@@ -107,7 +108,7 @@ class User extends Authenticatable
             UserRole::STATISTICIAN => 'statistician',
             UserRole::LIBRARIAN => 'librarian',
             UserRole::RESEARCH_PANELIST => 'panel',
-            UserRole::RESEARCH_EDITOR => 'academics',
+            UserRole::RESEARCH_EDITOR => 'research_editor',
             default => throw new InvalidArgumentException("Unknown canonical role [{$slug}]."),
         };
     }
@@ -239,11 +240,6 @@ class User extends Authenticatable
     public function methodologyReviews(): HasMany
     {
         return $this->hasMany(MethodologyReview::class, MethodologyReview::column('statistician_id'));
-    }
-
-    public function savedLibraryItems(): HasMany
-    {
-        return $this->hasMany(SavedLibraryItem::class);
     }
 
     public function complianceReviews(): HasMany

@@ -4,16 +4,18 @@ namespace App\Http\Controllers;
 
 use App\Exceptions\ApiValidationException;
 use App\Models\ComplianceReview;
-use App\Models\PrivacyLog;
 use App\Models\ResearchDocument;
 use App\Models\User;
 use App\Services\ComplianceService;
-use App\Services\PrivacyLogService;
 use App\Services\ReportingService;
+use App\Services\SupabaseStorageException;
+use App\Services\SupabaseStorageService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
+use Throwable;
+use ZipArchive;
 
 class ResearchOfficeController extends DomainController
 {
@@ -113,26 +115,112 @@ class ResearchOfficeController extends DomainController
             ->header('Cache-Control', 'private, no-store');
     }
 
-    public function privacyLogs(PrivacyLogService $logs): JsonResponse
+    public function instituteStudies(string $institute, SupabaseStorageService $storage): JsonResponse
     {
-        return response()
-            ->json(['data' => $logs->list(), 'schema_version' => 1])
-            ->header('Cache-Control', 'private, no-store');
+        try {
+            return response()->json(['data' => $storage->studiesForInstitute($institute)])
+                ->header('Cache-Control', 'private, no-store');
+        } catch (SupabaseStorageException) {
+            return response()->json(['error' => 'INSTITUTE_STUDIES_UNAVAILABLE'], 503);
+        }
     }
 
-    public function recordPrivacyLog(Request $request, PrivacyLogService $logs): JsonResponse
+    public function openInstituteStudy(Request $request, string $institute, string $year, string $title, SupabaseStorageService $storage)
     {
-        $input = $this->validated($request, [
-            'user_id' => ['nullable', 'string', 'max:36', 'exists:users,id'],
-            'action' => ['required', 'string', 'max:100'],
-            'details' => ['nullable', 'string', 'max:5000'],
-        ]);
-        if (! in_array($input['action'], PrivacyLog::ACTIONS, true)) {
-            return response()->json(['error' => 'INVALID_ACTION'], 422);
+        try {
+            $files = $storage->filesForStudy($institute, $year, $title);
+            if ($files === []) {
+                return response()->json(['error' => 'MANUSCRIPT_NOT_FOUND'], 404);
+            }
+            $selected = $request->query('file');
+            if ($selected === null) {
+                return $this->studyFileChooser($institute, $year, $title, $files);
+            }
+            $file = collect($files)->firstWhere('name', $selected);
+            if ($file === null) {
+                return response()->json(['error' => 'MANUSCRIPT_NOT_FOUND'], 404);
+            }
+            $contents = $storage->download($file['path']);
+        } catch (SupabaseStorageException) {
+            return response()->json(['error' => 'MANUSCRIPT_UNAVAILABLE'], 503);
         }
-        $log = $logs->record($this->actor($request), $input, $request);
+        $filename = preg_replace('/[^A-Za-z0-9._ -]/', '_', $file['name']) ?: 'manuscript';
+        $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+        $mimeType = match ($extension) {
+            'pdf' => 'application/pdf',
+            'doc' => 'application/msword',
+            'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            default => 'application/octet-stream',
+        };
 
-        return response()->json(['data' => $this->privacyPayload($log)], 201);
+        return response($contents, 200, [
+            'Cache-Control' => 'private, no-store',
+            'Content-Disposition' => ($extension === 'pdf' ? 'inline' : 'attachment').'; filename="'.$filename.'"',
+            'Content-Type' => $mimeType,
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+    }
+
+    public function downloadInstituteStudy(string $institute, string $year, string $title, SupabaseStorageService $storage)
+    {
+        $zipPath = false;
+        try {
+            $files = $storage->filesForStudy($institute, $year, $title);
+            if ($files === []) {
+                return response()->json(['error' => 'MANUSCRIPT_NOT_FOUND'], 404);
+            }
+            $zipPath = tempnam(sys_get_temp_dir(), 'researchnav-study-');
+            $zip = new ZipArchive;
+            if ($zipPath === false || $zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+                throw new SupabaseStorageException('The manuscript archive could not be created.');
+            }
+            $folder = $this->safeDownloadName($title, 'Study');
+            foreach ($files as $file) {
+                if (! $zip->addFromString($folder.'/'.$this->safeDownloadName($file['name'], 'manuscript'), $storage->download($file['path']))) {
+                    $zip->close();
+                    throw new SupabaseStorageException('The manuscript archive could not be created.');
+                }
+            }
+            if (! $zip->close()) {
+                throw new SupabaseStorageException('The manuscript archive could not be created.');
+            }
+
+            return response()->download($zipPath, $folder.'.zip', [
+                'Cache-Control' => 'private, no-store',
+                'Content-Type' => 'application/zip',
+                'X-Content-Type-Options' => 'nosniff',
+            ])->deleteFileAfterSend(true);
+        } catch (Throwable) {
+            if (is_string($zipPath)) {
+                @unlink($zipPath);
+            }
+
+            return response()->json(['error' => 'MANUSCRIPT_UNAVAILABLE'], 503);
+        }
+    }
+
+    /** @param list<array{name:string,path:string,extension:string}> $files */
+    private function studyFileChooser(string $institute, string $year, string $title, array $files)
+    {
+        $heading = htmlspecialchars($title, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $openUrl = route('office.institute-study.open', compact('institute', 'year', 'title'));
+        $downloadUrl = htmlspecialchars(route('office.institute-study.download', compact('institute', 'year', 'title')), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $links = collect($files)->map(function (array $file) use ($openUrl): string {
+            $url = htmlspecialchars($openUrl.'?'.http_build_query(['file' => $file['name']]), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+            $name = htmlspecialchars($file['name'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+
+            return '<li><a href="'.$url.'">'.$name.'</a></li>';
+        })->implode('');
+        $html = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'.$heading.'</title>'
+            .'<style>body{font-family:system-ui,sans-serif;max-width:44rem;margin:4rem auto;padding:0 1.5rem;color:#17202a}h1{margin-bottom:.4rem}p{color:#52606d}ul{padding:0;list-style:none}li{margin:.75rem 0}a{display:block;padding:1rem;border:1px solid #ccd3da;border-radius:.5rem;color:#0645ad;text-decoration:none}a:hover,a:focus{border-color:#0645ad}.download{margin-top:2rem;background:#17202a;color:#fff;text-align:center}</style></head>'
+            .'<body><main><h1>'.$heading.'</h1><p>Choose a PDF to open, or download the complete study as a ZIP archive.</p><ul>'.$links.'</ul><a class="download" href="'.$downloadUrl.'">Download all manuscripts (.zip)</a></main></body></html>';
+
+        return response($html)->header('Cache-Control', 'private, no-store')->header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'")->header('X-Content-Type-Options', 'nosniff');
+    }
+
+    private function safeDownloadName(string $name, string $fallback): string
+    {
+        return trim((string) preg_replace('/[^A-Za-z0-9._ -]+/', '_', $name), '. ') ?: $fallback;
     }
 
     private function payload(ComplianceReview $review): array
@@ -147,17 +235,6 @@ class ResearchOfficeController extends DomainController
             'remarks' => $review->remarks,
             'review_status' => $review->review_status,
             'decided_at' => $review->decided_at?->toISOString(),
-        ];
-    }
-
-    private function privacyPayload(PrivacyLog $log): array
-    {
-        return [
-            'id' => $log->id,
-            'user_id' => $log->user_id,
-            'action' => $log->action,
-            'details' => $log->details,
-            'activity_date' => $log->activity_date?->toISOString(),
         ];
     }
 

@@ -4,9 +4,8 @@ namespace Tests\Feature;
 
 use App\Models\ResearchAuthor;
 use App\Models\ResearchDocument;
-use App\Models\SavedLibraryItem;
-use App\Models\SimilarityResult;
 use App\Models\User;
+use App\Services\SupabaseStorageService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -50,7 +49,7 @@ class RoleWorkspaceApiSecondTest extends TestCase
         $this->as($librarian)->getJson('/api/librarian/retention-logs')->assertOk()->assertJsonCount(1, 'data');
     }
 
-    public function test_office_compliance_user_management_reports_and_privacy_logs(): void
+    public function test_office_compliance_user_management_and_reports(): void
     {
         $office = $this->user(['role' => 'research-office']);
         $owner = $this->user(['role' => 'researcher']);
@@ -81,67 +80,6 @@ class RoleWorkspaceApiSecondTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.counts.total_users', 3)
             ->assertJsonPath('data.counts.pending_archiving', 1);
-
-        $this->as($office)->postJson('/api/office/privacy-logs', [
-            'user_id' => $owner->id, 'action' => 'consent_recorded', 'details' => 'Consent form received.',
-        ], $this->origin())->assertCreated();
-        $this->assertDatabaseHas('audit_logs', ['action' => 'PRIVACY_LOGGED']);
-        $this->as($office)->postJson('/api/office/privacy-logs', ['action' => 'bad-action'], $this->origin())
-            ->assertUnprocessable();
-        $this->as($office)->getJson('/api/office/privacy-logs')->assertOk()->assertJsonCount(1, 'data');
-    }
-
-    public function test_academics_library_categories_and_recommendations(): void
-    {
-        $academic = $this->user(['role' => 'academics']);
-        $owner = $this->user(['role' => 'researcher']);
-        $archived = $this->document('archived', $owner, 'archived');
-        $this->document('archived', $owner, 'archived');
-        $draft = $this->document('draft', $owner);
-
-        $this->as($academic)->getJson('/api/academics/library')->assertOk()->assertJsonCount(0, 'data');
-        $this->as($academic)->postJson('/api/academics/library', ['research_document_id' => $archived->id], $this->origin())
-            ->assertCreated()
-            ->assertJsonPath('data.title', $archived->title);
-        $this->as($academic)->postJson('/api/academics/library', ['research_document_id' => $draft->id], $this->origin())
-            ->assertUnprocessable();
-        $item = SavedLibraryItem::query()->firstOrFail();
-        $this->as($academic)->getJson('/api/academics/library')->assertOk()->assertJsonCount(1, 'data');
-        $this->as($academic)->getJson('/api/academics/categories')
-            ->assertOk()
-            ->assertJsonCount(1, 'data')
-            ->assertJsonPath('data.0.records_count', 2);
-
-        $this->as($academic)->deleteJson('/api/academics/library/'.$item->id, [], $this->origin())->assertNoContent();
-        $this->assertDatabaseCount('saved_library_items', 0);
-        $this->as($academic)->getJson('/api/academics/recommendations')->assertOk()->assertJsonCount(0, 'data');
-    }
-
-    public function test_academics_recommendations_are_similarity_based_and_exclude_saved(): void
-    {
-        $academic = $this->user(['role' => 'academics']);
-        $owner = $this->user(['role' => 'researcher']);
-        $saved = $this->document('archived', $owner, 'archived');
-        $candidate = $this->document('archived', $owner, 'archived');
-        SimilarityResult::query()->create([
-            'source_research_id' => $saved->id,
-            'matched_research_id' => $candidate->id,
-            'source_title' => $saved->title,
-            'matched_title' => $candidate->title,
-            'title_similarity_score' => '0.610000000000',
-            'content_similarity_score' => '0.610000000000',
-            'algorithm_version' => 'title-content-weighted-v1',
-            'analysis_type' => 'search_retrieval',
-            'analyzed_at' => now(),
-        ]);
-        SavedLibraryItem::query()->create(['user_id' => $academic->id, 'research_document_id' => $saved->id]);
-
-        $this->as($academic)->getJson('/api/academics/recommendations')
-            ->assertOk()
-            ->assertJsonCount(1, 'data')
-            ->assertJsonPath('data.0.research_document_id', $candidate->id)
-            ->assertJsonPath('data.0.overall_similarity_score', '0.610000000000')
-            ->assertJsonPath('data.0.adviser_review_required', false);
     }
 
     public function test_reviewer_assignments_accept_panel_and_statistician_roles(): void
@@ -170,6 +108,49 @@ class RoleWorkspaceApiSecondTest extends TestCase
         $this->as($researcher)->putJson('/api/research/'.$document->id.'/reviewers', [
             'reviewers' => [['reviewer_id' => $panelist->id, 'review_role' => 'panel']],
         ], $this->origin())->assertForbidden();
+    }
+
+    public function test_office_can_browse_and_open_supabase_institute_studies(): void
+    {
+        $office = $this->user(['role' => 'research-office']);
+        $storage = $this->createStub(SupabaseStorageService::class);
+        $storage->method('studiesForInstitute')->willReturn([
+            ['year' => '2025', 'title' => 'Sample Study'],
+        ]);
+        $storage->method('filesForStudy')->willReturn([
+            ['name' => 'sample.pdf', 'path' => 'Institute of Computer Studies/2025/Sample Study/sample.pdf', 'extension' => 'pdf'],
+            ['name' => 'appendix.docx', 'path' => 'Institute of Computer Studies/2025/Sample Study/appendix.docx', 'extension' => 'docx'],
+        ]);
+        $storage->method('download')->willReturnCallback(fn (string $path): string => str_ends_with($path, '.pdf') ? '%PDF-sample' : 'DOCX-sample');
+        $this->app->instance(SupabaseStorageService::class, $storage);
+
+        $this->as($office)->getJson('/api/office/institutes/ICS/studies')
+            ->assertOk()
+            ->assertJsonPath('data.0.title', 'Sample Study');
+        $this->as($office)->get('/api/office/institutes/ICS/studies/2025/Sample%20Study/open')
+            ->assertOk()
+            ->assertSee('sample.pdf')
+            ->assertSee('appendix.docx')
+            ->assertSee('Download all manuscripts (.zip)');
+        $this->as($office)->get('/api/office/institutes/ICS/studies/2025/Sample%20Study/open?file=sample.pdf')
+            ->assertOk()
+            ->assertHeader('Content-Type', 'application/pdf')
+            ->assertHeader('Content-Disposition', 'inline; filename="sample.pdf"')
+            ->assertContent('%PDF-sample');
+        $this->as($office)->get('/api/office/institutes/ICS/studies/2025/Sample%20Study/open?file=missing.pdf')
+            ->assertNotFound();
+
+        if (class_exists(\ZipArchive::class)) {
+            $response = $this->as($office)->get('/api/office/institutes/ICS/studies/2025/Sample%20Study/download')
+                ->assertOk()
+                ->assertDownload('Sample Study.zip')
+                ->assertHeader('content-type', 'application/zip');
+            $archive = new \ZipArchive;
+            $this->assertTrue($archive->open($response->baseResponse->getFile()->getPathname()) === true);
+            $this->assertSame('%PDF-sample', $archive->getFromName('Sample Study/sample.pdf'));
+            $this->assertSame('DOCX-sample', $archive->getFromName('Sample Study/appendix.docx'));
+            $archive->close();
+        }
     }
 
     public function test_research_index_mine_filter_returns_only_own_submissions(): void

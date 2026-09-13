@@ -17,7 +17,7 @@ class UserRoleSeederTest extends TestCase
         $this->seed(DatabaseSeeder::class);
         $this->seed(DatabaseSeeder::class);
 
-        $this->assertSame(8, UserRole::query()->count());
+        $this->assertSame(9, UserRole::query()->count());
         $this->assertSame(0, User::query()->count());
     }
 }

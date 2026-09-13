@@ -66,6 +66,13 @@ def test_preprocessing_keeps_unicode_and_removes_only_versioned_stopwords() -> N
     assert title_tokens("the and with") == []
 
 
+def test_preprocessing_removes_filipino_function_words_but_keeps_subject_terms() -> None:
+    assert title_tokens("Ang Wika at Panitikan ng mga Mag-aaral sa Paaralan") == [
+        "wika", "panitikan", "mag", "aaral", "paaralan"
+    ]
+    assert title_tokens("ang at ay mga ng sa upang") == []
+
+
 def test_ranking_uses_title_then_candidate_identifier_when_components_tie() -> None:
     results = compare_query(
         "climate water",

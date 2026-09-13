@@ -205,6 +205,12 @@ export default function InstructorResearchReview({
 
   const { research, files, similarity, validations } = context;
   const beforeDefense = research.research_stage === "title_proposal";
+  const isFinalized =
+    research.research_stage === "completed" ||
+    research.submission_status === "approved" ||
+    research.submission_status === "archived" ||
+    research.archive_status === "archived";
+  const isReadOnly = readOnly || isFinalized;
   const canRecommend = [
     "submitted",
     "under_review",
@@ -331,8 +337,12 @@ export default function InstructorResearchReview({
         )}
       </section>
 
-      {readOnly ? (
-        <p className="admin-empty">Read-only assigned record.</p>
+      {isReadOnly ? (
+        <p className="admin-empty">
+          {isFinalized
+            ? "This research is complete. Its review record is read-only."
+            : "Read-only assigned record."}
+        </p>
       ) : (
         <div className="review-action-grid">
           <form className="review-action-card" onSubmit={addFeedback}>

@@ -33,6 +33,7 @@ const research = (
   submission_status: "draft",
   archive_status: "not_archived",
   visibility: "private",
+  can_update_metadata: true,
   ...overrides,
 });
 
@@ -490,7 +491,10 @@ describe("AdminResearchWorkspace", () => {
 
   it("renders ordered authors read-only outside editable states", async () => {
     installApi({
-      initialResearch: research({ submission_status: "submitted" }),
+      initialResearch: research({
+        submission_status: "submitted",
+        can_update_metadata: false,
+      }),
       authors: [
         author({ id: 4, author_name: "Second Author", author_order: 2 }),
         author({ id: 3, author_name: "First Author", author_order: 1 }),
@@ -680,6 +684,9 @@ describe("AdminResearchWorkspace", () => {
             abstract: "Internal abstract",
             keywords: "internal, study",
             publication_year: 2025,
+            institute: null,
+            degree_program: null,
+            manuscript_date_label: null,
             research_stage: "ongoing",
           }),
         }),

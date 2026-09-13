@@ -108,6 +108,39 @@ class SimilarityScorePolicy
         ];
     }
 
+    /** @return array<string, string|bool> */
+    public function evaluateStandalone(string $score, bool $isTitle): array
+    {
+        $score = self::normalize($score);
+        $high = self::compare($score, $this->highThreshold) >= 0;
+        $titleAlert = $isTitle && self::compare($score, $this->titleAlertThreshold) >= 0;
+
+        return [
+            'classification' => $high ? 'high' : (self::compare($score, $this->moderateThreshold) >= 0 ? 'moderate' : 'low'),
+            'overall_flagged' => $high,
+            'title_match_alert' => $titleAlert,
+            'adviser_review_required' => $high || $titleAlert,
+            'flag_reason' => $high && $titleAlert ? 'overall_and_title_match' : ($high ? 'overall_high_similarity' : ($titleAlert ? 'near_exact_title_match' : 'not_flagged')),
+            'algorithm_version' => $this->algorithmVersion,
+        ];
+    }
+
+    public static function blendStandalone(string $tfidfScore, ?string $fastTextScore): string
+    {
+        $tfidfScore = self::normalize($tfidfScore, 'TF-IDF score');
+        if ($fastTextScore === null) {
+            return $tfidfScore;
+        }
+
+        $fastTextScore = self::normalize($fastTextScore, 'FastText score');
+        $tfidfDigits = (int) str_replace('.', '', $tfidfScore);
+        $fastTextDigits = (int) str_replace('.', '', $fastTextScore);
+        $average = intdiv($tfidfDigits + $fastTextDigits + 1, 2);
+        $digits = str_pad((string) $average, self::SCALE + 1, '0', STR_PAD_LEFT);
+
+        return substr($digits, 0, 1).'.'.substr($digits, 1);
+    }
+
     public function algorithmVersion(): string
     {
         return $this->algorithmVersion;

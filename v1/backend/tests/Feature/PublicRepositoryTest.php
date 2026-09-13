@@ -131,6 +131,18 @@ class PublicRepositoryTest extends TestCase
             ->assertJsonValidationErrors(['year_from', 'year_to']);
     }
 
+    public function test_index_filters_public_research_by_institute(): void
+    {
+        $category = $this->category('Institute');
+        $match = $this->document($category, ['institute' => 'Institute of Teacher Education']);
+        $this->document($category, ['institute' => 'Institute of Computer Studies']);
+
+        $this->getJson('/api/repository?institute=Institute%20of%20Teacher%20Education')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $match->id);
+    }
+
     public function test_index_orders_and_paginates_by_year_then_title(): void
     {
         $category = $this->category('Ordering');
@@ -144,6 +156,7 @@ class PublicRepositoryTest extends TestCase
             ->assertJsonPath('meta.per_page', 2)
             ->assertJsonPath('meta.total', 3);
         $this->assertSame([$alpha->id, $beta->id], collect($first->json('data'))->pluck('id')->all());
+        $this->assertStringContainsString('per_page=2', $first->json('links.next'));
 
         $this->getJson('/api/repository?per_page=2&page=2')
             ->assertOk()
@@ -223,7 +236,7 @@ class PublicRepositoryTest extends TestCase
     {
         foreach ([
             '/api/repository?per_page=0',
-            '/api/repository?per_page=51',
+            '/api/repository?per_page=1001',
             '/api/repository?year=1900',
             '/api/repository?publication_year=2156',
             '/api/repository?category_id=999999',

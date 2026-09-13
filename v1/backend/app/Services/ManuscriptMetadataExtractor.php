@@ -59,7 +59,8 @@ class ManuscriptMetadataExtractor
         }
 
         return $this->extractMetadata(
-            $text
+            $text,
+            implode("\n", array_slice(preg_split('/\f/', $text) ?: [$text], 0, 2))
         );
     }
 
@@ -83,10 +84,11 @@ class ManuscriptMetadataExtractor
     }
 
     private function extractMetadata(
-        string $text
+        string $text,
+        ?string $titleText = null
     ): array {
         return [
-            'title' => $this->extractTitle($text),
+            'title' => $this->extractTitle($titleText ?? $text),
 
             'researchers' => $this->extractResearchers($text),
 
@@ -121,25 +123,28 @@ class ManuscriptMetadataExtractor
                 '/\bbachelor\s+of\s+science\s+in\s+business\s+administration\s+major\s+in\s+(?:human\s+resource|marketing)\s+management\b/i',
                 '/\b(?:human\s+resource|marketing)\s+management\b/i',
                 '/\bbsba[\s-]?(?:hrm|mm)\b/i',
-                '/\bbachelor\s+of\s+science\s+in\s+office\s+administration\b/i',
-                '/\boffice\s+administration\b/i',
-                '/\bbsoa\b/i',
+                '/^\s*(?:hrm|mm)\s*$/im',
             ],
             'Institute of Arts and Sciences' => [
-                '/\bbachelor\s+of\s+arts\s+in\s+(?:communication|english\s+language|political\s+science)\b/i',
+                '/\bbachelor\s+of\s+arts\s+in\s+(?:communication|english(?:\s+language)?|political\s+science)\b/i',
                 '/\bab\s+(?:comm|english|polsci)\b/i',
+                '/^\s*polsci\s*$/im',
             ],
             'Institute of Criminal Justice Education' => [
                 '/\bbachelor\s+of\s+science\s+in\s+criminology\b/i',
                 '/\bbs\s*crim\b/i',
                 '/\bbachelor\s+of\s+science\s+in\s+industrial\s+security\s+management\b/i',
                 '/\bbsism\b/i',
+                '/^\s*(?:crim|ism)\s*$/im',
             ],
             'Institute of Teacher Education' => [
+                '/\binstitusyon\s+ng\s+mga\s+magtuturo\s+ng\s+edukasyon\b/iu',
                 '/\bbachelor\s+of\s+elementary\s+education\b/i',
                 '/\bbeed\b/i',
                 '/\bbachelor\s+of\s+secondary\s+education\s+major\s+in\s+(?:english|filipino|math(?:ematics)?|social\s+studies)\b/i',
-                '/\bbsed[\s-]?(?:english|filipino|math|socstud)\b/i',
+                '/\bbsed[\s-]?(?:eng(?:lish)?|fil(?:ipino)?|math|socstud)\b/i',
+                '/\bbatsilyer\s+ng\s+edukasyon\s+sekondarya\b/iu',
+                '/\bmedyur\s+sa\s+(?:filipino|ingles|matematika|araling\s+panlipunan)\b/iu',
             ],
         ];
 
@@ -310,7 +315,7 @@ class ManuscriptMetadataExtractor
              */
             if (
                 preg_match(
-                    '/^(a\s+research\s+paper|a\s+thesis|a\s+capstone(?:\s+project)?|a\s+research\s+project)\s+(presented|submitted)/i',
+                    '/^(?:(?:a|an)\s+(?:research(?:\s+(?:paper|study|proposal))?|thesis|capstone(?:\s+project)?|project)(?=\s+(?:presented|to)\b)|isang\s+tesis\s+na\s+ihaharap)\b/i',
                     $line
                 )
             ) {
@@ -345,7 +350,13 @@ class ManuscriptMetadataExtractor
                 $title
             );
 
-            return trim($title);
+            $title = preg_replace('/^\d{6,}-\d{6,}(?=[A-Z])/u', '', trim($title));
+
+            if (strlen(trim((string) $title)) > 500) {
+                return null;
+            }
+
+            return trim((string) $title);
         }
 
         return null;
@@ -361,6 +372,13 @@ class ManuscriptMetadataExtractor
         $lower = strtolower(
             $line
         );
+
+        if (
+            preg_match('/^(?:appendix\b.*\bsource\s*code\b|source\s*code\b)/i', $line) ||
+            preg_match('/<(?:!doctype|html|body|div|script|style)\b|<\?php/i', $line)
+        ) {
+            return true;
+        }
 
         $ignored = [
             'tangub city global college',
@@ -403,6 +421,14 @@ class ManuscriptMetadataExtractor
             120
         );
 
+        $coverLines = $lines;
+        foreach ($lines as $index => $line) {
+            if ($index > 4 && $this->isDateLine(trim($line))) {
+                $coverLines = array_slice($lines, 0, $index + 1);
+                break;
+            }
+        }
+
         /*
          * METHOD 1
          *
@@ -414,11 +440,11 @@ class ManuscriptMetadataExtractor
          * Researchers
          */
         foreach (
-            $lines as $index => $line
+            $coverLines as $index => $line
         ) {
             if (
                 preg_match(
-                    '/^(researchers?|authors?|prepared\s+by|presented\s+by|submitted\s+by)\s*:?\s*$/i',
+                    '/^(researchers?|authors?|mga\s+mananaliksik|prepared\s+by|presented\s+by|submitted\s+by|inihanda\s+nina|iniharap\s+nina|isinumite\s+nina)\s*:?\s*$/i',
                     trim($line)
                 )
             ) {
@@ -426,11 +452,11 @@ class ManuscriptMetadataExtractor
 
                 for (
                     $i = $index + 1;
-                    $i < count($lines);
+                    $i < count($coverLines);
                     $i++
                 ) {
                     $candidate = trim(
-                        $lines[$i]
+                        $coverLines[$i]
                     );
 
                     if (
@@ -509,7 +535,7 @@ class ManuscriptMetadataExtractor
             if (
                 $partialIndex === null &&
                 preg_match(
-                    '/in\s+partial\s+fulfillment/i',
+                    '/(?:in\s+partial\s+fulfill?ment|bilang\s+bahagi)/i',
                     $line
                 )
             ) {
@@ -619,7 +645,7 @@ class ManuscriptMetadataExtractor
             if (
                 $degreeIndex === null &&
                 preg_match(
-                    '/^bachelor\s+of\s+science\s+in\s+computer\s+science$/i',
+                    '/^(?:bachelor\s+of\b.+|batsilyer\s+ng\b.+)$/i',
                     trim($line)
                 )
             ) {
@@ -716,6 +742,10 @@ class ManuscriptMetadataExtractor
 
         if ($line === '') {
             return [];
+        }
+
+        if (str_contains($line, ',')) {
+            return [$line];
         }
 
         /*
@@ -826,7 +856,7 @@ class ManuscriptMetadataExtractor
 
         if (
             preg_match(
-                '/^(abstract|keywords?|chapter|adviser|instructor|faculty|institute|college|school|bachelor|degree|research|submitted|presented|partial|requirement|requirements|computer\s+science|tangub\s+city)/i',
+                '/^(abstract|abstrak|keywords?|(?:mga\s+)?susing\s+salita|chapter|kabanata|introduction|panimula|adviser|instructor|faculty|institute|college|school|bachelor|degree|research|submitted|presented|partial|requirement|requirements|computer\s+science|tangub\s+city)/i',
                 $line
             )
         ) {
@@ -835,7 +865,7 @@ class ManuscriptMetadataExtractor
 
         if (
             ! preg_match(
-                "/^[\p{L}\s.'\-]+$/u",
+                "/^[\p{L}\s.,'\-]+$/u",
                 $line
             )
         ) {
@@ -867,7 +897,7 @@ class ManuscriptMetadataExtractor
         $line = trim($line);
 
         return (bool) preg_match(
-            '/^(of\s+the\s+requirements?|for\s+the\s+degree|bachelor|bachelor\s+of\s+science|in\s+computer\s+science|computer\s+science|faculty|institute|tangub\s+city|a\s+research|submitted|presented)/i',
+            '/^(?:the\s+)?requirements?\s+for\s+the\s+degree|^of\s+the\s+requirements?|^for\s+the\s+degree|^bachelor|^bachelor\s+of\s+science|^major\s+in\b|^bilang\s+bahagi|^ng\s+mga\s+pangangailangan|^para\s+sa\s+digring|^batsilyer|^medyur\s+sa\b|^in\s+computer\s+science|^computer\s+science|^faculty|^institute|^institusyon|^tangub\s+city|^a\s+research|^isang\s+tesis|^submitted|^presented|^iniharap|^isinumite/i',
             $line
         );
     }
@@ -876,7 +906,7 @@ class ManuscriptMetadataExtractor
         string $line
     ): bool {
         return (bool) preg_match(
-            '/^(abstract|keywords?|chapter\s+(?:i|1)|introduction|adviser|approved|acknowledg)/i',
+            '/^(abstract|abstrak|keywords?|(?:mga\s+)?susing\s+salita|chapter\s+(?:i|1)|kabanata\s+(?:i|1)|introduction|panimula|adviser|approved|acknowledg|pasasalamat)/i',
             trim($line)
         );
     }
@@ -899,7 +929,7 @@ class ManuscriptMetadataExtractor
          */
         if (
             preg_match(
-                '/\bABSTRACT\b\s*(.+?)(?=\b(?:KEYWORDS?|KEY\s+WORDS?)\b)/is',
+                '/\b(?:ABSTRACT|ABSTRAK)\b\s*(.+?)(?=\b(?:KEYWORDS?|KEY\s+WORDS?|(?:MGA\s+)?SUSING\s+SALITA)\b)/is',
                 $text,
                 $matches
             )
@@ -925,7 +955,7 @@ class ManuscriptMetadataExtractor
          */
         if (
             preg_match(
-                '/\bABSTRACT\b\s*(.+?)(?=\b(?:CHAPTER\s+(?:I|1)|INTRODUCTION)\b)/is',
+                '/\b(?:ABSTRACT|ABSTRAK)\b\s*(.+?)(?=\b(?:CHAPTER\s+(?:I|1)|KABANATA\s+(?:I|1)|INTRODUCTION|PANIMULA)\b)/is',
                 $text,
                 $matches
             )
@@ -964,7 +994,7 @@ class ManuscriptMetadataExtractor
         ) {
             if (
                 ! preg_match(
-                    '/^(?:keywords?|key\s+words?)\s*[:\-–—]?\s*(.*)$/i',
+                    '/^(?:keywords?|key\s+words?|(?:mga\s+)?susing\s+salita)\s*[:\-–—]?\s*(.*)$/i',
                     trim($line),
                     $matches
                 )
@@ -990,9 +1020,13 @@ class ManuscriptMetadataExtractor
                         $lines[$i]
                     );
 
+                if (preg_match('/^[ivxlcdm]+$/i', $nextLine)) {
+                    break;
+                }
+
                 if (
                     preg_match(
-                        '/^(chapter\s+(?:i|1)|introduction|acknowledg|table\s+of\s+contents)/i',
+                        '/^(chapter\s+(?:i|1)|kabanata\s+(?:i|1)|introduction|panimula|acknowledg|pasasalamat|table\s+of\s+contents|talaan\s+ng\s+nilalaman)/i',
                         $nextLine
                     )
                 ) {
@@ -1029,6 +1063,12 @@ class ManuscriptMetadataExtractor
                     ' ',
                     $keywordText
                 );
+
+            $keywordText = preg_replace(
+                '/\s+(?:TALAAN\s+NG\s+NILALAMAN|TALAAN\s+NG\s+MGA\s+(?:PIGYUR|APENDIKS)|TSAPTER|KABANATA)\b.*$/iu',
+                '',
+                (string) $keywordText
+            );
 
             $keywordText =
                 trim(
@@ -1228,8 +1268,22 @@ class ManuscriptMetadataExtractor
     private function normalizeMonthYear(
         string $value
     ): ?string {
-        $months =
-            'January|February|March|April|May|June|July|August|September|October|November|December';
+        $monthNames = [
+            'january' => 'January', 'enero' => 'January',
+            'february' => 'February', 'pebrero' => 'February',
+            'march' => 'March', 'marso' => 'March',
+            'april' => 'April', 'abril' => 'April',
+            'may' => 'May', 'mayo' => 'May',
+            'june' => 'June', 'hunyo' => 'June',
+            'july' => 'July', 'hulyo' => 'July',
+            'august' => 'August', 'agosto' => 'August',
+            'september' => 'September', 'setyembre' => 'September',
+            'october' => 'October', 'oktubre' => 'October',
+            'november' => 'November', 'nobyembre' => 'November',
+            'december' => 'December', 'disyembre' => 'December',
+        ];
+        $months = implode('|', array_map(fn (string $month): string => preg_quote($month, '/'), array_keys($monthNames)));
+        $value = preg_replace('/\s+(?:ABSTRACT|ABSTRAK)\b.*$/iu', '', trim($value));
 
         /*
          * December 2025
@@ -1243,11 +1297,7 @@ class ManuscriptMetadataExtractor
                 $matches
             )
         ) {
-            return ucfirst(
-                strtolower(
-                    $matches[1]
-                )
-            ).
+            return $monthNames[strtolower($matches[1])].
                 ' '.
                 $matches[2];
         }
@@ -1268,11 +1318,7 @@ class ManuscriptMetadataExtractor
                 $matches
             )
         ) {
-            return ucfirst(
-                strtolower(
-                    $matches[1]
-                )
-            ).
+            return $monthNames[strtolower($matches[1])].
                 ' '.
                 $matches[2];
         }
@@ -1293,11 +1339,7 @@ class ManuscriptMetadataExtractor
                 $matches
             )
         ) {
-            return ucfirst(
-                strtolower(
-                    $matches[1]
-                )
-            ).
+            return $monthNames[strtolower($matches[1])].
                 ' '.
                 $matches[2];
         }

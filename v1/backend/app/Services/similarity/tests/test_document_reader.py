@@ -6,7 +6,7 @@ import pytest
 from docx import Document
 from pypdf import PdfWriter
 
-from similarity.document_reader import DocumentReadError, extract_text
+from similarity.document_reader import DocumentReadError, _parts_from_units, extract_text
 
 
 def test_extract_text_reads_docx_paragraphs_and_tables(tmp_path: Path) -> None:
@@ -52,20 +52,31 @@ def test_malformed_documents_do_not_disclose_private_paths(
 
 
 def test_pdf_parser_warnings_are_suppressed_at_the_reader_boundary() -> None:
-    reader = MagicMock()
-    reader.is_encrypted = False
-    reader.pages = []
+    document = MagicMock()
+    document.__enter__.return_value = document
+    document.needs_pass = False
+    document.page_count = 0
 
-    def warned_reader(_stream: object) -> MagicMock:
+    def warned_open(**_kwargs: object) -> MagicMock:
         warnings.warn("malformed private PDF", UserWarning)
-        return reader
+        return document
 
     with warnings.catch_warnings(record=True) as caught, patch(
-        "similarity.document_reader.PdfReader", side_effect=warned_reader
+        "similarity.document_reader.pymupdf.open", side_effect=warned_open
     ):
         assert extract_text_for_pdf_reader() == ""
 
     assert caught == []
+
+
+def test_incremental_parts_preserve_all_units_in_exact_order() -> None:
+    units = ["Chapter One\nFirst paragraph", "Second paragraph", "Final words"]
+
+    parts = _parts_from_units(units, 20)
+
+    assert len(parts) > 1
+    assert "".join(parts) == "Chapter One First paragraph Second paragraph Final words"
+    assert all(part.endswith(" ") for part in parts[:-1])
 
 
 def extract_text_for_pdf_reader() -> str:

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Services\ManuscriptMetadataExtractor;
 use App\Services\ResearchOfficeBulkImportService;
 use App\Services\SupabaseStorageException;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -39,6 +40,7 @@ class ResearchOfficeBulkImportController extends Controller
                 'file',
                 'max:20480',
             ],
+            'group_name' => ['nullable', 'string', 'max:500'],
         ]);
 
         if ($validator->fails()) {
@@ -180,11 +182,70 @@ class ResearchOfficeBulkImportController extends Controller
             }
         }
 
+        if ($request->filled('group_name') && $results !== []) {
+            $usable = array_values(array_filter($results, fn (array $result): bool => $result['status'] !== 'failed'));
+            usort($usable, fn (array $left, array $right): int => $this->metadataFileRank($left['file_name']) <=> $this->metadataFileRank($right['file_name']));
+            $metadata = [
+                'title' => null, 'researchers' => [], 'abstract' => null,
+                'keywords' => [], 'year' => null, 'final_binding_date' => null,
+                'institute' => null,
+            ];
+            foreach ($usable as $result) {
+                foreach (array_keys($metadata) as $field) {
+                    if ($this->metadataFileRank($result['file_name']) === 4 && in_array($field, ['title', 'researchers', 'year', 'final_binding_date', 'institute'], true)) {
+                        continue;
+                    }
+                    if (($metadata[$field] === null || $metadata[$field] === [])
+                        && ($result['metadata'][$field] ?? null) !== null
+                        && ($result['metadata'][$field] ?? null) !== []) {
+                        $metadata[$field] = $result['metadata'][$field];
+                    }
+                }
+            }
+            if ($metadata['title'] === null || trim((string) $metadata['title']) === '' || strlen((string) $metadata['title']) > 500) {
+                $metadata['title'] = $this->titleFromGroupName($request->string('group_name')->toString());
+            }
+            $missing = [];
+            foreach (['title', 'researchers', 'abstract', 'keywords', 'year', 'final_binding_date', 'institute'] as $field) {
+                if ($metadata[$field] === null || $metadata[$field] === [] || $metadata[$field] === 'Unclassified') {
+                    $missing[] = $field;
+                }
+            }
+            $first = $results[0];
+            $results = [[
+                'file_name' => $request->string('group_name')->toString(),
+                'file_size' => array_sum(array_column($results, 'file_size')),
+                'mime_type' => 'application/x-researchnav-folder',
+                'status' => $usable === [] ? 'failed' : ($missing === [] ? 'ready' : 'needs_review'),
+                'missing_fields' => $missing,
+                'metadata' => $metadata,
+                ...($usable === [] ? ['error' => $first['error'] ?? 'No supported manuscript content could be extracted.'] : []),
+            ]];
+        }
+
         return response()->json([
             'message' => 'Manuscript metadata extraction completed.',
 
             'data' => $results,
         ]);
+    }
+
+    private function metadataFileRank(string $name): int
+    {
+        return match (true) {
+            preg_match('/(?:front|cover|prelim|pre[\s_-]*pages?|title[\s_-]*page|table[\s_-]*of[\s_-]*contents?)/i', $name) === 1 => 0,
+            preg_match('/(?:source[\s_-]*code|appendix|reference|minutes)/i', $name) === 1 => 4,
+            preg_match('/(?:final[\s_-]*binding|bookbind|full[\s_-]*manuscript|manuscript|thesis)/i', $name) === 1 => 1,
+            preg_match('/(?:content|body|chapter)/i', $name) === 1 => 2,
+            default => 3,
+        };
+    }
+
+    private function titleFromGroupName(string $groupName): ?string
+    {
+        $title = trim((string) preg_replace('/^\s*\d+\s*[-_.):]+\s*/', '', $groupName));
+
+        return strlen($title) >= 10 && strlen($title) <= 500 ? $title : null;
     }
 
     public function import(Request $request, ManuscriptMetadataExtractor $extractor, ResearchOfficeBulkImportService $service): JsonResponse
@@ -195,8 +256,34 @@ class ResearchOfficeBulkImportController extends Controller
             $metadata = null;
         }
 
-        $validator = Validator::make(['file' => $request->file('file'), 'metadata' => $metadata], [
-            'file' => ['required', 'file', 'max:20480'],
+        if (is_array($metadata) && is_array($metadata['keywords'] ?? null)) {
+            $uniqueKeywords = [];
+            foreach ($metadata['keywords'] as $keyword) {
+                if (! is_string($keyword)) {
+                    $uniqueKeywords[] = $keyword;
+
+                    continue;
+                }
+
+                $keyword = trim($keyword);
+                $key = strtolower($keyword);
+                if ($keyword !== '' && ! array_key_exists($key, $uniqueKeywords)) {
+                    $uniqueKeywords[$key] = $keyword;
+                }
+            }
+            $metadata['keywords'] = array_values($uniqueKeywords);
+        }
+
+        $uploadedFiles = $request->file('files', []);
+        if (! is_array($uploadedFiles) || $uploadedFiles === []) {
+            $uploadedFiles = [$request->file('file')];
+        }
+        $relativePaths = $request->input('relative_paths', []);
+        $validator = Validator::make(['files' => $uploadedFiles, 'relative_paths' => $relativePaths, 'metadata' => $metadata], [
+            'files' => ['required', 'array', 'min:1', 'max:20'],
+            'files.*' => ['required', 'file', 'max:20480'],
+            'relative_paths' => ['nullable', 'array'],
+            'relative_paths.*' => ['string', 'max:1000'],
             'metadata' => ['required', 'array'],
             'metadata.title' => ['required', 'string', 'max:500'],
             'metadata.researchers' => ['required', 'array', 'min:1', 'max:50'],
@@ -211,30 +298,28 @@ class ResearchOfficeBulkImportController extends Controller
 
         if ($validator->fails()) {
             return response()->json([
-                'message' => 'Please review the manuscript file and metadata before importing.',
+                'message' => 'Please review the manuscript file and metadata before uploading.',
                 'errors' => $validator->errors(),
             ], 422);
         }
 
-        $file = $request->file('file');
-        $extension = strtolower($file->getClientOriginalExtension());
-        if (! in_array($extension, ['pdf', 'docx'], true)) {
-            return response()->json(['message' => 'Only DOCX and text-based PDF manuscripts can be imported.'], 422);
+        if (collect($uploadedFiles)->contains(fn ($file) => ! in_array(strtolower($file->getClientOriginalExtension()), ['pdf', 'docx'], true))) {
+            return response()->json(['message' => 'Only DOCX and text-based PDF manuscripts can be uploaded.'], 422);
         }
 
         try {
-            // Re-extraction validates the actual manuscript structure; reviewed metadata remains authoritative.
-            $extracted = $extractor->extract($file->getRealPath(), $extension);
+            // The ordered front file is metadata authority; reviewed metadata remains authoritative.
+            $extractor->extract($uploadedFiles[0]->getRealPath(), strtolower($uploadedFiles[0]->getClientOriginalExtension()));
             $document = $service->import(
                 $request->attributes->get('current_user'),
-                $file,
+                count($uploadedFiles) === 1 ? $uploadedFiles[0] : $uploadedFiles,
                 $validator->validated()['metadata'],
                 $request,
-                $extracted['raw_text'] ?? null,
+                $relativePaths === [] ? null : $relativePaths,
             );
 
             return response()->json([
-                'message' => 'The manuscript was imported successfully.',
+                'message' => 'The manuscript was uploaded successfully.',
                 'data' => [
                     'id' => $document->id,
                     'title' => $document->title,
@@ -245,15 +330,18 @@ class ResearchOfficeBulkImportController extends Controller
             ], 201);
         } catch (SupabaseStorageException) {
             return response()->json(['message' => 'Manuscript storage is temporarily unavailable. Please try again.'], 503);
+        } catch (QueryException) {
+            return response()->json(['message' => 'The manuscript could not be saved to the database.'], 500);
         } catch (\RuntimeException $exception) {
             $status = in_array($exception->getMessage(), [
+                'This manuscript has already been uploaded.',
                 'This manuscript has already been imported.',
                 'A research record with this title already exists.',
             ], true) ? 409 : 422;
 
-            return response()->json(['message' => $status === 409 ? $exception->getMessage() : 'The manuscript could not be validated for import.'], $status);
+            return response()->json(['message' => $exception->getMessage()], $status);
         } catch (\Throwable) {
-            return response()->json(['message' => 'The manuscript could not be imported. No final record was created.'], 500);
+            return response()->json(['message' => 'The manuscript could not be uploaded. No final record was created.'], 500);
         }
     }
 }

@@ -2,7 +2,10 @@
 export function isProtectedRoute(pathname: string): boolean {
   return (
     pathname === "/app" ||
-    /^\/app\/researcher\/(submissions|similarity|related-studies)$/.test(
+    /^\/app\/instructor\/sections(?:\/\d+(?:\/projects\/\d+)?)?$/.test(
+      pathname,
+    ) ||
+    /^\/app\/researcher\/(?:submissions|related-studies|similarity(?:\/(?:title|content))?)$/.test(
       pathname,
     ) ||
     /^\/research\/\d+$/.test(pathname)

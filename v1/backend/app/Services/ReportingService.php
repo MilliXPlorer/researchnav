@@ -11,9 +11,20 @@ use App\Models\ResearchDocument;
 use App\Models\ReviewAssignment;
 use App\Models\SimilarityResult;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class ReportingService
 {
+    private const INSTITUTE_NAMES = [
+        'Institute of Health Sciences',
+        'Institute of Computer Studies',
+        'Institute of Business and Financial Management',
+        'Institute of Criminal Justice Education',
+        'Institute of Teacher Education',
+        'Institute of Arts and Sciences',
+    ];
+
     public function coordinatorProgram(): array
     {
         $documents = ResearchDocument::query();
@@ -108,6 +119,10 @@ class ReportingService
     public function officeInstitutional(): array
     {
         $documents = ResearchDocument::query();
+        $instituteColumn = Schema::hasColumn('research_documents', 'institute')
+            ? 'institute'
+            : 'academic_unit';
+        $instituteExpression = "COALESCE({$instituteColumn}, institution_name)";
 
         return [
             'schema_version' => 1,
@@ -121,13 +136,13 @@ class ReportingService
                 'evaluations_submitted' => Evaluation::query()->count(),
                 'methodology_signed_off' => MethodologyReview::query()->where(MethodologyReview::column('review_status'), 'signed_off')->count(),
             ],
-            'by_academic_unit' => (clone $documents)
-                ->whereNotNull('academic_unit')
-                ->selectRaw('academic_unit, count(*) as total')
-                ->groupBy('academic_unit')
+            'by_institute' => (clone $documents)
+                ->whereIn(DB::raw($instituteExpression), self::INSTITUTE_NAMES)
+                ->selectRaw("{$instituteExpression} as institute, count(*) as total")
+                ->groupByRaw($instituteExpression)
                 ->orderByDesc('total')
                 ->get()
-                ->map(fn ($row) => ['academic_unit' => $row->academic_unit, 'total' => (int) $row->total])
+                ->map(fn ($row) => ['institute' => $row->institute, 'total' => (int) $row->total])
                 ->all(),
             'by_status' => collect(ResearchDocument::SUBMISSION_STATUSES)
                 ->map(fn (string $status) => ['status' => $status, 'total' => (clone $documents)->where('submission_status', $status)->count()])

@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import RoleSidebarPage from "./RoleSidebarPages";
 
@@ -51,7 +57,7 @@ const draftResource = (overrides: Record<string, unknown> = {}) => ({
   publication_year: 2026,
   institution_name: null,
   institution_location: null,
-  academic_unit: null,
+  institute: null,
   degree_program: null,
   manuscript_date_label: null,
   abstract_provenance: null,
@@ -96,7 +102,7 @@ const institutionalReport = () =>
           evaluations_submitted: 0,
           methodology_signed_off: 0,
         },
-        by_academic_unit: [],
+        by_institute: [],
         by_status: [],
       },
     }),
@@ -154,10 +160,7 @@ function roleRoutes(): Array<[RegExp, Handler]> {
     [/\/api\/librarian\/retention-logs$/, emptyData],
     [/\/api\/office\/reports$/, institutionalReport],
     [/\/api\/office\/users(\?|$)/, emptyPage],
-    [/\/api\/office\/privacy-logs$/, emptyData],
     [/\/api\/office\/compliance$/, emptyData],
-    [/\/api\/academics\/(categories|recommendations)$/, emptyData],
-    [/\/api\/academics\/library$/, emptyData],
     [/\/api\/repository\?per_page=50/, emptyPage],
     [/\/api\/research\?/, emptyPage],
     [/\/api\/categories$/, emptyData],
@@ -165,6 +168,70 @@ function roleRoutes(): Array<[RegExp, Handler]> {
 }
 
 describe("role workspace pages", () => {
+  it("opens Editor dashboard sections from the summary cards", async () => {
+    stubFetch([
+      [
+        /\/api\/support-assignments\/inbox$/,
+        () =>
+          listData([
+            {
+              id: 4,
+              research_document_id: 7,
+              research_title: "Requested editorial review",
+              researchers: ["Student One"],
+              user_id: "editor@example.test",
+              name: "Editor",
+              assignment_role: "research_editor",
+              status: "pending",
+              created_at: "2026-09-04T08:00:00Z",
+            },
+          ]),
+      ],
+      [
+        /\/api\/editor\/assigned-research$/,
+        () =>
+          listData([
+            {
+              research_document_id: 8,
+              title: "Accepted editorial review",
+              researchers: ["Student Two"],
+              program: null,
+              category: null,
+              academic_year: 2026,
+              research_stage: "ongoing",
+              submission_status: "under_review",
+              latest_manuscript: null,
+              updated_at: null,
+            },
+          ]),
+      ],
+    ]);
+
+    render(
+      <RoleSidebarPage
+        role="research_editor"
+        selectedNav="Dashboard"
+        navigate={vi.fn()}
+      />,
+    );
+
+    const requestsCard = await screen.findByRole("button", {
+      name: "View pending requests",
+    });
+    expect(
+      screen.queryByText("Requested editorial review"),
+    ).not.toBeInTheDocument();
+    fireEvent.click(requestsCard);
+    expect(screen.getByText("Requested editorial review")).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close Pending requests" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "View assigned research" }),
+    );
+    expect(screen.getByText("Accepted editorial review")).toBeInTheDocument();
+  });
+
   it("opens adviser reviews and matched studies from adviser pages", async () => {
     const navigate = vi.fn();
     stubFetch([
@@ -256,25 +323,16 @@ describe("role workspace pages", () => {
     {
       role: "research-office",
       destinations: [
-        ["Institutional Overview", "Institutional overview"],
-        ["Import Manuscript", "Import Manuscript"],
+        ["Upload Manuscript", "Upload Manuscript"],
         ["User & Role Management", "User & role management"],
         ["Reports & Exports", "Reports & exports"],
-        ["Data Privacy Log", "Data privacy log"],
-      ],
-    },
-    {
-      role: "academics",
-      destinations: [
-        ["Search", "Search"],
-        ["Browse by Category", "Browse by category"],
       ],
     },
     {
       role: "researcher",
       destinations: [
         ["My Research", "My submissions"],
-        ["Similarity Check", "Similarity check"],
+        ["Similarity Check", "Title checker"],
         ["Related Studies", "Related studies"],
       ],
     },
@@ -359,7 +417,7 @@ describe("role workspace pages", () => {
       publication_year: 2026,
       institution_name: null,
       institution_location: null,
-      academic_unit: null,
+      institute: null,
       degree_program: null,
       manuscript_date_label: null,
       abstract_provenance: null,
@@ -438,8 +496,11 @@ describe("role workspace pages", () => {
     fireEvent.change(screen.getByLabelText("Publication year"), {
       target: { value: "2026" },
     });
-    fireEvent.change(screen.getByLabelText("Category"), {
-      target: { value: "2" },
+    fireEvent.change(screen.getByLabelText("Institute"), {
+      target: { value: "Institute of Teacher Education" },
+    });
+    fireEvent.change(screen.getByLabelText("Program"), {
+      target: { value: "Bachelor of Secondary Education major in English" },
     });
     fireEvent.change(screen.getByLabelText("Author name"), {
       target: { value: "Ada Lovelace" },
@@ -453,7 +514,8 @@ describe("role workspace pages", () => {
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
-          category_id: 2,
+          institute: "Institute of Teacher Education",
+          degree_program: "Bachelor of Secondary Education major in English",
           title: "My study title",
           abstract: "A study about learning.",
           keywords: "learning, education",
@@ -542,8 +604,11 @@ describe("role workspace pages", () => {
     fireEvent.change(screen.getByLabelText("Title"), {
       target: { value: "My study title" },
     });
-    fireEvent.change(screen.getByLabelText("Category"), {
-      target: { value: "2" },
+    fireEvent.change(screen.getByLabelText("Institute"), {
+      target: { value: "Institute of Teacher Education" },
+    });
+    fireEvent.change(screen.getByLabelText("Program"), {
+      target: { value: "Bachelor of Secondary Education major in English" },
     });
     fireEvent.change(screen.getByLabelText("Author name"), {
       target: { value: "Ada Lovelace" },
@@ -682,7 +747,7 @@ describe("role workspace pages", () => {
       publication_year: null,
       institution_name: null,
       institution_location: null,
-      academic_unit: null,
+      institute: null,
       degree_program: null,
       manuscript_date_label: null,
       abstract_provenance: null,
@@ -780,22 +845,8 @@ describe("role workspace pages", () => {
     );
   });
 
-  it("retries a failed category load and recovers with a second GET", async () => {
-    let categoryRequests = 0;
-    const fetchMock = stubFetch([
-      [/\/api\/research\?/, emptyPage],
-      [
-        /\/api\/categories$/,
-        () => {
-          categoryRequests += 1;
-          return categoryRequests === 1
-            ? new Response(JSON.stringify({ error: "UNAVAILABLE" }), {
-                status: 503,
-              })
-            : listData([draftResource().category]);
-        },
-      ],
-    ]);
+  it("limits programs to the selected institute and clears incompatible selections", async () => {
+    const fetchMock = stubFetch([[/\/api\/research\?/, emptyPage]]);
     render(
       <RoleSidebarPage
         role="researcher"
@@ -807,17 +858,28 @@ describe("role workspace pages", () => {
     fireEvent.click(
       await screen.findByRole("button", { name: "New submission" }),
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
-    expect(await screen.findByLabelText("Category")).toBeInTheDocument();
-    await waitFor(() => expect(categoryRequests).toBe(2));
+    const institute = await screen.findByLabelText("Institute");
+    const program = screen.getByLabelText("Program");
+    expect(program).toBeDisabled();
+    fireEvent.change(institute, {
+      target: { value: "Institute of Teacher Education" },
+    });
+    expect(program).toBeEnabled();
+    fireEvent.change(program, {
+      target: { value: "Bachelor of Secondary Education major in English" },
+    });
+    fireEvent.change(institute, {
+      target: { value: "Institute of Computer Studies" },
+    });
+    expect(program).toHaveValue("");
     expect(
       fetchMock.mock.calls.filter(
         ([path]) => String(path) === "/api/categories",
       ),
-    ).toHaveLength(2);
+    ).toHaveLength(0);
   });
 
-  it("scopes related studies to owned submissions and opens matched catalog titles", async () => {
+  it("scopes related studies to owned submissions and opens matched research", async () => {
     const owned = draftResource();
     const navigate = vi.fn();
     const fetchMock = stubFetch([
@@ -872,9 +934,14 @@ describe("role workspace pages", () => {
     );
     expect(navigate).toHaveBeenCalledWith("/research/7");
     fireEvent.click(
-      await screen.findByRole("button", { name: "Search catalog" }),
+      await screen.findByRole("button", {
+        name: "Open metadata for Catalog match",
+      }),
     );
-    expect(navigate).toHaveBeenCalledWith("/catalog?q=Catalog%20match");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(navigate).not.toHaveBeenCalledWith(
+      expect.stringContaining("/catalog"),
+    );
   });
 
   it("shows an error instead of mock submissions after a failed Researcher list request", async () => {
@@ -916,7 +983,7 @@ describe("role workspace pages", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("labels one-cent rounded similarity contributions as an approximate displayed equation", async () => {
+  it("shows only the title score on the researcher title checker page", async () => {
     stubFetch([
       [
         /\/api\/similarity\/query$/,
@@ -929,7 +996,7 @@ describe("role workspace pages", () => {
               publication_year: 2026,
               institution_name: null,
               institution_location: null,
-              academic_unit: null,
+              institute: null,
               degree_program: null,
               category: { name: "Education" },
               abstract: null,
@@ -956,107 +1023,28 @@ describe("role workspace pages", () => {
           ]),
       ],
     ]);
+    const navigate = vi.fn();
     render(
       <RoleSidebarPage
         role="researcher"
         selectedNav="Similarity Check"
-        navigate={vi.fn()}
+        navigate={navigate}
       />,
     );
 
     fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
       target: { value: "rounded" },
     });
+    fireEvent.click(screen.getByRole("button", { name: "Check Title" }));
+
+    expect(await screen.findByText("Title similarity")).toBeInTheDocument();
+    expect(screen.queryByText(/Displayed overall/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Content similarity/)).not.toBeInTheDocument();
     fireEvent.click(
-      screen.getByRole("button", { name: "Check for duplicates" }),
+      screen.getByRole("button", { name: "Open metadata for Rounded match" }),
     );
-
-    expect(
-      await screen.findByText("Displayed overall ≈ 8.77 + 16.41 ≈ 25.17%"),
-    ).toBeInTheDocument();
-    expect(screen.queryByText(/Overall =/)).not.toBeInTheDocument();
-  });
-
-  it("searches the repository and saves a match to the academics library", async () => {
-    const fetchMock = stubFetch([
-      [
-        /\/api\/repository\/similarity$/,
-        (_input, init) =>
-          init?.method === "POST"
-            ? new Response(
-                JSON.stringify({
-                  data: [
-                    {
-                      id: 42,
-                      title: "Related work",
-                      authors: [
-                        { author_name: "Ada Lovelace", author_order: 1 },
-                        { author_name: "Grace Hopper", author_order: 2 },
-                      ],
-                      publication_year: 2025,
-                      query_similarity_score: "0.785",
-                      academic_unit: "College of Education",
-                      degree_program: null,
-                      institution_name: null,
-                      institution_location: null,
-                      category: "Education",
-                      abstract: null,
-                      keywords: ["related", "work"],
-                      research_stage: "completed",
-                      manuscript_date_label: null,
-                      abstract_provenance: null,
-                    },
-                  ],
-                }),
-              )
-            : emptyPage(),
-      ],
-      [
-        /\/api\/academics\/library$/,
-        (_input, init) =>
-          init?.method === "POST"
-            ? new Response(
-                JSON.stringify({
-                  data: {
-                    id: 5,
-                    research_document_id: 42,
-                    title: "Related work",
-                    publication_year: 2025,
-                    saved_at: "2026-08-18T10:00:00.000000Z",
-                  },
-                }),
-                { status: 201 },
-              )
-            : emptyData(),
-      ],
-    ]);
-    render(
-      <RoleSidebarPage
-        role="academics"
-        selectedNav="Search"
-        navigate={vi.fn()}
-      />,
-    );
-    fireEvent.change(screen.getByLabelText("Search query"), {
-      target: { value: "related" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Search repository" }));
-    expect(
-      await screen.findByText("Ada Lovelace, Grace Hopper"),
-    ).toBeInTheDocument();
-    expect(screen.getByText("78.50%")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Save to library" }));
-    expect(
-      await screen.findByText("Saved to your library."),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Saved" })).toBeDisabled();
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/academics/library",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ research_document_id: 42 }),
-      }),
-    );
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(navigate).not.toHaveBeenCalled();
   });
 
   it("saves the statistician methodology checklist through the live endpoint", async () => {
@@ -1294,12 +1282,13 @@ describe("role workspace pages", () => {
         role="instructor"
         selectedNav="My Sections"
         navigate={vi.fn()}
+        instructorSectionId="7"
       />,
     );
     expect(await screen.findByText("CS-101")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "View details" }));
     expect(await screen.findByText("juan@example.edu")).toBeInTheDocument();
     expect(screen.getByText("2023-0001")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add student" }));
     expect(
       screen.getByRole("heading", { name: "Add a student researcher" }),
     ).toBeInTheDocument();
@@ -1325,7 +1314,9 @@ describe("role workspace pages", () => {
     await waitFor(() =>
       expect(screen.getAllByText("maria@example.edu")).toHaveLength(1),
     );
-    fireEvent.click(screen.getAllByRole("button", { name: "Remove" })[1]);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Remove Maria Santos" }),
+    );
     expect(
       await screen.findByRole("button", { name: "Remove student" }),
     ).toBeInTheDocument();
@@ -1335,6 +1326,331 @@ describe("role workspace pages", () => {
     ).toBeInTheDocument();
     await waitFor(() =>
       expect(screen.queryByText("maria@example.edu")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("renders section folder cards and navigates to the route-backed section page", async () => {
+    const navigate = vi.fn();
+    stubFetch([
+      [
+        /\/api\/instructor\/sections$/,
+        () =>
+          listData([
+            {
+              id: 7,
+              name: "CS-101",
+              section_code: "BSCS-4A",
+              academic_year: "2025-2026",
+              is_active: true,
+              documents_count: 2,
+              members_count: 4,
+              created_at: null,
+            },
+          ]),
+      ],
+    ]);
+
+    render(
+      <RoleSidebarPage
+        role="instructor"
+        selectedNav="My Sections"
+        navigate={navigate}
+      />,
+    );
+
+    const card = await screen.findByRole("button", {
+      name: "Open section CS-101",
+    });
+    expect(screen.queryByLabelText("Section name")).not.toBeInTheDocument();
+    fireEvent.click(card);
+    expect(navigate).toHaveBeenCalledWith("/app/instructor/sections/7");
+    fireEvent.click(screen.getByRole("button", { name: "Add Section" }));
+    expect(screen.getByLabelText("Section name")).toBeInTheDocument();
+    expect(screen.getByLabelText("Section code")).toBeRequired();
+    expect(screen.getByLabelText("Academic year")).toBeInTheDocument();
+  });
+
+  it("loads the project route with independent assignment disclosures and confirmations", async () => {
+    const navigate = vi.fn();
+    const student = {
+      id: "student-1",
+      email: "student@example.edu",
+      student_employee_id: "2023-0001",
+      first_name: "Student",
+      middle_name: null,
+      last_name: "One",
+      added_at: null,
+    };
+    const adviser = {
+      user_id: "adviser-1",
+      name: "Adviser One",
+      email: "adviser@example.edu",
+      team_role: "adviser",
+    };
+    stubFetch([
+      [
+        /\/api\/instructor\/sections$/,
+        () =>
+          listData([
+            {
+              id: 7,
+              name: "CS-101",
+              academic_year: "2025-2026",
+              is_active: true,
+              documents_count: 1,
+              members_count: 1,
+              created_at: null,
+            },
+          ]),
+      ],
+      [
+        /\/api\/instructor\/sections\/7\/documents$/,
+        () =>
+          listData([
+            {
+              research_document_id: 11,
+              title: "Project Alpha",
+              research_stage: "title_proposal",
+              submission_status: "draft",
+              updated_at: null,
+            },
+          ]),
+      ],
+      [/\/api\/instructor\/sections\/7\/members$/, () => listData([student])],
+      [/\/api\/instructor\/students(\?|$)/, () => listData([student])],
+      [
+        /\/api\/instructor\/sections\/7\/documents\/11\/members$/,
+        () => listData([student]),
+      ],
+      [
+        /\/api\/instructor\/sections\/7\/documents\/11\/team$/,
+        () =>
+          new Response(
+            JSON.stringify({
+              data: {
+                section_id: 7,
+                research_document_id: 11,
+                adviser,
+                research_office_representative: null,
+                chair: null,
+                panel_members: [],
+                complete: false,
+              },
+            }),
+          ),
+      ],
+      [
+        /\/api\/instructor\/sections\/7\/documents\/11\/team\/candidates/,
+        () => listData([adviser]),
+      ],
+    ]);
+
+    render(
+      <RoleSidebarPage
+        role="instructor"
+        selectedNav="My Sections"
+        navigate={navigate}
+        instructorSectionId="7"
+        instructorProjectDocumentId="11"
+      />,
+    );
+
+    expect(
+      await screen.findByRole("button", { name: "Back to Research Projects" }),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete research project" }),
+    );
+    expect(
+      screen.getByRole("heading", { name: "Delete research project" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Remove Student One" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Remove student" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Manage project assignments" }),
+    );
+    expect(
+      screen.getByRole("dialog", { name: "Manage project assignments" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Add students" }),
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.getByRole("button", { name: "Assign research adviser" }),
+    ).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(screen.getByRole("button", { name: "Add students" }));
+    expect(screen.getByLabelText("Search students")).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close Manage project assignments" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Manage project assignments" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByText("Loading current project assignments…"),
+      ).not.toBeInTheDocument(),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Assign research adviser" }),
+    );
+    expect(screen.getAllByText("Adviser One").length).toBeGreaterThan(0);
+    const adviserSearch = screen.getByLabelText(
+      "Search and select research adviser",
+    );
+    fireEvent.change(adviserSearch, { target: { value: "missing account" } });
+    fireEvent.change(adviserSearch, {
+      target: { value: "Adviser One" },
+    });
+    const adviserOption = screen.getByRole("radio", {
+      name: "Adviser One adviser@example.edu",
+    });
+    expect(adviserOption).toBeChecked();
+    fireEvent.click(
+      screen.getByRole("radio", {
+        name: "No assignment Leave this project role unassigned.",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Remove research adviser" }),
+    );
+    expect(
+      screen.getByRole("heading", { name: "Confirm assignment change" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Back to Research Projects" }),
+    );
+    expect(navigate).toHaveBeenCalledWith("/app/instructor/sections/7");
+    expect(
+      screen.queryByLabelText("Research project: Project Alpha"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("creates a research project from the section page and assigns roles on the project page", async () => {
+    const navigate = vi.fn();
+    const document = {
+      research_document_id: 11,
+      title: "Project Alpha",
+      research_stage: "title_proposal",
+      submission_status: "draft",
+      updated_at: null,
+    };
+    const adviser = {
+      user_id: "adviser-1",
+      name: "Adviser One",
+      email: "adviser@example.edu",
+      team_role: "adviser",
+    };
+    let documents: Array<typeof document> = [];
+    stubFetch([
+      [
+        /\/api\/instructor\/sections$/,
+        () =>
+          listData([
+            {
+              id: 7,
+              name: "CS-101",
+              academic_year: "2025-2026",
+              is_active: true,
+              documents_count: documents.length,
+              members_count: 0,
+              created_at: null,
+            },
+          ]),
+      ],
+      [
+        /\/api\/instructor\/sections\/7\/documents$/,
+        (input, init) => {
+          if (init?.method === "POST") {
+            documents = [document];
+            return new Response(JSON.stringify({ data: document }), {
+              status: 201,
+            });
+          }
+          return listData(documents);
+        },
+      ],
+      [/\/api\/instructor\/sections\/7\/members$/, emptyData],
+      [/\/api\/instructor\/students(\?|$)/, emptyData],
+      [
+        /\/api\/instructor\/sections\/7\/documents\/11\/team\/candidates/,
+        () => listData([adviser]),
+      ],
+      [
+        /\/api\/instructor\/sections\/7\/documents\/11\/team$/,
+        (input, init) => {
+          if (init?.method === "PUT") {
+            return new Response(
+              JSON.stringify({
+                data: {
+                  section_id: 7,
+                  research_document_id: 11,
+                  adviser,
+                  research_office_representative: null,
+                  chair: null,
+                  panel_members: [],
+                  complete: false,
+                },
+              }),
+            );
+          }
+          return new Response(
+            JSON.stringify({
+              data: {
+                section_id: 7,
+                research_document_id: 11,
+                adviser: null,
+                research_office_representative: null,
+                chair: null,
+                panel_members: [],
+                complete: false,
+              },
+            }),
+          );
+        },
+      ],
+      [/\/api\/instructor\/sections\/7\/documents\/11\/members$/, emptyData],
+    ]);
+
+    render(
+      <RoleSidebarPage
+        role="instructor"
+        selectedNav="My Sections"
+        navigate={navigate}
+        instructorSectionId="7"
+      />,
+    );
+
+    expect(await screen.findByText("CS-101")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Attach existing research" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Add Research Project" }),
+    );
+    fireEvent.change(screen.getByLabelText("Research title"), {
+      target: { value: "Project Alpha" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+    expect(
+      await screen.findByText("Research project created."),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("Project Alpha")).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Open research project Project Alpha",
+      }),
+    );
+    expect(navigate).toHaveBeenCalledWith(
+      "/app/instructor/sections/7/projects/11",
     );
   });
 
@@ -1409,5 +1725,152 @@ describe("role workspace pages", () => {
     await waitFor(() => expect(requests).toBeGreaterThan(initialRequests));
     expect(screen.queryByText("member@example.test")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Apply filters" })).toBeNull();
+  });
+
+  it("uses admin-style office user actions while only editing access", async () => {
+    let accessUpdate: { url: string; body: string } | null = null;
+    const officeUser = {
+      id: "user-id",
+      email: "member@example.test",
+      first_name: "Member",
+      middle_name: null,
+      last_name: "Example",
+      role: "researcher",
+      access_status: "active",
+      created_at: null,
+      updated_at: null,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        if (init?.method === "PATCH") {
+          accessUpdate = {
+            url: String(input),
+            body: String(init.body),
+          };
+          return new Response(JSON.stringify({ data: officeUser }));
+        }
+        return new Response(
+          JSON.stringify({ data: pageResponse([officeUser]) }),
+        );
+      }),
+    );
+
+    render(
+      <RoleSidebarPage
+        role="research-office"
+        selectedNav="User & Role Management"
+        navigate={vi.fn()}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Users" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Refresh users" }),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Edit member@example.test" }),
+    );
+
+    const dialog = screen.getByRole("dialog", {
+      name: "Edit member@example.test",
+    });
+    expect(within(dialog).queryByLabelText("Role")).not.toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText("Access status"), {
+      target: { value: "blocked" },
+    });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Save changes" }),
+    );
+
+    await waitFor(() =>
+      expect(accessUpdate).toEqual({
+        url: "/api/office/users/user-id",
+        body: JSON.stringify({ access_status: "blocked" }),
+      }),
+    );
+    expect(
+      screen.queryByRole("button", { name: /delete/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /add user/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("filters office users locally when the API returns an unfiltered page", async () => {
+    const users = [
+      {
+        id: "researcher-id",
+        email: "researcher@example.test",
+        first_name: "Alice",
+        middle_name: null,
+        last_name: "Researcher",
+        role: "researcher",
+        access_status: "active",
+        created_at: null,
+        updated_at: null,
+      },
+      {
+        id: "panel-id",
+        email: "panel@example.test",
+        first_name: "Bob",
+        middle_name: null,
+        last_name: "Panelist",
+        role: "panel",
+        access_status: "blocked",
+        created_at: null,
+        updated_at: null,
+      },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () => new Response(JSON.stringify({ data: pageResponse(users) })),
+      ),
+    );
+
+    render(
+      <RoleSidebarPage
+        role="research-office"
+        selectedNav="User & Role Management"
+        navigate={vi.fn()}
+      />,
+    );
+    expect(
+      await screen.findByText("researcher@example.test"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("panel@example.test")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Search"), {
+      target: { value: "Alice" },
+    });
+    expect(
+      await screen.findByText("researcher@example.test"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("panel@example.test")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Search"), {
+      target: { value: "" },
+    });
+    fireEvent.change(screen.getByLabelText("Role"), {
+      target: { value: "panel" },
+    });
+    expect(await screen.findByText("panel@example.test")).toBeInTheDocument();
+    expect(
+      screen.queryByText("researcher@example.test"),
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Role"), {
+      target: { value: "" },
+    });
+    fireEvent.change(screen.getByLabelText("Access status"), {
+      target: { value: "active" },
+    });
+    expect(
+      await screen.findByText("researcher@example.test"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("panel@example.test")).not.toBeInTheDocument();
   });
 });

@@ -1,10 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ExternalLink } from "lucide-react";
 import {
   listPersistedSimilarityResults,
   runTitleSimilarityCheck,
   type SimilarityResultResource,
 } from "./api";
 import { Button, EmptyState } from "./components";
+import PublicResearchMetadataDialog from "./PublicResearchMetadataDialog";
 import {
   classificationLabel,
   formatSimilarityPercentage,
@@ -21,12 +23,10 @@ export default function SimilarityResults({
   researchDocumentId,
   fetchPersistedResults = listPersistedSimilarityResults,
   checkTitleSimilarity = runTitleSimilarityCheck,
-  onOpenCatalog,
 }: {
   researchDocumentId?: string | number;
   fetchPersistedResults?: SimilarityFetcher;
   checkTitleSimilarity?: SimilarityChecker;
-  onOpenCatalog?: (matchedTitle: string) => void;
 }) {
   const hasSelectedResearch =
     researchDocumentId !== undefined && researchDocumentId !== null;
@@ -42,6 +42,9 @@ export default function SimilarityResults({
   const [checkErrorFor, setCheckErrorFor] = useState<string | number | null>(
     null,
   );
+  const [metadataResearchId, setMetadataResearchId] = useState<
+    string | number | null
+  >(null);
   const currentResearchDocumentId = useRef(researchDocumentId);
   const checkGeneration = useRef(0);
   const checking = checkingFor !== null && checkingFor === researchDocumentId;
@@ -322,15 +325,16 @@ export default function SimilarityResults({
                       ? new Date(result.analyzed_at).toLocaleString()
                       : "Not recorded"}
                   </p>
-                  {onOpenCatalog && (
-                    <Button
-                      variant="quiet"
-                      className="similarity-catalog-action"
-                      onClick={() => onOpenCatalog(result.matched_title)}
-                    >
-                      Search catalog
-                    </Button>
-                  )}
+                  <button
+                    className="icon-button similarity-catalog-action"
+                    aria-label={`Open metadata for ${result.matched_title}`}
+                    title="Open metadata"
+                    onClick={() =>
+                      setMetadataResearchId(result.matched_research_id)
+                    }
+                  >
+                    <ExternalLink size={17} aria-hidden="true" />
+                  </button>
                 </div>
               </li>
             );
@@ -343,6 +347,12 @@ export default function SimilarityResults({
           The manuscript similarity check could not be completed. Confirm that a
           current text-based PDF or DOCX is available, then try again.
         </p>
+      )}
+      {metadataResearchId !== null && (
+        <PublicResearchMetadataDialog
+          researchDocumentId={metadataResearchId}
+          onClose={() => setMetadataResearchId(null)}
+        />
       )}
     </section>
   );

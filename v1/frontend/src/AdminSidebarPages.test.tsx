@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import AdminSidebarPage from "./AdminSidebarPages";
 import Dashboard from "./Dashboard";
@@ -182,18 +188,22 @@ describe("administrator sidebar pages", () => {
       />,
     );
     fireEvent.click(
-      screen.getByRole("button", { name: "Account Provisioning" }),
+      screen.getByRole("button", { name: "User & Role Management" }),
     );
+    fireEvent.click(await screen.findByRole("button", { name: "Add user" }));
     expect(
-      await screen.findByText("coordinator@example.test"),
+      await screen.findByRole("heading", { name: "Add user" }),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "All Users" }));
+    expect(
+      screen.getAllByRole("option", { name: "Research Editor" }).length,
+    ).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Close Add user" }));
     expect(await screen.findByText("member@example.test")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Audit Logs" }));
     expect(await screen.findByText("Signed in.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Import Manuscript" }));
+    fireEvent.click(screen.getByRole("button", { name: "Upload Manuscript" }));
     expect(
-      await screen.findByRole("heading", { name: "Import Manuscript" }),
+      await screen.findByRole("heading", { name: "Upload Manuscript" }),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "System Settings" }));
     expect(
@@ -247,7 +257,7 @@ describe("administrator sidebar pages", () => {
     fireEvent.change(screen.getByLabelText("Workspace role"), {
       target: { value: "librarian" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Provision account" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add user" }));
     expect(await screen.findByText("Account provisioned.")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/admin/accounts",
@@ -350,24 +360,27 @@ describe("administrator sidebar pages", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<AdminSidebarPage selectedNav="All Users" />);
     expect(await screen.findByText("member@example.test")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Role for member@example.test"), {
+    fireEvent.click(
+      screen.getByRole("button", { name: "Edit member@example.test" }),
+    );
+    const dialog = screen.getByRole("dialog", {
+      name: "Edit member@example.test",
+    });
+    fireEvent.change(within(dialog).getByLabelText("Role"), {
       target: { value: "admin" },
     });
-    fireEvent.change(
-      screen.getByLabelText("Access status for member@example.test"),
-      { target: { value: "invited" } },
+    fireEvent.change(within(dialog).getByLabelText("Access status"), {
+      target: { value: "invited" },
+    });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Save changes" }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(
       await screen.findByText("At least one active administrator must remain."),
     ).toBeInTheDocument();
     await waitFor(() => expect(userRequests).toBeGreaterThan(1));
-    expect(screen.getByLabelText("Role for member@example.test")).toHaveValue(
-      "adviser",
-    );
-    expect(
-      screen.getByLabelText("Access status for member@example.test"),
-    ).toHaveValue("blocked");
+    expect(screen.getByRole("cell", { name: "Adviser" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "Blocked" })).toBeInTheDocument();
     expect(screen.queryByText(/password/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/google_sub/i)).not.toBeInTheDocument();
   });
@@ -401,25 +414,63 @@ describe("administrator sidebar pages", () => {
 
     render(<AdminSidebarPage selectedNav="All Users" />);
     expect(await screen.findByText("member@example.test")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Role for member@example.test"), {
+    fireEvent.click(
+      screen.getByRole("button", { name: "Edit member@example.test" }),
+    );
+    const dialog = screen.getByRole("dialog", {
+      name: "Edit member@example.test",
+    });
+    fireEvent.change(within(dialog).getByLabelText("Role"), {
       target: { value: "admin" },
     });
-    fireEvent.change(
-      screen.getByLabelText("Access status for member@example.test"),
-      { target: { value: "invited" } },
+    fireEvent.change(within(dialog).getByLabelText("Access status"), {
+      target: { value: "invited" },
+    });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Save changes" }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     expect(
       await screen.findByText("Updated member@example.test."),
     ).toBeInTheDocument();
     await waitFor(() => expect(userRequests).toBeGreaterThan(1));
-    expect(screen.getByLabelText("Role for member@example.test")).toHaveValue(
-      "coordinator",
+    expect(
+      screen.getByRole("cell", { name: "Coordinator" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "Blocked" })).toBeInTheDocument();
+  });
+
+  it("confirms and deletes a user account", async () => {
+    let deleted = false;
+    const fetchMock = vi.fn(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        if (init?.method === "DELETE") {
+          deleted = true;
+          return new Response(null, { status: 204 });
+        }
+        return new Response(JSON.stringify(page(deleted ? [] : [user])));
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AdminSidebarPage selectedNav="All Users" />);
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Delete member@example.test",
+      }),
     );
     expect(
-      screen.getByLabelText("Access status for member@example.test"),
-    ).toHaveValue("blocked");
+      screen.getByRole("heading", { name: "Delete user account" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Delete user" }));
+
+    expect(
+      await screen.findByText("Deleted member@example.test."),
+    ).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/admin/users/${user.id}`,
+      expect.objectContaining({ method: "DELETE" }),
+    );
   });
 
   it("filters admin users live as search text changes without submitting", async () => {

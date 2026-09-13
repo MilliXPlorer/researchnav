@@ -285,7 +285,11 @@ class AdminFullAccessTest extends TestCase
 
     private function document(User $owner, array $attributes = []): ResearchDocument
     {
-        return ResearchDocument::factory()->create(array_merge(['submitted_by' => $owner->id], $attributes));
+        return ResearchDocument::factory()->create(array_merge([
+            'submitted_by' => $owner->id,
+            'institute' => 'Institute of Computer Studies',
+            'degree_program' => 'Bachelor of Science in Computer Science',
+        ], $attributes));
     }
 
     private function revision(ResearchDocument $research, User $requester, int $number): Revision

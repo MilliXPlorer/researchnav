@@ -9,6 +9,38 @@ export const instituteNames = [
   "Institute of Teacher Education",
 ] as const;
 
+export const programsByInstitute: Record<
+  (typeof instituteNames)[number],
+  readonly string[]
+> = {
+  "Institute of Computer Studies": [
+    "Bachelor of Science in Computer Science",
+    "Bachelor of Science in Information Technology",
+  ],
+  "Institute of Health Sciences": ["Bachelor of Science in Midwifery"],
+  "Institute of Business and Financial Management": [
+    "Bachelor of Science in Business Administration major in Human Resource Management",
+    "Bachelor of Science in Business Administration major in Marketing Management",
+  ],
+  "Institute of Arts and Sciences": [
+    "Bachelor of Arts in Communication",
+    "Bachelor of Arts in English Language",
+    "Bachelor of Arts in Political Science",
+  ],
+  "Institute of Criminal Justice Education": [
+    "Bachelor of Science in Criminology",
+    "Bachelor of Science in Industrial Security Management",
+  ],
+  "Institute of Teacher Education": [
+    "Bachelor of Elementary Education",
+    "Bachelor of Secondary Education major in English",
+    "Bachelor of Secondary Education major in Filipino",
+    "Bachelor of Secondary Education major in Mathematics",
+    "Bachelor of Secondary Education major in Science",
+    "Bachelor of Secondary Education major in Social Studies",
+  ],
+};
+
 // New Google-authenticated accounts stay blocked until a coordinator activates an assignment.
 export const defaultUserSession: UserSession = {
   email: "researcher@gmail.com",
@@ -30,11 +62,10 @@ export const roleConfigs: RoleConfig[] = [
     shortLabel: "Administrator",
     description: "Provision accounts and manage system-wide access.",
     nav: [
-      "Access Requests",
-      "Account Provisioning",
-      "All Users",
+      "Dashboard",
+      "User & Role Management",
       "Audit Logs",
-      "Import Manuscript",
+      "Upload Manuscript",
       "System Settings",
     ],
   },
@@ -57,7 +88,6 @@ export const roleConfigs: RoleConfig[] = [
       "Manuscript Review",
       "Monitoring",
       "Review History",
-      "Panelist Availability",
     ],
   },
   {
@@ -67,6 +97,7 @@ export const roleConfigs: RoleConfig[] = [
     description: "Oversee class proposals and similarity trends.",
     nav: [
       "Dashboard",
+      "My Sections",
       "Assigned Research",
       "Review Submissions",
       "Monitoring",
@@ -150,22 +181,13 @@ export const roleConfigs: RoleConfig[] = [
 
     shortLabel: "Research Office personnel",
 
-    description: "Manage compliance, reports, roles, and privacy.",
+    description: "Manage compliance, reports, and roles.",
 
     nav: [
-      "Institutional Overview",
-      "Compliance Review",
-      "Import Manuscript",
+      "Dashboard",
+      "Upload Manuscript",
       "User & Role Management",
       "Reports & Exports",
-      "Data Privacy Log",
     ],
-  },
-  {
-    id: "academics",
-    label: "Academics",
-    shortLabel: "Faculty member",
-    description: "Search, save, and cross-reference studies.",
-    nav: ["Search", "My Library", "Browse by Category"],
   },
 ];

@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import {
   ApiError,
   decideAccessRequest,
+  deleteAdminUser,
   getSystemStatus,
   listAccessRequests,
   listAdminAuditLogs,
@@ -21,8 +22,10 @@ import {
 } from "./api";
 import { Button } from "./components";
 import { DatePickerInput } from "./dateControls";
+import { ConfirmDialog, Modal } from "./Modal";
 import ResearchOfficeBulkImport from "./ResearchOfficeBulkImport";
 import { useLiveFilters } from "./useLiveFilters";
+import { filterUserRows } from "./userManagement";
 
 const roles: AdminRole[] = [
   "admin",
@@ -35,7 +38,6 @@ const roles: AdminRole[] = [
   "librarian",
   "research_editor",
   "research-office",
-  "academics",
 ];
 const accessStatuses: AccessStatus[] = ["active", "invited", "blocked"];
 
@@ -45,6 +47,8 @@ export default function AdminSidebarPage({
   selectedNav: string;
 }) {
   switch (selectedNav) {
+    case "User & Role Management":
+      return <UserRoleManagement />;
     case "Access Requests":
       return <AccessRequests />;
     case "Account Provisioning":
@@ -53,13 +57,50 @@ export default function AdminSidebarPage({
       return <AllUsers />;
     case "Audit Logs":
       return <AuditLogs />;
-    case "Import Manuscript":
+    case "Upload Manuscript":
       return <ResearchOfficeBulkImport contextLabel="System Administrator" />;
     case "System Settings":
       return <SystemStatus />;
     default:
       return null;
   }
+}
+
+function UserRoleManagement() {
+  const [addUserOpen, setAddUserOpen] = useState(false);
+  const [usersVersion, setUsersVersion] = useState(0);
+
+  return (
+    <div className="workspace-content admin-sidebar-page">
+      <PageHeader
+        title="User & role management"
+        description="Add users, assign roles, and manage account access."
+      />
+      <AllUsers
+        key={usersVersion}
+        embedded
+        onAdd={() => setAddUserOpen(true)}
+      />
+      {addUserOpen && (
+        <Modal label="Add user" onClose={() => setAddUserOpen(false)}>
+          <div className="admin-add-user-modal">
+            <header>
+              <p className="eyebrow">User & role management</p>
+              <h2>Add user</h2>
+              <p>Enter an email address and choose the user's role.</p>
+            </header>
+            <AccountProvisioning
+              embedded
+              onAdded={() => {
+                setAddUserOpen(false);
+                setUsersVersion((version) => version + 1);
+              }}
+            />
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
 }
 
 function PageHeader({
@@ -316,7 +357,13 @@ function AccessRequests() {
   );
 }
 
-function AccountProvisioning() {
+function AccountProvisioning({
+  embedded = false,
+  onAdded,
+}: {
+  embedded?: boolean;
+  onAdded?: () => void;
+}) {
   const [users, setUsers] = useState<Awaited<
     ReturnType<typeof listAdminProvisionedAccounts>
   > | null>(null);
@@ -335,6 +382,7 @@ function AccountProvisioning() {
   }
 
   useEffect(() => {
+    if (embedded) return;
     let cancelled = false;
     void listAdminProvisionedAccounts()
       .then((result) => {
@@ -353,7 +401,7 @@ function AccountProvisioning() {
     return () => {
       cancelled = true;
     };
-  }, [attempt]);
+  }, [attempt, embedded]);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -363,7 +411,8 @@ function AccountProvisioning() {
       await provisionAdminAccount(email.trim(), role);
       setEmail("");
       setNotice("Account provisioned.");
-      reload();
+      if (onAdded) onAdded();
+      else reload();
     } catch (requestError) {
       setNotice(
         friendlyError(requestError, "Account could not be provisioned"),
@@ -374,13 +423,19 @@ function AccountProvisioning() {
   }
 
   return (
-    <div className="workspace-content admin-sidebar-page">
-      <PageHeader
-        title="Account provisioning"
-        description="Invite users and assign any supported workspace role."
-      />
+    <div
+      className={
+        embedded ? "admin-data-grid" : "workspace-content admin-sidebar-page"
+      }
+    >
+      {!embedded && (
+        <PageHeader
+          title="User & role management"
+          description="Add users, assign roles, and manage account access."
+        />
+      )}
       <section className="panel-card admin-provision-card">
-        <h2>Provision account</h2>
+        {!embedded && <h2>Add user</h2>}
         <form onSubmit={submit} className="admin-inline-form">
           <label>
             Account email
@@ -408,7 +463,7 @@ function AccountProvisioning() {
             </select>
           </label>
           <Button type="submit" disabled={provisioning}>
-            {provisioning ? "Provisioning…" : "Provision account"}
+            {provisioning ? "Adding…" : "Add user"}
           </Button>
         </form>
         {notice && (
@@ -422,51 +477,59 @@ function AccountProvisioning() {
           </p>
         )}
       </section>
-      <section className="panel-card admin-data-card">
-        <div className="admin-card-heading">
-          <div>
-            <h2>Provisioned accounts</h2>
-            <p>Only role and account-access information is listed.</p>
+      {!embedded && (
+        <section className="panel-card admin-data-card">
+          <div className="admin-card-heading">
+            <div>
+              <h2>Provisioned accounts</h2>
+              <p>Only role and account-access information is listed.</p>
+            </div>
+            <Button variant="secondary" onClick={reload}>
+              <RefreshCw /> Refresh
+            </Button>
           </div>
-          <Button variant="secondary" onClick={reload}>
-            <RefreshCw /> Refresh
-          </Button>
-        </div>
-        {error ? (
-          <InlineError message={error} retry={reload} />
-        ) : loading || users === null ? (
-          <Loading label="Loading provisioned accounts" />
-        ) : users.length === 0 ? (
-          <p className="admin-empty">No accounts have been provisioned.</p>
-        ) : (
-          <div className="admin-table-wrap">
-            <table>
-              <caption className="sr-only">Provisioned accounts</caption>
-              <thead>
-                <tr>
-                  <th>Email</th>
-                  <th>Role</th>
-                  <th>Access</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((user) => (
-                  <tr key={user.email}>
-                    <td>{user.email}</td>
-                    <td>{label(user.role)}</td>
-                    <td>{label(user.accessStatus)}</td>
+          {error ? (
+            <InlineError message={error} retry={reload} />
+          ) : loading || users === null ? (
+            <Loading label="Loading provisioned accounts" />
+          ) : users.length === 0 ? (
+            <p className="admin-empty">No accounts have been provisioned.</p>
+          ) : (
+            <div className="admin-table-wrap">
+              <table>
+                <caption className="sr-only">Provisioned accounts</caption>
+                <thead>
+                  <tr>
+                    <th>Email</th>
+                    <th>Role</th>
+                    <th>Access</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+                </thead>
+                <tbody>
+                  {users.map((user) => (
+                    <tr key={user.email}>
+                      <td>{user.email}</td>
+                      <td>{label(user.role)}</td>
+                      <td>{label(user.accessStatus)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 }
 
-function AllUsers() {
+function AllUsers({
+  embedded = false,
+  onAdd,
+}: {
+  embedded?: boolean;
+  onAdd?: () => void;
+}) {
   const [query, setQuery] = useState({
     search: "",
     role: "",
@@ -481,6 +544,12 @@ function AllUsers() {
     Record<string, { role: AdminRole; access_status: AccessStatus }>
   >({});
   const [saving, setSaving] = useState<string | null>(null);
+  const [editingUser, setEditingUser] = useState<AdminUserResource | null>(
+    null,
+  );
+  const [deletingUser, setDeletingUser] = useState<AdminUserResource | null>(
+    null,
+  );
   const [saveMessage, setSaveMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const { filters, change } = useLiveFilters(
@@ -546,6 +615,7 @@ function AllUsers() {
         return remaining;
       });
       setSaveMessage(`Updated ${user.email}.`);
+      setEditingUser(null);
       reload();
     } catch (requestError) {
       setDrafts((current) => {
@@ -556,19 +626,66 @@ function AllUsers() {
       setSaveMessage(
         friendlyError(requestError, "User change could not be saved"),
       );
+      setEditingUser(null);
       reload();
     } finally {
       setSaving(null);
     }
   }
 
+  async function remove(user: AdminUserResource) {
+    setSaveMessage("");
+    setSaving(user.id);
+    try {
+      await deleteAdminUser(user.id);
+      setSaveMessage(`Deleted ${user.email}.`);
+      setDeletingUser(null);
+      reload();
+    } catch (requestError) {
+      setSaveMessage(
+        friendlyError(requestError, "User account could not be deleted"),
+      );
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  const visibleUsers = filterUserRows(result?.data ?? [], filters, fullName);
+
   return (
-    <div className="workspace-content admin-sidebar-page">
-      <PageHeader
-        title="All users"
-        description="Review account access and roles. Authentication and session data are never displayed."
-      />
+    <div
+      className={
+        embedded ? "admin-data-grid" : "workspace-content admin-sidebar-page"
+      }
+    >
+      {!embedded && (
+        <PageHeader
+          title="User & role management"
+          description="Add users, assign roles, and manage account access."
+        />
+      )}
       <section className="panel-card admin-data-card">
+        <div className="admin-card-heading">
+          <div>
+            <h2>Users</h2>
+            <p>Search users and update their role or access.</p>
+          </div>
+          <div className="row-actions">
+            {onAdd && (
+              <Button onClick={onAdd} aria-label="Add user" title="Add user">
+                <Plus aria-hidden="true" />
+              </Button>
+            )}
+            <Button
+              variant="secondary"
+              onClick={reload}
+              aria-label="Refresh users"
+              title="Refresh users"
+            >
+              <RefreshCw aria-hidden="true" />
+            </Button>
+          </div>
+        </div>
         <form className="admin-filters" onSubmit={applyFilters}>
           <label>
             Search
@@ -611,7 +728,8 @@ function AllUsers() {
           <p
             role="status"
             className={
-              saveMessage.startsWith("Updated")
+              saveMessage.startsWith("Updated") ||
+              saveMessage.startsWith("Deleted")
                 ? "admin-success"
                 : "admin-error"
             }
@@ -623,7 +741,7 @@ function AllUsers() {
           <InlineError message={error} retry={reload} />
         ) : loading || result === null ? (
           <Loading label="Loading users" />
-        ) : result.data.length === 0 ? (
+        ) : visibleUsers.length === 0 ? (
           <p className="admin-empty">
             {hasFilters(query)
               ? "No users match these filters."
@@ -642,69 +760,51 @@ function AllUsers() {
                     <th>Access</th>
                     <th>Last login</th>
                     <th>Created</th>
-                    <th>Save</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {result.data.map((user) => {
-                    const draft = draftFor(user);
+                  {visibleUsers.map((user) => {
                     return (
                       <tr key={user.id}>
                         <td>{fullName(user) || "—"}</td>
                         <td>{user.email}</td>
-                        <td>
-                          <select
-                            aria-label={`Role for ${user.email}`}
-                            value={draft.role}
-                            onChange={(event) =>
-                              setDrafts((current) => ({
-                                ...current,
-                                [user.id]: {
-                                  ...draft,
-                                  role: event.target.value as AdminRole,
-                                },
-                              }))
-                            }
-                          >
-                            {roles.map((role) => (
-                              <option key={role} value={role}>
-                                {label(role)}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                        <td>
-                          <select
-                            aria-label={`Access status for ${user.email}`}
-                            value={draft.access_status}
-                            onChange={(event) =>
-                              setDrafts((current) => ({
-                                ...current,
-                                [user.id]: {
-                                  ...draft,
-                                  access_status: event.target
-                                    .value as AccessStatus,
-                                },
-                              }))
-                            }
-                          >
-                            {accessStatuses.map((status) => (
-                              <option key={status} value={status}>
-                                {label(status)}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
+                        <td>{label(user.role)}</td>
+                        <td>{label(user.access_status)}</td>
                         <td>{displayDate(user.last_login_at)}</td>
                         <td>{displayDate(user.created_at)}</td>
                         <td>
-                          <Button
-                            variant="secondary"
-                            onClick={() => void save(user)}
-                            disabled={saving === user.id}
-                          >
-                            {saving === user.id ? "Saving…" : "Save"}
-                          </Button>
+                          <span className="row-actions">
+                            <Button
+                              variant="secondary"
+                              className="icon-button"
+                              aria-label={`Edit ${user.email}`}
+                              title="Edit user"
+                              onClick={() => {
+                                setDrafts((current) => ({
+                                  ...current,
+                                  [user.id]: {
+                                    role: user.role,
+                                    access_status: user.access_status,
+                                  },
+                                }));
+                                setEditingUser(user);
+                              }}
+                              disabled={saving === user.id}
+                            >
+                              <Pencil />
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              className="icon-button"
+                              aria-label={`Delete ${user.email}`}
+                              title="Delete user"
+                              onClick={() => setDeletingUser(user)}
+                              disabled={saving === user.id}
+                            >
+                              <Trash2 />
+                            </Button>
+                          </span>
                         </td>
                       </tr>
                     );
@@ -722,6 +822,84 @@ function AllUsers() {
           </>
         )}
       </section>
+      {editingUser && (
+        <Modal
+          label={`Edit ${editingUser.email}`}
+          onClose={() => setEditingUser(null)}
+          busy={saving === editingUser.id}
+        >
+          <form
+            className="admin-user-edit-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void save(editingUser);
+            }}
+          >
+            <header className="admin-user-edit-header">
+              <p className="eyebrow">User management</p>
+              <h2>Edit user</h2>
+              <p>{editingUser.email}</p>
+            </header>
+            <label>
+              Role
+              <select
+                value={draftFor(editingUser).role}
+                onChange={(event) =>
+                  setDrafts((current) => ({
+                    ...current,
+                    [editingUser.id]: {
+                      ...draftFor(editingUser),
+                      role: event.target.value as AdminRole,
+                    },
+                  }))
+                }
+              >
+                {roles.map((role) => (
+                  <option key={role} value={role}>
+                    {label(role)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Access status
+              <select
+                value={draftFor(editingUser).access_status}
+                onChange={(event) =>
+                  setDrafts((current) => ({
+                    ...current,
+                    [editingUser.id]: {
+                      ...draftFor(editingUser),
+                      access_status: event.target.value as AccessStatus,
+                    },
+                  }))
+                }
+              >
+                {accessStatuses.map((status) => (
+                  <option key={status} value={status}>
+                    {label(status)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="modal-actions admin-user-edit-actions">
+              <Button type="submit" disabled={saving === editingUser.id}>
+                {saving === editingUser.id ? "Saving…" : "Save changes"}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+      {deletingUser && (
+        <ConfirmDialog
+          title="Delete user account"
+          message={`Delete ${deletingUser.email}? The account will immediately lose access to ResearchNAV.`}
+          confirmLabel="Delete user"
+          busy={saving === deletingUser.id}
+          onConfirm={() => void remove(deletingUser)}
+          onCancel={() => setDeletingUser(null)}
+        />
+      )}
     </div>
   );
 }

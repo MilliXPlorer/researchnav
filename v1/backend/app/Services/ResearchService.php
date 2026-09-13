@@ -61,7 +61,11 @@ class ResearchService
             if (! $importedArchive) {
                 $this->ensureEditable($locked);
             }
-            $locked->fill($importedArchive ? $this->metadata($data) : array_merge($this->metadata($data), ['visibility' => 'private']));
+            $metadata = $this->metadata($data);
+            if ($importedArchive && array_key_exists('abstract', $metadata) && (string) $metadata['abstract'] !== (string) $locked->abstract) {
+                $metadata['abstract_provenance'] = 'Manually corrected by authorized Research Office personnel.';
+            }
+            $locked->fill($importedArchive ? $metadata : array_merge($metadata, ['visibility' => 'private']));
             $locked->save();
             if ($authors !== null) {
                 if (! $importedArchive && ! DomainAuthorization::isResearcherOwner($actor, $locked) && ! DomainAuthorization::isActiveAdministrator($actor)) {
@@ -92,6 +96,7 @@ class ResearchService
             $locked = ResearchDocument::query()->whereKey($research->id)->lockForUpdate()->firstOrFail();
             $this->monitoring->log($locked, 'RESEARCH_DELETED', $actor, 'Deleted an imported research record.', 'archived', null, 'archived');
             $this->audit->log($actor, 'RESEARCH_DELETED', $locked, 'Deleted an imported research record.', $request);
+            $locked->forceFill(['import_source_sha256' => null])->save();
             $locked->deleteOrFail();
         });
     }
@@ -155,7 +160,7 @@ class ResearchService
     /** @param array<string, mixed> $data @return array<string, mixed> */
     private function metadata(array $data): array
     {
-        $allowed = array_intersect_key($data, array_flip(['category_id', 'title', 'abstract', 'keywords', 'publication_year', 'research_stage']));
+        $allowed = array_intersect_key($data, array_flip(['category_id', 'title', 'abstract', 'keywords', 'publication_year', 'institute', 'degree_program', 'manuscript_date_label', 'research_stage']));
         if (isset($allowed['title'])) {
             $allowed['normalized_title'] = str($allowed['title'])->lower()->replaceMatches('/[^a-z0-9]+/', ' ')->trim()->toString();
         }
@@ -169,8 +174,11 @@ class ResearchService
         if (trim($research->title) === '') {
             $errors['title'] = ['A title is required before submission.'];
         }
-        if ($research->category_id === null || ! $research->category()->where('is_active', true)->exists()) {
-            $errors['category_id'] = ['An active category is required before submission.'];
+        if (! in_array($research->institute, ResearchDocument::INSTITUTES, true)) {
+            $errors['institute'] = ['An institute is required before submission.'];
+        }
+        if (! in_array($research->degree_program, ResearchDocument::PROGRAMS_BY_INSTITUTE[$research->institute] ?? [], true)) {
+            $errors['degree_program'] = ['A program offered by the institute is required before submission.'];
         }
         if (! $research->authors()->exists()) {
             $errors['authors'] = ['At least one author is required before submission.'];

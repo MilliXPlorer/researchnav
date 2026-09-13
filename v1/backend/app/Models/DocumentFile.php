@@ -15,12 +15,12 @@ class DocumentFile extends Model
 
     protected $fillable = [
         'research_document_id', 'uploaded_by', 'document_type', 'version_number', 'original_filename',
-        'stored_filename', 'file_path', 'file_extension', 'mime_type', 'file_size', 'is_current', 'uploaded_at',
+        'relative_path', 'file_order', 'content_sha256', 'stored_filename', 'file_path', 'file_extension', 'mime_type', 'file_size', 'is_current', 'uploaded_at',
     ];
 
     protected function casts(): array
     {
-        return ['version_number' => 'integer', 'file_size' => 'integer', 'is_current' => 'boolean', 'uploaded_at' => 'datetime'];
+        return ['version_number' => 'integer', 'file_order' => 'integer', 'file_size' => 'integer', 'is_current' => 'boolean', 'uploaded_at' => 'datetime'];
     }
 
     public function researchDocument(): BelongsTo

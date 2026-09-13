@@ -27,7 +27,6 @@ class RoleWorkspaceApiTest extends TestCase
             ['get', '/api/coordinator/schedules', 'coordinator'],
             ['get', '/api/librarian/archiving-queue', 'librarian'],
             ['get', '/api/office/compliance', 'research-office'],
-            ['get', '/api/academics/library', 'academics'],
         ];
 
         foreach ($routes as [$method, $path, $role]) {
@@ -254,15 +253,20 @@ class RoleWorkspaceApiTest extends TestCase
         $proposal = $this->document('submitted', $student);
         $this->assign($office, $proposal, $instructor, 'instructor');
 
-        $this->as($instructor)->postJson('/api/instructor/sections', ['name' => 'BSCS 4A', 'academic_year' => '2025-2026'], $this->origin())
+        $this->as($instructor)->postJson('/api/instructor/sections', ['name' => 'Thesis 2', 'academic_year' => '2025-2026'], $this->origin())
+            ->assertBadRequest();
+        $this->assertDatabaseCount('class_sections', 0);
+
+        $this->as($instructor)->postJson('/api/instructor/sections', ['name' => 'Thesis 2', 'section_code' => 'BSCS-4A', 'academic_year' => '2025-2026'], $this->origin())
             ->assertCreated()
-            ->assertJsonPath('data.name', 'BSCS 4A');
+            ->assertJsonPath('data.name', 'Thesis 2')
+            ->assertJsonPath('data.section_code', 'BSCS-4A');
         $section = ClassSection::query()->firstOrFail();
         $this->assertDatabaseHas('audit_logs', ['action' => 'CLASS_SECTION_CREATED']);
 
-        $this->as($instructor)->putJson('/api/instructor/sections/'.$section->id.'/documents', ['research_document_ids' => [$proposal->id]], $this->origin())
-            ->assertOk();
-        $this->assertDatabaseHas('research_documents', ['id' => $proposal->id, 'section_id' => $section->id]);
+        $project = $this->as($instructor)->postJson('/api/instructor/sections/'.$section->id.'/documents', ['title' => 'Instructor Project'], $this->origin())
+            ->assertCreated();
+        $this->assertDatabaseHas('research_documents', ['id' => $project->json('data.research_document_id'), 'section_id' => $section->id]);
 
         $this->as($instructor)->getJson('/api/instructor/sections')
             ->assertOk()

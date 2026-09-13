@@ -52,6 +52,9 @@ class PublicRepositoryService
         if ($category = $filters['category'] ?? null) {
             $query->whereHas('category', fn (Builder $categories) => $categories->where('slug', $category)->orWhere('name', $category));
         }
+        if ($institute = $filters['institute'] ?? null) {
+            $query->where('institute', $institute);
+        }
         if ($year = $filters['publication_year'] ?? $filters['year'] ?? null) {
             $query->where('publication_year', $year);
         } else {
@@ -63,7 +66,12 @@ class PublicRepositoryService
             }
         }
 
-        return $query->orderByDesc('research_documents.publication_year')->orderBy('research_documents.title')->orderBy('research_documents.id')->paginate(min((int) ($filters['per_page'] ?? 15), 50));
+        return $query
+            ->orderByDesc('research_documents.publication_year')
+            ->orderBy('research_documents.title')
+            ->orderBy('research_documents.id')
+            ->paginate(min((int) ($filters['per_page'] ?? 15), 1000))
+            ->appends($filters);
     }
 
     public function find(int $id): ResearchDocument

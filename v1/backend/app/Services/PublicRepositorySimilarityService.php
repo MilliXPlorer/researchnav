@@ -2,20 +2,14 @@
 
 namespace App\Services;
 
-use App\Models\DocumentFile;
-use App\Models\ManuscriptSearchDocument;
 use App\Models\ResearchDocument;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Support\Str;
 
 class PublicRepositorySimilarityService
 {
     public function __construct(
         private readonly SimilarityProcessRunner $process,
-        private readonly SupabaseStorageService $storage,
-        private readonly ManuscriptTextExtractor $extractor,
-        private readonly ManuscriptSimilarityTextCache $textCache,
     ) {}
 
     /**
@@ -27,8 +21,9 @@ class PublicRepositorySimilarityService
      */
     public function compare(string $query): array
     {
-        $maximumCandidates = min(250, max(1, (int) config('researchnav.similarity.maximum_candidates')));
-        $candidates = $this->withCloudManuscriptContent($this->eligibleCandidates($maximumCandidates));
+        $this->configureMemoryLimit();
+        $maximumCandidates = min(1000, max(1, (int) config('researchnav.similarity.maximum_candidates')));
+        $candidates = $this->eligibleCandidates($maximumCandidates);
         $candidateSnapshots = $this->candidateSnapshots($candidates);
 
         if ($candidates->count() > $maximumCandidates) {
@@ -37,7 +32,7 @@ class PublicRepositorySimilarityService
 
         $results = $this->process->runQuery($query, $candidates);
         $candidateIds = $candidates->pluck('id')->map(fn ($id): int => (int) $id)->all();
-        $currentCandidates = $this->withCloudManuscriptContent($this->eligibleCandidatesById($candidateIds));
+        $currentCandidates = $this->eligibleCandidatesById($candidateIds);
 
         if ($currentCandidates->pluck('id')->sort()->values()->all() !== collect($candidateIds)->sort()->values()->all()) {
             throw new PublicRepositorySimilarityCatalogChangedException('Public similarity catalog changed during scoring.');
@@ -65,6 +60,68 @@ class PublicRepositorySimilarityService
                 'fasttext_support_score' => $result['fasttext_support_score'],
             ];
         }, $nonzeroResults);
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public function compareTitle(string $query): array
+    {
+        $candidates = $this->eligibleCandidates(min(1000, max(1, (int) config('researchnav.similarity.maximum_candidates'))));
+        $results = $this->process->runTitleQuery($query, $candidates);
+        $results = array_values(array_filter(
+            $results,
+            fn (array $result): bool => $result['title_similarity_score'] !== '0.000000000000',
+        ));
+        $byId = $candidates->keyBy('id');
+
+        return array_map(function (array $result) use ($byId): array {
+            /** @var ResearchDocument $research */
+            $research = $byId->get($result['matched_research_id']);
+            $score = $result['title_similarity_score'];
+
+            return [
+                'research' => $research,
+                ...$result,
+                'fasttext_support_score' => $result['fasttext_support_score'],
+                'title_weight' => '1.000000000000',
+                'title_weighted_contribution' => SimilarityScorePolicy::percentage($score),
+                'overall_similarity_score' => $score,
+                'overall_similarity_percentage' => SimilarityScorePolicy::percentage($score),
+                'algorithm_version' => 'title-only-v1',
+            ];
+        }, $results);
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public function compareContent(string $query): array
+    {
+        $candidates = $this->eligibleCandidates(min(250, max(1, (int) config('researchnav.similarity.maximum_candidates'))));
+        $results = array_values(array_filter(
+            $this->process->runContentTextQuery($query, $candidates),
+            fn (array $result): bool => $result['content_similarity_score'] !== null
+                && $result['content_similarity_score'] !== '0.000000000000',
+        ));
+        $byId = $candidates->keyBy('id');
+
+        return array_map(function (array $result) use ($byId): array {
+            /** @var ResearchDocument $research */
+            $research = $byId->get($result['matched_research_id']);
+            $score = $result['content_similarity_score'];
+
+            return [
+                'research' => $research,
+                ...$result,
+                'fasttext_support_score' => $result['fasttext_support_score'],
+                'title_similarity_percentage' => $score === null ? null : SimilarityScorePolicy::percentage($score),
+                'title_weight' => '1.000000000000',
+                'title_weighted_contribution' => $score === null ? null : SimilarityScorePolicy::percentage($score),
+                'content_similarity_percentage' => $score === null ? null : SimilarityScorePolicy::percentage($score),
+                'content_weight' => '1.000000000000',
+                'content_weighted_contribution' => $score === null ? null : SimilarityScorePolicy::percentage($score),
+                'overall_similarity_score' => $score,
+                'overall_similarity_percentage' => $score === null ? null : SimilarityScorePolicy::percentage($score),
+                'algorithm_version' => 'content-only-v1',
+            ];
+        }, $results);
     }
 
     /** @return Collection<int, ResearchDocument> */
@@ -126,56 +183,12 @@ class PublicRepositorySimilarityService
         return $relations;
     }
 
-    /** @param Collection<int, ResearchDocument> $candidates
-     * @return Collection<int, ResearchDocument>
-     */
-    private function withCloudManuscriptContent(Collection $candidates): Collection
+    private function configureMemoryLimit(): void
     {
-        foreach ($candidates as $candidate) {
-            if ($candidate->relationLoaded('manuscriptSearchDocument')
-                && $candidate->getRelation('manuscriptSearchDocument') !== null) {
-                continue;
-            }
-
-            /** @var DocumentFile|null $file */
-            $file = $candidate->files
-                ->where('is_current', true)
-                ->where('document_type', 'final_manuscript')
-                ->sortByDesc('uploaded_at')
-                ->first();
-            if (! $file instanceof DocumentFile || ! $this->storage->isSupabasePath($file->file_path)
-                || ! in_array($file->file_extension, ['pdf', 'docx'], true)) {
-                continue;
-            }
-
-            $temporaryPath = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR)
-                .DIRECTORY_SEPARATOR.'researchnav-'.Str::uuid().'.'.$file->file_extension;
-
-            try {
-                $text = $this->textCache->remember($file, function () use ($file, $temporaryPath): string {
-                    $contents = $this->storage->download($file->file_path);
-                    if (file_put_contents($temporaryPath, $contents, LOCK_EX) !== strlen($contents)) {
-                        throw new ManuscriptTextExtractionException('Manuscript extraction failed.');
-                    }
-
-                    return $this->extractor->extract($temporaryPath);
-                });
-                $candidate->setRelation('manuscriptSearchDocument', new ManuscriptSearchDocument([
-                    'source_sha256' => $candidate->import_source_sha256
-                        ?? hash('sha256', $file->file_path.'|'.$file->file_size),
-                    'body_text' => $text,
-                    'extraction_status' => 'ready',
-                    'extractor_version' => config('researchnav.manuscript_search.extractor_version'),
-                ]));
-            } catch (SupabaseStorageException|ManuscriptTextExtractionException) {
-                // Title similarity remains available when remote content cannot be extracted.
-            } finally {
-                if (is_file($temporaryPath)) {
-                    @unlink($temporaryPath);
-                }
-            }
+        $limit = (string) config('researchnav.similarity.php_memory_limit');
+        if (preg_match('/\A(?:[1-9]\d{2}|[1-9]\d{3})M\z/', $limit) !== 1) {
+            $limit = '512M';
         }
-
-        return $candidates;
+        ini_set('memory_limit', $limit);
     }
 }

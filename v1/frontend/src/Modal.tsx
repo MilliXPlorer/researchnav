@@ -10,6 +10,7 @@ export function Modal({
   busy = false,
   dirty = false,
   size = "regular",
+  showClose = true,
   children,
 }: {
   label: string;
@@ -17,6 +18,7 @@ export function Modal({
   busy?: boolean;
   dirty?: boolean;
   size?: "regular" | "large";
+  showClose?: boolean;
   children: ReactNode;
 }) {
   const [askDiscard, setAskDiscard] = useState(false);
@@ -56,14 +58,16 @@ export function Modal({
         onKeyDown={handleDialogKeyDown}
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <button
-          className="icon-button dialog-close"
-          onClick={requestClose}
-          aria-label={`Close ${label}`}
-          disabled={busy}
-        >
-          <X />
-        </button>
+        {showClose && (
+          <button
+            className="icon-button dialog-close"
+            onClick={requestClose}
+            aria-label={`Close ${label}`}
+            disabled={busy}
+          >
+            <X />
+          </button>
+        )}
         {children}
         {askDiscard && (
           <div className="modal-discard" role="alertdialog">

@@ -47,7 +47,13 @@ class ImportedResearchCrudTest extends TestCase
         $this->app->instance(SupabaseStorageService::class, $storage);
 
         $service = $this->app->make(ResearchService::class);
-        $updated = $service->update($office, $document, ['title' => 'Updated imported title'], [[
+        $updated = $service->update($office, $document, [
+            'title' => 'Updated imported title',
+            'abstract' => 'Corrected abstract text.',
+            'institute' => 'Institute of Teacher Education',
+            'degree_program' => 'Bachelor of Secondary Education',
+            'manuscript_date_label' => 'May 2024',
+        ], [[
             'user_id' => null,
             'author_name' => 'Updated Author',
             'is_corresponding_author' => false,
@@ -55,10 +61,16 @@ class ImportedResearchCrudTest extends TestCase
 
         $this->assertSame('public', $updated->visibility);
         $this->assertSame('Updated Author', $updated->authors->first()->author_name);
+        $this->assertSame('Corrected abstract text.', $updated->abstract);
+        $this->assertSame('Institute of Teacher Education', $updated->institute);
+        $this->assertSame('Bachelor of Secondary Education', $updated->degree_program);
+        $this->assertSame('May 2024', $updated->manuscript_date_label);
+        $this->assertSame('Manually corrected by authorized Research Office personnel.', $updated->abstract_provenance);
 
         $service->deleteImported($office, $updated);
 
         $this->assertSoftDeleted('research_documents', ['id' => $document->id]);
+        $this->assertNull($document->fresh()->import_source_sha256);
         $this->assertDatabaseMissing('document_files', ['research_document_id' => $document->id]);
         $this->getJson('/api/repository/'.$document->id)->assertNotFound();
     }

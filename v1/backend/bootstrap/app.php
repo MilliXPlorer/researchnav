@@ -9,6 +9,7 @@ use App\Http\Middleware\EnsureOfficeAuthority;
 use App\Http\Middleware\EnsureRequestBodySize;
 use App\Http\Middleware\EnsureRole;
 use App\Http\Middleware\ResolveCurrentUser;
+use App\Http\Middleware\ResolveOptionalCurrentUser;
 use App\Http\Middleware\StartResearchNavSession;
 use App\Http\Middleware\TrustConfiguredProxies;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -36,6 +37,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'origin.allowed' => EnsureAllowedOrigin::class,
             'current.user' => ResolveCurrentUser::class,
+            'optional.current.user' => ResolveOptionalCurrentUser::class,
             'account.active' => EnsureActiveAccount::class,
             'active.admin' => EnsureActiveAdministrator::class,
             'role' => EnsureRole::class,

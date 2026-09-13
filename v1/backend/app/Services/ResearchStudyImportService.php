@@ -80,7 +80,7 @@ class ResearchStudyImportService
                         'publication_year' => $study['publication_year'],
                         'institution_name' => $study['institution_name'],
                         'institution_location' => $study['institution_location'],
-                        'academic_unit' => $study['academic_unit'],
+                        'institute' => $study['institute'],
                         'degree_program' => $study['degree_program'],
                         'manuscript_date_label' => $study['manuscript_date_label'],
                         'abstract_provenance' => $study['abstract_provenance'],
@@ -224,12 +224,12 @@ class ResearchStudyImportService
     /** @param array<string, mixed> $study */
     private function validateStudy(array $study): void
     {
-        foreach (['source_filename', 'source_sha256', 'title', 'institution_name', 'institution_location', 'academic_unit', 'degree_program', 'manuscript_date_label', 'abstract_provenance', 'abstract', 'research_stage'] as $field) {
+        foreach (['source_filename', 'source_sha256', 'title', 'institution_name', 'institution_location', 'institute', 'degree_program', 'manuscript_date_label', 'abstract_provenance', 'abstract', 'research_stage'] as $field) {
             if (! isset($study[$field]) || ! is_string($study[$field]) || trim($study[$field]) === '') {
                 throw new RuntimeException('The import catalog is missing required study metadata.');
             }
         }
-        foreach (['source_filename' => 500, 'title' => 500, 'institution_name' => 255, 'institution_location' => 255, 'academic_unit' => 255, 'degree_program' => 255, 'manuscript_date_label' => 50, 'abstract_provenance' => 255] as $field => $limit) {
+        foreach (['source_filename' => 500, 'title' => 500, 'institution_name' => 255, 'institution_location' => 255, 'institute' => 255, 'degree_program' => 255, 'manuscript_date_label' => 50, 'abstract_provenance' => 255] as $field => $limit) {
             if (mb_strlen($study[$field]) > $limit) {
                 throw new RuntimeException('The import catalog contains oversized study metadata.');
             }

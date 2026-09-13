@@ -25,6 +25,7 @@ import ProfileDialog, { ProfileAvatar } from "./ProfileDialog";
 import { instituteNames } from "./data";
 import { PublicationYearInput } from "./dateControls";
 import { classificationLabel, formatSimilarityPercentage } from "./similarity";
+import type { SimilarityClassification } from "./similarity";
 import type { ResearchRecord, UserSession } from "./types";
 import { useDialogFocus } from "./useDialogFocus";
 
@@ -80,12 +81,14 @@ export default function CatalogPage({
   const yearTo = searchParams.get("year_to") ?? exactYear;
   const category = searchParams.get("category") ?? "all";
   const institute = searchParams.get("institute") ?? "all";
-  /**
-   * Category and year matching run in SQL. `institute` has no server-side
-   * filter and stays local.
-   */
-  const hasServerFilters = Boolean(yearFrom || yearTo) || category !== "all";
-  const serverFilterKey = JSON.stringify({ yearFrom, yearTo, category });
+  const hasServerFilters =
+    Boolean(yearFrom || yearTo) || category !== "all" || institute !== "all";
+  const serverFilterKey = JSON.stringify({
+    yearFrom,
+    yearTo,
+    category,
+    institute,
+  });
   const [serverFiltered, setServerFiltered] = useState<{
     key: string;
     status: "ready" | "error";
@@ -106,6 +109,7 @@ export default function CatalogPage({
     searchPublicResearch(
       {
         category: category === "all" ? undefined : category,
+        institute: institute === "all" ? undefined : institute,
         yearFrom: yearFrom || undefined,
         yearTo: yearTo || undefined,
       },
@@ -133,7 +137,14 @@ export default function CatalogPage({
       active = false;
       controller.abort();
     };
-  }, [category, hasServerFilters, serverFilterKey, yearFrom, yearTo]);
+  }, [
+    category,
+    hasServerFilters,
+    institute,
+    serverFilterKey,
+    yearFrom,
+    yearTo,
+  ]);
 
   const activeQuery = (searchParams.get("q") ?? "").trim();
   const hasActiveSimilarityQuery = activeQuery.length > 0;
@@ -210,11 +221,9 @@ export default function CatalogPage({
         ? (serverFilterState?.records ?? [])
         : records;
 
-    const filtered = base.filter((record) => {
-      if (allowedIds && !allowedIds.has(record.id)) return false;
-      // `institute` has no server-side filter, so it is always applied locally.
-      return institute === "all" || record.institute === institute;
-    });
+    const filtered = allowedIds
+      ? base.filter((record) => allowedIds.has(record.id))
+      : base;
 
     // Relevance preserves the backend's exact similarity rank. Date options
     // deliberately reorder only the already-qualified similarity results.
@@ -237,7 +246,6 @@ export default function CatalogPage({
     hasServerFilters,
     serverFilterState,
     searchParams,
-    institute,
   ]);
 
   const updateParam = (name: string, value: string) => {
@@ -418,7 +426,7 @@ export default function CatalogPage({
                 title="Loading public catalog"
                 message="Retrieving cataloged public metadata…"
               />
-            ) : error ? (
+            ) : error && records.length === 0 ? (
               <EmptyState title="Public catalog unavailable" message={error} />
             ) : !hasActiveSimilarityQuery && records.length === 0 ? (
               <EmptyState
@@ -469,10 +477,12 @@ export default function CatalogPage({
                     {session ? (
                       record.hasDownloadableManuscript ? (
                         <a
-                          className="download-gate"
+                          className="button button-primary"
                           href={repositoryDownloadUrl(record.id)}
+                          target="_blank"
+                          rel="noopener noreferrer"
                         >
-                          <Download /> Download manuscript
+                          <Download /> View files
                         </a>
                       ) : (
                         <span className="download-gate is-unavailable">
@@ -480,8 +490,11 @@ export default function CatalogPage({
                         </span>
                       )
                     ) : (
-                      <button className="download-gate" onClick={onSignIn}>
-                        <LockKeyhole /> Sign in to download
+                      <button
+                        className="button button-primary"
+                        onClick={onSignIn}
+                      >
+                        <LockKeyhole /> Sign in to view files
                       </button>
                     )}
                   </div>
@@ -571,7 +584,7 @@ function MetadataDialog({
           </div>
           <div>
             <dt>Institute</dt>
-            <dd>{record.institutionName}</dd>
+            <dd>{record.institute}</dd>
           </div>
           <div>
             <dt>Researchers</dt>
@@ -610,8 +623,10 @@ function MetadataDialog({
             <a
               className="button button-primary"
               href={repositoryDownloadUrl(record.id)}
+              target="_blank"
+              rel="noopener noreferrer"
             >
-              <Download /> Download manuscript
+              <Download /> View files
             </a>
           ) : authenticated ? (
             <span className="download-gate is-unavailable">
@@ -619,7 +634,7 @@ function MetadataDialog({
             </span>
           ) : (
             <Button onClick={onSignIn}>
-              <LockKeyhole /> Sign in to download
+              <LockKeyhole /> Sign in to view files
             </Button>
           )}
         </div>
@@ -665,11 +680,11 @@ function SimilarityOverview({ record }: { record: ResearchRecord }) {
     record.scoreStatus === "content_unavailable" || !content;
   const scores = [
     ["Overall", overall, record.classification, "Overall similarity"],
-    ["Title", title, null, "Title similarity"],
+    ["Title", title, similarityClassification(title), "Title similarity"],
     [
       "Content",
       contentUnavailable ? null : content,
-      null,
+      similarityClassification(content),
       "Content similarity",
     ],
   ] as const;
@@ -696,6 +711,18 @@ function SimilarityOverview({ record }: { record: ResearchRecord }) {
       </dd>
     </div>
   );
+}
+
+function similarityClassification(
+  percentage: string | null,
+): SimilarityClassification | null {
+  if (!percentage) return null;
+
+  const score = Number.parseFloat(percentage);
+  if (!Number.isFinite(score)) return null;
+  if (score >= 70) return "high";
+  if (score >= 40) return "moderate";
+  return "low";
 }
 
 function OverallSimilarityScore({ record }: { record: ResearchRecord }) {

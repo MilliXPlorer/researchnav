@@ -1,5 +1,4 @@
 import {
-  Archive,
   ArrowRight,
   ExternalLink,
   LibraryBig,
@@ -13,8 +12,17 @@ import InstructorResearchReview from "./InstructorResearchReview";
 import ResearcherResearchWorkspace from "./ResearcherResearchWorkspace";
 import SimilarityResults from "./SimilarityResults";
 import ResearchOfficeBulkImport from "./ResearchOfficeBulkImport";
+import iasLogo from "./institute_logo/ias.webp";
+import ibfsLogo from "./institute_logo/ibfs.webp";
+import icsLogo from "./institute_logo/ics.webp";
+import icjeLogo from "./institute_logo/icje.webp";
+import ihsLogo from "./institute_logo/ihs.webp";
+import iteLogo from "./institute_logo/ite.webp";
 import {
   ApiError,
+  listOfficeInstituteStudies,
+  officeInstituteStudyOpenUrl,
+  type OfficeInstituteStudy,
   type RoleDashboard,
   type RoleDashboardAnalytics,
   type RoleDashboardSection,
@@ -40,6 +48,39 @@ type WorkspaceProps = {
   onRetry: () => void;
   researchDocumentId?: string | number;
 };
+
+const OFFICE_INSTITUTES = [
+  {
+    code: "IHS",
+    name: "Institute of Health Sciences",
+    logo: ihsLogo,
+  },
+  {
+    code: "ICS",
+    name: "Institute of Computer Studies",
+    logo: icsLogo,
+  },
+  {
+    code: "IBFS",
+    name: "Institute of Business and Financial Management",
+    logo: ibfsLogo,
+  },
+  {
+    code: "ICJE",
+    name: "Institute of Criminal Justice Education",
+    logo: icjeLogo,
+  },
+  {
+    code: "ITE",
+    name: "Institute of Teacher Education",
+    logo: iteLogo,
+  },
+  {
+    code: "IAS",
+    name: "Institute of Arts and Sciences",
+    logo: iasLogo,
+  },
+] as const;
 
 export default function RoleWorkspace({
   role,
@@ -120,6 +161,7 @@ export default function RoleWorkspace({
     <RoleDashboardWorkspace
       role={role}
       navigate={navigate}
+      selectNav={selectNav}
       dashboardScope={dashboardScope}
       dashboardState={dashboardState}
       onRetry={onRetry}
@@ -188,6 +230,7 @@ function ResearcherWorkspace({
         role="researcher"
         config={config}
         navigate={navigate}
+        selectNav={selectNav}
         dashboardScope={dashboardScope}
         dashboardState={dashboardState}
         onRetry={onRetry}
@@ -202,6 +245,7 @@ type SectionConfig = {
   description: string;
   catalog?: boolean;
   internalRecord?: boolean;
+  destination?: string;
 };
 
 type WorkspaceConfig = {
@@ -261,17 +305,10 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
     title: "System access overview.",
     description: "Live account, audit, and research activity summaries.",
     sections: {
-      active_accounts: {
-        title: "Active accounts",
-        description: "Accounts with active access.",
-      },
       pending_accounts: {
         title: "Pending accounts",
         description: "Invited or blocked accounts awaiting attention.",
-      },
-      audit_events: {
-        title: "Audit events",
-        description: "Recorded system activity.",
+        destination: "User & Role Management",
       },
       draft_research: {
         title: "Draft research",
@@ -369,6 +406,7 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
       defense_schedule: {
         title: "Defense schedule",
         description: "Scheduled proposal defense information.",
+        destination: "Assigned Defenses",
       },
       repository_references: {
         title: "Repository references",
@@ -390,6 +428,7 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
       signoffs: {
         title: "Sign-offs",
         description: "Recorded statistical sign-offs.",
+        destination: "Review History",
       },
       completed_references: {
         title: "Completed references",
@@ -406,22 +445,27 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
       active_instructors: {
         title: "Active instructors",
         description: "Instructors with active access.",
+        destination: "Account Roles",
       },
       invited_instructors: {
         title: "Invited instructors",
         description: "Instructors awaiting activation.",
+        destination: "Account Roles",
       },
       blocked_instructors: {
         title: "Blocked instructors",
         description: "Instructors without active access.",
+        destination: "Account Roles",
       },
       schedules: {
         title: "Schedules",
         description: "Program scheduling information.",
+        destination: "Schedules",
       },
       duplicate_flags: {
         title: "Duplicate flags",
         description: "Duplicate-review information.",
+        destination: "Duplicate Flags",
       },
     },
   },
@@ -437,6 +481,7 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
       metadata_validation: {
         title: "Metadata validation",
         description: "Metadata validation work.",
+        destination: "Assigned Research",
       },
       repository_records: {
         title: "Repository records",
@@ -446,16 +491,16 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
     },
   },
   "research-office": {
-    eyebrow: "Research Office / Compliance review",
-    title: "Institutional research oversight.",
-    description: "Live submission, revision, and archiving queues.",
+    eyebrow: "Research Office / Dashboard",
+    title: "Institutional research dashboard.",
+    description: "Analytics, institutional totals, and compliance queues.",
     sections: {
       submission_queue: {
         title: "Submission queue",
         description: "Submitted research awaiting institutional review.",
       },
       bulk_import: {
-        title: "Import Manuscript",
+        title: "Upload Manuscript",
         description:
           "Upload multiple research manuscripts and extract metadata.",
       },
@@ -469,29 +514,8 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
       },
       archived_repository: {
         title: "Archived repository",
-        description: "Archived research records.",
-        catalog: true,
+        description: "Review and correct metadata for archived manuscripts.",
         internalRecord: true,
-      },
-    },
-  },
-  academics: {
-    eyebrow: "My library",
-    title: "Your research reading room.",
-    description: "Repository references and available library information.",
-    sections: {
-      repository_references: {
-        title: "Repository references",
-        description: "Archived research available in the catalog.",
-        catalog: true,
-      },
-      saved_library: {
-        title: "Saved library",
-        description: "Saved research in your library.",
-      },
-      recommendations: {
-        title: "Recommendations",
-        description: "Research recommendations for your library.",
       },
     },
   },
@@ -500,10 +524,11 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
 function RoleDashboardWorkspace({
   role,
   navigate,
+  selectNav,
   dashboardScope,
   dashboardState,
   onRetry,
-}: Omit<WorkspaceProps, "selectNav" | "researchDocumentId"> & {
+}: Omit<WorkspaceProps, "researchDocumentId"> & {
   role: Exclude<Role, "researcher">;
 }) {
   const config = workspaceConfigs[role];
@@ -511,10 +536,6 @@ function RoleDashboardWorkspace({
     role === "librarian" ? (
       <Button variant="secondary" onClick={() => navigate("/catalog")}>
         <LibraryBig /> Open catalog
-      </Button>
-    ) : role === "academics" ? (
-      <Button variant="secondary" onClick={() => navigate("/catalog")}>
-        <Archive /> Browse catalog
       </Button>
     ) : role === "admin" ? (
       <span className="admin-access-badge">
@@ -529,6 +550,7 @@ function RoleDashboardWorkspace({
         role={role}
         config={config}
         navigate={navigate}
+        selectNav={selectNav}
         dashboardScope={dashboardScope}
         dashboardState={dashboardState}
         onRetry={onRetry}
@@ -541,6 +563,7 @@ function DashboardSections({
   role,
   config,
   navigate,
+  selectNav,
   dashboardScope,
   dashboardState,
   onRetry,
@@ -548,6 +571,7 @@ function DashboardSections({
   role: Role;
   config: WorkspaceConfig;
   navigate: (path: string) => void;
+  selectNav: (item: string) => void;
   dashboardScope: string;
   dashboardState: RoleDashboardLoadState;
   onRetry: () => void;
@@ -608,40 +632,28 @@ function DashboardSections({
       <DashboardStatistics
         sections={dashboardState.dashboard.sections}
         config={config}
-        onSelect={
-          role === "researcher"
-            ? (section) => setSelectedSectionKey(section.key)
-            : undefined
-        }
+        onSelect={(section) => setSelectedSectionKey(section.key)}
       />
+      {role === "research-office" && (
+        <InstituteCountAnalytics
+          institutes={dashboardState.dashboard.institutional_overview}
+        />
+      )}
       <div className="dashboard-visualizations">
         <DashboardWorkloadChart
           sections={dashboardState.dashboard.sections}
           config={config}
         />
-        {dashboardState.dashboard.analytics && (
+        {role !== "research-office" && dashboardState.dashboard.analytics && (
           <DashboardAnalytics analytics={dashboardState.dashboard.analytics} />
         )}
       </div>
-      {role !== "researcher" && (
-        <div className="role-dashboard-sections">
-          {dashboardState.dashboard.sections.map((section) => (
-            <DashboardSection
-              key={section.key}
-              section={section}
-              config={
-                config.sections[section.key] ?? {
-                  title: section.key,
-                  description: "Role workspace data.",
-                }
-              }
-              navigate={navigate}
-              role={role}
-            />
-          ))}
-        </div>
+      {role === "research-office" && (
+        <OfficeInstitutionalOverview
+          institutes={dashboardState.dashboard.institutional_overview}
+        />
       )}
-      {role === "researcher" && selectedSectionKey !== null && (
+      {selectedSectionKey !== null && (
         <Modal
           label={config.sections[selectedSectionKey]?.title ?? "Research"}
           onClose={() => setSelectedSectionKey(null)}
@@ -662,6 +674,7 @@ function DashboardSections({
                   }
                 }
                 navigate={navigate}
+                selectNav={selectNav}
                 role={role}
               />
             );
@@ -669,6 +682,286 @@ function DashboardSections({
         </Modal>
       )}
     </>
+  );
+}
+
+function OfficeInstitutionalOverview({
+  institutes,
+}: {
+  institutes?: Array<{ institute: string; total: number }> | null;
+}) {
+  const [selectedInstitute, setSelectedInstitute] = useState<string | null>(
+    null,
+  );
+  const [studiesState, setStudiesState] = useState<
+    | { status: "idle" }
+    | { status: "loading"; code: string }
+    | { status: "error"; code: string }
+    | { status: "ready"; code: string; studies: OfficeInstituteStudy[] }
+  >({ status: "idle" });
+  const totals = new Map(
+    (institutes ?? []).map((unit) => [unit.institute, unit.total]),
+  );
+
+  async function loadStudies(code: string) {
+    setStudiesState({ status: "loading", code });
+    try {
+      const studies = await listOfficeInstituteStudies(code);
+      setStudiesState({ status: "ready", code, studies });
+    } catch {
+      setStudiesState({ status: "error", code });
+    }
+  }
+
+  function selectInstitute(code: string) {
+    if (selectedInstitute === code) {
+      setSelectedInstitute(null);
+      setStudiesState({ status: "idle" });
+      return;
+    }
+    setSelectedInstitute(code);
+    void loadStudies(code);
+  }
+
+  function closeInstituteStudies() {
+    setSelectedInstitute(null);
+    setStudiesState({ status: "idle" });
+  }
+
+  const selectedInstituteName = OFFICE_INSTITUTES.find(
+    (institute) => institute.code === selectedInstitute,
+  )?.name;
+
+  return (
+    <>
+      <section
+        className="panel-card office-institute-overview"
+        aria-labelledby="office-institute-overview-title"
+      >
+        <header>
+          <div>
+            <p className="eyebrow">Research by institute</p>
+            <h2 id="office-institute-overview-title">Institutional Overview</h2>
+            <p>
+              Select an institute to browse its Supabase studies and manuscript
+              files.
+            </p>
+          </div>
+        </header>
+        <div className="office-institute-grid">
+          {OFFICE_INSTITUTES.map((institute) => {
+            const total =
+              institutes === null ? null : (totals.get(institute.name) ?? 0);
+            return (
+              <button
+                type="button"
+                className="office-institute-card"
+                key={institute.code}
+                aria-label={`${institute.name}: ${total ?? "unavailable"} research records`}
+                aria-haspopup="dialog"
+                onClick={() => selectInstitute(institute.code)}
+              >
+                <div className="office-institute-mark" aria-hidden="true">
+                  <span>{institute.code}</span>
+                  <img src={institute.logo} alt="" />
+                </div>
+                <div className="office-institute-copy">
+                  <strong>{institute.code}</strong>
+                  <span>{institute.name}</span>
+                </div>
+                <div className="office-institute-total">
+                  <strong>{total ?? "-"}</strong>
+                  <span>
+                    {total === null
+                      ? "Supabase unavailable"
+                      : total === 1
+                        ? "research record"
+                        : "research records"}
+                  </span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+      {selectedInstitute && selectedInstituteName && (
+        <Modal
+          label={`${selectedInstituteName} studies`}
+          onClose={closeInstituteStudies}
+          size="large"
+        >
+          <div className="office-study-browser" aria-live="polite">
+            <header>
+              <div>
+                <p className="eyebrow">Supabase manuscripts</p>
+                <h3>{selectedInstituteName}</h3>
+                <p>
+                  Select a study to choose which file to open, or download all
+                  study files as a ZIP archive.
+                </p>
+              </div>
+            </header>
+            {studiesState.status === "loading" ? (
+              <p className="office-institute-message">Loading studies...</p>
+            ) : studiesState.status === "error" ? (
+              <div className="office-institute-message" role="alert">
+                <p>Studies could not be loaded from Supabase.</p>
+                <Button
+                  variant="secondary"
+                  onClick={() => void loadStudies(selectedInstitute)}
+                >
+                  Retry
+                </Button>
+              </div>
+            ) : studiesState.status === "ready" &&
+              studiesState.studies.length === 0 ? (
+              <p className="office-institute-message">
+                No studies are stored for this institute.
+              </p>
+            ) : studiesState.status === "ready" ? (
+              <div className="office-study-list" aria-label="Studies">
+                {studiesState.studies.map((study) => (
+                  <a
+                    className="office-study-item"
+                    key={`${study.year}/${study.title}`}
+                    href={officeInstituteStudyOpenUrl(selectedInstitute, study)}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <span className="office-study-year">{study.year}</span>
+                    <strong>{study.title}</strong>
+                    <ExternalLink aria-hidden="true" />
+                  </a>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+const INSTITUTE_CHART_WIDTH = 760;
+const INSTITUTE_CHART_HEIGHT = 250;
+const INSTITUTE_CHART_LEFT = 48;
+const INSTITUTE_CHART_RIGHT = 26;
+const INSTITUTE_CHART_TOP = 26;
+const INSTITUTE_CHART_BOTTOM = 48;
+
+function InstituteCountAnalytics({
+  institutes,
+}: {
+  institutes?: Array<{ institute: string; total: number }> | null;
+}) {
+  const totals = new Map(
+    (institutes ?? []).map((unit) => [unit.institute, unit.total]),
+  );
+  const points = OFFICE_INSTITUTES.map((institute) => ({
+    ...institute,
+    total: totals.get(institute.name) ?? 0,
+  }));
+  const maximum = Math.max(1, ...points.map((point) => point.total));
+  const plotWidth =
+    INSTITUTE_CHART_WIDTH - INSTITUTE_CHART_LEFT - INSTITUTE_CHART_RIGHT;
+  const plotHeight =
+    INSTITUTE_CHART_HEIGHT - INSTITUTE_CHART_TOP - INSTITUTE_CHART_BOTTOM;
+  const x = (index: number) =>
+    INSTITUTE_CHART_LEFT + (index * plotWidth) / (points.length - 1);
+  const y = (total: number) =>
+    INSTITUTE_CHART_TOP + plotHeight - (total / maximum) * plotHeight;
+  const line = points
+    .map((point, index) => `${x(index)},${y(point.total)}`)
+    .join(" ");
+  const area = `${INSTITUTE_CHART_LEFT},${INSTITUTE_CHART_TOP + plotHeight} ${line} ${INSTITUTE_CHART_LEFT + plotWidth},${INSTITUTE_CHART_TOP + plotHeight}`;
+
+  return (
+    <figure className="office-institute-analytics">
+      <figcaption>
+        <div>
+          <p className="eyebrow">Supabase analytics</p>
+          <h2>Manuscripts by institute</h2>
+          <p>Live distribution based on research-title folders in Supabase.</p>
+        </div>
+        <strong>
+          {points.reduce((sum, point) => sum + point.total, 0)} total
+        </strong>
+      </figcaption>
+      {institutes === null ? (
+        <p className="office-institute-message">
+          Supabase analytics are unavailable.
+        </p>
+      ) : (
+        <div className="office-institute-chart-scroll">
+          <svg
+            viewBox={`0 0 ${INSTITUTE_CHART_WIDTH} ${INSTITUTE_CHART_HEIGHT}`}
+            role="img"
+            aria-label="Supabase manuscripts by institute"
+          >
+            <defs>
+              <linearGradient
+                id="institute-chart-area"
+                x1="0"
+                y1="0"
+                x2="0"
+                y2="1"
+              >
+                <stop offset="0%" stopColor="var(--fern)" stopOpacity="0.28" />
+                <stop
+                  offset="100%"
+                  stopColor="var(--fern)"
+                  stopOpacity="0.02"
+                />
+              </linearGradient>
+            </defs>
+            {[0, 0.5, 1].map((ratio) => {
+              const value = Math.round(maximum * (1 - ratio));
+              const gridY = INSTITUTE_CHART_TOP + plotHeight * ratio;
+              return (
+                <g key={ratio}>
+                  <line
+                    className="office-institute-grid-line"
+                    x1={INSTITUTE_CHART_LEFT}
+                    x2={INSTITUTE_CHART_WIDTH - INSTITUTE_CHART_RIGHT}
+                    y1={gridY}
+                    y2={gridY}
+                  />
+                  <text className="office-institute-axis" x={36} y={gridY + 4}>
+                    {value}
+                  </text>
+                </g>
+              );
+            })}
+            <polygon className="office-institute-area" points={area} />
+            <polyline className="office-institute-line" points={line} />
+            {points.map((point, index) => (
+              <g key={point.code}>
+                <circle
+                  className="office-institute-point"
+                  cx={x(index)}
+                  cy={y(point.total)}
+                  r="6"
+                />
+                <text
+                  className="office-institute-point-value"
+                  x={x(index)}
+                  y={Math.max(17, y(point.total) - 13)}
+                >
+                  {point.total}
+                </text>
+                <text
+                  className="office-institute-axis-label"
+                  x={x(index)}
+                  y={INSTITUTE_CHART_HEIGHT - 18}
+                >
+                  {point.code}
+                </text>
+              </g>
+            ))}
+          </svg>
+        </div>
+      )}
+    </figure>
   );
 }
 
@@ -939,11 +1232,13 @@ function DashboardSection({
   section,
   config,
   navigate,
+  selectNav,
   role,
 }: {
   section: RoleDashboardSection;
   config: SectionConfig;
   navigate: (path: string) => void;
+  selectNav?: (item: string) => void;
   role: Role;
 }) {
   if (section.state === "unavailable") {
@@ -1053,7 +1348,21 @@ function DashboardSection({
             </li>
           ))}
         </ul>
-      ) : null}
+      ) : (
+        <div className="dashboard-count-summary">
+          <strong>{section.total?.toLocaleString()}</strong>
+          <p>
+            {section.total === 1
+              ? "1 matching record is available."
+              : `${section.total?.toLocaleString()} matching records are available.`}
+          </p>
+          {config.destination && selectNav && (
+            <Button onClick={() => selectNav(config.destination!)}>
+              Open details
+            </Button>
+          )}
+        </div>
+      )}
     </section>
   );
 }

@@ -2,20 +2,21 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\AuditLog;
 use App\Models\DefenseSchedule;
 use App\Models\MetadataReview;
 use App\Models\MethodologyReview;
 use App\Models\ResearchDocument;
 use App\Models\ReviewAssignment;
-use App\Models\SavedLibraryItem;
 use App\Models\SimilarityResult;
 use App\Models\TitleValidation;
 use App\Models\User;
 use App\Services\DomainAuthorization;
+use App\Services\SupabaseStorageException;
+use App\Services\SupabaseStorageService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 class DashboardController extends DomainController
 {
@@ -30,7 +31,7 @@ class DashboardController extends DomainController
         'updated_at',
     ];
 
-    public function index(Request $request): JsonResponse
+    public function index(Request $request, SupabaseStorageService $storage): JsonResponse
     {
         $actor = $this->actor($request);
         $effectiveRole = $actor->roleDefinition?->slug === 'research_editor' ? 'research_editor' : $actor->role;
@@ -43,7 +44,6 @@ class DashboardController extends DomainController
             'coordinator' => $this->coordinatorSections(),
             'librarian' => $this->librarianSections(),
             'research-office' => $this->researchOfficeSections(),
-            'academics' => $this->academicsSections($actor),
             'research_editor' => [],
             default => null,
         };
@@ -52,13 +52,26 @@ class DashboardController extends DomainController
             return response()->json(['error' => 'ROLE_NOT_AUTHORIZED'], 403);
         }
 
+        $data = [
+            'schema_version' => 1,
+            'role' => $effectiveRole,
+            'sections' => $sections,
+            'analytics' => $this->analytics($actor),
+        ];
+        if ($effectiveRole === 'research-office') {
+            try {
+                $data['institutional_overview'] = Cache::remember(
+                    'research-office:supabase-institute-counts',
+                    now()->addMinutes(5),
+                    fn (): array => $storage->manuscriptCountsByInstitute(),
+                );
+            } catch (SupabaseStorageException) {
+                $data['institutional_overview'] = null;
+            }
+        }
+
         return response()
-            ->json(['data' => [
-                'schema_version' => 1,
-                'role' => $effectiveRole,
-                'sections' => $sections,
-                'analytics' => $this->analytics($actor),
-            ]])
+            ->json(['data' => $data])
             ->header('Cache-Control', 'private, no-store');
     }
 
@@ -109,7 +122,6 @@ class DashboardController extends DomainController
             'instructor' => $this->assignedDocuments($actor, 'instructor'),
             'panel' => $this->assignedDocuments($actor, 'panel'),
             'statistician' => $this->assignedDocuments($actor, 'statistician'),
-            'academics' => $this->repositoryDocuments(),
             default => ResearchDocument::query(),
         };
     }
@@ -117,9 +129,7 @@ class DashboardController extends DomainController
     private function adminSections(): array
     {
         return [
-            $this->countSection('active_accounts', User::query()->where('access_status', 'active')),
             $this->countSection('pending_accounts', User::query()->whereIn('access_status', ['invited', 'blocked'])),
-            $this->countSection('audit_events', AuditLog::query()),
             $this->researchSection('draft_research', ResearchDocument::query()->where('submission_status', 'draft')),
             $this->researchSection('submission_queue', ResearchDocument::query()->whereIn('submission_status', ['submitted', 'under_review'])),
             $this->researchSection('revision_required', ResearchDocument::query()->where('submission_status', 'revision_required')),
@@ -223,17 +233,6 @@ class DashboardController extends DomainController
             $this->researchSection('revision_requests', ResearchDocument::query()->where('submission_status', 'revision_required')),
             $this->researchSection('pending_archiving', ResearchDocument::query()->where('archive_status', 'pending_archiving')),
             $this->researchSection('archived_repository', $this->repositoryDocuments()),
-        ];
-    }
-
-    private function academicsSections(User $actor): array
-    {
-        return [
-            $this->researchSection('repository_references', $this->repositoryDocuments()),
-            $this->countSection('saved_library', SavedLibraryItem::query()->where('user_id', $actor->id)),
-            $this->countSection('recommendations', SimilarityResult::query()->latestPerPair()
-                ->whereIn('source_research_id', SavedLibraryItem::query()->where('user_id', $actor->id)->select('research_document_id'))
-                ->whereNotIn('matched_research_id', SavedLibraryItem::query()->where('user_id', $actor->id)->select('research_document_id'))),
         ];
     }
 

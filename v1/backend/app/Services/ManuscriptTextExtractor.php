@@ -9,6 +9,12 @@ class ManuscriptTextExtractor
 {
     public function extract(string $canonicalPath): string
     {
+        return implode('', $this->extractParts($canonicalPath));
+    }
+
+    /** @return list<string> */
+    public function extractParts(string $canonicalPath): array
+    {
         $maximumInputBytes = min(25 * 1024 * 1024, (int) config('researchnav.manuscript_search.maximum_input_bytes'));
         if (! is_file($canonicalPath) || is_link($canonicalPath) || filesize($canonicalPath) === false || filesize($canonicalPath) > $maximumInputBytes) {
             throw new ManuscriptTextExtractionException('Manuscript extraction failed.');
@@ -46,7 +52,8 @@ class ManuscriptTextExtractor
         return $this->validateOutput($process->getOutput(), $maximumOutputBytes);
     }
 
-    private function validateOutput(string $output, int $maximumOutputBytes): string
+    /** @return list<string> */
+    private function validateOutput(string $output, int $maximumOutputBytes): array
     {
         if ($output === '' || strlen($output) > $maximumOutputBytes) {
             throw new ManuscriptTextExtractionException('Manuscript extraction failed.');
@@ -58,16 +65,19 @@ class ManuscriptTextExtractor
             throw new ManuscriptTextExtractionException('Manuscript extraction failed.');
         }
 
-        if (! is_array($decoded) || array_keys($decoded) !== ['status', 'text'] || $decoded['status'] !== 'ready' || ! is_string($decoded['text'])) {
+        if (! is_array($decoded) || array_keys($decoded) !== ['status', 'parts'] || $decoded['status'] !== 'ready'
+            || ! is_array($decoded['parts']) || $decoded['parts'] === []
+            || array_filter($decoded['parts'], fn ($part): bool => ! is_string($part) || $part === '') !== []) {
             throw new ManuscriptTextExtractionException('Manuscript extraction failed.');
         }
 
-        $text = preg_replace('/\s+/u', ' ', trim($decoded['text']));
-        if ($text === null || $text !== $decoded['text'] || str_contains($text, "\0") || mb_strlen($text) > (int) config('researchnav.manuscript_search.maximum_text_characters')) {
+        $text = implode('', $decoded['parts']);
+        if (str_contains($text, "\0") || mb_strlen($text) > (int) config('researchnav.manuscript_search.maximum_text_characters')
+            || preg_replace('/\s+/u', ' ', trim($text)) !== $text) {
             throw new ManuscriptTextExtractionException('Manuscript extraction failed.');
         }
 
-        return $text;
+        return array_values($decoded['parts']);
     }
 
     /** @return array<string, string|false> */
@@ -86,6 +96,7 @@ class ManuscriptTextExtractor
         $environment['PYTHONIOENCODING'] = 'utf-8';
         $environment['PYTHONUTF8'] = '1';
         $environment['PYTHONDONTWRITEBYTECODE'] = '1';
+        $environment['MANUSCRIPT_PART_CHARACTERS'] = (string) config('researchnav.manuscript_search.part_characters');
 
         return $environment;
     }

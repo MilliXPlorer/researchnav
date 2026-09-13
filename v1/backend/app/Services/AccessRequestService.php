@@ -24,7 +24,7 @@ class AccessRequestService
     /** Roles an applicant may ask for. Administrator is never self-requestable. */
     public const REQUESTABLE_ROLES = [
         'researcher', 'adviser', 'instructor', 'panel',
-        'statistician', 'coordinator', 'librarian', 'research-office', 'academics',
+        'statistician', 'coordinator', 'librarian', 'research-office', 'research_editor',
     ];
 
     /**

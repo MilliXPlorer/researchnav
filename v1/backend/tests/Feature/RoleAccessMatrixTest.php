@@ -25,7 +25,6 @@ class RoleAccessMatrixTest extends TestCase
             'coordinator' => ['/api/coordinator/schedules', '/api/coordinator/adviser-load', '/api/coordinator/duplicate-flags', '/api/coordinator/reports'],
             'librarian' => ['/api/librarian/archiving-queue'],
             'research-office' => ['/api/office/compliance', '/api/office/users', '/api/office/reports'],
-            'academics' => ['/api/academics/library'],
             'admin' => ['/api/admin/system-status', '/api/admin/users', '/api/admin/audit-logs'],
         ];
     }
@@ -38,8 +37,7 @@ class RoleAccessMatrixTest extends TestCase
             $allowed[] = 'research-office';
         }
 
-        // Canonical mapping never grants authority: coordinator/academics map
-        // to research_office for identity only.
+        // The coordinator compatibility identity never grants office authority.
         return $allowed;
     }
 
@@ -99,12 +97,6 @@ class RoleAccessMatrixTest extends TestCase
             ->assertForbidden()
             ->assertExactJson(['error' => 'ROLE_NOT_AUTHORIZED']);
         $this->as($coordinator)->getJson('/api/coordinator/schedules')->assertOk();
-
-        $academics = $this->user(['role' => 'academics']);
-        $this->as($academics)->getJson('/api/office/reports')
-            ->assertForbidden()
-            ->assertExactJson(['error' => 'ROLE_NOT_AUTHORIZED']);
-        $this->as($academics)->getJson('/api/academics/library')->assertOk();
 
         $office = $this->user(['role' => 'research-office']);
         $this->as($office)->getJson('/api/office/compliance')->assertOk();

@@ -25,7 +25,9 @@ def _bounded_environment_integer(name: str, default: int, maximum: int) -> int:
 MAX_INPUT_BYTES = _bounded_environment_integer(
     "SIMILARITY_MAXIMUM_INPUT_BYTES", 256 * 1024 * 1024, 512 * 1024 * 1024
 )
-MAX_CANDIDATES = 250
+MAX_CANDIDATES = _bounded_environment_integer(
+    "SIMILARITY_MAXIMUM_CANDIDATES", 1000, 1000
+)
 MAX_TITLE_LENGTH = 500
 MAX_CONTENT_LENGTH = _bounded_environment_integer(
     "SIMILARITY_MAXIMUM_CONTENT_CHARACTERS", 1_000_000, 2_000_000

@@ -192,29 +192,36 @@ class ResearchSubmissionTest extends TestCase
 
         $this->as($owner)->postJson('/api/research/'.$draft->id.'/submit', [], $this->origin())
             ->assertUnprocessable()
-            ->assertJsonValidationErrors(['title', 'category_id', 'authors']);
+            ->assertJsonValidationErrors(['title', 'institute', 'degree_program', 'authors']);
 
         $this->assertSame('draft', $draft->refresh()->submission_status);
         $this->assertNull($draft->submitted_at);
     }
 
-    public function test_owner_cannot_submit_with_an_inactive_category(): void
+    public function test_owner_cannot_submit_with_a_program_from_another_institute(): void
     {
         $owner = User::factory()->create();
-        $category = Category::query()->create(['name' => 'Inactive', 'slug' => 'inactive', 'is_active' => false]);
-        $draft = ResearchDocument::factory()->create(['submitted_by' => $owner->id, 'category_id' => $category->id]);
+        $draft = ResearchDocument::factory()->create([
+            'submitted_by' => $owner->id,
+            'institute' => 'Institute of Teacher Education',
+            'degree_program' => 'Bachelor of Science in Computer Science',
+        ]);
         ResearchAuthor::factory()->create(['research_document_id' => $draft->id]);
 
         $this->as($owner)->postJson('/api/research/'.$draft->id.'/submit', [], $this->origin())
             ->assertUnprocessable()
-            ->assertJsonValidationErrors(['category_id']);
+            ->assertJsonValidationErrors(['degree_program']);
     }
 
     public function test_complete_draft_is_submitted_and_records_activity(): void
     {
         $owner = User::factory()->create();
-        $category = Category::query()->create(['name' => 'Education', 'slug' => 'education']);
-        $draft = ResearchDocument::factory()->create(['submitted_by' => $owner->id, 'category_id' => $category->id]);
+        $draft = ResearchDocument::factory()->create([
+            'submitted_by' => $owner->id,
+            'category_id' => null,
+            'institute' => 'Institute of Teacher Education',
+            'degree_program' => 'Bachelor of Secondary Education major in English',
+        ]);
         ResearchAuthor::factory()->create(['research_document_id' => $draft->id, 'user_id' => $owner->id]);
 
         $this->as($owner)->postJson('/api/research/'.$draft->id.'/submit', [], $this->origin())

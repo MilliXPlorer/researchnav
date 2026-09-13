@@ -32,8 +32,14 @@ class SupabaseManuscriptAccessTest extends TestCase
         $this->withSession(['user_id' => $viewer->id])
             ->get('/api/repository/'.$document->id.'/download')
             ->assertOk()
-            ->assertDownload('manuscript.pdf')
+            ->assertSee('manuscript.pdf')
+            ->assertSee('Download all manuscripts (.zip)')
             ->assertHeaderMissing('Location');
+
+        $this->withSession(['user_id' => $viewer->id])
+            ->get('/api/repository/'.$document->id.'/download?file='.$document->files()->first()->id)
+            ->assertOk()
+            ->assertHeader('content-disposition', 'inline; filename="manuscript.pdf"');
 
         Http::assertSentCount(1);
         Http::assertSent(fn ($request) => $request->method() === 'GET'
@@ -51,6 +57,35 @@ class SupabaseManuscriptAccessTest extends TestCase
             ->assertForbidden();
 
         Http::assertNothingSent();
+    }
+
+    public function test_grouped_catalog_download_is_a_zip_named_for_the_folder(): void
+    {
+        Http::fake(['*' => Http::response('%PDF-private', 200)]);
+        [$document, $file] = $this->publicManuscript(['import_group_name' => 'Study A']);
+        DocumentFile::query()->create([
+            'research_document_id' => $document->id,
+            'uploaded_by' => $file->uploaded_by,
+            'document_type' => 'final_manuscript',
+            'version_number' => 2,
+            'file_order' => 2,
+            'original_filename' => 'Manuscript.pdf',
+            'stored_filename' => 'Manuscript.pdf',
+            'file_path' => 'Institute of Computer Studies/2026/Research Title/Manuscript.pdf',
+            'file_extension' => 'pdf',
+            'mime_type' => 'application/pdf',
+            'file_size' => 12,
+            'is_current' => true,
+            'uploaded_at' => now(),
+        ]);
+        $viewer = User::factory()->create(['access_status' => 'active']);
+
+        $this->withSession(['user_id' => $viewer->id])
+            ->get('/api/repository/'.$document->id.'/download?all=1')
+            ->assertOk()
+            ->assertDownload('Study A.zip')
+            ->assertHeader('content-type', 'application/zip');
+        Http::assertSentCount(2);
     }
 
     /** @return array{ResearchDocument, DocumentFile} */

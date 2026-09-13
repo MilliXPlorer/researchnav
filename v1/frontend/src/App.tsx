@@ -31,8 +31,14 @@ export default function App({ initialState }: { initialState?: InitialState }) {
   const path = location.pathname;
   const selectedResearchDocumentId = path.match(/^\/research\/(\d+)$/)?.[1];
   const researcherSection = path.match(
-    /^\/app\/researcher\/(submissions|similarity|related-studies)$/,
+    /^\/app\/researcher\/(submissions|similarity|related-studies)(?:\/(title|content))?$/,
   )?.[1];
+  const researcherSimilarityMode = path.match(
+    /^\/app\/researcher\/similarity\/(title|content)$/,
+  )?.[1] as "title" | "content" | undefined;
+  const instructorSectionRoute = path.match(
+    /^\/app\/instructor\/sections\/(\d+)(?:\/projects\/(\d+))?$/,
+  );
   const isDashboardRoute = isProtectedRoute(path);
 
   /** Auth middleware: any sign-out or expired session lands on the landing page. */
@@ -138,13 +144,22 @@ export default function App({ initialState }: { initialState?: InitialState }) {
           onSessionChange={setSession}
           navigate={navigate}
           researchDocumentId={selectedResearchDocumentId}
+          instructorSectionsRoute={
+            instructorSectionRoute !== null ||
+            path === "/app/instructor/sections"
+          }
+          instructorSectionId={instructorSectionRoute?.[1]}
+          instructorProjectDocumentId={instructorSectionRoute?.[2]}
           initialNav={
             researcherSection === "submissions"
               ? "My Research"
               : researcherSection === "similarity"
                 ? "Similarity Check"
-                : undefined
+                : instructorSectionRoute || path === "/app/instructor/sections"
+                  ? "My Sections"
+                  : undefined
           }
+          initialSimilarityMode={researcherSimilarityMode}
           onLogout={signOut}
         />
       ) : (

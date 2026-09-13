@@ -1,6 +1,6 @@
 # FastText remains lazy-loaded so a missing model is a stable 503, not a startup leak.
 scikit-learn>=1.5,<2.0
-pypdf>=5.0,<7.0
+PyMuPDF>=1.26,<2.0
 python-docx>=1.1,<2.0
 # fastText 0.9.3 is a source-only distribution written against pybind11 2.x.
 # pybind11 3.x removes the py::init overloads and the global ssize_t typedef it

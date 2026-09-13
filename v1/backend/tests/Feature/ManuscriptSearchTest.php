@@ -10,6 +10,7 @@ use App\Services\DocumentService;
 use App\Services\ManuscriptSearchProjectionService;
 use App\Services\ManuscriptTextExtractionException;
 use App\Services\ManuscriptTextExtractor;
+use App\Services\SupabaseStorageService;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -167,6 +168,45 @@ class ManuscriptSearchTest extends TestCase
         $extractor->shouldNotReceive('extract');
 
         $this->assertSame('no_source', app(ManuscriptSearchProjectionService::class)->reindex($document->id));
+    }
+
+    public function test_reindex_downloads_extracts_and_persists_a_supabase_manuscript_projection(): void
+    {
+        $document = $this->document();
+        $contents = '%PDF-1.4 cached manuscript';
+        $path = 'Institute of Computer Studies/2026/Cached Study/final.pdf';
+        $file = $this->file($document, [
+            'document_type' => 'final_manuscript',
+            'original_filename' => 'final.pdf',
+            'stored_filename' => 'final.pdf',
+            'file_path' => $path,
+            'file_extension' => 'pdf',
+            'mime_type' => 'application/pdf',
+            'file_size' => strlen($contents),
+            'content_sha256' => null,
+        ]);
+        $storage = $this->mock(SupabaseStorageService::class);
+        $storage->shouldReceive('isSupabasePath')->twice()->with($path)->andReturnTrue();
+        $storage->shouldReceive('downloadTo')->once()->with($path, \Mockery::type('string'))
+            ->andReturnUsing(function (string $_path, string $destination) use ($contents): void {
+                file_put_contents($destination, $contents);
+            });
+        $extractor = $this->mock(ManuscriptTextExtractor::class);
+        $extractor->shouldReceive('extract')->once()->with(\Mockery::on(fn (string $temporaryPath): bool => is_file($temporaryPath)))
+            ->andReturn('durably cached manuscript body');
+
+        $this->assertSame('indexed', app(ManuscriptSearchProjectionService::class)->reindex($document->id));
+        $this->assertDatabaseHas('manuscript_search_documents', [
+            'research_document_id' => $document->id,
+            'source_document_file_id' => $file->id,
+            'source_sha256' => hash('sha256', $contents),
+            'body_text' => 'durably cached manuscript body',
+            'extraction_status' => 'ready',
+        ]);
+        $this->assertDatabaseHas('document_files', [
+            'id' => $file->id,
+            'content_sha256' => hash('sha256', $contents),
+        ]);
     }
 
     public function test_invalidation_clears_a_ready_projection(): void

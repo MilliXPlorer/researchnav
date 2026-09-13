@@ -15,7 +15,7 @@ const record = {
   ],
   publication_year: 2026,
   institution_name: "Example College",
-  academic_unit: "Institute of Computing",
+  institute: "Institute of Computing",
   degree_program: "Computer Science",
   category: { name: "Repositories" },
   abstract: "Rendered before hydration.",
