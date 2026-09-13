@@ -8,30 +8,33 @@ use Illuminate\Support\Facades\Cache;
 
 class ManuscriptSimilarityTextCache
 {
-    public function remember(DocumentFile $file, Closure $extract): string
-    {
-        return Cache::rememberForever($this->key($file), $extract);
-    }
+    private const FORMAT_VERSION = 'incremental-document-parts-pymupdf-v1';
 
-    public function put(DocumentFile $file, string $text): void
+    /** @return list<string> */
+    public function remember(DocumentFile|iterable $files, Closure $extract): array
     {
-        if (trim($text) !== '') {
-            Cache::forever($this->key($file), $text);
-        }
+        $files = $files instanceof DocumentFile ? [$files] : [...$files];
+
+        return Cache::rememberForever(
+            $this->key($files),
+            fn (): array => $extract(),
+        );
     }
 
     public function forget(DocumentFile $file): void
     {
-        Cache::forget($this->key($file));
+        Cache::forget($this->key([$file]));
     }
 
-    private function key(DocumentFile $file): string
+    /** @param list<DocumentFile> $files */
+    private function key(array $files): string
     {
-        return 'manuscript-similarity-text:'.hash('sha256', implode('|', [
-            (string) $file->research_document_id,
-            (string) $file->file_path,
-            (string) $file->file_size,
-            (string) $file->version_number,
-        ]));
+        $identity = [self::FORMAT_VERSION];
+        foreach ($files as $file) {
+            array_push($identity, (string) $file->research_document_id, (string) $file->file_order,
+                (string) $file->file_path, (string) $file->file_size, (string) ($file->content_sha256 ?? ''), (string) $file->version_number);
+        }
+
+        return 'manuscript-similarity-text:'.hash('sha256', implode('|', $identity));
     }
 }

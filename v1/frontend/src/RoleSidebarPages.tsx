@@ -1,19 +1,27 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  ArrowLeft,
   ExternalLink,
+  Folder,
   MessageSquareText,
   Pencil,
   Plus,
+  Power,
   RefreshCw,
   Send,
+  Trash2,
+  UserPlus,
+  UsersRound,
 } from "lucide-react";
 import {
   ApiError,
+  checkContentQuerySimilarity,
   checkTitleQuerySimilarity,
   createCoordinatorSchedule,
   createInstructorSection,
   createResearchDraft,
   getCoordinatorProgramReport,
+  getInstructorProjectTeam,
   getInstitutionalReport,
   listAdviserAdvisees,
   listAdviserMonitoring,
@@ -22,7 +30,6 @@ import {
   listAdviserFeedbackHistory,
   listAdviserSimilarityAlerts,
   listCategories,
-  listCategoryCounts,
   listCoordinatorSchedules,
   listDuplicateFlags,
   listAdviserLoad,
@@ -34,18 +41,17 @@ import {
   listInstructorSections,
   listInstructorSimilarityOverview,
   listInstructorStudents,
+  listInstructorProjectTeamCandidates,
   listOfficeUsers,
   listPanelAssignments,
   listPanelHistory,
   listPanelSchedule,
-  listPrivacyLogs,
   listProvisionedAccounts,
   listRepositoryCatalog,
   listResearchDocuments,
   listMetadataStandards,
   listRetentionLogs,
   listSectionDocuments,
-  listAssignableSectionDocuments,
   listSectionDocumentMembers,
   listSectionMembers,
   listStatisticianQueue,
@@ -59,22 +65,24 @@ import {
   listEditorMonitoring,
   markStatisticalReviewNotApplicable,
   provisionAccount,
-  recordPrivacyLog,
   recordRetentionLog,
   removeSectionMember,
   addSectionDocumentMember,
   removeSectionDocumentMember,
+  replaceInstructorProjectTeam,
+  replaceInstructorProjectTeamRole,
+  createSectionProject,
+  updateSectionProjectTitle,
+  deleteSectionProject,
   returnMethodologyForClarification,
   respondToSupportAssignment,
   saveLibrarianMonitoring,
   saveLibrarianReferenceReview,
   saveEditorMonitoring,
   saveEditorReview,
-  saveLibraryItem,
   saveAdviserMonitoring,
   saveMetadataReview,
   saveStatisticianChecklist,
-  searchPublicResearchBySimilarity,
   signOffMethodology,
   saveInstructorMonitoring,
   assignInstructorPanelist,
@@ -87,18 +95,19 @@ import {
   updateOfficeUserAccess,
   uploadResearchFile,
   addSectionMembers,
-  assignSectionDocuments,
   type AccessStatus,
   type AdminRole,
+  type OfficeUserRow,
   type CoordinatorProgramReport,
   type DefenseScheduleResource,
   type DocumentFileResource,
-  type InstitutionalReport,
   type InstructorSectionDocumentItem,
   type InstructorAssignedSubmissionItem,
   type InstructorSectionResource,
   type InstructorStudentResource,
   type InstructorMonitoringEntry,
+  type InstructorProjectTeam,
+  type ProjectTeamPerson,
   type LaravelPaginatedResponse,
   type MetadataStandardsItem,
   type PanelAssignmentResource,
@@ -111,19 +120,16 @@ import {
   DatePickerInput,
   PublicationYearInput,
 } from "./dateControls";
-import { roleConfigs } from "./data";
+import { instituteNames, programsByInstitute, roleConfigs } from "./data";
 import { ConfirmDialog, Modal } from "./Modal";
 import ResearchActivity from "./ResearchActivity";
 import InstructorResearchReview from "./InstructorResearchReview";
 import SimilarityResults from "./SimilarityResults";
-import {
-  classificationLabel,
-  formatSimilarityPercentage,
-  formatSimilarityValue,
-  formatSimilarityWeight,
-} from "./similarity";
+import PublicResearchMetadataDialog from "./PublicResearchMetadataDialog";
+import { classificationLabel, formatSimilarityPercentage } from "./similarity";
 import type { ResearchRecord, Role } from "./types";
 import { useLiveFilters } from "./useLiveFilters";
+import { filterUserRows } from "./userManagement";
 
 const roles: AdminRole[] = [
   "admin",
@@ -136,7 +142,6 @@ const roles: AdminRole[] = [
   "librarian",
   "research_editor",
   "research-office",
-  "academics",
 ];
 import ResearchOfficeBulkImport from "./ResearchOfficeBulkImport";
 
@@ -185,10 +190,16 @@ export default function RoleSidebarPage({
   role,
   selectedNav,
   navigate,
+  similarityMode,
+  instructorSectionId,
+  instructorProjectDocumentId,
 }: {
   role: Role;
   selectedNav: string;
   navigate: (path: string) => void;
+  similarityMode?: "title" | "content";
+  instructorSectionId?: string | number;
+  instructorProjectDocumentId?: string | number;
 }) {
   switch (role) {
     case "research_editor":
@@ -233,7 +244,14 @@ export default function RoleSidebarPage({
         case "Title Proposals":
           return <InstructorAssignedSubmissions role={role} titleOnly />;
         case "My Sections":
-          return <InstructorSections role={role} />;
+          return (
+            <InstructorSections
+              role={role}
+              navigate={navigate}
+              sectionId={instructorSectionId}
+              projectDocumentId={instructorProjectDocumentId}
+            />
+          );
         case "Assigned Submissions":
         case "Assigned Research":
           return <InstructorAssignedSubmissions role={role} />;
@@ -319,10 +337,7 @@ export default function RoleSidebarPage({
       }
     case "research-office":
       switch (selectedNav) {
-        case "Institutional Overview":
-          return <OfficeInstitutionalOverview role={role} />;
-
-        case "Import Manuscript":
+        case "Upload Manuscript":
           return <ResearchOfficeBulkImport />;
 
         case "User & Role Management":
@@ -331,18 +346,6 @@ export default function RoleSidebarPage({
         case "Reports & Exports":
           return <OfficeReports role={role} />;
 
-        case "Data Privacy Log":
-          return <OfficePrivacyLogs role={role} />;
-
-        default:
-          return null;
-      }
-    case "academics":
-      switch (selectedNav) {
-        case "Search":
-          return <AcademicsSearch role={role} />;
-        case "Browse by Category":
-          return <AcademicsCategories role={role} navigate={navigate} />;
         default:
           return null;
       }
@@ -356,7 +359,13 @@ export default function RoleSidebarPage({
         case "Create Research":
           return <ResearcherNewSubmission role={role} />;
         case "Similarity Check":
-          return <ResearcherSimilarityCheck role={role} />;
+          return (
+            <ResearcherSimilarityCheck
+              key={similarityMode}
+              role={role}
+              initialMode={similarityMode}
+            />
+          );
         case "Related Studies":
           return <ResearcherRelatedStudies role={role} navigate={navigate} />;
         default:
@@ -915,7 +924,7 @@ function AdviserAdvisees({
                 </div>
               </div>
               <div className="admin-table-wrap">
-                <table>
+                <table className="checker-results-table">
                   <caption className="sr-only">Advisee documents</caption>
                   <thead>
                     <tr>
@@ -1139,6 +1148,7 @@ function CreateSectionDialog({
   onClose: () => void;
 }) {
   const [name, setName] = useState("");
+  const [sectionCode, setSectionCode] = useState("");
   const [academicYear, setAcademicYear] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
@@ -1150,6 +1160,7 @@ function CreateSectionDialog({
     try {
       await createInstructorSection({
         name: name.trim(),
+        section_code: sectionCode.trim(),
         academic_year: academicYear.trim() || null,
       });
       onCreated();
@@ -1168,7 +1179,10 @@ function CreateSectionDialog({
           Add a class section to organize the student researchers and research
           documents joined to it.
         </p>
-        <form onSubmit={submit} className="admin-inline-form">
+        <form
+          onSubmit={submit}
+          className="admin-inline-form section-dialog-form"
+        >
           <label>
             Section name
             <input
@@ -1179,6 +1193,15 @@ function CreateSectionDialog({
             />
           </label>
           <label>
+            Section code
+            <input
+              value={sectionCode}
+              onChange={(event) => setSectionCode(event.target.value)}
+              required
+              maxLength={100}
+            />
+          </label>
+          <label className="section-dialog-year">
             Academic year
             <AcademicYearSelect
               value={academicYear}
@@ -1211,6 +1234,66 @@ function CreateSectionDialog({
         )}
       </div>
     </Modal>
+  );
+}
+
+function ProjectAccountOptions({
+  candidates,
+  selectedIds,
+  onToggle,
+  mode = "multiple",
+  groupName,
+  onClear,
+  disabledIds = [],
+  disabledLabel,
+}: {
+  candidates: ProjectTeamPerson[];
+  selectedIds: string[];
+  onToggle: (person: ProjectTeamPerson, selected: boolean) => void;
+  mode?: "single" | "multiple";
+  groupName?: string;
+  onClear?: () => void;
+  disabledIds?: string[];
+  disabledLabel?: string;
+}) {
+  return (
+    <div className="project-team-options">
+      {mode === "single" && onClear && (
+        <label>
+          <input
+            type="radio"
+            name={groupName}
+            checked={selectedIds.length === 0}
+            onChange={onClear}
+          />
+          <span>
+            <strong>No assignment</strong>
+            <small>Leave this project role unassigned.</small>
+          </span>
+        </label>
+      )}
+      {candidates.map((person) => {
+        const disabled = disabledIds.includes(person.user_id);
+        return (
+          <label key={person.user_id}>
+            <input
+              type={mode === "single" ? "radio" : "checkbox"}
+              name={mode === "single" ? groupName : undefined}
+              disabled={disabled}
+              checked={selectedIds.includes(person.user_id)}
+              onChange={(event) => onToggle(person, event.target.checked)}
+            />
+            <span>
+              <strong>{person.name}</strong>
+              <small>{person.email}</small>
+              {disabled && disabledLabel && (
+                <small className="project-role-status">{disabledLabel}</small>
+              )}
+            </span>
+          </label>
+        );
+      })}
+    </div>
   );
 }
 
@@ -1723,16 +1806,30 @@ function InstructorMonitoring({ role }: { role: Role }) {
   );
 }
 
-function InstructorSections({ role }: { role: Role }) {
+function InstructorSections({
+  role,
+  navigate,
+  sectionId,
+  projectDocumentId,
+}: {
+  role: Role;
+  navigate: (path: string) => void;
+  sectionId?: string | number;
+  projectDocumentId?: string | number;
+}) {
   const [attempt, reload] = useAttempt();
   const state = useLoad(() => listInstructorSections(), attempt);
   const [pageNotice, setPageNotice] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
-  const [openSection, setOpenSection] =
-    useState<InstructorSectionResource | null>(null);
+  const openSection =
+    sectionId !== undefined && state.status === "ready"
+      ? (state.data.find((item) => String(item.id) === String(sectionId)) ??
+        null)
+      : null;
   const [detailsNotice, setDetailsNotice] = useState("");
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState("");
+  const [editSectionCode, setEditSectionCode] = useState("");
   const [editYear, setEditYear] = useState("");
   const [editBusy, setEditBusy] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<{
@@ -1764,15 +1861,68 @@ function InstructorSections({ role }: { role: Role }) {
     InstructorStudentResource[]
   >([]);
   const [documentMembersLoading, setDocumentMembersLoading] = useState(false);
-  const [assignableFor, setAssignableFor] = useState<
-    Record<number, InstructorSectionDocumentItem[]>
+  const [projectTeam, setProjectTeam] = useState<InstructorProjectTeam | null>(
+    null,
+  );
+  const [teamCandidates, setTeamCandidates] = useState<
+    Record<string, ProjectTeamPerson[]>
   >({});
-  const [assignableState, setAssignableState] = useState<
-    Record<number, "loading" | "ready" | "error">
-  >({});
-  const [assigningDocuments, setAssigningDocuments] = useState(false);
-  const [selectedDocumentIds, setSelectedDocumentIds] = useState<number[]>([]);
+  const [teamSearches, setTeamSearches] = useState<Record<string, string>>({});
+  const [teamDraft, setTeamDraft] = useState({
+    adviser_id: "",
+    research_office_representative_id: "",
+    chair_id: "",
+    panel_member_ids: [] as string[],
+  });
+  const panelSearchQuery = (teamSearches.panelMembers ?? "")
+    .trim()
+    .toLocaleLowerCase();
+  const matchingPanelCandidates = (teamCandidates.panel_member ?? []).filter(
+    (person) =>
+      panelSearchQuery === "" ||
+      `${person.name} ${person.email}`
+        .toLocaleLowerCase()
+        .includes(panelSearchQuery),
+  );
+  const [teamLoading, setTeamLoading] = useState(false);
+  const [teamBusy, setTeamBusy] = useState(false);
+  const [addStudentOpen, setAddStudentOpen] = useState(false);
+  const [projectDisclosures, setProjectDisclosures] = useState({
+    students: false,
+    adviser: false,
+    researchOffice: false,
+    chair: false,
+    panelMembers: false,
+  });
+  const [projectManageOpen, setProjectManageOpen] = useState(false);
+  const [confirmDocumentRemove, setConfirmDocumentRemove] =
+    useState<InstructorStudentResource | null>(null);
+  const [confirmTeamSave, setConfirmTeamSave] = useState<
+    "adviser" | "researchOffice" | "chair" | "panelMembers" | null
+  >(null);
+  const teamRequestRef = useRef(0);
+  const [addProjectOpen, setAddProjectOpen] = useState(false);
+  const [newProjectTitle, setNewProjectTitle] = useState("");
+  const [newProjectBusy, setNewProjectBusy] = useState(false);
+  const [editingProject, setEditingProject] = useState(false);
+  const [editProjectTitle, setEditProjectTitle] = useState("");
+  const [editProjectBusy, setEditProjectBusy] = useState(false);
+  const [confirmProjectDelete, setConfirmProjectDelete] = useState(false);
+  const [deleteProjectBusy, setDeleteProjectBusy] = useState(false);
   const studentSearchRef = useRef<Record<number, number>>({});
+  const showingProjectPage = openSection !== null && selectedDocument !== null;
+  const projectAssignmentEditing =
+    Object.values(projectDisclosures).some(Boolean);
+
+  function resetProjectDisclosures() {
+    setProjectDisclosures({
+      students: false,
+      adviser: false,
+      researchOffice: false,
+      chair: false,
+      panelMembers: false,
+    });
+  }
 
   useEffect(() => {
     const timers = studentSearchRef.current;
@@ -1781,25 +1931,22 @@ function InstructorSections({ role }: { role: Role }) {
     };
   }, []);
 
+  useEffect(() => {
+    if (!openSection) return;
+    void loadDocuments(openSection.id);
+    void loadStudents(openSection.id, "");
+  }, [openSection, sectionId, state]);
+
+  useEffect(() => {
+    if (!openSection || projectDocumentId === undefined) return;
+    const document = (documentsFor[openSection.id] ?? []).find(
+      (item) => String(item.research_document_id) === String(projectDocumentId),
+    );
+    if (document) void openDocumentMembers(openSection.id, document);
+  }, [openSection, projectDocumentId, documentsFor]);
+
   function openSectionDetails(section: InstructorSectionResource) {
-    setOpenSection(section);
-    setDetailsNotice("");
-    setEditing(false);
-    setSelectedDocument(null);
-    setDocumentMembers([]);
-    setSelectedDocumentIds([]);
-    setEditName(section.name);
-    setEditYear(section.academic_year ?? "");
-    if (documentsState[section.id] !== "ready") {
-      void loadDocuments(section.id);
-    }
-    if (assignableState[section.id] !== "ready") {
-      void loadAssignableDocuments(section.id);
-    }
-    if (studentsState[section.id] !== "ready") {
-      setStudentsState((current) => ({ ...current, [section.id]: "loading" }));
-      void loadStudents(section.id, "");
-    }
+    navigate(`/app/instructor/sections/${section.id}`);
   }
 
   async function loadDocuments(sectionId: number) {
@@ -1810,36 +1957,6 @@ function InstructorSections({ role }: { role: Role }) {
       setDocumentsState((current) => ({ ...current, [sectionId]: "ready" }));
     } catch {
       setDocumentsState((current) => ({ ...current, [sectionId]: "error" }));
-    }
-  }
-
-  async function loadAssignableDocuments(sectionId: number) {
-    setAssignableState((current) => ({ ...current, [sectionId]: "loading" }));
-    try {
-      const documents = await listAssignableSectionDocuments(sectionId);
-      setAssignableFor((current) => ({ ...current, [sectionId]: documents }));
-      setAssignableState((current) => ({ ...current, [sectionId]: "ready" }));
-    } catch {
-      setAssignableState((current) => ({ ...current, [sectionId]: "error" }));
-    }
-  }
-
-  async function assignTitlesToSection() {
-    if (!openSection || selectedDocumentIds.length === 0) return;
-    setAssigningDocuments(true);
-    setDetailsNotice("");
-    try {
-      await assignSectionDocuments(openSection.id, selectedDocumentIds);
-      await loadDocuments(openSection.id);
-      setSelectedDocumentIds([]);
-      setDetailsNotice("Research titles added to this section.");
-      reload();
-    } catch (error) {
-      setDetailsNotice(
-        friendlyError(error, "The research titles could not be added"),
-      );
-    } finally {
-      setAssigningDocuments(false);
     }
   }
 
@@ -1880,22 +1997,281 @@ function InstructorSections({ role }: { role: Role }) {
     sectionId: number,
     document: InstructorSectionDocumentItem,
   ) {
+    const requestId = ++teamRequestRef.current;
     setSelectedDocument(document);
     setDocumentMembersLoading(true);
+    setTeamLoading(true);
     try {
-      setDocumentMembers(
-        await listSectionDocumentMembers(
-          sectionId,
-          document.research_document_id,
-        ),
-      );
+      const [members, team, advisers, officePersonnel, chairs, panelists] =
+        await Promise.allSettled([
+          listSectionDocumentMembers(sectionId, document.research_document_id),
+          getInstructorProjectTeam(sectionId, document.research_document_id),
+          listInstructorProjectTeamCandidates(
+            sectionId,
+            document.research_document_id,
+            "adviser",
+          ),
+          listInstructorProjectTeamCandidates(
+            sectionId,
+            document.research_document_id,
+            "research_office_representative",
+          ),
+          listInstructorPanelists().then((people) =>
+            people.map((person) => ({
+              user_id: person.id,
+              name: person.name,
+              email: person.email,
+              team_role: "chair" as const,
+            })),
+          ),
+          listInstructorPanelists().then((people) =>
+            people.map((person) => ({
+              user_id: person.id,
+              name: person.name,
+              email: person.email,
+              team_role: "panel_member" as const,
+            })),
+          ),
+        ]);
+      if (requestId !== teamRequestRef.current) return;
+      if (members.status === "fulfilled") setDocumentMembers(members.value);
+      if (team.status === "fulfilled") {
+        setProjectTeam(team.value);
+        setTeamDraft({
+          adviser_id: team.value.adviser?.user_id ?? "",
+          research_office_representative_id:
+            team.value.research_office_representative?.user_id ?? "",
+          chair_id: team.value.chair?.user_id ?? "",
+          panel_member_ids: team.value.panel_members.map(
+            (member) => member.user_id,
+          ),
+        });
+      }
+      setTeamCandidates({
+        adviser: advisers.status === "fulfilled" ? advisers.value : [],
+        research_office_representative:
+          officePersonnel.status === "fulfilled" ? officePersonnel.value : [],
+        chair: chairs.status === "fulfilled" ? chairs.value : [],
+        panel_member: panelists.status === "fulfilled" ? panelists.value : [],
+      });
+      const failedRequest = [
+        members,
+        team,
+        advisers,
+        officePersonnel,
+        chairs,
+        panelists,
+      ].find((result) => result.status === "rejected");
+      if (failedRequest?.status === "rejected") {
+        setDetailsNotice(
+          friendlyError(
+            failedRequest.reason,
+            "Some research title assignment data could not be loaded",
+          ),
+        );
+      }
     } catch (error) {
+      if (requestId !== teamRequestRef.current) return;
       setDetailsNotice(
         friendlyError(error, "The research title members could not be loaded"),
       );
       setDocumentMembers([]);
     } finally {
-      setDocumentMembersLoading(false);
+      if (requestId === teamRequestRef.current) {
+        setDocumentMembersLoading(false);
+        setTeamLoading(false);
+      }
+    }
+  }
+
+  function closeDocumentFolder() {
+    teamRequestRef.current += 1;
+    setSelectedDocument(null);
+    setDocumentMembers([]);
+    setProjectTeam(null);
+    setProjectManageOpen(false);
+    resetProjectDisclosures();
+    if (openSection) navigate(`/app/instructor/sections/${openSection.id}`);
+  }
+
+  function closeSectionDetails() {
+    teamRequestRef.current += 1;
+    navigate("/app/instructor/sections");
+  }
+
+  async function saveProjectTeamRole(
+    role: "adviser" | "researchOffice" | "chair" | "panelMembers",
+  ) {
+    if (!openSection || !selectedDocument) return;
+    setTeamBusy(true);
+    setDetailsNotice("");
+    const teamRole =
+      role === "researchOffice"
+        ? "research_office_representative"
+        : role === "panelMembers"
+          ? "panel_member"
+          : role;
+    try {
+      if (role === "panelMembers") {
+        const team = await replaceInstructorProjectTeam(
+          openSection.id,
+          selectedDocument.research_document_id,
+          {
+            adviser_id: projectTeam?.adviser?.user_id ?? null,
+            research_office_representative_id:
+              projectTeam?.research_office_representative?.user_id ?? null,
+            chair_id: projectTeam?.chair?.user_id ?? null,
+            panel_member_ids: teamDraft.panel_member_ids,
+          },
+        );
+        setProjectTeam(team);
+      } else {
+        const field =
+          role === "adviser"
+            ? "adviser_id"
+            : role === "researchOffice"
+              ? "research_office_representative_id"
+              : "chair_id";
+        const team = await replaceInstructorProjectTeamRole(
+          openSection.id,
+          selectedDocument.research_document_id,
+          teamRole,
+          teamDraft[field] || null,
+        );
+        setProjectTeam(team);
+      }
+      setDetailsNotice("Research project assignment saved.");
+      resetProjectDisclosures();
+    } catch (error) {
+      setDetailsNotice(
+        friendlyError(error, "The project assignment could not be saved"),
+      );
+    } finally {
+      setTeamBusy(false);
+    }
+  }
+
+  function requestProjectTeamSave(
+    role: "adviser" | "researchOffice" | "chair" | "panelMembers",
+  ) {
+    if (!projectTeam) {
+      void saveProjectTeamRole(role);
+      return;
+    }
+    const changed =
+      role === "adviser"
+        ? projectTeam.adviser?.user_id !== teamDraft.adviser_id
+        : role === "researchOffice"
+          ? projectTeam.research_office_representative?.user_id !==
+            teamDraft.research_office_representative_id
+          : role === "chair"
+            ? projectTeam.chair?.user_id !== teamDraft.chair_id
+            : projectTeam.panel_members
+                .map((member) => member.user_id)
+                .sort()
+                .join(",") !== [...teamDraft.panel_member_ids].sort().join(",");
+    const hasCurrentAssignment =
+      role === "panelMembers"
+        ? projectTeam.panel_members.length > 0
+        : role === "researchOffice"
+          ? projectTeam.research_office_representative !== null
+          : role === "adviser"
+            ? projectTeam.adviser !== null
+            : projectTeam.chair !== null;
+    if (changed && hasCurrentAssignment) {
+      setConfirmTeamSave(role);
+      return;
+    }
+    void saveProjectTeamRole(role);
+  }
+
+  function projectTeamRoleAction(
+    role: "adviser" | "researchOffice" | "chair" | "panelMembers",
+  ) {
+    const label =
+      role === "adviser"
+        ? "research adviser"
+        : role === "researchOffice"
+          ? "Research Office representative"
+          : role === "chair"
+            ? "panel chair"
+            : "panel members";
+    const hasCurrentAssignment =
+      role === "panelMembers"
+        ? Boolean(projectTeam?.panel_members.length)
+        : role === "researchOffice"
+          ? Boolean(projectTeam?.research_office_representative)
+          : role === "adviser"
+            ? Boolean(projectTeam?.adviser)
+            : Boolean(projectTeam?.chair);
+    const hasDraftAssignment =
+      role === "panelMembers"
+        ? teamDraft.panel_member_ids.length > 0
+        : role === "researchOffice"
+          ? Boolean(teamDraft.research_office_representative_id)
+          : role === "adviser"
+            ? Boolean(teamDraft.adviser_id)
+            : Boolean(teamDraft.chair_id);
+
+    if (hasCurrentAssignment && !hasDraftAssignment) return `Remove ${label}`;
+    return `${hasCurrentAssignment ? "Update" : "Assign"} ${label}`;
+  }
+
+  function projectTeamRoleChanged(
+    role: "adviser" | "researchOffice" | "chair" | "panelMembers",
+  ) {
+    if (!projectTeam) return false;
+    if (role === "panelMembers") {
+      return (
+        projectTeam.panel_members
+          .map((member) => member.user_id)
+          .sort()
+          .join(",") !== [...teamDraft.panel_member_ids].sort().join(",")
+      );
+    }
+    if (role === "researchOffice") {
+      return (
+        (projectTeam.research_office_representative?.user_id ?? "") !==
+        teamDraft.research_office_representative_id
+      );
+    }
+    return role === "adviser"
+      ? (projectTeam.adviser?.user_id ?? "") !== teamDraft.adviser_id
+      : (projectTeam.chair?.user_id ?? "") !== teamDraft.chair_id;
+  }
+
+  async function refreshProjectTeamCandidates(
+    role: "adviser" | "researchOffice" | "chair" | "panelMembers",
+  ) {
+    if (!openSection || !selectedDocument) return;
+    const teamRole =
+      role === "researchOffice"
+        ? "research_office_representative"
+        : role === "panelMembers"
+          ? "panel_member"
+          : role;
+    try {
+      const candidates: ProjectTeamPerson[] =
+        teamRole === "panel_member" || teamRole === "chair"
+          ? (await listInstructorPanelists()).map((person) => ({
+              user_id: person.id,
+              name: person.name,
+              email: person.email,
+              team_role: teamRole,
+            }))
+          : await listInstructorProjectTeamCandidates(
+              openSection.id,
+              selectedDocument.research_document_id,
+              teamRole,
+            );
+      setTeamCandidates((current) => ({
+        ...current,
+        [teamRole]: candidates,
+      }));
+    } catch (error) {
+      setDetailsNotice(
+        friendlyError(error, "Eligible project staff could not be refreshed"),
+      );
     }
   }
 
@@ -1944,14 +2320,84 @@ function InstructorSections({ role }: { role: Role }) {
     }
   }
 
+  async function createProject(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!openSection) return;
+    const title = newProjectTitle.trim();
+    if (!title) return;
+    setNewProjectBusy(true);
+    setDetailsNotice("");
+    try {
+      await createSectionProject(openSection.id, title);
+      await loadDocuments(openSection.id);
+      setNewProjectTitle("");
+      setAddProjectOpen(false);
+      setDetailsNotice("Research project created.");
+      reload();
+    } catch (error) {
+      setDetailsNotice(
+        friendlyError(error, "The research project could not be created"),
+      );
+    } finally {
+      setNewProjectBusy(false);
+    }
+  }
+
+  async function saveProjectTitle(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!openSection || !selectedDocument) return;
+    setEditProjectBusy(true);
+    setDetailsNotice("");
+    try {
+      await updateSectionProjectTitle(
+        openSection.id,
+        selectedDocument.research_document_id,
+        editProjectTitle.trim(),
+      );
+      await loadDocuments(openSection.id);
+      setEditingProject(false);
+      setDetailsNotice("Research title updated.");
+      reload();
+    } catch (error) {
+      setDetailsNotice(
+        friendlyError(error, "The research title could not be updated"),
+      );
+    } finally {
+      setEditProjectBusy(false);
+    }
+  }
+
+  async function removeProject() {
+    if (!openSection || !selectedDocument) return;
+    setDeleteProjectBusy(true);
+    setDetailsNotice("");
+    try {
+      await deleteSectionProject(
+        openSection.id,
+        selectedDocument.research_document_id,
+      );
+      setConfirmProjectDelete(false);
+      closeDocumentFolder();
+      await loadDocuments(openSection.id);
+      setDetailsNotice("Research project deleted.");
+      reload();
+    } catch (error) {
+      setConfirmProjectDelete(false);
+      setDetailsNotice(
+        friendlyError(error, "The research project could not be deleted"),
+      );
+    } finally {
+      setDeleteProjectBusy(false);
+    }
+  }
+
   async function toggleActive(section: InstructorSectionResource) {
     setDetailsNotice("");
     try {
-      const updated = await updateInstructorSection(section.id, {
+      await updateInstructorSection(section.id, {
         is_active: !section.is_active,
       });
-      setOpenSection(updated);
-      setDetailsNotice(`Section "${updated.name}" updated.`);
+      setDetailsNotice(`Section "${section.name}" updated.`);
       reload();
     } catch (error) {
       setDetailsNotice(
@@ -1966,13 +2412,13 @@ function InstructorSections({ role }: { role: Role }) {
     setEditBusy(true);
     setDetailsNotice("");
     try {
-      const updated = await updateInstructorSection(openSection.id, {
+      await updateInstructorSection(openSection.id, {
         name: editName.trim(),
+        section_code: editSectionCode.trim(),
         academic_year: editYear.trim() || null,
       });
       setEditing(false);
-      setOpenSection(updated);
-      setDetailsNotice(`Section "${updated.name}" updated.`);
+      setDetailsNotice(`Section "${editName.trim()}" updated.`);
       reload();
     } catch (error) {
       setDetailsNotice(
@@ -1987,8 +2433,7 @@ function InstructorSections({ role }: { role: Role }) {
     setStudentBusy((current) => ({ ...current, [sectionId]: true }));
     setDetailsNotice("");
     try {
-      const updated = await addSectionMembers(sectionId, [userId]);
-      setOpenSection(updated);
+      await addSectionMembers(sectionId, [userId]);
       await loadStudents(sectionId, studentQueries[sectionId] ?? "");
       setDetailsNotice("Student researcher added to the section.");
       reload();
@@ -2005,8 +2450,7 @@ function InstructorSections({ role }: { role: Role }) {
     setStudentBusy((current) => ({ ...current, [sectionId]: true }));
     setDetailsNotice("");
     try {
-      const updated = await removeSectionMember(sectionId, userId);
-      setOpenSection(updated);
+      await removeSectionMember(sectionId, userId);
       await loadStudents(sectionId, studentQueries[sectionId] ?? "");
       setDetailsNotice("Student researcher removed from the section.");
       reload();
@@ -2021,109 +2465,104 @@ function InstructorSections({ role }: { role: Role }) {
 
   return (
     <div className="workspace-content admin-sidebar-page">
-      <RolePageHeader
-        role={role}
-        title="My sections"
-        description="Class sections you own and the research assigned to each."
-        action={
-          <span className="row-actions">
-            <Button variant="secondary" onClick={reload}>
-              <RefreshCw /> Refresh
-            </Button>
-            <Button onClick={() => setCreateOpen(true)}>Create section</Button>
-          </span>
-        }
-      />
-      {pageNotice && (
-        <p
-          role="status"
-          className={
-            pageNotice.includes("could not") ? "admin-error" : "admin-success"
-          }
-        >
-          {pageNotice}
-        </p>
-      )}
-      {state.status === "loading" ? (
-        <Loading label="Loading sections" />
-      ) : state.status === "error" ? (
-        <InlineError message={state.message} retry={reload} />
-      ) : state.data.length === 0 ? (
-        <p className="admin-empty">No class sections have been created.</p>
-      ) : (
-        <section className="panel-card admin-data-card">
-          <div className="admin-table-wrap">
-            <table>
-              <caption className="sr-only">Class sections</caption>
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Academic year</th>
-                  <th>Active</th>
-                  <th>Documents</th>
-                  <th>Students</th>
-                  <th>Details</th>
-                </tr>
-              </thead>
-              <tbody>
-                {state.data.map((section) => (
-                  <tr
-                    key={section.id}
-                    className="clickable-row"
-                    onClick={(event) => {
-                      if ((event.target as HTMLElement).closest("button"))
-                        return;
-                      openSectionDetails(section);
-                    }}
+      {!openSection && (
+        <>
+          <RolePageHeader
+            role={role}
+            title="My sections"
+            description="Class sections you own and the research assigned to each."
+            action={
+              <span className="row-actions">
+                <Button variant="secondary" onClick={reload}>
+                  <RefreshCw /> Refresh
+                </Button>
+                <Button onClick={() => setCreateOpen(true)}>
+                  <Plus /> Add Section
+                </Button>
+              </span>
+            }
+          />
+          {pageNotice && (
+            <p
+              role="status"
+              className={
+                pageNotice.includes("could not")
+                  ? "admin-error"
+                  : "admin-success"
+              }
+            >
+              {pageNotice}
+            </p>
+          )}
+          {state.status === "loading" ? (
+            <Loading label="Loading sections" />
+          ) : state.status === "error" ? (
+            <InlineError message={state.message} retry={reload} />
+          ) : state.data.length === 0 ? (
+            <p className="admin-empty">No class sections have been created.</p>
+          ) : (
+            <section className="section-folder-grid" aria-label="Your sections">
+              {state.data.map((section) => (
+                <button
+                  type="button"
+                  className="section-folder-card"
+                  key={section.id}
+                  onClick={() => openSectionDetails(section)}
+                  aria-label={`Open section ${section.name}`}
+                >
+                  <span className="folder-card-icon" aria-hidden="true">
+                    <Folder />
+                  </span>
+                  <span className="folder-card-copy">
+                    <strong>{section.name}</strong>
+                    <small>
+                      {section.section_code ?? "Section code not set"}
+                    </small>
+                    <small>
+                      {section.academic_year ?? "Academic year not set"}
+                    </small>
+                    <span>
+                      {section.documents_count} project
+                      {section.documents_count === 1 ? "" : "s"} ·{" "}
+                      {section.members_count} student
+                      {section.members_count === 1 ? "" : "s"}
+                    </span>
+                  </span>
+                  <span
+                    className={
+                      section.is_active
+                        ? "badge badge-active"
+                        : "badge badge-inactive"
+                    }
                   >
-                    <td>{section.name}</td>
-                    <td>{section.academic_year ?? "—"}</td>
-                    <td>
-                      <span
-                        className={
-                          section.is_active
-                            ? "badge badge-active"
-                            : "badge badge-inactive"
-                        }
-                      >
-                        {section.is_active ? "Active" : "Inactive"}
-                      </span>
-                    </td>
-                    <td>{section.documents_count}</td>
-                    <td>{section.members_count}</td>
-                    <td>
-                      <Button
-                        variant="secondary"
-                        onClick={() => openSectionDetails(section)}
-                      >
-                        View details
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
+                    {section.is_active ? "Active" : "Inactive"}
+                  </span>
+                </button>
+              ))}
+            </section>
+          )}
+          {createOpen && (
+            <CreateSectionDialog
+              onClose={() => setCreateOpen(false)}
+              onCreated={() => {
+                setCreateOpen(false);
+                setPageNotice("Class section created.");
+                reload();
+              }}
+            />
+          )}
+        </>
       )}
-      {createOpen && (
-        <CreateSectionDialog
-          onClose={() => setCreateOpen(false)}
-          onCreated={() => {
-            setCreateOpen(false);
-            setPageNotice("Class section created.");
-            reload();
-          }}
-        />
-      )}
-      {openSection && (
-        <Modal
-          label={`Section details: ${openSection.name}`}
-          onClose={() => setOpenSection(null)}
-          busy={editBusy || studentBusy[openSection.id] === true}
-          dirty={editing}
-          size="large"
+      {openSection && !showingProjectPage && (
+        <section
+          className="section-page-view"
+          aria-label={`Section details: ${openSection.name}`}
         >
+          <div className="section-page-toolbar">
+            <Button variant="quiet" onClick={closeSectionDetails}>
+              Back to Sections
+            </Button>
+          </div>
           <div className="section-details section-details-redesigned">
             <div className="section-details-header">
               <div>
@@ -2170,55 +2609,135 @@ function InstructorSections({ role }: { role: Role }) {
             <div className="section-details-actions">
               <Button
                 variant="secondary"
+                className="icon-button"
+                aria-label={
+                  openSection.is_active
+                    ? "Deactivate section"
+                    : "Activate section"
+                }
+                title={
+                  openSection.is_active
+                    ? "Deactivate section"
+                    : "Activate section"
+                }
                 onClick={() => void toggleActive(openSection)}
               >
-                {openSection.is_active
-                  ? "Deactivate section"
-                  : "Activate section"}
+                <Power />
               </Button>
               <Button
                 variant="secondary"
-                onClick={() => setEditing((value) => !value)}
+                className="icon-button"
+                aria-label="Edit section"
+                title="Edit section"
+                onClick={() => {
+                  setEditName(openSection.name);
+                  setEditSectionCode(openSection.section_code ?? "");
+                  setEditYear(openSection.academic_year ?? "");
+                  setEditing(true);
+                }}
               >
-                {editing ? "Cancel editing" : "Edit section"}
+                <Pencil />
               </Button>
             </div>
             {editing && (
-              <form
-                onSubmit={saveSection}
-                className="admin-inline-form section-edit-form"
+              <Modal
+                label="Edit section"
+                onClose={() => setEditing(false)}
+                busy={editBusy}
               >
-                <label>
-                  Section name
-                  <input
-                    value={editName}
-                    onChange={(event) => setEditName(event.target.value)}
-                    required
-                    maxLength={150}
-                  />
-                </label>
-                <label>
-                  Academic year
-                  <AcademicYearSelect
-                    value={editYear}
-                    onChange={(event) => setEditYear(event.target.value)}
-                  />
-                </label>
-                <div className="modal-actions">
-                  <Button type="submit" disabled={editBusy}>
-                    {editBusy ? "Saving…" : "Save changes"}
-                  </Button>
-                </div>
-              </form>
+                <form
+                  onSubmit={saveSection}
+                  className="admin-inline-form section-edit-form section-dialog-form"
+                >
+                  <h2>Edit section</h2>
+                  <label>
+                    Section name
+                    <input
+                      value={editName}
+                      onChange={(event) => setEditName(event.target.value)}
+                      required
+                      maxLength={150}
+                    />
+                  </label>
+                  <label>
+                    Section code
+                    <input
+                      value={editSectionCode}
+                      onChange={(event) =>
+                        setEditSectionCode(event.target.value)
+                      }
+                      required
+                      maxLength={100}
+                    />
+                  </label>
+                  <label className="section-dialog-year">
+                    Academic year
+                    <AcademicYearSelect
+                      value={editYear}
+                      onChange={(event) => setEditYear(event.target.value)}
+                    />
+                  </label>
+                  <div className="modal-actions">
+                    <Button type="submit" disabled={editBusy}>
+                      {editBusy ? "Saving…" : "Save changes"}
+                    </Button>
+                  </div>
+                </form>
+              </Modal>
             )}
             <section className="section-detail-block">
               <div className="section-block-heading">
                 <div>
                   <p className="eyebrow">Research records</p>
-                  <h3>Documents</h3>
+                  <h3>Research projects</h3>
                 </div>
                 <span>{openSection.documents_count}</span>
               </div>
+              <div className="section-block-actions">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="icon-button"
+                  aria-label="Add Research Project"
+                  title="Add research project"
+                  onClick={() => setAddProjectOpen(true)}
+                >
+                  <Plus />
+                </Button>
+              </div>
+              {addProjectOpen && (
+                <Modal
+                  label="Create research project"
+                  onClose={() => setAddProjectOpen(false)}
+                  busy={newProjectBusy}
+                >
+                  <form
+                    onSubmit={createProject}
+                    className="admin-inline-form section-project-create"
+                    aria-label="Create research project"
+                  >
+                    <h2>Add research project</h2>
+                    <label>
+                      Research title
+                      <input
+                        value={newProjectTitle}
+                        onChange={(event) =>
+                          setNewProjectTitle(event.target.value)
+                        }
+                        required
+                        maxLength={500}
+                        placeholder="Enter the research title"
+                        disabled={newProjectBusy}
+                      />
+                    </label>
+                    <div className="modal-actions">
+                      <Button type="submit" disabled={newProjectBusy}>
+                        {newProjectBusy ? "Creating…" : "Create project"}
+                      </Button>
+                    </div>
+                  </form>
+                </Modal>
+              )}
               {documentsState[openSection.id] === "loading" ? (
                 <p className="section-documents-loading">Loading documents…</p>
               ) : documentsState[openSection.id] === "error" ? (
@@ -2235,8 +2754,7 @@ function InstructorSections({ role }: { role: Role }) {
                 <div className="section-empty-folder-state">
                   <p className="admin-empty">No research-title folders yet.</p>
                   <p>
-                    Select assigned research below to create folders for this
-                    section.
+                    Create a research project to add its folder to this section.
                   </p>
                 </div>
               ) : (
@@ -2244,13 +2762,21 @@ function InstructorSections({ role }: { role: Role }) {
                   {(documentsFor[openSection.id] ?? []).map((document) => (
                     <button
                       type="button"
-                      className={`research-title-folder${selectedDocument?.research_document_id === document.research_document_id ? " is-selected" : ""}`}
+                      className="research-title-folder"
                       key={document.research_document_id}
                       onClick={() =>
-                        void openDocumentMembers(openSection.id, document)
+                        navigate(
+                          `/app/instructor/sections/${openSection.id}/projects/${document.research_document_id}`,
+                        )
                       }
+                      aria-label={`Open research project ${document.title}`}
                     >
-                      <span className="research-title-folder-icon">▱</span>
+                      <span
+                        className="research-title-folder-icon"
+                        aria-hidden="true"
+                      >
+                        <Folder />
+                      </span>
                       <span className="research-title-folder-copy">
                         <strong>{document.title}</strong>
                         <small>
@@ -2261,144 +2787,11 @@ function InstructorSections({ role }: { role: Role }) {
                           Updated {displayDate(document.updated_at)}
                         </small>
                       </span>
-                      <span className="research-title-folder-arrow">Open</span>
+                      <span className="research-title-folder-arrow">
+                        <ExternalLink aria-hidden="true" />
+                      </span>
                     </button>
                   ))}
-                </div>
-              )}
-              {assignableState[openSection.id] === "ready" && (
-                <div className="section-title-assigner">
-                  <label>
-                    Add assigned research titles
-                    <select
-                      multiple
-                      value={selectedDocumentIds.map(String)}
-                      onChange={(event) =>
-                        setSelectedDocumentIds(
-                          Array.from(event.target.selectedOptions).map(
-                            (option) => Number(option.value),
-                          ),
-                        )
-                      }
-                      disabled={assigningDocuments}
-                    >
-                      {(assignableFor[openSection.id] ?? [])
-                        .filter(
-                          (item) =>
-                            !(documentsFor[openSection.id] ?? []).some(
-                              (document) =>
-                                document.research_document_id ===
-                                item.research_document_id,
-                            ),
-                        )
-                        .map((item) => (
-                          <option
-                            key={item.research_document_id}
-                            value={item.research_document_id}
-                          >
-                            {item.title}
-                          </option>
-                        ))}
-                    </select>
-                  </label>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={
-                      assigningDocuments || selectedDocumentIds.length === 0
-                    }
-                    onClick={() => void assignTitlesToSection()}
-                  >
-                    {assigningDocuments
-                      ? "Adding folders…"
-                      : "Add selected folders"}
-                  </Button>
-                </div>
-              )}
-              {selectedDocument && (
-                <div className="title-member-panel">
-                  <div className="title-member-panel-heading">
-                    <div>
-                      <p className="eyebrow">Selected research title</p>
-                      <h3>{selectedDocument.title}</h3>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="quiet"
-                      onClick={() => setSelectedDocument(null)}
-                    >
-                      Close folder
-                    </Button>
-                  </div>
-                  {documentMembersLoading ? (
-                    <p className="section-documents-loading">
-                      Loading assigned students…
-                    </p>
-                  ) : documentMembers.length === 0 ? (
-                    <p className="admin-empty">
-                      No students are assigned to this research title.
-                    </p>
-                  ) : (
-                    <ul className="title-member-list">
-                      {documentMembers.map((member) => (
-                        <li key={member.id}>
-                          <span>
-                            <strong>{studentName(member)}</strong>
-                            <small>{member.email}</small>
-                          </span>
-                          <Button
-                            type="button"
-                            variant="quiet"
-                            disabled={studentBusy[openSection.id]}
-                            onClick={() =>
-                              void removeStudentFromDocument(member.id)
-                            }
-                          >
-                            Remove
-                          </Button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  <div className="title-member-picker">
-                    <label>
-                      Add student to this title
-                      <input
-                        value={studentQueries[openSection.id] ?? ""}
-                        onChange={(event) =>
-                          changeStudentQuery(openSection.id, event.target.value)
-                        }
-                        placeholder="Search name, email, or student ID"
-                      />
-                    </label>
-                    <ul className="student-candidates">
-                      {(candidatesFor[openSection.id] ?? [])
-                        .filter(
-                          (candidate) =>
-                            !documentMembers.some(
-                              (member) => member.id === candidate.id,
-                            ),
-                        )
-                        .map((candidate) => (
-                          <li key={candidate.id}>
-                            <span>
-                              <strong>{studentName(candidate)}</strong> (
-                              {candidate.email})
-                            </span>
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              disabled={studentBusy[openSection.id]}
-                              onClick={() =>
-                                void addStudentToDocument(candidate.id)
-                              }
-                            >
-                              Add to title
-                            </Button>
-                          </li>
-                        ))}
-                    </ul>
-                  </div>
                 </div>
               )}
             </section>
@@ -2409,6 +2802,18 @@ function InstructorSections({ role }: { role: Role }) {
                   <h3>Student researchers</h3>
                 </div>
                 <span>{openSection.members_count}</span>
+              </div>
+              <div className="section-block-actions">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="icon-button"
+                  aria-label="Add student"
+                  title="Add student"
+                  onClick={() => setAddStudentOpen(true)}
+                >
+                  <UserPlus />
+                </Button>
               </div>
               {studentsState[openSection.id] === "loading" ? (
                 <p className="section-documents-loading">Loading students…</p>
@@ -2460,6 +2865,9 @@ function InstructorSections({ role }: { role: Role }) {
                           <td>
                             <Button
                               variant="secondary"
+                              className="icon-button"
+                              aria-label={`Remove ${studentName(member)}`}
+                              title="Remove student"
                               disabled={studentBusy[openSection.id]}
                               onClick={() =>
                                 setConfirmRemove({
@@ -2468,7 +2876,7 @@ function InstructorSections({ role }: { role: Role }) {
                                 })
                               }
                             >
-                              Remove
+                              <Trash2 />
                             </Button>
                           </td>
                         </tr>
@@ -2477,59 +2885,670 @@ function InstructorSections({ role }: { role: Role }) {
                   </table>
                 </div>
               )}
-              <div className="student-add-form">
-                <h3>Add a student researcher</h3>
-                <label>
-                  Search students
-                  <input
-                    value={studentQueries[openSection.id] ?? ""}
-                    onChange={(event) =>
-                      changeStudentQuery(openSection.id, event.target.value)
-                    }
-                    placeholder="Name, email, or student ID"
-                  />
-                </label>
-                <ul className="student-candidates">
-                  {(candidatesFor[openSection.id] ?? []).filter(
-                    (candidate) =>
-                      !(studentsFor[openSection.id] ?? []).some(
-                        (member) => member.id === candidate.id,
-                      ),
-                  ).length === 0 ? (
-                    <li className="admin-empty">
-                      No student researchers match the search.
-                    </li>
-                  ) : (
-                    (candidatesFor[openSection.id] ?? [])
-                      .filter(
+              {addStudentOpen && (
+                <Modal
+                  label="Add a student researcher"
+                  onClose={() => setAddStudentOpen(false)}
+                  busy={studentBusy[openSection.id]}
+                >
+                  <div className="student-add-form">
+                    <h3>Add a student researcher</h3>
+                    <label>
+                      Search students
+                      <input
+                        value={studentQueries[openSection.id] ?? ""}
+                        onChange={(event) =>
+                          changeStudentQuery(openSection.id, event.target.value)
+                        }
+                        placeholder="Name, email, or student ID"
+                      />
+                    </label>
+                    <ul className="student-candidates">
+                      {(candidatesFor[openSection.id] ?? []).filter(
                         (candidate) =>
                           !(studentsFor[openSection.id] ?? []).some(
                             (member) => member.id === candidate.id,
                           ),
-                      )
-                      .map((candidate) => (
-                        <li key={candidate.id}>
-                          <span>
-                            <strong>{studentName(candidate)}</strong> (
-                            {candidate.email})
-                          </span>
-                          <Button
-                            variant="secondary"
-                            disabled={studentBusy[openSection.id]}
-                            onClick={() =>
-                              void addStudent(openSection.id, candidate.id)
-                            }
-                          >
-                            Add
-                          </Button>
+                      ).length === 0 ? (
+                        <li className="admin-empty">
+                          No student researchers match the search.
                         </li>
-                      ))
-                  )}
-                </ul>
-              </div>
+                      ) : (
+                        (candidatesFor[openSection.id] ?? [])
+                          .filter(
+                            (candidate) =>
+                              !(studentsFor[openSection.id] ?? []).some(
+                                (member) => member.id === candidate.id,
+                              ),
+                          )
+                          .map((candidate) => (
+                            <li key={candidate.id}>
+                              <span>
+                                <strong>{studentName(candidate)}</strong> (
+                                {candidate.email})
+                              </span>
+                              <Button
+                                variant="secondary"
+                                disabled={studentBusy[openSection.id]}
+                                onClick={() =>
+                                  void addStudent(openSection.id, candidate.id)
+                                }
+                              >
+                                Add
+                              </Button>
+                            </li>
+                          ))
+                      )}
+                    </ul>
+                  </div>
+                </Modal>
+              )}
             </section>
           </div>
-        </Modal>
+        </section>
+      )}
+      {openSection && selectedDocument && (
+        <section
+          className="section-page-view"
+          aria-label={`Research project: ${selectedDocument.title}`}
+        >
+          <div className="section-page-toolbar">
+            <Button
+              type="button"
+              variant="quiet"
+              className="icon-button"
+              aria-label="Back to Research Projects"
+              title="Back to research projects"
+              onClick={closeDocumentFolder}
+            >
+              <ArrowLeft />
+            </Button>
+          </div>
+          <div className="title-member-panel project-page-panel">
+            <div className="title-member-panel-heading">
+              <div>
+                <p className="eyebrow">Research project</p>
+                <h3>{selectedDocument.title}</h3>
+              </div>
+              <div className="section-block-actions">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="icon-button"
+                  aria-label="Edit research title"
+                  title="Edit research title"
+                  onClick={() => {
+                    setEditProjectTitle(selectedDocument.title);
+                    setEditingProject(true);
+                  }}
+                >
+                  <Pencil />
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="icon-button"
+                  aria-label="Delete research project"
+                  title="Delete research project"
+                  onClick={() => setConfirmProjectDelete(true)}
+                >
+                  <Trash2 />
+                </Button>
+              </div>
+            </div>
+            {editingProject && (
+              <Modal
+                label="Edit research title"
+                onClose={() => setEditingProject(false)}
+                busy={editProjectBusy}
+              >
+                <form
+                  onSubmit={saveProjectTitle}
+                  className="admin-inline-form section-project-create"
+                  aria-label="Edit research title"
+                >
+                  <h2>Edit research title</h2>
+                  <label>
+                    Research title
+                    <input
+                      value={editProjectTitle}
+                      onChange={(event) =>
+                        setEditProjectTitle(event.target.value)
+                      }
+                      required
+                      maxLength={500}
+                      disabled={editProjectBusy}
+                    />
+                  </label>
+                  <div className="modal-actions">
+                    <Button type="submit" disabled={editProjectBusy}>
+                      {editProjectBusy ? "Saving…" : "Save title"}
+                    </Button>
+                  </div>
+                </form>
+              </Modal>
+            )}
+            <p className="project-page-meta">
+              {label(selectedDocument.research_stage)} ·{" "}
+              {label(selectedDocument.submission_status)}
+            </p>
+            {documentMembersLoading ? (
+              <p className="section-documents-loading">
+                Loading assigned students…
+              </p>
+            ) : documentMembers.length === 0 ? (
+              <p className="admin-empty">
+                No students are assigned to this research title.
+              </p>
+            ) : (
+              <ul className="title-member-list">
+                {documentMembers.map((member) => (
+                  <li key={member.id}>
+                    <span>
+                      <strong>{studentName(member)}</strong>
+                      <small>{member.email}</small>
+                    </span>
+                    <Button
+                      type="button"
+                      variant="quiet"
+                      className="icon-button"
+                      aria-label={`Remove ${studentName(member)}`}
+                      title="Remove student"
+                      disabled={studentBusy[openSection.id]}
+                      onClick={() => setConfirmDocumentRemove(member)}
+                    >
+                      <Trash2 />
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {teamLoading ? (
+              <p className="section-documents-loading">
+                Loading current project assignments…
+              </p>
+            ) : (
+              <dl className="project-assignment-summary">
+                <div>
+                  <dt>Research adviser</dt>
+                  <dd>{projectTeam?.adviser?.name ?? "Unassigned"}</dd>
+                </div>
+                <div>
+                  <dt>Research Office representative</dt>
+                  <dd>
+                    {projectTeam?.research_office_representative?.name ??
+                      "Unassigned"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Panel chair</dt>
+                  <dd>{projectTeam?.chair?.name ?? "Unassigned"}</dd>
+                </div>
+                <div>
+                  <dt>Panel members</dt>
+                  <dd>
+                    {projectTeam?.panel_members
+                      .map((member) => member.name)
+                      .join(", ") || "Unassigned"}
+                  </dd>
+                </div>
+              </dl>
+            )}
+            <div className="project-manage-action">
+              <Button
+                type="button"
+                variant="secondary"
+                className="icon-button"
+                aria-label="Manage project assignments"
+                title="Manage project assignments"
+                onClick={() => {
+                  resetProjectDisclosures();
+                  setProjectManageOpen(true);
+                  void openDocumentMembers(openSection.id, selectedDocument);
+                }}
+              >
+                <UsersRound />
+              </Button>
+            </div>
+            {projectManageOpen && (
+              <Modal
+                label="Manage project assignments"
+                onClose={() => {
+                  resetProjectDisclosures();
+                  setProjectManageOpen(false);
+                }}
+                busy={teamBusy}
+              >
+                <div
+                  className={`project-disclosures project-assignment-modal${projectAssignmentEditing ? " is-editing" : ""}`}
+                  aria-label="Project assignments"
+                >
+                  <h2>Manage project assignments</h2>
+                  <div className="project-assignment-control">
+                    <span>
+                      <strong>Student researchers</strong>
+                      <small>Add students enrolled in this section.</small>
+                    </span>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="icon-button"
+                      aria-label="Add students"
+                      title="Add students"
+                      aria-expanded={projectDisclosures.students}
+                      aria-controls={
+                        projectDisclosures.students
+                          ? "project-students-editor"
+                          : undefined
+                      }
+                      onClick={() =>
+                        setProjectDisclosures({
+                          students: !projectDisclosures.students,
+                          adviser: false,
+                          researchOffice: false,
+                          chair: false,
+                          panelMembers: false,
+                        })
+                      }
+                    >
+                      <UserPlus />
+                    </Button>
+                  </div>
+                  {projectDisclosures.students && (
+                    <div
+                      id="project-students-editor"
+                      className="title-member-picker"
+                    >
+                      <div className="project-editor-heading">
+                        <p className="eyebrow">Project assignment</p>
+                        <h3>Student researchers</h3>
+                      </div>
+                      <label>
+                        Search students
+                        <input
+                          value={studentQueries[openSection.id] ?? ""}
+                          onChange={(event) =>
+                            changeStudentQuery(
+                              openSection.id,
+                              event.target.value,
+                            )
+                          }
+                          placeholder="Search name, email, or student ID"
+                        />
+                      </label>
+                      <ul className="student-candidates">
+                        {(candidatesFor[openSection.id] ?? [])
+                          .filter(
+                            (candidate) =>
+                              !documentMembers.some(
+                                (member) => member.id === candidate.id,
+                              ),
+                          )
+                          .map((candidate) => (
+                            <li key={candidate.id}>
+                              <span>
+                                {studentName(candidate)} ({candidate.email})
+                              </span>
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                disabled={studentBusy[openSection.id]}
+                                onClick={() =>
+                                  void addStudentToDocument(candidate.id)
+                                }
+                              >
+                                Add
+                              </Button>
+                            </li>
+                          ))}
+                      </ul>
+                    </div>
+                  )}
+                  {(
+                    [
+                      [
+                        "adviser",
+                        "Assign research adviser",
+                        "Research adviser",
+                        "adviser_id",
+                      ],
+                      [
+                        "researchOffice",
+                        "Assign Research Office representative",
+                        "Research Office representative",
+                        "research_office_representative_id",
+                      ],
+                      [
+                        "chair",
+                        "Assign panel chair",
+                        "Panel chair",
+                        "chair_id",
+                      ],
+                    ] as const
+                  ).map(([disclosure, buttonLabel, fieldLabel, field]) => {
+                    const candidateKey =
+                      disclosure === "researchOffice"
+                        ? "research_office_representative"
+                        : disclosure;
+                    const candidates = teamCandidates[candidateKey] ?? [];
+                    const searchQuery = (teamSearches[disclosure] ?? "")
+                      .trim()
+                      .toLocaleLowerCase();
+                    const matchingCandidates = candidates.filter(
+                      (person) =>
+                        searchQuery === "" ||
+                        `${person.name} ${person.email}`
+                          .toLocaleLowerCase()
+                          .includes(searchQuery),
+                    );
+
+                    return (
+                      <div key={disclosure}>
+                        <div className="project-assignment-control">
+                          <span>
+                            <strong>{fieldLabel}</strong>
+                            <small>
+                              View or change the current assignment.
+                            </small>
+                          </span>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            className="icon-button"
+                            aria-label={buttonLabel}
+                            title={buttonLabel}
+                            aria-expanded={projectDisclosures[disclosure]}
+                            aria-controls={
+                              projectDisclosures[disclosure]
+                                ? `project-${disclosure}-editor`
+                                : undefined
+                            }
+                            onClick={() => {
+                              const opening = !projectDisclosures[disclosure];
+                              setProjectDisclosures({
+                                students: false,
+                                adviser: false,
+                                researchOffice: false,
+                                chair: false,
+                                panelMembers: false,
+                                [disclosure]: opening,
+                              });
+                              if (opening) {
+                                void refreshProjectTeamCandidates(disclosure);
+                              }
+                            }}
+                          >
+                            {projectTeam?.[
+                              disclosure === "researchOffice"
+                                ? "research_office_representative"
+                                : disclosure
+                            ] ? (
+                              <Pencil />
+                            ) : (
+                              <Plus />
+                            )}
+                          </Button>
+                        </div>
+                        {projectDisclosures[disclosure] && (
+                          <div
+                            id={`project-${disclosure}-editor`}
+                            className="project-role-editor"
+                          >
+                            <div className="project-editor-heading">
+                              <p className="eyebrow">Project assignment</p>
+                              <h3>{fieldLabel}</h3>
+                            </div>
+                            <p>
+                              <strong>Current:</strong>{" "}
+                              {projectTeam?.[
+                                disclosure === "researchOffice"
+                                  ? "research_office_representative"
+                                  : disclosure
+                              ]?.name ?? "Unassigned"}
+                            </p>
+                            <label>
+                              Search and select {fieldLabel.toLowerCase()}
+                              <input
+                                type="search"
+                                value={teamSearches[disclosure] ?? ""}
+                                placeholder="Search by name or email"
+                                autoComplete="off"
+                                onChange={(event) =>
+                                  setTeamSearches((current) => ({
+                                    ...current,
+                                    [disclosure]: event.target.value,
+                                  }))
+                                }
+                              />
+                            </label>
+                            <fieldset>
+                              <legend>{fieldLabel}</legend>
+                              {teamLoading ? (
+                                <p
+                                  className="project-assignment-empty"
+                                  role="status"
+                                >
+                                  Loading eligible accounts…
+                                </p>
+                              ) : candidates.length === 0 ? (
+                                <p className="project-assignment-empty">
+                                  No eligible {fieldLabel.toLowerCase()} account
+                                  is available. Ask the Coordinator or
+                                  Administrator to activate the required account
+                                  first.
+                                </p>
+                              ) : matchingCandidates.length === 0 ? (
+                                <p
+                                  className="project-assignment-empty"
+                                  role="status"
+                                >
+                                  No accounts match “
+                                  {teamSearches[disclosure]?.trim()}”.
+                                </p>
+                              ) : (
+                                <ProjectAccountOptions
+                                  candidates={matchingCandidates}
+                                  selectedIds={
+                                    teamDraft[field] ? [teamDraft[field]] : []
+                                  }
+                                  mode="single"
+                                  groupName={`project-${disclosure}-selection`}
+                                  onClear={() =>
+                                    setTeamDraft((current) => ({
+                                      ...current,
+                                      [field]: "",
+                                    }))
+                                  }
+                                  disabledIds={
+                                    disclosure === "chair"
+                                      ? teamDraft.panel_member_ids
+                                      : []
+                                  }
+                                  disabledLabel={
+                                    disclosure === "chair"
+                                      ? "Panel member"
+                                      : undefined
+                                  }
+                                  onToggle={(person, selected) =>
+                                    setTeamDraft((current) => ({
+                                      ...current,
+                                      [field]: selected ? person.user_id : "",
+                                    }))
+                                  }
+                                />
+                              )}
+                            </fieldset>
+                            <div className="project-role-actions">
+                              <span>
+                                {teamDraft[field]
+                                  ? "1 account selected"
+                                  : "No account selected"}
+                              </span>
+                              <Button
+                                type="button"
+                                disabled={
+                                  teamBusy ||
+                                  teamLoading ||
+                                  !projectTeamRoleChanged(disclosure)
+                                }
+                                onClick={() =>
+                                  requestProjectTeamSave(disclosure)
+                                }
+                              >
+                                {teamBusy
+                                  ? "Saving…"
+                                  : projectTeamRoleAction(disclosure)}
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  <div>
+                    <div className="project-assignment-control">
+                      <span>
+                        <strong>Panel members</strong>
+                        <small>Select the project evaluation panel.</small>
+                      </span>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="icon-button"
+                        aria-label="Assign panel members"
+                        title="Assign panel members"
+                        aria-expanded={projectDisclosures.panelMembers}
+                        aria-controls={
+                          projectDisclosures.panelMembers
+                            ? "project-panel-members-editor"
+                            : undefined
+                        }
+                        onClick={() => {
+                          const opening = !projectDisclosures.panelMembers;
+                          setProjectDisclosures({
+                            students: false,
+                            adviser: false,
+                            researchOffice: false,
+                            chair: false,
+                            panelMembers: opening,
+                          });
+                          if (opening) {
+                            void refreshProjectTeamCandidates("panelMembers");
+                          }
+                        }}
+                      >
+                        {projectTeam?.panel_members.length ? (
+                          <Pencil />
+                        ) : (
+                          <Plus />
+                        )}
+                      </Button>
+                    </div>
+                    {projectDisclosures.panelMembers && (
+                      <div
+                        id="project-panel-members-editor"
+                        className="project-role-editor"
+                      >
+                        <div className="project-editor-heading">
+                          <p className="eyebrow">Project assignment</p>
+                          <h3>Panel members</h3>
+                        </div>
+                        <p>
+                          <strong>Current:</strong>{" "}
+                          {projectTeam?.panel_members
+                            .map((member) => member.name)
+                            .join(", ") || "None"}
+                        </p>
+                        <label>
+                          Search and select panel members
+                          <input
+                            type="search"
+                            value={teamSearches.panelMembers ?? ""}
+                            placeholder="Search by name or email"
+                            onChange={(event) =>
+                              setTeamSearches((current) => ({
+                                ...current,
+                                panelMembers: event.target.value,
+                              }))
+                            }
+                          />
+                        </label>
+                        <fieldset>
+                          <legend>Panel members</legend>
+                          {teamLoading ? (
+                            <p
+                              className="project-assignment-empty"
+                              role="status"
+                            >
+                              Loading eligible panel members…
+                            </p>
+                          ) : (teamCandidates.panel_member ?? []).length ===
+                            0 ? (
+                            <p className="project-assignment-empty">
+                              No eligible panel accounts are available. Ask the
+                              Coordinator or Administrator to activate a Panel
+                              account first.
+                            </p>
+                          ) : matchingPanelCandidates.length === 0 ? (
+                            <p
+                              className="project-assignment-empty"
+                              role="status"
+                            >
+                              No panel accounts match “
+                              {teamSearches.panelMembers?.trim()}”.
+                            </p>
+                          ) : (
+                            <ProjectAccountOptions
+                              candidates={matchingPanelCandidates}
+                              selectedIds={teamDraft.panel_member_ids}
+                              disabledIds={
+                                teamDraft.chair_id ? [teamDraft.chair_id] : []
+                              }
+                              disabledLabel="Panel chair"
+                              onToggle={(person, selected) =>
+                                setTeamDraft((current) => ({
+                                  ...current,
+                                  panel_member_ids: selected
+                                    ? [
+                                        ...current.panel_member_ids,
+                                        person.user_id,
+                                      ]
+                                    : current.panel_member_ids.filter(
+                                        (id) => id !== person.user_id,
+                                      ),
+                                }))
+                              }
+                            />
+                          )}
+                        </fieldset>
+                        <div className="project-role-actions">
+                          <span>
+                            {teamDraft.panel_member_ids.length} selected
+                          </span>
+                          <Button
+                            type="button"
+                            disabled={
+                              teamBusy ||
+                              teamLoading ||
+                              !projectTeamRoleChanged("panelMembers")
+                            }
+                            onClick={() =>
+                              requestProjectTeamSave("panelMembers")
+                            }
+                          >
+                            {teamBusy
+                              ? "Saving…"
+                              : projectTeamRoleAction("panelMembers")}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </Modal>
+            )}
+          </div>
+        </section>
       )}
       {confirmRemove && openSection && (
         <ConfirmDialog
@@ -2543,6 +3562,44 @@ function InstructorSections({ role }: { role: Role }) {
             void removeStudent(target.sectionId, target.member.id);
           }}
           onCancel={() => setConfirmRemove(null)}
+        />
+      )}
+      {confirmDocumentRemove && openSection && selectedDocument && (
+        <ConfirmDialog
+          title="Remove project student"
+          message={`Remove ${studentName(confirmDocumentRemove)} from "${selectedDocument.title}"?`}
+          confirmLabel="Remove student"
+          busy={studentBusy[openSection.id]}
+          onConfirm={() => {
+            const member = confirmDocumentRemove;
+            setConfirmDocumentRemove(null);
+            void removeStudentFromDocument(member.id);
+          }}
+          onCancel={() => setConfirmDocumentRemove(null)}
+        />
+      )}
+      {confirmTeamSave && (
+        <ConfirmDialog
+          title="Confirm assignment change"
+          message={`${projectTeamRoleAction(confirmTeamSave)} for this project?`}
+          confirmLabel={projectTeamRoleAction(confirmTeamSave)}
+          busy={teamBusy}
+          onConfirm={() => {
+            const target = confirmTeamSave;
+            setConfirmTeamSave(null);
+            void saveProjectTeamRole(target);
+          }}
+          onCancel={() => setConfirmTeamSave(null)}
+        />
+      )}
+      {confirmProjectDelete && selectedDocument && (
+        <ConfirmDialog
+          title="Delete research project"
+          message={`Delete "${selectedDocument.title}"? Assigned students will remain in the section roster.`}
+          confirmLabel="Delete project"
+          busy={deleteProjectBusy}
+          onConfirm={() => void removeProject()}
+          onCancel={() => setConfirmProjectDelete(false)}
         />
       )}
     </div>
@@ -3827,6 +4884,9 @@ function ProgramCounts({ report }: { report: CoordinatorProgramReport }) {
 
 function EditorDashboard({ role }: { role: Role }) {
   const [attempt, reload] = useAttempt();
+  const [selectedSection, setSelectedSection] = useState<
+    "requests" | "assigned" | null
+  >(null);
   const requests = useLoad(() => listSupportAssignmentInbox(), attempt);
   const assigned = useLoad(() => listEditorAssignedResearch(), attempt);
   async function respond(id: number, decision: "accept" | "decline") {
@@ -3841,52 +4901,98 @@ function EditorDashboard({ role }: { role: Role }) {
         description="Pending requests and accepted editorial assignments."
       />
       <div className="score-grid">
-        <section className="panel-card admin-stat">
+        <button
+          type="button"
+          className="panel-card admin-stat admin-stat-button"
+          onClick={() => setSelectedSection("requests")}
+          aria-label="View pending requests"
+        >
           <strong>
             {requests.status === "ready" ? requests.data.length : 0}
           </strong>
           <span>Pending requests</span>
-        </section>
-        <section className="panel-card admin-stat">
+        </button>
+        <button
+          type="button"
+          className="panel-card admin-stat admin-stat-button"
+          onClick={() => setSelectedSection("assigned")}
+          aria-label="View assigned research"
+        >
           <strong>
             {assigned.status === "ready" ? assigned.data.length : 0}
           </strong>
           <span>Assigned research</span>
-        </section>
+        </button>
       </div>
-      <section className="panel-card admin-data-card">
-        <h2>Pending requests</h2>
-        {requests.status === "loading" ? (
-          <Loading label="Loading Editor requests" />
-        ) : requests.status === "error" ? (
-          <InlineError message={requests.message} retry={reload} />
-        ) : requests.data.length === 0 ? (
-          <p className="admin-empty">No pending Editor requests.</p>
-        ) : (
-          requests.data.map((item) => (
-            <div className="admin-card-heading" key={item.id}>
-              <div>
-                <strong>{item.research_title}</strong>
-                <p>
-                  {item.researchers.join(", ") || "Researcher"} ·{" "}
-                  {displayDate(item.created_at)}
-                </p>
-              </div>
-              <div className="row-actions">
-                <Button onClick={() => void respond(item.id, "accept")}>
-                  Accept
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => void respond(item.id, "decline")}
+      {selectedSection !== null && (
+        <Modal
+          label={
+            selectedSection === "requests"
+              ? "Pending requests"
+              : "Assigned research"
+          }
+          onClose={() => setSelectedSection(null)}
+          size="large"
+        >
+          <section className="panel-card admin-data-card">
+            <h2>
+              {selectedSection === "requests"
+                ? "Pending requests"
+                : "Assigned research"}
+            </h2>
+            {selectedSection === "requests" ? (
+              requests.status === "loading" ? (
+                <Loading label="Loading Editor requests" />
+              ) : requests.status === "error" ? (
+                <InlineError message={requests.message} retry={reload} />
+              ) : requests.data.length === 0 ? (
+                <p className="admin-empty">No pending Editor requests.</p>
+              ) : (
+                requests.data.map((item) => (
+                  <div className="admin-card-heading" key={item.id}>
+                    <div>
+                      <strong>{item.research_title}</strong>
+                      <p>
+                        {item.researchers.join(", ") || "Researcher"} ·{" "}
+                        {displayDate(item.created_at)}
+                      </p>
+                    </div>
+                    <div className="row-actions">
+                      <Button onClick={() => void respond(item.id, "accept")}>
+                        Accept
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        onClick={() => void respond(item.id, "decline")}
+                      >
+                        Decline
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              )
+            ) : assigned.status === "loading" ? (
+              <Loading label="Loading assigned research" />
+            ) : assigned.status === "error" ? (
+              <InlineError message={assigned.message} retry={reload} />
+            ) : assigned.data.length === 0 ? (
+              <p className="admin-empty">No accepted Editor assignments.</p>
+            ) : (
+              assigned.data.map((item) => (
+                <div
+                  className="admin-card-heading"
+                  key={item.research_document_id}
                 >
-                  Decline
-                </Button>
-              </div>
-            </div>
-          ))
-        )}
-      </section>
+                  <div>
+                    <strong>{item.title}</strong>
+                    <p>{item.submission_status.replaceAll("_", " ")}</p>
+                  </div>
+                </div>
+              ))
+            )}
+          </section>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -5014,87 +6120,6 @@ function LibrarianRetentionLogs({ role }: { role: Role }) {
 
 /* ---------------------------------- Research office ---------------------------------- */
 
-function OfficeInstitutionalOverview({ role }: { role: Role }) {
-  const [attempt, reload] = useAttempt();
-  const state = useLoad(() => getInstitutionalReport(), attempt);
-  return (
-    <div className="workspace-content admin-sidebar-page">
-      <RolePageHeader
-        role={role}
-        title="Institutional overview"
-        description="Live institutional counts for users, archiving, and reviews."
-        action={
-          <Button variant="secondary" onClick={reload}>
-            <RefreshCw /> Refresh
-          </Button>
-        }
-      />
-      {state.status === "loading" ? (
-        <Loading label="Loading institutional overview" />
-      ) : state.status === "error" ? (
-        <InlineError message={state.message} retry={reload} />
-      ) : (
-        <>
-          <InstitutionCounts report={state.data} />
-          <section className="panel-card admin-data-card">
-            <div className="admin-card-heading">
-              <div>
-                <h2>Academic units</h2>
-                <p>Research records per academic unit.</p>
-              </div>
-            </div>
-            {state.data.by_academic_unit.length === 0 ? (
-              <p className="admin-empty">No academic units are recorded.</p>
-            ) : (
-              <div className="admin-table-wrap">
-                <table>
-                  <caption className="sr-only">Academic units</caption>
-                  <thead>
-                    <tr>
-                      <th>Academic unit</th>
-                      <th>Records</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {state.data.by_academic_unit.map((unit) => (
-                      <tr key={unit.academic_unit}>
-                        <td>{unit.academic_unit}</td>
-                        <td>{unit.total}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-        </>
-      )}
-    </div>
-  );
-}
-
-function InstitutionCounts({ report }: { report: InstitutionalReport }) {
-  const counts = report.counts;
-  return (
-    <section className="admin-stat-grid" aria-label="Institutional counts">
-      <Stat label="Total users" value={counts.total_users} />
-      <Stat label="Active users" value={counts.active_users} />
-      <Stat label="Pending archiving" value={counts.pending_archiving} />
-      <Stat label="Archived" value={counts.archived} />
-      <Stat label="Flagged similarity" value={counts.flagged_similarity} />
-      <Stat label="Audit events" value={counts.audit_events} />
-      <Stat
-        label="Evaluations submitted"
-        value={counts.evaluations_submitted}
-      />
-      <Stat
-        label="Methodology signed off"
-        value={counts.methodology_signed_off}
-      />
-    </section>
-  );
-}
-
 function OfficeUsers({ role }: { role: Role }) {
   const [query, setQuery] = useState({
     search: "",
@@ -5107,18 +6132,18 @@ function OfficeUsers({ role }: { role: Role }) {
   > | null>(null);
   const [drafts, setDrafts] = useState<Record<string, AccessStatus>>({});
   const [saving, setSaving] = useState<string | null>(null);
+  const [editingUser, setEditingUser] = useState<OfficeUserRow | null>(null);
   const [saveMessage, setSaveMessage] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [attempt, reload] = useAttempt();
-  const { filters, change } = useLiveFilters(
-    { search: "", role: "", access_status: "" },
-    (next) => {
-      setPage(1);
-      setQuery(next);
-      reload();
-    },
-  );
+
+  function changeFilter(name: keyof typeof query, value: string) {
+    setPage(1);
+    setLoading(true);
+    setError("");
+    setQuery((current) => ({ ...current, [name]: value }));
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -5145,13 +6170,6 @@ function OfficeUsers({ role }: { role: Role }) {
     };
   }, [attempt, page, query]);
 
-  function applyFilters(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setPage(1);
-    setQuery(filters);
-    reload();
-  }
-
   async function save(
     user: Awaited<ReturnType<typeof listOfficeUsers>>["data"][number],
   ) {
@@ -5166,6 +6184,7 @@ function OfficeUsers({ role }: { role: Role }) {
         return remaining;
       });
       setSaveMessage(`Updated ${user.email}.`);
+      setEditingUser(null);
       reload();
     } catch (requestError) {
       setSaveMessage(
@@ -5179,6 +6198,12 @@ function OfficeUsers({ role }: { role: Role }) {
     }
   }
 
+  const visibleUsers = filterUserRows(
+    result?.data ?? [],
+    query,
+    officeUserName,
+  );
+
   return (
     <div className="workspace-content admin-sidebar-page">
       <RolePageHeader
@@ -5187,20 +6212,37 @@ function OfficeUsers({ role }: { role: Role }) {
         description="Review account access across the program. Roles are assigned by coordinators."
       />
       <section className="panel-card admin-data-card">
-        <form className="admin-filters" onSubmit={applyFilters}>
+        <div className="admin-card-heading">
+          <div>
+            <h2>Users</h2>
+            <p>Search users and update their account access.</p>
+          </div>
+          <div className="row-actions">
+            <Button
+              variant="secondary"
+              onClick={reload}
+              aria-label="Refresh users"
+              title="Refresh users"
+            >
+              <RefreshCw aria-hidden="true" />
+            </Button>
+          </div>
+        </div>
+        <div className="admin-filters">
           <label>
             Search
             <input
-              value={filters.search}
-              onChange={(event) => change("search", event.target.value)}
+              type="search"
+              value={query.search}
+              onChange={(event) => changeFilter("search", event.target.value)}
               placeholder="Name or email"
             />
           </label>
           <label>
             Role
             <select
-              value={filters.role}
-              onChange={(event) => change("role", event.target.value)}
+              value={query.role}
+              onChange={(event) => changeFilter("role", event.target.value)}
             >
               <option value="">All roles</option>
               {roles.map((roleOption) => (
@@ -5213,8 +6255,10 @@ function OfficeUsers({ role }: { role: Role }) {
           <label>
             Access status
             <select
-              value={filters.access_status}
-              onChange={(event) => change("access_status", event.target.value)}
+              value={query.access_status}
+              onChange={(event) =>
+                changeFilter("access_status", event.target.value)
+              }
             >
               <option value="">All statuses</option>
               {accessStatuses.map((status) => (
@@ -5224,7 +6268,7 @@ function OfficeUsers({ role }: { role: Role }) {
               ))}
             </select>
           </label>
-        </form>
+        </div>
         {saveMessage && (
           <p
             role="status"
@@ -5241,7 +6285,7 @@ function OfficeUsers({ role }: { role: Role }) {
           <InlineError message={error} retry={reload} />
         ) : loading || result === null ? (
           <Loading label="Loading users" />
-        ) : result.data.length === 0 ? (
+        ) : visibleUsers.length === 0 ? (
           <p className="admin-empty">
             {hasFilters(query)
               ? "No users match these filters."
@@ -5259,41 +6303,33 @@ function OfficeUsers({ role }: { role: Role }) {
                     <th>Role</th>
                     <th>Access</th>
                     <th>Created</th>
-                    <th>Save</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {result.data.map((user) => (
+                  {visibleUsers.map((user) => (
                     <tr key={user.id}>
                       <td>{officeUserName(user) || "—"}</td>
                       <td>{user.email}</td>
                       <td>{label(user.role)}</td>
-                      <td>
-                        <select
-                          aria-label={`Access status for ${user.email}`}
-                          value={drafts[user.id] ?? user.access_status}
-                          onChange={(event) =>
-                            setDrafts((current) => ({
-                              ...current,
-                              [user.id]: event.target.value as AccessStatus,
-                            }))
-                          }
-                        >
-                          {accessStatuses.map((status) => (
-                            <option key={status} value={status}>
-                              {label(status)}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
+                      <td>{label(user.access_status)}</td>
                       <td>{displayDate(user.created_at)}</td>
                       <td>
                         <Button
                           variant="secondary"
-                          onClick={() => void save(user)}
+                          className="icon-button"
+                          aria-label={`Edit ${user.email}`}
+                          title="Edit user"
+                          onClick={() => {
+                            setDrafts((current) => ({
+                              ...current,
+                              [user.id]: user.access_status,
+                            }));
+                            setEditingUser(user);
+                          }}
                           disabled={saving === user.id}
                         >
-                          {saving === user.id ? "Saving…" : "Save"}
+                          <Pencil />
                         </Button>
                       </td>
                     </tr>
@@ -5311,6 +6347,50 @@ function OfficeUsers({ role }: { role: Role }) {
           </>
         )}
       </section>
+      {editingUser && (
+        <Modal
+          label={`Edit ${editingUser.email}`}
+          onClose={() => setEditingUser(null)}
+          busy={saving === editingUser.id}
+        >
+          <form
+            className="admin-user-edit-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void save(editingUser);
+            }}
+          >
+            <header className="admin-user-edit-header">
+              <p className="eyebrow">User management</p>
+              <h2>Edit user</h2>
+              <p>{editingUser.email}</p>
+            </header>
+            <label>
+              Access status
+              <select
+                value={drafts[editingUser.id] ?? editingUser.access_status}
+                onChange={(event) =>
+                  setDrafts((current) => ({
+                    ...current,
+                    [editingUser.id]: event.target.value as AccessStatus,
+                  }))
+                }
+              >
+                {accessStatuses.map((status) => (
+                  <option key={status} value={status}>
+                    {label(status)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="modal-actions admin-user-edit-actions">
+              <Button type="submit" disabled={saving === editingUser.id}>
+                {saving === editingUser.id ? "Saving…" : "Save changes"}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -5343,7 +6423,7 @@ function OfficeReports({ role }: { role: Role }) {
                 <p>Research records per academic unit.</p>
               </div>
             </div>
-            {state.data.by_academic_unit.length === 0 ? (
+            {state.data.by_institute.length === 0 ? (
               <p className="admin-empty">No academic units are recorded.</p>
             ) : (
               <div className="admin-table-wrap">
@@ -5356,9 +6436,9 @@ function OfficeReports({ role }: { role: Role }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {state.data.by_academic_unit.map((unit) => (
-                      <tr key={unit.academic_unit}>
-                        <td>{unit.academic_unit}</td>
+                    {state.data.by_institute.map((unit) => (
+                      <tr key={unit.institute}>
+                        <td>{unit.institute}</td>
                         <td>{unit.total}</td>
                       </tr>
                     ))}
@@ -5395,327 +6475,6 @@ function OfficeReports({ role }: { role: Role }) {
             </div>
           </section>
         </>
-      )}
-    </div>
-  );
-}
-
-function OfficePrivacyLogs({ role }: { role: Role }) {
-  const [attempt, reload] = useAttempt();
-  const state = useLoad(() => listPrivacyLogs(), attempt);
-  const [userId, setUserId] = useState("");
-  const [action, setAction] = useState("consent_recorded");
-  const [details, setDetails] = useState("");
-  const [recording, setRecording] = useState(false);
-  const [notice, setNotice] = useState("");
-
-  async function record(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setNotice("");
-    setRecording(true);
-    try {
-      await recordPrivacyLog({
-        user_id: userId.trim() || null,
-        action: action as
-          | "consent_recorded"
-          | "consent_withdrawn"
-          | "consent_log_requested"
-          | "data_export",
-        details: details.trim() || null,
-      });
-      setUserId("");
-      setDetails("");
-      setNotice("Privacy action recorded.");
-      reload();
-    } catch (error) {
-      setNotice(
-        friendlyError(error, "The privacy action could not be recorded"),
-      );
-    } finally {
-      setRecording(false);
-    }
-  }
-
-  return (
-    <div className="workspace-content admin-sidebar-page">
-      <RolePageHeader
-        role={role}
-        title="Data privacy log"
-        description="Record and review data-privacy consent and export actions."
-        action={
-          <Button variant="secondary" onClick={reload}>
-            <RefreshCw /> Refresh
-          </Button>
-        }
-      />
-      <section className="panel-card admin-provision-card">
-        <h2>Record a privacy action</h2>
-        <form onSubmit={record} className="admin-inline-form">
-          <label>
-            User ID
-            <input
-              value={userId}
-              onChange={(event) => setUserId(event.target.value)}
-              maxLength={36}
-            />
-          </label>
-          <label>
-            Action
-            <select
-              value={action}
-              onChange={(event) => setAction(event.target.value)}
-            >
-              {[
-                "consent_recorded",
-                "consent_withdrawn",
-                "consent_log_requested",
-                "data_export",
-              ].map((item) => (
-                <option key={item} value={item}>
-                  {label(item)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Details
-            <textarea
-              value={details}
-              onChange={(event) => setDetails(event.target.value)}
-              rows={2}
-              maxLength={5000}
-            />
-          </label>
-          <Button type="submit" disabled={recording}>
-            {recording ? "Recording…" : "Record action"}
-          </Button>
-        </form>
-        {notice && (
-          <p
-            role="status"
-            className={
-              notice.includes("could not") ? "admin-error" : "admin-success"
-            }
-          >
-            {notice}
-          </p>
-        )}
-      </section>
-      {state.status === "loading" ? (
-        <Loading label="Loading privacy logs" />
-      ) : state.status === "error" ? (
-        <InlineError message={state.message} retry={reload} />
-      ) : state.data.length === 0 ? (
-        <p className="admin-empty">No privacy actions have been recorded.</p>
-      ) : (
-        <section className="panel-card admin-data-card">
-          <div className="admin-table-wrap">
-            <table>
-              <caption className="sr-only">Privacy logs</caption>
-              <thead>
-                <tr>
-                  <th>User</th>
-                  <th>Action</th>
-                  <th>Details</th>
-                  <th>Performed by</th>
-                  <th>Date</th>
-                </tr>
-              </thead>
-              <tbody>
-                {state.data.map((log) => (
-                  <tr key={log.id}>
-                    <td>{log.user?.name ?? log.user?.email ?? "—"}</td>
-                    <td>{label(log.action)}</td>
-                    <td>{log.details ?? "—"}</td>
-                    <td>{log.performed_by ?? "—"}</td>
-                    <td>{displayDate(log.activity_date)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
-    </div>
-  );
-}
-
-/* ---------------------------------- Academics ---------------------------------- */
-
-function AcademicsSearch({ role }: { role: Role }) {
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<ResearchRecord[] | null>(null);
-  const [searching, setSearching] = useState(false);
-  const [error, setError] = useState("");
-  const [saved, setSaved] = useState<Record<string, boolean>>({});
-  const [notice, setNotice] = useState("");
-
-  async function runSearch(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const q = query.trim();
-    if (!q) return;
-    setError("");
-    setNotice("");
-    setSearching(true);
-    try {
-      const matches = await searchPublicResearchBySimilarity(q);
-      setResults(matches);
-    } catch (requestError) {
-      setError(
-        friendlyError(requestError, "The repository search is unavailable"),
-      );
-      setResults(null);
-    } finally {
-      setSearching(false);
-    }
-  }
-
-  async function saveToLibrary(record: ResearchRecord) {
-    setNotice("");
-    try {
-      await saveLibraryItem(record.id);
-      setSaved((current) => ({ ...current, [String(record.id)]: true }));
-      setNotice("Saved to your library.");
-    } catch (requestError) {
-      setNotice(
-        friendlyError(
-          requestError,
-          "The record could not be saved to your library",
-        ),
-      );
-    }
-  }
-
-  return (
-    <div className="workspace-content admin-sidebar-page">
-      <RolePageHeader
-        role={role}
-        title="Search"
-        description="Search the public repository and save records to your library."
-      />
-      <section className="panel-card admin-provision-card">
-        <form onSubmit={runSearch} className="admin-inline-form">
-          <label>
-            Search query
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Research title or keyword"
-              required
-            />
-          </label>
-          <Button type="submit" disabled={searching}>
-            {searching ? "Searching…" : "Search repository"}
-          </Button>
-        </form>
-        {notice && (
-          <p
-            role="status"
-            className={
-              notice.includes("could not") ? "admin-error" : "admin-success"
-            }
-          >
-            {notice}
-          </p>
-        )}
-        {error && (
-          <p className="admin-error" role="alert">
-            {error}
-          </p>
-        )}
-      </section>
-      {searching ? (
-        <Loading label="Searching repository" />
-      ) : results === null ? (
-        <p className="admin-empty">
-          Enter a query to search repository records by similarity.
-        </p>
-      ) : results.length === 0 ? (
-        <p className="admin-empty">
-          No matching repository records were found.
-        </p>
-      ) : (
-        <section className="panel-card admin-data-card">
-          <div className="admin-table-wrap">
-            <table>
-              <caption className="sr-only">Repository search results</caption>
-              <thead>
-                <tr>
-                  <th>Title</th>
-                  <th>Authors</th>
-                  <th>Year</th>
-                  <th>Score</th>
-                  <th>Save</th>
-                </tr>
-              </thead>
-              <tbody>
-                {results.map((record) => (
-                  <tr key={record.id}>
-                    <td>{record.title}</td>
-                    <td>{record.authors}</td>
-                    <td>{record.year || "—"}</td>
-                    <td>
-                      {record.querySimilarityScore === null ||
-                      record.querySimilarityScore === undefined
-                        ? "—"
-                        : scorePercent(Number(record.querySimilarityScore))}
-                    </td>
-                    <td>
-                      <Button
-                        variant="secondary"
-                        onClick={() => void saveToLibrary(record)}
-                        disabled={saved[record.id]}
-                      >
-                        {saved[record.id] ? "Saved" : "Save to library"}
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
-    </div>
-  );
-}
-
-function AcademicsCategories({
-  role,
-  navigate,
-}: {
-  role: Role;
-  navigate: (path: string) => void;
-}) {
-  const [attempt, reload] = useAttempt();
-  const state = useLoad(() => listCategoryCounts(), attempt);
-  return (
-    <div className="workspace-content admin-sidebar-page">
-      <RolePageHeader
-        role={role}
-        title="Browse by category"
-        description="Public repository records grouped by research category."
-        action={
-          <Button variant="secondary" onClick={() => navigate("/catalog")}>
-            Open catalog
-          </Button>
-        }
-      />
-      {state.status === "loading" ? (
-        <Loading label="Loading categories" />
-      ) : state.status === "error" ? (
-        <InlineError message={state.message} retry={reload} />
-      ) : state.data.length === 0 ? (
-        <p className="admin-empty">No research categories are available.</p>
-      ) : (
-        <div className="admin-data-grid">
-          {state.data.map((category) => (
-            <section className="panel-card admin-stat" key={category.id}>
-              <strong>{category.records_count.toLocaleString()}</strong>
-              <span>{category.name}</span>
-            </section>
-          ))}
-        </div>
       )}
     </div>
   );
@@ -6111,8 +6870,6 @@ export function ResearcherNewSubmission({
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const isRevisionRequired = draft?.submission_status === "revision_required";
-  const [categoryAttempt, retryCategories] = useAttempt();
-  const categories = useLoad(() => listCategories(), categoryAttempt);
   const initialAuthors = draft?.authors.length
     ? draft.authors.map((author) => ({
         author_name: author.author_name,
@@ -6129,8 +6886,9 @@ export function ResearcherNewSubmission({
   const [researchStage, setResearchStage] = useState(
     draft?.research_stage ?? "title_proposal",
   );
-  const [categoryId, setCategoryId] = useState(
-    draft?.category_id ? String(draft.category_id) : "",
+  const [institute, setInstitute] = useState(draft?.institute ?? "");
+  const [degreeProgram, setDegreeProgram] = useState(
+    draft?.degree_program ?? "",
   );
   const [authors, setAuthors] = useState<AuthorDraft[]>(initialAuthors);
   const [documentType, setDocumentType] = useState<
@@ -6152,7 +6910,8 @@ export function ResearcherNewSubmission({
       ? String(draft.publication_year)
       : "",
     researchStage: draft?.research_stage ?? "title_proposal",
-    categoryId: draft?.category_id ? String(draft.category_id) : "",
+    institute: draft?.institute ?? "",
+    degreeProgram: draft?.degree_program ?? "",
     authors: initialAuthors,
   });
   const currentSnapshot = JSON.stringify({
@@ -6161,7 +6920,8 @@ export function ResearcherNewSubmission({
     keywords,
     publicationYear,
     researchStage,
-    categoryId,
+    institute,
+    degreeProgram,
     authors,
   });
   const dirty = manuscript !== null || currentSnapshot !== initialSnapshot;
@@ -6204,7 +6964,8 @@ export function ResearcherNewSubmission({
     setKeywords("");
     setPublicationYear("");
     setResearchStage("title_proposal");
-    setCategoryId("");
+    setInstitute("");
+    setDegreeProgram("");
     setAuthors([
       { author_name: "", user_id: "", is_corresponding_author: false },
     ]);
@@ -6240,8 +7001,14 @@ export function ResearcherNewSubmission({
       setError("Every author must have a name.");
       return;
     }
-    if (submitAfterSave && !categoryId) {
-      setError("Choose a category before submitting for review.");
+    const validInstitute = instituteNames.find((name) => name === institute);
+    const validProgram = validInstitute
+      ? programsByInstitute[validInstitute].includes(degreeProgram)
+      : false;
+    if (submitAfterSave && (!validInstitute || !validProgram)) {
+      setError(
+        "Choose a valid institute and program before submitting for review.",
+      );
       return;
     }
     const fileError = validateManuscript(manuscript);
@@ -6254,7 +7021,8 @@ export function ResearcherNewSubmission({
     let metadataSaved = false;
     try {
       const input = {
-        category_id: categoryId ? Number(categoryId) : null,
+        institute: validInstitute ?? null,
+        degree_program: validProgram ? degreeProgram : null,
         title: title.trim(),
         abstract: abstract.trim() || null,
         keywords: keywords.trim() || null,
@@ -6345,221 +7113,243 @@ export function ResearcherNewSubmission({
           description="Create a research draft, attach a manuscript, or submit it for review."
         />
       )}
-      {categories.status === "error" ? (
-        <InlineError message={categories.message} retry={retryCategories} />
-      ) : categories.status === "loading" ? (
-        <Loading label="Loading research categories" />
-      ) : (
-        <section className="panel-card admin-provision-card">
-          <form
-            onSubmit={saveSubmission}
-            className="admin-inline-form submission-form"
-            aria-label="Research submission"
-          >
-            <label className="submission-title-field">
-              Title
+      <section className="panel-card admin-provision-card">
+        <form
+          onSubmit={saveSubmission}
+          className="admin-inline-form submission-form"
+          aria-label="Research submission"
+        >
+          <label className="submission-title-field">
+            Title
+            <input
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              required
+              maxLength={500}
+            />
+          </label>
+          <label className="submission-abstract-field">
+            Abstract
+            <textarea
+              value={abstract}
+              onChange={(event) => setAbstract(event.target.value)}
+              rows={5}
+              maxLength={50000}
+            />
+          </label>
+          <label className="submission-keywords-field">
+            Keywords
+            <input
+              value={keywords}
+              onChange={(event) => setKeywords(event.target.value)}
+              maxLength={5000}
+              placeholder="Comma separated"
+            />
+          </label>
+          <div className="score-grid submission-metadata-fields">
+            <label>
+              Publication year
+              <PublicationYearInput
+                value={publicationYear}
+                onChange={(event) => setPublicationYear(event.target.value)}
+              />
+            </label>
+            <label>
+              Research stage
+              <select
+                value={researchStage}
+                onChange={(event) =>
+                  setResearchStage(
+                    event.target
+                      .value as ResearchDocumentSummaryResource["research_stage"],
+                  )
+                }
+              >
+                {researchStages.map((stage) => (
+                  <option key={stage} value={stage}>
+                    {label(stage)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Institute
               <input
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
-                required
-                maxLength={500}
+                list="submission-institutes"
+                value={institute}
+                placeholder="Search institutes"
+                onChange={(event) => {
+                  setInstitute(event.target.value);
+                  setDegreeProgram("");
+                }}
               />
+              <datalist id="submission-institutes">
+                {instituteNames.map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
             </label>
-            <label className="submission-abstract-field">
-              Abstract
-              <textarea
-                value={abstract}
-                onChange={(event) => setAbstract(event.target.value)}
-                rows={5}
-                maxLength={50000}
-              />
-            </label>
-            <label className="submission-keywords-field">
-              Keywords
+            <label>
+              Program
               <input
-                value={keywords}
-                onChange={(event) => setKeywords(event.target.value)}
-                maxLength={5000}
-                placeholder="Comma separated"
+                list="submission-programs"
+                value={degreeProgram}
+                placeholder={
+                  institute ? "Search programs" : "Choose an institute first"
+                }
+                disabled={
+                  !instituteNames.includes(
+                    institute as (typeof instituteNames)[number],
+                  )
+                }
+                onChange={(event) => setDegreeProgram(event.target.value)}
               />
+              <datalist id="submission-programs">
+                {(
+                  programsByInstitute[
+                    institute as keyof typeof programsByInstitute
+                  ] ?? []
+                ).map((program) => (
+                  <option key={program} value={program} />
+                ))}
+              </datalist>
             </label>
-            <div className="score-grid submission-metadata-fields">
+          </div>
+          <fieldset className="author-editor submission-authors">
+            <legend>Authors</legend>
+            {authors.map((author, index) => (
+              <div className="author-row" key={index}>
+                <label>
+                  Author name
+                  <input
+                    value={author.author_name}
+                    onChange={(event) =>
+                      changeAuthor(index, { author_name: event.target.value })
+                    }
+                    maxLength={255}
+                  />
+                </label>
+                <label>
+                  User ID (optional)
+                  <input
+                    value={author.user_id}
+                    onChange={(event) =>
+                      changeAuthor(index, { user_id: event.target.value })
+                    }
+                    maxLength={36}
+                  />
+                </label>
+                <label className="checklist-toggle">
+                  <input
+                    type="checkbox"
+                    checked={author.is_corresponding_author}
+                    onChange={(event) =>
+                      changeAuthor(index, {
+                        is_corresponding_author: event.target.checked,
+                      })
+                    }
+                  />
+                  Corresponding
+                </label>
+                {authors.length > 1 && (
+                  <Button
+                    variant="secondary"
+                    onClick={() => removeAuthor(index)}
+                  >
+                    Remove
+                  </Button>
+                )}
+              </div>
+            ))}
+            <Button variant="secondary" onClick={addAuthor}>
+              Add author
+            </Button>
+          </fieldset>
+          <fieldset className="author-editor submission-file">
+            <legend>Manuscript file (optional)</legend>
+            <div className="score-grid">
               <label>
-                Publication year
-                <PublicationYearInput
-                  value={publicationYear}
-                  onChange={(event) => setPublicationYear(event.target.value)}
-                />
-              </label>
-              <label>
-                Research stage
+                Document type
                 <select
-                  value={researchStage}
+                  value={documentType}
                   onChange={(event) =>
-                    setResearchStage(
+                    setDocumentType(
                       event.target
-                        .value as ResearchDocumentSummaryResource["research_stage"],
+                        .value as DocumentFileResource["document_type"],
                     )
                   }
                 >
-                  {researchStages.map((stage) => (
-                    <option key={stage} value={stage}>
-                      {label(stage)}
+                  {(isRevisionRequired
+                    ? [
+                        {
+                          value: "revised_manuscript",
+                          label: "Revised manuscript",
+                        },
+                        ...submissionDocumentTypes,
+                      ]
+                    : submissionDocumentTypes
+                  ).map((type) => (
+                    <option key={type.value} value={type.value}>
+                      {type.label}
                     </option>
                   ))}
                 </select>
               </label>
               <label>
-                Category
-                <select
-                  value={categoryId}
-                  onChange={(event) => setCategoryId(event.target.value)}
-                >
-                  <option value="">Uncategorized</option>
-                  {categories.data.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.name}
-                    </option>
-                  ))}
-                </select>
+                PDF or DOCX (maximum 25 MB)
+                <input
+                  ref={fileInput}
+                  type="file"
+                  accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  onChange={(event) =>
+                    setManuscript(event.target.files?.[0] ?? null)
+                  }
+                />
               </label>
             </div>
-            <fieldset className="author-editor submission-authors">
-              <legend>Authors</legend>
-              {authors.map((author, index) => (
-                <div className="author-row" key={index}>
-                  <label>
-                    Author name
-                    <input
-                      value={author.author_name}
-                      onChange={(event) =>
-                        changeAuthor(index, { author_name: event.target.value })
-                      }
-                      maxLength={255}
-                    />
-                  </label>
-                  <label>
-                    User ID (optional)
-                    <input
-                      value={author.user_id}
-                      onChange={(event) =>
-                        changeAuthor(index, { user_id: event.target.value })
-                      }
-                      maxLength={36}
-                    />
-                  </label>
-                  <label className="checklist-toggle">
-                    <input
-                      type="checkbox"
-                      checked={author.is_corresponding_author}
-                      onChange={(event) =>
-                        changeAuthor(index, {
-                          is_corresponding_author: event.target.checked,
-                        })
-                      }
-                    />
-                    Corresponding
-                  </label>
-                  {authors.length > 1 && (
-                    <Button
-                      variant="secondary"
-                      onClick={() => removeAuthor(index)}
-                    >
-                      Remove
-                    </Button>
-                  )}
-                </div>
-              ))}
-              <Button variant="secondary" onClick={addAuthor}>
-                Add author
+          </fieldset>
+          <div className="modal-actions submission-actions">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() =>
+                dirty
+                  ? setConfirmCancel(true)
+                  : onCancel
+                    ? onCancel()
+                    : resetForm()
+              }
+              disabled={saving}
+            >
+              {onCancel ? "Cancel" : "Reset"}
+            </Button>
+            <Button type="submit" value="draft" disabled={saving}>
+              {saving
+                ? "Saving…"
+                : isRevisionRequired
+                  ? "Save changes"
+                  : draft
+                    ? "Update draft"
+                    : "Save draft"}
+            </Button>
+            {!isRevisionRequired && (
+              <Button type="submit" value="submit" disabled={saving}>
+                {saving ? "Working…" : "Save and submit"}
               </Button>
-            </fieldset>
-            <fieldset className="author-editor submission-file">
-              <legend>Manuscript file (optional)</legend>
-              <div className="score-grid">
-                <label>
-                  Document type
-                  <select
-                    value={documentType}
-                    onChange={(event) =>
-                      setDocumentType(
-                        event.target
-                          .value as DocumentFileResource["document_type"],
-                      )
-                    }
-                  >
-                    {(isRevisionRequired
-                      ? [
-                          {
-                            value: "revised_manuscript",
-                            label: "Revised manuscript",
-                          },
-                          ...submissionDocumentTypes,
-                        ]
-                      : submissionDocumentTypes
-                    ).map((type) => (
-                      <option key={type.value} value={type.value}>
-                        {type.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  PDF or DOCX (maximum 25 MB)
-                  <input
-                    ref={fileInput}
-                    type="file"
-                    accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    onChange={(event) =>
-                      setManuscript(event.target.files?.[0] ?? null)
-                    }
-                  />
-                </label>
-              </div>
-            </fieldset>
-            <div className="modal-actions submission-actions">
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() =>
-                  dirty
-                    ? setConfirmCancel(true)
-                    : onCancel
-                      ? onCancel()
-                      : resetForm()
-                }
-                disabled={saving}
-              >
-                {onCancel ? "Cancel" : "Reset"}
-              </Button>
-              <Button type="submit" value="draft" disabled={saving}>
-                {saving
-                  ? "Saving…"
-                  : isRevisionRequired
-                    ? "Save changes"
-                    : draft
-                      ? "Update draft"
-                      : "Save draft"}
-              </Button>
-              {!isRevisionRequired && (
-                <Button type="submit" value="submit" disabled={saving}>
-                  {saving ? "Working…" : "Save and submit"}
-                </Button>
-              )}
-            </div>
-          </form>
-          {notice && (
-            <p role="status" className="admin-success">
-              {notice}
-            </p>
-          )}
-          {error && (
-            <p role="alert" className="admin-error">
-              {error}
-            </p>
-          )}
-        </section>
-      )}
+            )}
+          </div>
+        </form>
+        {notice && (
+          <p role="status" className="admin-success">
+            {notice}
+          </p>
+        )}
+        {error && (
+          <p role="alert" className="admin-error">
+            {error}
+          </p>
+        )}
+      </section>
       {confirmCancel && (
         <ConfirmDialog
           title="Discard submission changes"
@@ -6582,7 +7372,14 @@ const MAX_SIMILARITY_QUERY_LENGTH = 200;
  * not by an already-created research record, so a proposed title can be
  * validated before any submission exists.
  */
-function ResearcherSimilarityCheck({ role }: { role: Role }) {
+function ResearcherSimilarityCheck({
+  role,
+  initialMode = "title",
+}: {
+  role: Role;
+  initialMode?: "title" | "content";
+}) {
+  const mode = initialMode;
   const [draft, setDraft] = useState("");
   const [submitted, setSubmitted] = useState("");
   const [state, setState] = useState<
@@ -6591,6 +7388,9 @@ function ResearcherSimilarityCheck({ role }: { role: Role }) {
     | { status: "ready"; matches: ResearchRecord[] }
     | { status: "error"; message: string }
   >({ status: "idle" });
+  const [metadataResearchId, setMetadataResearchId] = useState<
+    string | number | null
+  >(null);
 
   const trimmed = draft.trim();
   const tooShort = trimmed.length > 0 && trimmed.length < 2;
@@ -6603,7 +7403,11 @@ function ResearcherSimilarityCheck({ role }: { role: Role }) {
     if (!canCheck) return;
     setSubmitted(trimmed);
     setState({ status: "checking" });
-    void checkTitleQuerySimilarity(trimmed)
+    const request =
+      mode === "title"
+        ? checkTitleQuerySimilarity(trimmed)
+        : checkContentQuerySimilarity(trimmed);
+    void request
       .then((matches) => setState({ status: "ready", matches }))
       .catch((requestError: unknown) =>
         setState({
@@ -6613,17 +7417,31 @@ function ResearcherSimilarityCheck({ role }: { role: Role }) {
       );
   }
 
-  const scored = state.status === "ready" ? state.matches : [];
+  const scored =
+    state.status === "ready"
+      ? state.matches.filter((match) => {
+          const percentage =
+            mode === "title"
+              ? match.titleSimilarityPercentage
+              : match.contentSimilarityPercentage;
+          return percentage === null || Number(percentage) > 0;
+        })
+      : [];
   const reviewRequired = scored.filter(
     (match) => match.adviserReviewRequired === true,
   );
+  const hasLowResult = scored.some((match) => match.classification === "low");
 
   return (
-    <div className="workspace-content admin-sidebar-page">
+    <div className="workspace-content admin-sidebar-page similarity-check-page">
       <RolePageHeader
         role={role}
-        title="Similarity check"
-        description="Type a proposed title or keywords to check it against the archived repository before you submit."
+        title={mode === "title" ? "Title checker" : "Content checker"}
+        description={
+          mode === "title"
+            ? "Compare a proposed title or keywords only with archived research titles."
+            : "Search your keywords only against cached archived manuscript content."
+        }
       />
 
       <section className="panel-card admin-provision-card">
@@ -6636,13 +7454,19 @@ function ResearcherSimilarityCheck({ role }: { role: Role }) {
           }}
         >
           <label className="full-field" htmlFor="similarity-query">
-            Proposed title or keywords
+            {mode === "title"
+              ? "Proposed title or keywords"
+              : "Content keywords"}
             <input
               id="similarity-query"
               type="search"
               value={draft}
               maxLength={MAX_SIMILARITY_QUERY_LENGTH}
-              placeholder="e.g. web-based inventory management system for small business"
+              placeholder={
+                mode === "title"
+                  ? "e.g. web-based inventory management system for small business"
+                  : "e.g. machine learning student performance prediction"
+              }
               onChange={(event) => setDraft(event.target.value)}
             />
           </label>
@@ -6653,7 +7477,9 @@ function ResearcherSimilarityCheck({ role }: { role: Role }) {
             <Button type="submit" disabled={!canCheck}>
               {state.status === "checking"
                 ? "Checking…"
-                : "Check for duplicates"}
+                : mode === "title"
+                  ? "Check Title"
+                  : "Check content"}
             </Button>
           </div>
         </form>
@@ -6663,14 +7489,24 @@ function ResearcherSimilarityCheck({ role }: { role: Role }) {
       </section>
 
       {state.status === "checking" ? (
-        <Loading label="Comparing your keywords with the repository" />
+        <Loading
+          label={
+            mode === "title"
+              ? "Comparing title with the repository"
+              : "Comparing manuscript content with the repository"
+          }
+        />
       ) : state.status === "error" ? (
         <InlineError message={state.message} retry={runCheck} />
       ) : state.status === "ready" ? (
         <section className="panel-card admin-data-card">
           <div className="admin-card-heading">
             <div>
-              <h2>Results for “{submitted}”</h2>
+              <h2>
+                {mode === "title"
+                  ? `Title results for “${submitted}”`
+                  : `Content results for “${submitted}”`}
+              </h2>
               <p>
                 {scored.length === 0
                   ? "No archived study shares any terms with these keywords."
@@ -6687,61 +7523,83 @@ function ResearcherSimilarityCheck({ role }: { role: Role }) {
           </div>
           {scored.length > 0 && (
             <>
-              <div className="admin-table-wrap">
+              <div
+                className="checker-legend"
+                aria-label="Similarity classification legend"
+              >
+                <span>
+                  <strong>Low</strong> Below 40%
+                </span>
+                <span>
+                  <strong>Moderate</strong> 40% to 69.99%
+                </span>
+                <span>
+                  <strong>High</strong> 70% and above
+                </span>
+              </div>
+              <div
+                className={`admin-table-wrap checker-results-scroll${mode === "content" && scored.length > 6 ? " is-scrollable" : ""}`}
+              >
                 <table>
                   <caption className="sr-only">
                     Archived studies ranked by similarity to your keywords
                   </caption>
                   <thead>
                     <tr>
-                      <th>Similarity</th>
-                      <th>Archived title</th>
-                      <th>Year</th>
-                      <th>Shared terms</th>
+                      <th scope="col">Archived title</th>
+                      <th scope="col">Year</th>
+                      <th scope="col">Shared terms</th>
+                      <th scope="col">Similarity</th>
+                      <th scope="col">Action</th>
                     </tr>
                   </thead>
                   <tbody>
                     {scored.map((match) => {
                       const overall = formatSimilarityPercentage(
-                        match.overallSimilarityPercentage,
+                        mode === "title"
+                          ? match.titleSimilarityPercentage
+                          : match.contentSimilarityPercentage,
                       );
                       const classification = classificationLabel(
                         match.classification,
                       );
-                      const title = formatSimilarityPercentage(
-                        match.titleSimilarityPercentage,
-                      );
                       const content = formatSimilarityPercentage(
                         match.contentSimilarityPercentage,
                       );
-                      const titleWeight = formatSimilarityWeight(
-                        match.titleWeight,
-                      );
-                      const contentWeight = formatSimilarityWeight(
-                        match.contentWeight,
-                      );
-                      const titleContribution = formatSimilarityValue(
-                        match.titleWeightedContribution,
-                      );
-                      const contentContribution = formatSimilarityValue(
-                        match.contentWeightedContribution,
-                      );
                       const contentUnavailable =
                         match.scoreStatus === "content_unavailable" || !content;
-                      const showEquation =
-                        !!overall &&
-                        !contentUnavailable &&
-                        titleContribution !== null &&
-                        contentContribution !== null;
                       return (
                         <tr key={match.id}>
-                          <td>
-                            <span className="score-cell">
+                          <td className="serif-cell checker-title-cell">
+                            {match.title}
+                          </td>
+                          <td className="checker-year-cell">{match.year}</td>
+                          <td className="checker-terms-cell">
+                            {match.matchedTerms && match.matchedTerms.length > 0
+                              ? match.matchedTerms.map((term) => (
+                                  <span className="checker-term" key={term}>
+                                    {term}
+                                  </span>
+                                ))
+                              : "—"}
+                          </td>
+                          <td className="checker-similarity-cell">
+                            <span className="score-cell checker-score-cell">
                               <strong>
-                                {overall ?? "Overall similarity unavailable"}
+                                {overall ??
+                                  `${mode === "title" ? "Title" : "Content"} similarity unavailable`}
                               </strong>
-                              <span>
-                                Classification:{" "}
+                              <span className="sr-only">
+                                {mode === "title" ? "Title" : "Content"}{" "}
+                                similarity
+                              </span>
+                              <span
+                                className={
+                                  match.classification === "low"
+                                    ? "sr-only"
+                                    : "checker-score-classification"
+                                }
+                              >
                                 {classification ?? "Unavailable"}
                               </span>
                               {match.adviserReviewRequired && (
@@ -6754,46 +7612,20 @@ function ResearcherSimilarityCheck({ role }: { role: Role }) {
                               {match.titleMatchAlert && (
                                 <span>Near-exact title match alert</span>
                               )}
-                              <span>
-                                Title {title ?? "unavailable"} · Weight{" "}
-                                {titleWeight ?? "unavailable"} · Contribution{" "}
-                                {titleContribution === null
-                                  ? "unavailable"
-                                  : `${titleContribution} points`}
-                              </span>
-                              {contentUnavailable ? (
-                                <span>Content analysis unavailable</span>
-                              ) : (
-                                <span>
-                                  Content {content} · Weight{" "}
-                                  {contentWeight ?? "unavailable"} ·
-                                  Contribution{" "}
-                                  {contentContribution === null
-                                    ? "unavailable"
-                                    : `${contentContribution} points`}
-                                </span>
-                              )}
-                              {showEquation && (
-                                <span>
-                                  Displayed overall ≈ {titleContribution} +{" "}
-                                  {contentContribution} ≈ {overall}
-                                </span>
-                              )}
-                              {match.classification === "low" && (
-                                <span>
-                                  The system detected low similarity based on
-                                  the configured comparison method. Low
-                                  similarity does not prove originality.
-                                </span>
+                              {mode === "content" && contentUnavailable && (
+                                <span>Content similarity unavailable</span>
                               )}
                             </span>
                           </td>
-                          <td className="serif-cell">{match.title}</td>
-                          <td>{match.year}</td>
                           <td>
-                            {match.matchedTerms && match.matchedTerms.length > 0
-                              ? match.matchedTerms.join(", ")
-                              : "—"}
+                            <button
+                              className="icon-button"
+                              aria-label={`Open metadata for ${match.title}`}
+                              title="Open metadata"
+                              onClick={() => setMetadataResearchId(match.id)}
+                            >
+                              <ExternalLink size={17} aria-hidden="true" />
+                            </button>
                           </td>
                         </tr>
                       );
@@ -6801,10 +7633,23 @@ function ResearcherSimilarityCheck({ role }: { role: Role }) {
                   </tbody>
                 </table>
               </div>
+              {hasLowResult && (
+                <p className="admin-empty">
+                  <strong>Note:</strong> The system detected low similarity
+                  based on the configured comparison method. Low similarity does
+                  not prove originality.
+                </p>
+              )}
             </>
           )}
         </section>
       ) : null}
+      {metadataResearchId !== null && (
+        <PublicResearchMetadataDialog
+          researchDocumentId={metadataResearchId}
+          onClose={() => setMetadataResearchId(null)}
+        />
+      )}
     </div>
   );
 }
@@ -6924,14 +7769,7 @@ function ResearcherRelatedStudies({
               }}
             />
           </section>
-          {selected && (
-            <SimilarityResults
-              researchDocumentId={selected.id}
-              onOpenCatalog={(title) =>
-                navigate(`/catalog?q=${encodeURIComponent(title)}`)
-              }
-            />
-          )}
+          {selected && <SimilarityResults researchDocumentId={selected.id} />}
         </>
       )}
     </div>

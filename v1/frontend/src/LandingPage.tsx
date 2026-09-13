@@ -36,11 +36,7 @@ export default function LandingPage({
   const [query, setQuery] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
   const recent = records.slice(0, 3);
-  const programCount = new Set(
-    records
-      .map((record) => record.degreeProgram.trim().toLowerCase())
-      .filter(Boolean),
-  ).size;
+  const instituteCount = instituteNames.length;
   const earliestYear = records.length
     ? Math.min(...records.map((record) => record.year))
     : null;
@@ -196,11 +192,8 @@ export default function LandingPage({
               <span>public studies</span>
             </div>
             <div>
-              <strong>{programCount}</strong>
-              <span>
-                academic {programCount === 1 ? "program" : "programs"}
-                {" represented"}
-              </span>
+              <strong>{instituteCount}</strong>
+              <span>institutes represented</span>
             </div>
             <div>
               <strong>{earliestYear ?? "—"}</strong>

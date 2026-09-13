@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class ResearchDocument extends Model
@@ -24,11 +25,29 @@ class ResearchDocument extends Model
 
     public const VISIBILITIES = ['private', 'registered_only', 'public'];
 
+    public const INSTITUTES = [
+        'Institute of Computer Studies',
+        'Institute of Health Sciences',
+        'Institute of Business and Financial Management',
+        'Institute of Arts and Sciences',
+        'Institute of Criminal Justice Education',
+        'Institute of Teacher Education',
+    ];
+
+    public const PROGRAMS_BY_INSTITUTE = [
+        'Institute of Computer Studies' => ['Bachelor of Science in Computer Science', 'Bachelor of Science in Information Technology'],
+        'Institute of Health Sciences' => ['Bachelor of Science in Midwifery'],
+        'Institute of Business and Financial Management' => ['Bachelor of Science in Business Administration major in Human Resource Management', 'Bachelor of Science in Business Administration major in Marketing Management'],
+        'Institute of Arts and Sciences' => ['Bachelor of Arts in Communication', 'Bachelor of Arts in English Language', 'Bachelor of Arts in Political Science'],
+        'Institute of Criminal Justice Education' => ['Bachelor of Science in Criminology', 'Bachelor of Science in Industrial Security Management'],
+        'Institute of Teacher Education' => ['Bachelor of Elementary Education', 'Bachelor of Secondary Education major in English', 'Bachelor of Secondary Education major in Filipino', 'Bachelor of Secondary Education major in Mathematics', 'Bachelor of Secondary Education major in Science', 'Bachelor of Secondary Education major in Social Studies'],
+    ];
+
     protected $fillable = [
         'submitted_by', 'submission_reference', 'category_id', 'section_id', 'title', 'normalized_title', 'abstract', 'keywords', 'publication_year',
-        'institution_name', 'institution_location', 'academic_unit', 'degree_program', 'manuscript_date_label', 'abstract_provenance',
+        'institution_name', 'institution_location', 'institute', 'degree_program', 'manuscript_date_label', 'abstract_provenance',
         'research_stage', 'submission_status', 'archive_status', 'visibility', 'submitted_at', 'approved_at', 'archived_at',
-        'import_source_sha256', 'import_source_filename',
+        'import_source_sha256', 'import_source_filename', 'import_group_name',
     ];
 
     protected function casts(): array
@@ -60,6 +79,9 @@ class ResearchDocument extends Model
         });
 
         static::deleted(function (self $document): void {
+            if (! Schema::hasTable('manuscript_search_documents')) {
+                return;
+            }
             ManuscriptSearchDocument::query()
                 ->where('research_document_id', $document->id)
                 ->delete();
@@ -119,6 +141,11 @@ class ResearchDocument extends Model
     public function reviewAssignments(): HasMany
     {
         return $this->hasMany(ReviewAssignment::class);
+    }
+
+    public function projectTeamMembers(): HasMany
+    {
+        return $this->hasMany(ResearchProjectTeamMember::class);
     }
 
     public function sourceSimilarityResults(): HasMany

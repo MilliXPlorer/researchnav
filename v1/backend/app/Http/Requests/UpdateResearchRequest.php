@@ -27,10 +27,13 @@ class UpdateResearchRequest extends FormRequest
     {
         return [
             'category_id' => ['sometimes', 'nullable', 'integer', 'exists:categories,id'],
-            'title' => ['sometimes', 'string', 'max:500'],
+            'title' => ['sometimes', 'filled', 'string', 'max:500'],
             'abstract' => ['sometimes', 'nullable', 'string', 'max:50000'],
             'keywords' => ['sometimes', 'nullable', 'string', 'max:5000'],
             'publication_year' => ['sometimes', 'nullable', 'integer', 'between:1901,2155'],
+            'institute' => ['sometimes', 'nullable', Rule::in(ResearchDocument::INSTITUTES)],
+            'degree_program' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'manuscript_date_label' => ['sometimes', 'nullable', 'string', 'max:50'],
             'research_stage' => ['sometimes', Rule::in(ResearchDocument::RESEARCH_STAGES)],
             'visibility' => ['prohibited'],
             'authors' => ['sometimes', 'array', 'min:1', 'max:50'],
@@ -43,7 +46,12 @@ class UpdateResearchRequest extends FormRequest
     public function withValidator(Validator $validator): void
     {
         $validator->after(function () use ($validator): void {
-            $this->rejectUnknownFields($validator, ['category_id', 'title', 'abstract', 'keywords', 'publication_year', 'research_stage', 'authors']);
+            $this->rejectUnknownFields($validator, ['category_id', 'title', 'abstract', 'keywords', 'publication_year', 'institute', 'degree_program', 'manuscript_date_label', 'research_stage', 'authors']);
+            $institute = $this->input('institute', $this->route('researchDocument')?->institute);
+            $program = $this->input('degree_program', $this->route('researchDocument')?->degree_program);
+            if ($program !== null && ! in_array($program, ResearchDocument::PROGRAMS_BY_INSTITUTE[$institute] ?? [], true)) {
+                $validator->errors()->add('degree_program', 'Select a program offered by the chosen institute.');
+            }
             foreach ((array) $this->input('authors', []) as $index => $author) {
                 if (! is_array($author)) {
                     continue;

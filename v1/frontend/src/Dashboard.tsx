@@ -1,18 +1,41 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  Activity,
+  Archive,
   Bell,
   BookOpen,
+  BookOpenCheck,
+  CalendarDays,
+  ChartNoAxesCombined,
+  ChevronDown,
   CircleUserRound,
+  ClipboardCheck,
+  FileCheck2,
+  FileClock,
+  FileSearch,
+  FileText,
+  FileUp,
+  Flag,
+  FolderKanban,
   Home,
+  LibraryBig,
   LayoutDashboard,
   MailCheck,
   Menu,
+  Presentation,
   RefreshCw,
+  ScanSearch,
+  ScrollText,
   Search,
+  Settings,
   ShieldAlert,
+  SlidersHorizontal,
+  UserCog,
+  Users,
   X,
   LogOut,
   Pencil,
+  type LucideIcon,
 } from "lucide-react";
 import { canEnterDashboard } from "./access";
 import AccessRequestPanel from "./AccessRequestPanel";
@@ -33,7 +56,7 @@ import type { Role, UserSession } from "./types";
 import { useDialogFocus } from "./useDialogFocus";
 
 const primaryNav: Record<Role, string> = {
-  admin: "Access Requests",
+  admin: "Dashboard",
   researcher: "Dashboard",
   adviser: "Dashboard",
   instructor: "Dashboard",
@@ -41,12 +64,48 @@ const primaryNav: Record<Role, string> = {
   statistician: "Dashboard",
   coordinator: "Program Overview",
   librarian: "Dashboard",
-  "research-office": "Compliance Review",
-  academics: "My Library",
+  "research-office": "Dashboard",
   research_editor: "Dashboard",
 };
 
-const navIcons = [LayoutDashboard, BookOpen, Search, Home, Bell, Menu];
+const navIcons: Record<string, LucideIcon> = {
+  "Audit Logs": ScrollText,
+  "Upload Manuscript": FileUp,
+  "System Settings": Settings,
+  Dashboard: LayoutDashboard,
+  "My Research": FolderKanban,
+  "My Sections": FolderKanban,
+  "Similarity Check": ScanSearch,
+  "Assigned Research": BookOpen,
+  "Title Review": FileSearch,
+  "Manuscript Review": BookOpenCheck,
+  Monitoring: Activity,
+  "Review History": FileClock,
+  "Review Submissions": ClipboardCheck,
+  "Assigned Defenses": Presentation,
+  "Defense Evaluation": ClipboardCheck,
+  "Availability Calendar": CalendarDays,
+  "Evaluation History": FileClock,
+  "Statistical Review": ChartNoAxesCombined,
+  "Editorial Review": FileText,
+  "Program Overview": LayoutDashboard,
+  Schedules: CalendarDays,
+  "Duplicate Flags": Flag,
+  "Adviser Load": Users,
+  "Account Roles": UserCog,
+  Reports: ChartNoAxesCombined,
+  "Assignment Requests": ClipboardCheck,
+  "Reference Review": BookOpenCheck,
+  "User & Role Management": UserCog,
+  "Reports & Exports": FileCheck2,
+  Search,
+  "My Library": LibraryBig,
+  "Browse by Category": Archive,
+  Notifications: Bell,
+  Profile: CircleUserRound,
+};
+
+const getNavIcon = (item: string) => navIcons[item] ?? SlidersHorizontal;
 const ignoreSessionChange = () => undefined;
 
 export default function Dashboard({
@@ -55,14 +114,22 @@ export default function Dashboard({
   onSessionChange = ignoreSessionChange,
   onLogout,
   researchDocumentId,
+  instructorSectionsRoute = false,
+  instructorSectionId,
+  instructorProjectDocumentId,
   initialNav,
+  initialSimilarityMode,
 }: {
   session: UserSession;
   navigate: (path: string) => void;
   onSessionChange?: (session: UserSession) => void;
   onLogout?: () => Promise<void> | void;
   researchDocumentId?: string | number;
+  instructorSectionsRoute?: boolean;
+  instructorSectionId?: string | number;
+  instructorProjectDocumentId?: string | number;
   initialNav?: string;
+  initialSimilarityMode?: "title" | "content";
 }) {
   const role = session.role;
   const dashboardScope = `${role}:${session.email.trim().toLowerCase()}`;
@@ -82,6 +149,8 @@ export default function Dashboard({
     open: false,
   });
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
+  const [similarityMenuOpen, setSimilarityMenuOpen] = useState(false);
+  const similarityMode = initialSimilarityMode ?? "title";
   const [accountOpen, setAccountOpen] = useState(false);
   const [notificationState, setNotificationState] = useState({
     scope: dashboardScope,
@@ -99,14 +168,12 @@ export default function Dashboard({
   const selectedNav =
     activeNav.scope === dashboardScope ? activeNav.item : primaryNav[role];
   useEffect(() => {
-    if (
-      initialNav &&
-      role === "researcher" &&
-      config.nav.includes(initialNav)
-    ) {
+    if (initialNav && config.nav.includes(initialNav)) {
       setActiveNav({ scope: dashboardScope, role, item: initialNav });
     }
   }, [config.nav, dashboardScope, initialNav, role]);
+  const showingInstructorSection =
+    role === "instructor" && instructorSectionsRoute;
   const showingRecordWorkspace =
     researchDocumentId !== undefined &&
     (
@@ -120,6 +187,21 @@ export default function Dashboard({
         "research-office",
       ] as Role[]
     ).includes(role);
+
+  function selectNavigation(item: string) {
+    setActiveNav({ scope: dashboardScope, role, item });
+    if (role !== "instructor") return;
+    if (item === "My Sections") {
+      navigate("/app/instructor/sections");
+    } else if (showingInstructorSection) {
+      navigate("/app");
+    }
+  }
+  function selectSimilarityMode(mode: "title" | "content") {
+    setSimilarityMenuOpen(true);
+    selectNavigation("Similarity Check");
+    navigate(`/app/researcher/similarity/${mode}`);
+  }
   const scopedDashboardState: RoleDashboardLoadState =
     dashboardState.scope === dashboardScope
       ? dashboardState
@@ -288,9 +370,38 @@ export default function Dashboard({
           <strong>{config.label}</strong>
         </div>
         <nav aria-label={`${config.label} navigation`}>
-          {config.nav.map((item, index) => {
-            const Icon = navIcons[index % navIcons.length];
+          {config.nav.map((item) => {
+            const Icon = getNavIcon(item);
             const active = item === selectedNav;
+            if (role === "researcher" && item === "Similarity Check") {
+              return (
+                <div className="sidebar-nav-group" key={item}>
+                  <button
+                    className={active ? "active" : ""}
+                    aria-label="Similarity Check"
+                    aria-expanded={similarityMenuOpen}
+                    onClick={() => setSimilarityMenuOpen((open) => !open)}
+                  >
+                    <Icon aria-hidden="true" />
+                    <span>Similarity Check</span>
+                    <ChevronDown
+                      className="sidebar-nav-chevron"
+                      aria-hidden="true"
+                    />
+                  </button>
+                  {similarityMenuOpen && (
+                    <div className="sidebar-nav-children">
+                      <button onClick={() => selectSimilarityMode("title")}>
+                        Title Checker
+                      </button>
+                      <button onClick={() => selectSimilarityMode("content")}>
+                        Content Checker
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            }
             return (
               <button
                 key={item}
@@ -306,7 +417,7 @@ export default function Dashboard({
                     setAccountOpen(true);
                     return;
                   }
-                  setActiveNav({ scope: dashboardScope, role, item });
+                  selectNavigation(item);
                 }}
               >
                 <Icon aria-hidden="true" />
@@ -341,7 +452,15 @@ export default function Dashboard({
       </aside>
 
       <main id="workspace" className="workspace">
-        {role === "research_editor" && selectedNav === "Dashboard" ? (
+        {showingInstructorSection ? (
+          <RoleSidebarPage
+            role={role}
+            selectedNav="My Sections"
+            navigate={navigate}
+            instructorSectionId={instructorSectionId}
+            instructorProjectDocumentId={instructorProjectDocumentId}
+          />
+        ) : role === "research_editor" && selectedNav === "Dashboard" ? (
           <RoleSidebarPage
             role={role}
             selectedNav="Dashboard"
@@ -351,9 +470,7 @@ export default function Dashboard({
           <RoleWorkspace
             role={role}
             navigate={navigate}
-            selectNav={(item) =>
-              setActiveNav({ scope: dashboardScope, role, item })
-            }
+            selectNav={selectNavigation}
             dashboardScope={dashboardScope}
             dashboardState={scopedDashboardState}
             onRetry={() => {
@@ -369,6 +486,7 @@ export default function Dashboard({
             role={role}
             selectedNav={selectedNav}
             navigate={navigate}
+            similarityMode={similarityMode}
           />
         )}
       </main>
@@ -385,9 +503,47 @@ export default function Dashboard({
             onMouseDown={(event) => event.stopPropagation()}
           >
             <p className="eyebrow">{config.label} workspace</p>
-            {config.nav.map((item, index) => {
-              const Icon = navIcons[index % navIcons.length];
+            {config.nav.map((item) => {
+              const Icon = getNavIcon(item);
               const active = item === selectedNav;
+              if (role === "researcher" && item === "Similarity Check") {
+                return (
+                  <div className="sidebar-nav-group" key={item}>
+                    <button
+                      className={active ? "active" : ""}
+                      aria-expanded={similarityMenuOpen}
+                      onClick={() => setSimilarityMenuOpen((open) => !open)}
+                    >
+                      <Icon aria-hidden="true" />
+                      <span>Similarity Check</span>
+                      <ChevronDown
+                        className="sidebar-nav-chevron"
+                        aria-hidden="true"
+                      />
+                    </button>
+                    {similarityMenuOpen && (
+                      <div className="sidebar-nav-children">
+                        <button
+                          onClick={() => {
+                            selectSimilarityMode("title");
+                            setWorkspaceMenuOpen(false);
+                          }}
+                        >
+                          Title Checker
+                        </button>
+                        <button
+                          onClick={() => {
+                            selectSimilarityMode("content");
+                            setWorkspaceMenuOpen(false);
+                          }}
+                        >
+                          Content Checker
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              }
               return (
                 <button
                   key={item}
@@ -399,7 +555,7 @@ export default function Dashboard({
                     } else if (item === "Profile") {
                       setAccountOpen(true);
                     } else {
-                      setActiveNav({ scope: dashboardScope, role, item });
+                      selectNavigation(item);
                     }
                     setWorkspaceMenuOpen(false);
                   }}
@@ -417,13 +573,7 @@ export default function Dashboard({
         <button
           className={selectedNav === primaryNav[role] ? "active" : ""}
           aria-current={selectedNav === primaryNav[role] ? "page" : undefined}
-          onClick={() =>
-            setActiveNav({
-              scope: dashboardScope,
-              role,
-              item: primaryNav[role],
-            })
-          }
+          onClick={() => selectNavigation(primaryNav[role])}
         >
           <Home />
           <span>Home</span>

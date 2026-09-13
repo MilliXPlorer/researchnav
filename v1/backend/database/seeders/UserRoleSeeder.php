@@ -18,6 +18,7 @@ class UserRoleSeeder extends Seeder
             ['name' => 'Statistician', 'slug' => UserRole::STATISTICIAN, 'description' => 'Statistical research review personnel.'],
             ['name' => 'Librarian', 'slug' => UserRole::LIBRARIAN, 'description' => 'Research repository and archive personnel.'],
             ['name' => 'Research Panelist', 'slug' => UserRole::RESEARCH_PANELIST, 'description' => 'Assigned research panel reviewer.'],
+            ['name' => 'Research Editor', 'slug' => UserRole::RESEARCH_EDITOR, 'description' => 'Research manuscript editorial reviewer.'],
         ];
 
         $unknownSlugs = UserRole::query()->whereNotIn('slug', array_column($roles, 'slug'))->pluck('slug');

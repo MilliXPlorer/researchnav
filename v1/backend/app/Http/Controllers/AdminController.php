@@ -15,6 +15,7 @@ use App\Services\AdminUserMutationException;
 use App\Services\AdminUserService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
@@ -53,6 +54,17 @@ class AdminController extends DomainController
         }
 
         return (new AdminUserResource($updated))->response()->header('Cache-Control', 'private, no-store');
+    }
+
+    public function deleteUser(Request $request, string $user, AdminUserService $users): JsonResponse
+    {
+        try {
+            $users->delete($this->actor($request), $user, $request);
+        } catch (AdminUserMutationException $exception) {
+            return response()->json(['error' => $exception->error], 409);
+        }
+
+        return response()->json(null, 204);
     }
 
     public function auditLogs(AdminAuditLogIndexRequest $request): JsonResponse

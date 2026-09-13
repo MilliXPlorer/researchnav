@@ -12,7 +12,7 @@ class ClassSection extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['instructor_id', 'name', 'academic_year', 'is_active'];
+    protected $fillable = ['instructor_id', 'name', 'section_code', 'academic_year', 'is_active'];
 
     protected function casts(): array
     {
@@ -32,6 +32,7 @@ class ClassSection extends Model
     public function members(): BelongsToMany
     {
         return $this->belongsToMany(User::class, 'class_section_members')
+            ->wherePivotNull('research_document_id')
             ->withTimestamps();
     }
 

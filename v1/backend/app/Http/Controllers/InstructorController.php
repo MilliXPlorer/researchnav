@@ -13,6 +13,7 @@ use App\Services\ClassSectionService;
 use App\Services\DomainAuthorization;
 use App\Services\MonitoringService;
 use App\Services\ReportingService;
+use App\Services\ResearchProjectTeamService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -64,6 +65,7 @@ class InstructorController extends DomainController
     {
         $input = $this->validated($request, [
             'name' => ['required', 'string', 'max:150'],
+            'section_code' => ['required', 'string', 'max:100'],
             'academic_year' => ['nullable', 'string', 'max:50'],
         ]);
         $section = $sections->create($this->actor($request), $input, $request);
@@ -75,6 +77,7 @@ class InstructorController extends DomainController
     {
         $input = $this->validated($request, [
             'name' => ['sometimes', 'string', 'max:150'],
+            'section_code' => ['sometimes', 'required', 'string', 'max:100'],
             'academic_year' => ['nullable', 'string', 'max:50'],
             'is_active' => ['sometimes', 'boolean'],
         ]);
@@ -101,18 +104,6 @@ class InstructorController extends DomainController
         return response()
             ->json(['data' => $documents->values()->all(), 'schema_version' => 1])
             ->header('Cache-Control', 'private, no-store');
-    }
-
-    public function availableSectionDocuments(Request $request, ClassSection $classSection, ClassSectionService $sections): JsonResponse
-    {
-        if ($denied = $this->authorizeSectionAccess($request, $classSection)) {
-            return $denied;
-        }
-
-        return response()->json([
-            'data' => $sections->listAssignableDocuments($this->actor($request), $classSection),
-            'schema_version' => 1,
-        ]);
     }
 
     public function sectionMembers(Request $request, ClassSection $classSection, ClassSectionService $sections): JsonResponse
@@ -179,6 +170,99 @@ class InstructorController extends DomainController
         return response()->json(['data' => $sections->listDocumentMembers($this->actor($request), $classSection, $researchDocument), 'schema_version' => 1]);
     }
 
+    public function documentTeam(Request $request, ClassSection $classSection, ResearchDocument $researchDocument, ResearchProjectTeamService $teams): JsonResponse
+    {
+        if ($denied = $this->authorizeSectionAccess($request, $classSection)) {
+            return $denied;
+        }
+
+        return response()->json(['data' => $teams->get($classSection, $researchDocument), 'schema_version' => 1])
+            ->header('Cache-Control', 'private, no-store');
+    }
+
+    public function documentTeamCandidates(Request $request, ClassSection $classSection, ResearchDocument $researchDocument, ResearchProjectTeamService $teams): JsonResponse
+    {
+        if ($denied = $this->authorizeSectionAccess($request, $classSection)) {
+            return $denied;
+        }
+        $input = $this->validated($request, [
+            'team_role' => ['required', 'in:adviser,research_office_representative,chair,panel_member'],
+            'search' => ['nullable', 'string', 'max:100'],
+        ], true);
+
+        return response()->json(['data' => $teams->candidates($classSection, $researchDocument, $input['team_role'], $input['search'] ?? null), 'schema_version' => 1])
+            ->header('Cache-Control', 'private, no-store');
+    }
+
+    public function replaceDocumentTeam(Request $request, ClassSection $classSection, ResearchDocument $researchDocument, ResearchProjectTeamService $teams): JsonResponse
+    {
+        if ($denied = $this->authorizeSectionAccess($request, $classSection)) {
+            return $denied;
+        }
+        $input = $this->validated($request, [
+            'adviser_id' => ['nullable', 'string', 'exists:users,id'],
+            'research_office_representative_id' => ['nullable', 'string', 'exists:users,id'],
+            'chair_id' => ['nullable', 'string', 'exists:users,id'],
+            'panel_member_ids' => ['nullable', 'array', 'max:20'],
+            'panel_member_ids.*' => ['string', 'distinct', 'exists:users,id'],
+        ]);
+
+        return response()->json(['data' => $teams->replace($this->actor($request), $classSection, $researchDocument, $input), 'schema_version' => 1])
+            ->header('Cache-Control', 'private, no-store');
+    }
+
+    public function replaceDocumentTeamRole(Request $request, ClassSection $classSection, ResearchDocument $researchDocument, ResearchProjectTeamService $teams): JsonResponse
+    {
+        if ($denied = $this->authorizeSectionAccess($request, $classSection)) {
+            return $denied;
+        }
+        $input = $this->validated($request, [
+            'team_role' => ['required', 'in:adviser,research_office_representative,chair,panel_member'],
+            'user_id' => ['nullable', 'string', 'exists:users,id'],
+        ]);
+
+        return response()->json(['data' => $teams->replaceRole($this->actor($request), $classSection, $researchDocument, $input['team_role'], $input['user_id'] ?? null, $request), 'schema_version' => 1])
+            ->header('Cache-Control', 'private, no-store');
+    }
+
+    public function createSectionProject(Request $request, ClassSection $classSection, ClassSectionService $sections): JsonResponse
+    {
+        if ($denied = $this->authorizeSectionAccess($request, $classSection)) {
+            return $denied;
+        }
+        $input = $this->validated($request, [
+            'title' => ['required', 'string', 'max:500'],
+        ]);
+        $document = $sections->createProject($this->actor($request), $classSection, $input['title'], $request);
+
+        return response()->json(['data' => $document, 'schema_version' => 1], 201)
+            ->header('Cache-Control', 'private, no-store');
+    }
+
+    public function updateSectionProjectTitle(Request $request, ClassSection $classSection, ResearchDocument $researchDocument, ClassSectionService $sections): JsonResponse
+    {
+        if ($denied = $this->authorizeSectionAccess($request, $classSection)) {
+            return $denied;
+        }
+        $input = $this->validated($request, [
+            'title' => ['required', 'string', 'max:500'],
+        ]);
+        $document = $sections->updateProjectTitle($this->actor($request), $classSection, $researchDocument, $input['title'], $request);
+
+        return response()->json(['data' => $document, 'schema_version' => 1])
+            ->header('Cache-Control', 'private, no-store');
+    }
+
+    public function deleteSectionProject(Request $request, ClassSection $classSection, ResearchDocument $researchDocument, ClassSectionService $sections): JsonResponse
+    {
+        if ($denied = $this->authorizeSectionAccess($request, $classSection)) {
+            return $denied;
+        }
+        $sections->deleteProject($this->actor($request), $classSection, $researchDocument, $request);
+
+        return response()->json(null, 204);
+    }
+
     private function authorizeSectionAccess(Request $request, ClassSection $classSection): ?JsonResponse
     {
         $actor = $this->actor($request);
@@ -198,17 +282,6 @@ class InstructorController extends DomainController
         return response()
             ->json(['data' => $sections->listStudentCandidates($this->actor($request), $input['search'] ?? null), 'schema_version' => 1])
             ->header('Cache-Control', 'private, no-store');
-    }
-
-    public function assignDocuments(Request $request, ClassSection $classSection, ClassSectionService $sections): JsonResponse
-    {
-        $input = $this->validated($request, [
-            'research_document_ids' => ['required', 'array', 'min:1', 'max:50'],
-            'research_document_ids.*' => ['integer', 'exists:research_documents,id'],
-        ]);
-        $sections->assignDocuments($this->actor($request), $classSection, $input['research_document_ids'], $request);
-
-        return response()->json(['data' => $this->sectionPayload($classSection->fresh('researchDocuments'))]);
     }
 
     public function titleProposals(Request $request): JsonResponse
@@ -349,7 +422,7 @@ class InstructorController extends DomainController
     {
         $this->actor($request);
 
-        return response()->json(['data' => User::query()->where('role', 'panel')->where('account_status', 'active')->get()->map(fn (User $user) => ['id' => $user->id, 'name' => $user->profileName(), 'email' => $user->email, 'unavailable_dates' => [], 'availability_persistence_supported' => false])]);
+        return response()->json(['data' => User::query()->where('role', 'panel')->where('access_status', 'active')->where('account_status', 'active')->get()->map(fn (User $user) => ['id' => $user->id, 'name' => $user->profileName(), 'email' => $user->email, 'unavailable_dates' => [], 'availability_persistence_supported' => false])]);
     }
 
     public function assignPanelist(Request $request, ResearchDocument $researchDocument, MonitoringService $activity): JsonResponse
@@ -476,18 +549,19 @@ class InstructorController extends DomainController
         return [
             'id' => $section->id,
             'name' => $section->name,
+            'section_code' => $section->section_code,
             'academic_year' => $section->academic_year,
             'is_active' => $section->is_active,
             'documents_count' => $section->researchDocuments()->count(),
-            'members_count' => $section->members()->count(),
+            'members_count' => $section->members()->distinct()->count('users.id'),
             'created_at' => $section->created_at?->toISOString(),
         ];
     }
 
     /** @param array<string, array<int, string>> $rules @return array<string, string> */
-    private function validated(Request $request, array $rules): array
+    private function validated(Request $request, array $rules, bool $query = false): array
     {
-        $validator = Validator::make($request->json()->all(), $rules);
+        $validator = Validator::make($query ? $request->query() : $request->json()->all(), $rules);
         if ($validator->fails()) {
             throw new ApiValidationException($validator->errors()->toArray());
         }

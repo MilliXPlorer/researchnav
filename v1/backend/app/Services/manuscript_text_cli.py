@@ -4,17 +4,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 
-from similarity.document_reader import DocumentReadError, extract_text
+from similarity.document_reader import DocumentReadError, extract_parts
 
 
-for parser_logger in ("pypdf", "docx", "pdfminer"):
+for parser_logger in ("pymupdf", "docx", "pdfminer"):
     logging.getLogger(parser_logger).setLevel(logging.CRITICAL)
-
-
-def normalize(text: str) -> str:
-    return " ".join(text.split())
 
 
 def main(argv: list[str]) -> int:
@@ -22,27 +19,28 @@ def main(argv: list[str]) -> int:
         sys.stdout.reconfigure(encoding="utf-8")
 
     if len(argv) != 2:
-        _write("failed", "")
+        _write("failed", [])
         return 1
 
     try:
-        text = normalize(extract_text(argv[1]))
+        maximum_part_characters = int(os.environ.get("MANUSCRIPT_PART_CHARACTERS", "100000"))
+        parts = extract_parts(argv[1], maximum_part_characters)
     except (DocumentReadError, OSError, ValueError):
-        _write("failed", "")
+        _write("failed", [])
         return 1
     except Exception:
-        _write("failed", "")
+        _write("failed", [])
         return 1
 
-    _write("ready", text)
+    _write("ready", parts)
     return 0
 
 
-def _write(status: str, text: str) -> None:
+def _write(status: str, parts: list[str]) -> None:
     # stdout is the complete protocol. Never include exception details or paths.
     sys.stdout.write(
         json.dumps(
-            {"status": status, "text": text}, ensure_ascii=False, separators=(",", ":")
+            {"status": status, "parts": parts}, ensure_ascii=False, separators=(",", ":")
         )
     )
 

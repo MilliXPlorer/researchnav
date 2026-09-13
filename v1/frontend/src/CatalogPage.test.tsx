@@ -16,9 +16,8 @@ const fallbackRecord: ResearchRecord = {
   authors: "Fallback Author",
   year: 2026,
   institutionName: "Example College",
-  academicUnit: "Example Unit",
-  degreeProgram: "Example Program",
   institute: "Example Unit",
+  degreeProgram: "Example Program",
   program: "Example Program",
   category: "Example Category",
   abstract:
@@ -61,7 +60,7 @@ function resource(
     ],
     publication_year: 2026,
     institution_name: "Example College",
-    academic_unit: "Example Unit",
+    institute: "Example Unit",
     degree_program: "Example Program",
     category: { name: "Example Category" },
     abstract: "Algorithm-scored public metadata.",
@@ -110,6 +109,23 @@ beforeEach(() => window.history.replaceState({}, "", "/catalog"));
 afterEach(() => vi.unstubAllGlobals());
 
 describe("CatalogPage public similarity search", () => {
+  it("keeps loaded studies visible when a later catalog page fails", () => {
+    render(
+      <CatalogPage
+        onSignIn={vi.fn()}
+        session={null}
+        navigate={vi.fn()}
+        records={[fallbackRecord]}
+        error="The public catalog is unavailable."
+      />,
+    );
+
+    expect(screen.getByText(fallbackRecord.title)).toBeInTheDocument();
+    expect(
+      screen.queryByText("Public catalog unavailable"),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows the manuscript sign-in card only to unauthenticated users", () => {
     const { unmount } = renderCatalog(undefined, null);
 
@@ -125,6 +141,26 @@ describe("CatalogPage public similarity search", () => {
     ).not.toBeInTheDocument();
     expect(container.querySelector(".catalog-layout")).toHaveClass(
       "is-authenticated",
+    );
+  });
+
+  it("opens manuscript files separately so catalog results stay mounted", () => {
+    render(
+      <CatalogPage
+        onSignIn={vi.fn()}
+        session={authenticatedSession}
+        navigate={vi.fn()}
+        records={[{ ...fallbackRecord, hasDownloadableManuscript: true }]}
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: /view files/i })).toHaveAttribute(
+      "target",
+      "_blank",
+    );
+    expect(screen.getByRole("link", { name: /view files/i })).toHaveAttribute(
+      "rel",
+      "noopener noreferrer",
     );
   });
 
@@ -204,6 +240,35 @@ describe("CatalogPage public similarity search", () => {
     expect(
       await screen.findByText("No studies match these filters"),
     ).toBeInTheDocument();
+  });
+
+  it("requests category and institute filters from the repository", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ data: [], links: { next: null } })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderCatalog();
+
+    fireEvent.change(
+      screen.getByRole("combobox", { name: /filter by category/i }),
+      { target: { value: "Example Category" } },
+    );
+    fireEvent.change(
+      screen.getByRole("combobox", { name: /filter by institute/i }),
+      { target: { value: "Institute of Teacher Education" } },
+    );
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenLastCalledWith(
+        expect.stringContaining("category=Example+Category"),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      ),
+    );
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      expect.stringContaining("institute=Institute+of+Teacher+Education"),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it("requests an initial catalog q and preserves the backend ranking order", async () => {
@@ -328,12 +393,12 @@ describe("CatalogPage public similarity search", () => {
     ).toBeInTheDocument();
     expect(
       within(dialog).getByRole("img", {
-        name: "Title similarity: 100.00%",
+        name: "Title similarity: 100.00%, classification HIGH",
       }),
     ).toBeInTheDocument();
     expect(
       within(dialog).getByRole("img", {
-        name: "Content similarity: 100.00%",
+        name: "Content similarity: 100.00%, classification HIGH",
       }),
     ).toBeInTheDocument();
     const metadataLabels = Array.from(

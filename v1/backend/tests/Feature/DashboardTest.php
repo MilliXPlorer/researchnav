@@ -2,14 +2,15 @@
 
 namespace Tests\Feature;
 
-use App\Models\AuditLog;
 use App\Models\ResearchDocument;
 use App\Models\ReviewAssignment;
 use App\Models\SimilarityResult;
 use App\Models\TitleValidation;
 use App\Models\User;
+use App\Services\SupabaseStorageService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Tests\TestCase;
 
 class DashboardTest extends TestCase
@@ -17,6 +18,15 @@ class DashboardTest extends TestCase
     use RefreshDatabase;
 
     protected $seed = true;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Cache::forget('research-office:supabase-institute-counts');
+        $storage = $this->createStub(SupabaseStorageService::class);
+        $storage->method('manuscriptCountsByInstitute')->willReturn([]);
+        $this->app->instance(SupabaseStorageService::class, $storage);
+    }
 
     public function test_authentication_and_active_account_middleware_protect_the_dashboard(): void
     {
@@ -55,7 +65,7 @@ class DashboardTest extends TestCase
     public function test_every_supported_legacy_role_has_its_contract_sections(): void
     {
         $expectedKeys = [
-            'admin' => ['active_accounts', 'pending_accounts', 'audit_events', 'draft_research', 'submission_queue', 'revision_required', 'pending_title_validations', 'flagged_similarity', 'approved_for_archiving', 'archived_repository', 'recent_research'],
+            'admin' => ['pending_accounts', 'draft_research', 'submission_queue', 'revision_required', 'pending_title_validations', 'flagged_similarity', 'approved_for_archiving', 'archived_repository', 'recent_research'],
             'researcher' => ['my_drafts', 'my_under_review', 'my_revision_required', 'my_flagged_similarity', 'my_approved', 'my_archived', 'repository_references'],
             'adviser' => ['assigned_reviews', 'revision_requests', 'repository_references'],
             'instructor' => ['title_proposals', 'pending_reviews', 'repository_references'],
@@ -64,7 +74,6 @@ class DashboardTest extends TestCase
             'coordinator' => ['active_instructors', 'invited_instructors', 'blocked_instructors', 'schedules', 'duplicate_flags'],
             'librarian' => ['archiving_queue', 'metadata_validation', 'repository_records'],
             'research-office' => ['submission_queue', 'revision_requests', 'pending_archiving', 'archived_repository'],
-            'academics' => ['repository_references', 'saved_library', 'recommendations'],
         ];
 
         foreach ($expectedKeys as $role => $keys) {
@@ -157,17 +166,32 @@ class DashboardTest extends TestCase
 
     public function test_research_office_queues_use_the_required_statuses(): void
     {
-        $this->document(['submission_status' => 'submitted']);
-        $this->document(['submission_status' => 'under_review']);
+        Cache::forget('research-office:supabase-institute-counts');
+        $storage = $this->createMock(SupabaseStorageService::class);
+        $storage->expects($this->once())
+            ->method('manuscriptCountsByInstitute')
+            ->willReturn([
+                ['institute' => 'Institute of Health Sciences', 'total' => 4],
+                ['institute' => 'Institute of Computer Studies', 'total' => 7],
+            ]);
+        $this->app->instance(SupabaseStorageService::class, $storage);
+
+        $this->document(['submission_status' => 'submitted', 'institute' => 'Institute of Health Sciences']);
+        $this->document(['submission_status' => 'under_review', 'institute' => 'Institute of Health Sciences']);
+        $this->document(['submission_status' => 'draft', 'institute' => 'Institute of Computer Studies']);
         $this->document(['submission_status' => 'revision_required']);
         $this->document(['archive_status' => 'pending_archiving']);
-        $this->document(['submission_status' => 'draft']);
 
-        $sections = $this->sections($this->dashboard($this->user('research-office'))->assertOk());
+        $response = $this->dashboard($this->user('research-office'))->assertOk();
+        $sections = $this->sections($response);
 
         $this->assertSame(2, $sections['submission_queue']['total']);
         $this->assertSame(1, $sections['revision_requests']['total']);
         $this->assertSame(1, $sections['pending_archiving']['total']);
+        $this->assertEqualsCanonicalizing([
+            ['institute' => 'Institute of Health Sciences', 'total' => 4],
+            ['institute' => 'Institute of Computer Studies', 'total' => 7],
+        ], $response->json('data.institutional_overview'));
     }
 
     public function test_admin_aggregates_are_exact_and_unavailable_sections_remain_null(): void
@@ -177,14 +201,10 @@ class DashboardTest extends TestCase
         $this->user('instructor', 'invited');
         $this->user('panel', 'blocked');
         $this->document(['submitted_by' => $admin->id]);
-        AuditLog::query()->create(['user_id' => $admin->id, 'action' => 'dashboard.viewed']);
 
         $adminSections = $this->sections($this->dashboard($admin)->assertOk());
-        $this->assertSame(2, $adminSections['active_accounts']['total']);
         $this->assertSame(2, $adminSections['pending_accounts']['total']);
-        $this->assertSame(1, $adminSections['audit_events']['total']);
         $this->assertSame(1, $adminSections['recent_research']['total']);
-        $this->assertSame([], $adminSections['audit_events']['items']);
 
         $panelSections = $this->sections($this->dashboard($this->user('panel'))->assertOk());
         $this->assertSame('ready', $panelSections['assigned_manuscripts']['state']);

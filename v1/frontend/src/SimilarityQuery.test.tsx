@@ -21,7 +21,7 @@ const archived = (
   ],
   publication_year: 2026,
   institution_name: "Tangub City Global College",
-  academic_unit: "Institute of Computer Studies",
+  institute: "Institute of Computer Studies",
   degree_program: "BS Computer Science",
   category: { name: "Institutional Information Systems" },
   abstract: "Archived abstract.",
@@ -30,8 +30,9 @@ const archived = (
   query_similarity_score: score,
   query_similarity_percentage:
     score === null ? null : (Number(score) * 100).toFixed(6),
-  title_similarity_score: "0.292100",
-  title_similarity_percentage: "29.210000",
+  title_similarity_score: score ?? "0.292100",
+  title_similarity_percentage:
+    score === null ? "29.210000" : (Number(score) * 100).toFixed(6),
   title_weight: "0.300000000000",
   title_weighted_contribution: "8.763000",
   content_similarity_score: "0.234400",
@@ -75,11 +76,12 @@ function stubQuery(
   );
 }
 
-function renderCheck() {
+function renderCheck(mode: "title" | "content" = "title") {
   render(
     <RoleSidebarPage
       role="researcher"
       selectedNav="Similarity Check"
+      similarityMode={mode}
       navigate={vi.fn()}
     />,
   );
@@ -111,9 +113,7 @@ describe("researcher similarity check", () => {
     fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
       target: { value: "inventory management system" },
     });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Check for duplicates" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Check Title" }));
 
     await waitFor(() =>
       expect(sent).toEqual({ q: "inventory management system" }),
@@ -124,11 +124,11 @@ describe("researcher similarity check", () => {
       await screen.findByText("INVENTORY MANAGEMENT SYSTEM FOR SMALL BUSINESS"),
     ).toBeInTheDocument();
     expect(screen.getByText("84.21%")).toBeInTheDocument();
-    expect(screen.getByText(/Weight 30\.00%/)).toBeInTheDocument();
-    expect(screen.getByText(/Weight 70\.00%/)).toBeInTheDocument();
-    expect(
-      screen.getByText("inventory, management, system"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Title similarity")).toBeInTheDocument();
+    expect(screen.queryByText(/Content similarity/)).not.toBeInTheDocument();
+    expect(screen.getByText("inventory")).toBeInTheDocument();
+    expect(screen.getByText("management")).toBeInTheDocument();
+    expect(screen.getByText("system")).toBeInTheDocument();
   });
 
   it("uses the backend review decision rather than applying a local threshold", async () => {
@@ -147,9 +147,7 @@ describe("researcher similarity check", () => {
     fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
       target: { value: "web based research repository system" },
     });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Check for duplicates" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Check Title" }));
 
     expect(await screen.findByText("1 require review")).toBeInTheDocument();
     expect(
@@ -166,9 +164,7 @@ describe("researcher similarity check", () => {
     fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
       target: { value: "tilapia pond monitoring" },
     });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Check for duplicates" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Check Title" }));
 
     expect(
       await screen.findByText("No archived study requires adviser review."),
@@ -181,7 +177,7 @@ describe("researcher similarity check", () => {
     renderCheck();
 
     const submit = screen.getByRole("button", {
-      name: "Check for duplicates",
+      name: "Check Title",
     });
     expect(submit).toBeDisabled();
 
@@ -199,23 +195,19 @@ describe("researcher similarity check", () => {
     expect(submit).toBeEnabled();
   });
 
-  it("shows an unavailable score instead of inventing one", async () => {
+  it("uses the title component even when the combined score is unavailable", async () => {
     stubQuery([archived(1, "AN ARCHIVED STUDY WITHOUT A SCORE", null)]);
     renderCheck();
 
     fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
       target: { value: "archived study" },
     });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Check for duplicates" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Check Title" }));
 
-    expect(
-      await screen.findByText("Overall similarity unavailable"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("29.21%")).toBeInTheDocument();
   });
 
-  it("shows all archived public studies including zero-scoring studies", async () => {
+  it("hides archived public studies with zero title similarity", async () => {
     stubQuery([
       archived(1, "A WEB-BASED RESEARCH REPOSITORY SYSTEM", "0.640000", [
         "repository",
@@ -228,23 +220,24 @@ describe("researcher similarity check", () => {
     fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
       target: { value: "research repository" },
     });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Check for duplicates" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Check Title" }));
 
     expect(
       await screen.findByText("A WEB-BASED RESEARCH REPOSITORY SYSTEM"),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("A MOBILE POND WATER QUALITY MONITOR"),
-    ).toBeInTheDocument();
+      screen.queryByText("A MOBILE POND WATER QUALITY MONITOR"),
+    ).not.toBeInTheDocument();
     expect(
-      screen.getByText("A GEOGRAPHIC MAPPING TOOL FOR EXTENSION"),
-    ).toBeInTheDocument();
-    expect(screen.getAllByText("0.00%")).toHaveLength(2);
+      screen.queryByText("A GEOGRAPHIC MAPPING TOOL FOR EXTENSION"),
+    ).not.toBeInTheDocument();
+    expect(screen.getAllByRole("row")).toHaveLength(2);
+    expect(
+      screen.getAllByText(/Low similarity does not prove originality/),
+    ).toHaveLength(1);
   });
 
-  it("shows every archived public study when all scores are zero", async () => {
+  it("shows an empty result when all title scores are zero", async () => {
     stubQuery([
       archived(1, "A MOBILE POND WATER QUALITY MONITOR", "0.000000"),
       archived(2, "A GEOGRAPHIC MAPPING TOOL FOR EXTENSION", "0.000000"),
@@ -254,15 +247,14 @@ describe("researcher similarity check", () => {
     fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
       target: { value: "quantum cryptography" },
     });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Check for duplicates" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Check Title" }));
 
     expect(
-      await screen.findByText("No archived study requires adviser review."),
+      await screen.findByText(
+        "No archived study shares any terms with these keywords.",
+      ),
     ).toBeInTheDocument();
-    expect(screen.getByRole("table")).toBeInTheDocument();
-    expect(screen.getAllByText("0.00%")).toHaveLength(2);
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 
   it("surfaces a failed check as a retryable error", async () => {
@@ -272,12 +264,50 @@ describe("researcher similarity check", () => {
     fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
       target: { value: "inventory management system" },
     });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Check for duplicates" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Check Title" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "The similarity check could not be completed. No score was produced.",
     );
+  });
+
+  it("checks typed keywords only against cached archived manuscript content", async () => {
+    let contentRequest = "";
+    let contentBody: unknown;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        if (path === "/api/similarity/content-query") {
+          contentRequest = path;
+          contentBody = JSON.parse(String(init?.body));
+          return new Response(
+            JSON.stringify({
+              data: [archived(1, "ARCHIVED MANUSCRIPT", "0.120000")],
+            }),
+          );
+        }
+        return new Response("{}", { status: 404 });
+      }),
+    );
+    renderCheck("content");
+
+    expect(
+      screen.getByRole("heading", { name: "Content checker" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Content keywords"), {
+      target: { value: "machine learning" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Check content" }));
+
+    await waitFor(() =>
+      expect(contentRequest).toBe("/api/similarity/content-query"),
+    );
+    expect(contentBody).toEqual({ q: "machine learning" });
+    expect(
+      await screen.findByText("Content results for “machine learning”"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Content similarity")).toBeInTheDocument();
   });
 });

@@ -66,6 +66,30 @@ class SimilarityQueryTest extends TestCase
         $this->assertDatabaseMissing('audit_logs', ['action' => 'SIMILARITY_CHECK_COMPLETED']);
     }
 
+    public function test_content_query_accepts_keywords_without_a_research_document(): void
+    {
+        $this->archived('ARCHIVED MACHINE LEARNING STUDY');
+        $researcher = $this->researcher();
+
+        $this->as($researcher)
+            ->postJson('/api/similarity/content-query', ['q' => 'machine learning'], $this->origin())
+            ->assertOk();
+
+        $this->assertSame(0, ResearchDocument::query()->where('submitted_by', $researcher->id)->count());
+        $this->assertDatabaseCount('similarity_results', 0);
+    }
+
+    public function test_content_query_validates_the_keyword_request(): void
+    {
+        $researcher = $this->researcher();
+
+        foreach ([[], ['q' => 'a'], ['q' => str_repeat('x', 201)], ['q' => 'valid query', 'extra' => true]] as $payload) {
+            $this->as($researcher)
+                ->postJson('/api/similarity/content-query', $payload, $this->origin())
+                ->assertStatus(422);
+        }
+    }
+
     public function test_it_rejects_a_missing_short_or_overlong_query(): void
     {
         $researcher = $this->researcher();
@@ -96,7 +120,7 @@ class SimilarityQueryTest extends TestCase
     {
         $this->archived('INVENTORY MANAGEMENT SYSTEM FOR SMALL BUSINESS');
 
-        foreach (['researcher', 'adviser', 'instructor', 'coordinator', 'librarian', 'research-office', 'academics'] as $role) {
+        foreach (['researcher', 'adviser', 'instructor', 'coordinator', 'librarian', 'research-office', 'research_editor'] as $role) {
             $user = User::factory()->create(['role' => $role, 'access_status' => 'active']);
             $this->as($user)
                 ->postJson('/api/similarity/query', ['q' => 'inventory management system'], $this->origin())

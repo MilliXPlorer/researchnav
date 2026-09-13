@@ -6,7 +6,6 @@ ResearchNAV is split into independently runnable applications:
 frontend/  React 19 + TypeScript + Vite
 backend/   Laravel 13 API + MariaDB
 server/    Legacy Express/PostgreSQL rollback implementation
-algorithm/ Standalone Python similarity utility
 ```
 
 The repository root is an npm workspace and command facade. Normal development starts only the active React frontend and Laravel backend. The legacy Express server is opt-in.
@@ -23,6 +22,8 @@ MariaDB (127.0.0.1:3307)
 ```
 
 Laravel owns authentication, authorization, validation, database access, and private document storage. The Node frontend server renders React, serves the browser bundle, and streams `/api` traffic to Laravel without becoming an authorization boundary. Private import documents live under `backend/storage/app/private/research_studies/<institute>/` and are never frontend assets. The current corpus is under `ics/`.
+
+Similarity runs through Laravel's process boundary using the Python worker in `backend/app/Services/similarity/`; its focused tests are in `backend/app/Services/similarity/tests/`.
 
 Authentication is **Google ID-token SSO only**. AI-generated content, AI recommendations, and AI workflow decisions are excluded from this project; review, title validation, progress, and feedback decisions remain human-recorded actions.
 

@@ -5,9 +5,11 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SimilarityResultResource } from "./api";
 import SimilarityResults from "./SimilarityResults";
+
+afterEach(() => vi.unstubAllGlobals());
 
 const result = (
   id: number,
@@ -186,20 +188,25 @@ describe("SimilarityResults", () => {
     expect(screen.queryByText(/Overall =/)).not.toBeInTheDocument();
   });
 
-  it("offers a catalog action for each matched title when supplied", async () => {
-    const onOpenCatalog = vi.fn();
+  it("opens matched metadata in a dialog without leaving the page", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise<Response>(() => undefined)),
+    );
     render(
       <SimilarityResults
         researchDocumentId={42}
         fetchPersistedResults={vi.fn(async () => [result(1, "0.58", false)])}
-        onOpenCatalog={onOpenCatalog}
       />,
     );
 
     fireEvent.click(
-      await screen.findByRole("button", { name: "Search catalog" }),
+      await screen.findByRole("button", {
+        name: "Open metadata for Matched study 1",
+      }),
     );
-    expect(onOpenCatalog).toHaveBeenCalledWith("Matched study 1");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText("Loading metadata…")).toBeInTheDocument();
   });
 
   it("does not apply an earlier check after switching research records", async () => {

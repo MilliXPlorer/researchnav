@@ -3,8 +3,10 @@
 namespace Tests\Feature;
 
 use App\Models\ClassSection;
+use App\Models\ResearchDocument;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -116,6 +118,64 @@ class InstructorSectionMembersTest extends TestCase
             ->assertJsonPath('data.members_count', 0);
         $this->assertDatabaseMissing('class_section_members', [
             'class_section_id' => $section->id,
+            'user_id' => $student->id,
+        ]);
+    }
+
+    public function test_section_roster_hides_project_memberships_and_collapses_legacy_duplicates(): void
+    {
+        $instructor = $this->user(['role' => 'instructor']);
+        $section = ClassSection::query()->create([
+            'instructor_id' => $instructor->id,
+            'name' => 'CS-101',
+        ]);
+        $student = $this->user(['role' => 'researcher']);
+        $document = ResearchDocument::factory()->create(['section_id' => $section->id]);
+
+        DB::table('class_section_members')->insert([
+            [
+                'class_section_id' => $section->id,
+                'research_document_id' => null,
+                'user_id' => $student->id,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'class_section_id' => $section->id,
+                'research_document_id' => null,
+                'user_id' => $student->id,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'class_section_id' => $section->id,
+                'research_document_id' => $document->id,
+                'user_id' => $student->id,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
+        $this->as($instructor)->getJson('/api/instructor/sections/'.$section->id.'/members')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $student->id);
+
+        $this->as($instructor)->getJson('/api/instructor/sections')
+            ->assertOk()
+            ->assertJsonPath('data.0.members_count', 1);
+
+        $this->as($instructor)->putJson('/api/instructor/sections/'.$section->id.'/members', [
+            'user_ids' => [$student->id],
+        ], $this->origin())
+            ->assertOk()
+            ->assertJsonPath('data.members_count', 1);
+
+        $this->as($instructor)->deleteJson('/api/instructor/sections/'.$section->id.'/members/'.$student->id, [], $this->origin())
+            ->assertOk();
+        $this->assertDatabaseHas('class_section_members', [
+            'class_section_id' => $section->id,
+            'research_document_id' => $document->id,
             'user_id' => $student->id,
         ]);
     }

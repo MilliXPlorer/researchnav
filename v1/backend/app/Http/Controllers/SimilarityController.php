@@ -55,12 +55,25 @@ class SimilarityController extends DomainController
     ) {
         try {
             return PublicRepositorySimilarityResource::collection(
-                $service->compare($request->string('q')->toString())
+                $service->compareTitle($request->string('q')->toString())
             );
         } catch (PublicRepositorySimilarityCapacityException) {
             return response()->json(['error' => 'SIMILARITY_CAPACITY_EXCEEDED'], 503);
         } catch (PublicRepositorySimilarityCatalogChangedException) {
             return response()->json(['error' => 'SIMILARITY_CATALOG_CHANGED'], 409);
+        } catch (SimilarityUnavailableException) {
+            return response()->json(['error' => 'SIMILARITY_UNAVAILABLE'], 503);
+        } catch (SimilarityProcessException) {
+            return response()->json(['error' => 'SIMILARITY_PROCESS_FAILED'], 502);
+        }
+    }
+
+    public function contentQuery(PublicRepositorySimilarityRequest $request, PublicRepositorySimilarityService $service)
+    {
+        try {
+            return PublicRepositorySimilarityResource::collection(
+                $service->compareContent($request->string('q')->toString())
+            );
         } catch (SimilarityUnavailableException) {
             return response()->json(['error' => 'SIMILARITY_UNAVAILABLE'], 503);
         } catch (SimilarityProcessException) {

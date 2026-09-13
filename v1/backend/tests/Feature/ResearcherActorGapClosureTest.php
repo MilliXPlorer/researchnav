@@ -57,6 +57,29 @@ class ResearcherActorGapClosureTest extends TestCase
         $this->assertSame($office->id, $officeFinal->uploaded_by);
     }
 
+    public function test_office_can_upload_and_manage_non_final_manuscripts_in_editable_states_like_admin(): void
+    {
+        Storage::fake('researchnav_private');
+        $owner = User::factory()->create(['role' => 'researcher']);
+        $office = User::factory()->create(['role' => 'research-office']);
+        $research = $this->research($owner, 'draft');
+        $service = app(DocumentService::class);
+
+        $draft = $service->upload($office, $research, $this->pdf('office-draft.pdf'), 'draft');
+        $service->rename($office, $draft, 'office-draft-renamed.pdf');
+
+        $research->update(['submission_status' => 'revision_required']);
+        $revision = $service->upload($office, $research, $this->pdf('office-revision.pdf'), 'revised_manuscript');
+        $service->delete($office, $revision);
+
+        $this->assertDatabaseHas('document_files', [
+            'id' => $draft->id,
+            'uploaded_by' => $office->id,
+            'original_filename' => 'office-draft-renamed.pdf',
+        ]);
+        $this->assertDatabaseMissing('document_files', ['id' => $revision->id]);
+    }
+
     public function test_direct_upload_reauthorizes_the_locked_parent_state(): void
     {
         Storage::fake('researchnav_private');
@@ -112,8 +135,8 @@ class ResearcherActorGapClosureTest extends TestCase
 
         $this->expectValidationException(fn () => $service->rename($owner, $final, 'owner-final.pdf'));
         $this->assertDatabaseHas('document_files', ['id' => $final->id, 'original_filename' => 'final.pdf']);
-        $this->expectValidationException(fn () => $service->rename($office, $draft, 'office-draft.pdf'));
-        $this->assertDatabaseHas('document_files', ['id' => $draft->id, 'original_filename' => 'draft.pdf']);
+        $service->rename($office, $draft, 'office-draft.pdf');
+        $this->assertDatabaseHas('document_files', ['id' => $draft->id, 'original_filename' => 'office-draft.pdf']);
 
         $research->update(['submission_status' => 'approved']);
         $service->rename($admin, $final, 'admin-final.pdf');

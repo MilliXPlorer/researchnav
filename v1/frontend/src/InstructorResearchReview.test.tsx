@@ -13,7 +13,21 @@ const submission = {
   updated_at: "2026-08-20T10:00:00.000Z",
 };
 
-function stubReviewApi() {
+function stubReviewApi({
+  researchStage = "title_proposal",
+  submissionStatus = "under_review",
+  archiveStatus = "not_archived",
+}: {
+  researchStage?: "title_proposal" | "ongoing" | "completed";
+  submissionStatus?:
+    | "draft"
+    | "submitted"
+    | "under_review"
+    | "revision_required"
+    | "approved"
+    | "archived";
+  archiveStatus?: "not_archived" | "pending_archiving" | "archived";
+} = {}) {
   const requests: Array<{ path: string; method: string; body: string | null }> =
     [];
   const fetcher = vi.fn(
@@ -36,9 +50,9 @@ function stubReviewApi() {
               abstract: "Research abstract.",
               keywords: "research, review",
               publication_year: 2026,
-              research_stage: "title_proposal",
-              submission_status: "under_review",
-              archive_status: "not_archived",
+              research_stage: researchStage,
+              submission_status: submissionStatus,
+              archive_status: archiveStatus,
               visibility: "private",
             },
           }),
@@ -148,5 +162,29 @@ describe("InstructorResearchReview", () => {
     expect(requests.some((request) => request.path.endsWith("/status"))).toBe(
       false,
     );
+  });
+
+  it.each([
+    { submissionStatus: "approved" as const },
+    { archiveStatus: "archived" as const },
+    { researchStage: "completed" as const },
+  ])("keeps finalized research read-only", async (researchState) => {
+    stubReviewApi(researchState);
+    render(
+      <InstructorResearchReview submission={submission} onUpdated={vi.fn()} />,
+    );
+
+    expect(
+      await screen.findByText(
+        "This research is complete. Its review record is read-only.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Comment")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Request revision" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Record recommendation" }),
+    ).not.toBeInTheDocument();
   });
 });

@@ -17,7 +17,7 @@ class ReviewAuthorizationTest extends TestCase
 
     public function test_legacy_compatibility_roles_do_not_gain_office_privileges(): void
     {
-        foreach (['panel', 'statistician', 'coordinator', 'librarian', 'academics'] as $role) {
+        foreach (['panel', 'statistician', 'coordinator', 'librarian'] as $role) {
             $this->assertFalse(DomainAuthorization::isOffice(User::factory()->create(['role' => $role])));
         }
 
@@ -27,7 +27,7 @@ class ReviewAuthorizationTest extends TestCase
 
     public function test_office_routes_deny_compatibility_roles_despite_canonical_mapping(): void
     {
-        foreach (['coordinator', 'academics'] as $role) {
+        foreach (['coordinator'] as $role) {
             $user = User::factory()->create(['role' => $role, 'access_status' => 'active']);
             $this->withSession(['user_id' => $user->id])
                 ->getJson('/api/office/users')

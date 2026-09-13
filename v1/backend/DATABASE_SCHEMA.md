@@ -97,7 +97,7 @@ Columns and constraints:
 - `abstract` `LONGTEXT`, nullable.
 - `keywords` `TEXT`, nullable.
 - `publication_year` nullable MariaDB `YEAR` (SQLite uses unsigned small integer).
-- `institution_name`, `institution_location`, `academic_unit`, and `degree_program` nullable `VARCHAR(255)` metadata.
+- `institution_name`, `institution_location`, `institute`, and `degree_program` nullable `VARCHAR(255)` metadata.
 - `manuscript_date_label` nullable `VARCHAR(50)` preserves source labels such as `May 2026` without inventing a day.
 - `abstract_provenance` nullable `VARCHAR(255)` identifies whether an abstract was synthesized from a source manuscript.
 - `import_source_sha256` nullable unique `CHAR(64)` and `import_source_filename` nullable indexed `VARCHAR(500)` are private import-identity fields. API resources never expose them.

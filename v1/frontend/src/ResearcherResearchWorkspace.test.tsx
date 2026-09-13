@@ -14,7 +14,7 @@ const research = {
   publication_year: 2026,
   institution_name: null,
   institution_location: null,
-  academic_unit: null,
+  institute: null,
   degree_program: null,
   manuscript_date_label: null,
   abstract_provenance: null,
@@ -245,7 +245,8 @@ describe("researcher research workspace", () => {
         expect.objectContaining({
           method: "PATCH",
           body: JSON.stringify({
-            category_id: 2,
+            institute: null,
+            degree_program: null,
             title: "Revision-ready study",
             abstract: "An abstract updated by the research owner.",
             keywords: "ownership, metadata, revision",

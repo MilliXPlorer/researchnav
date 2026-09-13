@@ -25,7 +25,7 @@ const mockResearch: ResearchDocumentSummaryResource = {
   publication_year: 2026,
   institution_name: "Tangub City Global College",
   institution_location: "Tangub City",
-  academic_unit: "College of Computer Studies",
+  institute: "College of Computer Studies",
   degree_program: "Bachelor of Science in Information Technology",
   manuscript_date_label: "September 2026",
   abstract_provenance: null,

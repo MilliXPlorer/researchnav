@@ -72,6 +72,23 @@ class SimilarityScorePolicyTest extends TestCase
         }
     }
 
+    public function test_standalone_checks_classify_the_component_as_the_complete_score(): void
+    {
+        $policy = new SimilarityScorePolicy;
+
+        $this->assertSame('moderate', $policy->evaluateStandalone('0.65', true)['classification']);
+        $this->assertSame('high', $policy->evaluateStandalone('0.75', false)['classification']);
+        $this->assertTrue($policy->evaluateStandalone('0.95', true)['title_match_alert']);
+        $this->assertFalse($policy->evaluateStandalone('0.95', false)['title_match_alert']);
+    }
+
+    public function test_standalone_blend_uses_equal_tfidf_and_fasttext_weights_with_a_tfidf_fallback(): void
+    {
+        $this->assertSame('0.600000000000', SimilarityScorePolicy::blendStandalone('0.4', '0.8'));
+        $this->assertSame('0.400000000000', SimilarityScorePolicy::blendStandalone('0.4', null));
+        $this->assertSame('0.500000000001', SimilarityScorePolicy::blendStandalone('0.000000000001', '1'));
+    }
+
     public function test_invalid_scores_and_invalid_weight_sum_are_rejected(): void
     {
         foreach (['-0.1', '1.1', 'NaN', 'INF', '0.1234567890123', 0.5] as $value) {

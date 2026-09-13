@@ -55,9 +55,10 @@ return [
         'cli_path' => app_path('Services/similarity/cli.py'),
         'fasttext_model_path' => env('SIMILARITY_FASTTEXT_MODEL_PATH', ''),
         'timeout_seconds' => (int) env('SIMILARITY_TIMEOUT_SECONDS', 20),
-        'maximum_candidates' => (int) env('SIMILARITY_MAXIMUM_CANDIDATES', 250),
+        'maximum_candidates' => (int) env('SIMILARITY_MAXIMUM_CANDIDATES', 1000),
+        'php_memory_limit' => env('SIMILARITY_PHP_MEMORY_LIMIT', '512M'),
         'maximum_input_bytes' => (int) env('SIMILARITY_MAXIMUM_INPUT_BYTES', 268435456),
-        'maximum_output_bytes' => (int) env('SIMILARITY_MAXIMUM_OUTPUT_BYTES', 262144),
+        'maximum_output_bytes' => (int) env('SIMILARITY_MAXIMUM_OUTPUT_BYTES', 2097152),
     ],
     'manuscript_search' => [
         // The worker receives one verified canonical private-disk path by argv.
@@ -67,6 +68,7 @@ return [
         'maximum_input_bytes' => (int) env('MANUSCRIPT_SEARCH_MAXIMUM_INPUT_BYTES', 26214400),
         'maximum_output_bytes' => (int) env('MANUSCRIPT_SEARCH_MAXIMUM_OUTPUT_BYTES', 8388608),
         'maximum_text_characters' => (int) env('MANUSCRIPT_SEARCH_MAXIMUM_TEXT_CHARACTERS', 1000000),
+        'part_characters' => (int) env('MANUSCRIPT_SEARCH_PART_CHARACTERS', 100000),
         'extractor_version' => env('MANUSCRIPT_SEARCH_EXTRACTOR_VERSION', 'manuscript-text/1'),
     ],
 ];

@@ -40,12 +40,16 @@ import {
 } from "./api";
 import { PublicationYearInput } from "./dateControls";
 import { Button } from "./components";
+import { instituteNames } from "./data";
 
 type FormState = {
   title: string;
   abstract: string;
   keywords: string;
   publicationYear: string;
+  institute: string;
+  degreeProgram: string;
+  manuscriptDateLabel: string;
   researchStage: ResearchMetadataInput["research_stage"];
 };
 type ValidationChoice = Exclude<
@@ -89,6 +93,9 @@ function formFor(research: InternalResearchResource): FormState {
     abstract: research.abstract ?? "",
     keywords: research.keywords ?? "",
     publicationYear: research.publication_year?.toString() ?? "",
+    institute: research.institute ?? "",
+    degreeProgram: research.degree_program ?? "",
+    manuscriptDateLabel: research.manuscript_date_label ?? "",
     researchStage: research.research_stage,
   };
 }
@@ -405,9 +412,7 @@ export default function AdminResearchWorkspace({
     );
   }
 
-  const editable =
-    research.is_imported === true ||
-    ["draft", "revision_required"].includes(research.submission_status);
+  const editable = research.can_update_metadata === true;
   const allowedUploadTypes = uploadTypesFor(research.submission_status);
   const canUpload = allowedUploadTypes.length > 0;
   const canArchive =
@@ -455,6 +460,9 @@ export default function AdminResearchWorkspace({
         abstract: form.abstract || null,
         keywords: form.keywords || null,
         publication_year,
+        institute: form.institute || null,
+        degree_program: form.degreeProgram || null,
+        manuscript_date_label: form.manuscriptDateLabel || null,
         research_stage: form.researchStage,
       }),
     );
@@ -629,6 +637,47 @@ export default function AdminResearchWorkspace({
                 <option value="ongoing">Ongoing</option>
                 <option value="completed">Completed</option>
               </select>
+            </label>
+            <label>
+              Institute
+              <select
+                value={form.institute}
+                disabled={isMutating}
+                onChange={(event) =>
+                  setForm({ ...form, institute: event.target.value })
+                }
+              >
+                <option value="">Unclassified</option>
+                {instituteNames.map((institute) => (
+                  <option key={institute} value={institute}>
+                    {institute}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Final binding date
+              <input
+                value={form.manuscriptDateLabel}
+                disabled={isMutating}
+                placeholder="e.g. May 2024"
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    manuscriptDateLabel: event.target.value,
+                  })
+                }
+              />
+            </label>
+            <label className="admin-form-wide">
+              Degree program
+              <input
+                value={form.degreeProgram}
+                disabled={isMutating}
+                onChange={(event) =>
+                  setForm({ ...form, degreeProgram: event.target.value })
+                }
+              />
             </label>
             <label className="admin-form-wide">
               Keywords

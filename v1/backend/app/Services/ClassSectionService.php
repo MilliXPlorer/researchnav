@@ -18,11 +18,18 @@ class ClassSectionService
         return ClassSection::query()
             ->where('instructor_id', $actor->id)
             ->orderByDesc('id')
-            ->withCount(['researchDocuments', 'members'])
+            ->withCount('researchDocuments')
+            ->addSelect([
+                'members_count' => DB::table('class_section_members')
+                    ->selectRaw('COUNT(DISTINCT user_id)')
+                    ->whereColumn('class_section_id', 'class_sections.id')
+                    ->whereNull('research_document_id'),
+            ])
             ->get()
             ->map(fn (ClassSection $section) => [
                 'id' => $section->id,
                 'name' => $section->name,
+                'section_code' => $section->section_code,
                 'academic_year' => $section->academic_year,
                 'is_active' => $section->is_active,
                 'documents_count' => $section->research_documents_count,
@@ -38,6 +45,7 @@ class ClassSectionService
             $section = ClassSection::query()->create([
                 'instructor_id' => $actor->id,
                 'name' => $data['name'],
+                'section_code' => $data['section_code'],
                 'academic_year' => $data['academic_year'] ?? null,
                 'is_active' => true,
             ]);
@@ -56,6 +64,7 @@ class ClassSectionService
             }
             $locked->update([
                 'name' => $data['name'] ?? $locked->name,
+                'section_code' => $data['section_code'] ?? $locked->section_code,
                 'academic_year' => array_key_exists('academic_year', $data) ? $data['academic_year'] : $locked->academic_year,
                 'is_active' => $data['is_active'] ?? $locked->is_active,
             ]);
@@ -63,59 +72,6 @@ class ClassSectionService
 
             return $locked;
         });
-    }
-
-    public function assignDocuments(User $actor, ClassSection $section, array $researchDocumentIds, ?Request $request = null): ClassSection
-    {
-        return DB::transaction(function () use ($actor, $section, $researchDocumentIds, $request): ClassSection {
-            $locked = ClassSection::query()->whereKey($section->id)->lockForUpdate()->firstOrFail();
-            if ($locked->instructor_id !== $actor->id && ! DomainAuthorization::isActiveAdministrator($actor)) {
-                throw $this->notAuthorized();
-            }
-            $documents = ResearchDocument::query()
-                ->whereIn('id', $researchDocumentIds)
-                ->where(function ($query) use ($actor): void {
-                    $query->where('submitted_by', $actor->id)
-                        ->orWhereHas('reviewAssignments', fn ($assignments) => $assignments
-                            ->where('reviewer_id', $actor->id)
-                            ->where('review_role', $actor->role)
-                            ->where('is_active', true));
-                })
-                ->get();
-            if ($documents->count() !== count(array_unique($researchDocumentIds))) {
-                throw ValidationException::withMessages(['research_document_ids' => ['Only research you supervise may be assigned to your sections.']]);
-            }
-            ResearchDocument::query()->whereIn('id', $researchDocumentIds)->update(['section_id' => $locked->id]);
-            $this->audit->log($actor, 'CLASS_SECTION_DOCUMENTS_UPDATED', $locked, 'Assigned research documents to the class section.', $request);
-
-            return $locked->load('researchDocuments');
-        });
-    }
-
-    /** @return list<array<string, mixed>> */
-    public function listAssignableDocuments(User $actor, ClassSection $section): array
-    {
-        $this->authorizeOwner($actor, $section);
-
-        return ResearchDocument::query()
-            ->where(function ($query) use ($actor, $section): void {
-                $query->whereHas('reviewAssignments', fn ($assignments) => $assignments
-                    ->where('reviewer_id', $actor->id)
-                    ->where('review_role', 'instructor')
-                    ->where('is_active', true))
-                    ->orWhereIn('submitted_by', $section->members()->select('users.id'));
-            })
-            ->whereIn('submission_status', ['submitted', 'under_review', 'revision_required', 'approved', 'archived'])
-            ->orderByDesc('updated_at')
-            ->get(['id', 'title', 'research_stage', 'submission_status', 'updated_at'])
-            ->map(fn (ResearchDocument $document) => [
-                'research_document_id' => $document->id,
-                'title' => $document->title,
-                'research_stage' => $document->research_stage,
-                'submission_status' => $document->submission_status,
-                'updated_at' => $document->updated_at?->toISOString(),
-            ])
-            ->all();
     }
 
     /** @return list<array<string, mixed>> */
@@ -128,7 +84,9 @@ class ClassSectionService
             ->orderBy('first_name')
             ->withPivot('created_at')
             ->get(['users.id', 'email', 'student_employee_id', 'first_name', 'middle_name', 'last_name'])
+            ->unique('id')
             ->map(fn (User $member) => $this->memberPayload($member))
+            ->values()
             ->all();
     }
 
@@ -146,10 +104,22 @@ class ClassSectionService
             if ($students->count() !== count($uniqueIds)) {
                 throw ValidationException::withMessages(['user_ids' => ['Only active student researcher accounts can be added to a class section.']]);
             }
-            $existing = $locked->members()->whereIn('user_id', $uniqueIds)->pluck('class_section_members.user_id')->map(fn ($id) => (string) $id)->all();
-            $locked->members()->syncWithoutDetaching(
-                $students->pluck('id')->map(fn ($id) => (string) $id)->diff($existing)->all(),
-            );
+            foreach ($students as $student) {
+                $memberExists = DB::table('class_section_members')
+                    ->where('class_section_id', $locked->id)
+                    ->whereNull('research_document_id')
+                    ->where('user_id', $student->id)
+                    ->exists();
+                if (! $memberExists) {
+                    DB::table('class_section_members')->insert([
+                        'class_section_id' => $locked->id,
+                        'research_document_id' => null,
+                        'user_id' => $student->id,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                }
+            }
             $this->audit->log($actor, 'CLASS_SECTION_MEMBERS_UPDATED', $locked, "Added student researchers to class section [{$locked->name}].", $request);
 
             return $locked;
@@ -161,7 +131,11 @@ class ClassSectionService
         return DB::transaction(function () use ($actor, $section, $member, $request): ClassSection {
             $locked = ClassSection::query()->whereKey($section->id)->lockForUpdate()->firstOrFail();
             $this->authorizeOwner($actor, $locked);
-            $locked->members()->detach($member->id);
+            DB::table('class_section_members')
+                ->where('class_section_id', $locked->id)
+                ->whereNull('research_document_id')
+                ->where('user_id', $member->id)
+                ->delete();
             $this->audit->log($actor, 'CLASS_SECTION_MEMBERS_UPDATED', $locked, "Removed a student researcher from class section [{$locked->name}].", $request);
 
             return $locked;
@@ -232,6 +206,109 @@ class ClassSectionService
         return $query->get(['id', 'email', 'student_employee_id', 'first_name', 'middle_name', 'last_name'])
             ->map(fn (User $student) => $this->memberPayload($student))
             ->all();
+    }
+
+    /** @return array<string, mixed> */
+    public function createProject(User $actor, ClassSection $section, string $title, ?Request $request = null): array
+    {
+        $document = DB::transaction(function () use ($actor, $section, $title, $request): ResearchDocument {
+            $locked = ClassSection::query()->whereKey($section->id)->lockForUpdate()->firstOrFail();
+            $this->authorizeOwner($actor, $locked);
+            $trimmed = trim($title);
+            if ($trimmed === '') {
+                throw ValidationException::withMessages(['title' => ['The research title is required.']]);
+            }
+            $normalized = str($trimmed)->lower()->replaceMatches('/[^a-z0-9]+/', ' ')->trim()->toString();
+            if (ResearchDocument::withTrashed()->where('normalized_title', $normalized)->exists()) {
+                throw ValidationException::withMessages(['title' => ['A research project with this title already exists.']]);
+            }
+            $document = ResearchDocument::query()->create([
+                'submitted_by' => $actor->id,
+                'section_id' => $locked->id,
+                'title' => $trimmed,
+                'normalized_title' => $normalized,
+                'research_stage' => 'title_proposal',
+                'submission_status' => 'draft',
+                'archive_status' => 'not_archived',
+                'visibility' => 'private',
+            ]);
+            $this->audit->log($actor, 'CLASS_SECTION_PROJECT_CREATED', $document, "Created research project [{$trimmed}] in class section [{$locked->name}].", $request);
+
+            return $document;
+        });
+
+        return [
+            'research_document_id' => $document->id,
+            'title' => $document->title,
+            'research_stage' => $document->research_stage,
+            'submission_status' => $document->submission_status,
+            'updated_at' => $document->updated_at?->toISOString(),
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    public function updateProjectTitle(User $actor, ClassSection $section, ResearchDocument $document, string $title, ?Request $request = null): array
+    {
+        $document = DB::transaction(function () use ($actor, $section, $document, $title, $request): ResearchDocument {
+            $locked = ClassSection::query()->whereKey($section->id)->lockForUpdate()->firstOrFail();
+            $this->authorizeOwner($actor, $locked);
+            $this->ensureDocumentInSection($locked, $document);
+            if ($document->submitted_by !== $actor->id) {
+                throw ValidationException::withMessages(['title' => ['Only research projects created by you can be edited.']]);
+            }
+            $trimmed = trim($title);
+            if ($trimmed === '') {
+                throw ValidationException::withMessages(['title' => ['The research title is required.']]);
+            }
+            if ($document->submission_status !== 'draft' || $document->research_stage !== 'title_proposal') {
+                throw ValidationException::withMessages(['title' => ['The research title can only be edited while the project is still a draft title proposal.']]);
+            }
+            $normalized = str($trimmed)->lower()->replaceMatches('/[^a-z0-9]+/', ' ')->trim()->toString();
+            $collision = ResearchDocument::withTrashed()
+                ->where('normalized_title', $normalized)
+                ->whereKeyNot($document->id)
+                ->exists();
+            if ($collision) {
+                throw ValidationException::withMessages(['title' => ['A research project with this title already exists.']]);
+            }
+            $lockedDocument = ResearchDocument::query()->lockForUpdate()->findOrFail($document->id);
+            $lockedDocument->update([
+                'title' => $trimmed,
+                'normalized_title' => $normalized,
+            ]);
+            $this->audit->log($actor, 'CLASS_SECTION_PROJECT_TITLE_UPDATED', $lockedDocument, "Renamed research project to [{$trimmed}].", $request);
+
+            return $lockedDocument;
+        });
+
+        return [
+            'research_document_id' => $document->id,
+            'title' => $document->title,
+            'research_stage' => $document->research_stage,
+            'submission_status' => $document->submission_status,
+            'updated_at' => $document->updated_at?->toISOString(),
+        ];
+    }
+
+    public function deleteProject(User $actor, ClassSection $section, ResearchDocument $document, ?Request $request = null): void
+    {
+        DB::transaction(function () use ($actor, $section, $document, $request): void {
+            $locked = ClassSection::query()->whereKey($section->id)->lockForUpdate()->firstOrFail();
+            $this->authorizeOwner($actor, $locked);
+            $lockedDocument = ResearchDocument::query()->lockForUpdate()->findOrFail($document->id);
+            $this->ensureDocumentInSection($locked, $lockedDocument);
+            if ($lockedDocument->submitted_by !== $actor->id || $lockedDocument->submission_status !== 'draft' || $lockedDocument->research_stage !== 'title_proposal') {
+                throw ValidationException::withMessages(['project' => ['Only draft title-proposal projects created by you can be deleted.']]);
+            }
+            if ($lockedDocument->files()->exists()) {
+                throw ValidationException::withMessages(['project' => ['A research project with uploaded files cannot be deleted here.']]);
+            }
+
+            DB::table('class_section_members')->where('research_document_id', $lockedDocument->id)->update(['research_document_id' => null]);
+            DB::table('research_project_team_members')->where('research_document_id', $lockedDocument->id)->delete();
+            $this->audit->log($actor, 'CLASS_SECTION_PROJECT_DELETED', $lockedDocument, "Deleted research project [{$lockedDocument->title}] from class section [{$locked->name}].", $request);
+            $lockedDocument->deleteOrFail();
+        });
     }
 
     private function authorizeOwner(User $actor, ClassSection $section): void

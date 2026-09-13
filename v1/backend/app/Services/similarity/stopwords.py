@@ -5,9 +5,8 @@ from __future__ import annotations
 import re
 
 
-# Keep this local, versioned list rather than relying on NLTK's downloadable data.
-STOPWORDS = frozenset(
-    {
+# Keep these local and versioned rather than relying on downloadable corpora.
+ENGLISH_STOPWORDS = {
         "a",
         "an",
         "and",
@@ -27,8 +26,49 @@ STOPWORDS = frozenset(
         "the",
         "to",
         "with",
-    }
-)
+}
+FILIPINO_STOPWORDS = {
+    "ako",
+    "ang",
+    "at",
+    "ay",
+    "bilang",
+    "dahil",
+    "din",
+    "dito",
+    "doon",
+    "habang",
+    "ito",
+    "iyon",
+    "kanilang",
+    "kanyang",
+    "kapag",
+    "kasi",
+    "kay",
+    "kaya",
+    "kung",
+    "lang",
+    "mga",
+    "mula",
+    "na",
+    "namin",
+    "nang",
+    "ng",
+    "ngunit",
+    "ni",
+    "nila",
+    "nito",
+    "o",
+    "para",
+    "pero",
+    "rin",
+    "sa",
+    "sila",
+    "siya",
+    "tayo",
+    "upang",
+}
+STOPWORDS = frozenset(ENGLISH_STOPWORDS | FILIPINO_STOPWORDS)
 _TOKEN_RE = re.compile(r"(?u)\b[\w\d]{2,}\b")
 
 

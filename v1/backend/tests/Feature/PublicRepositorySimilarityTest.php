@@ -165,6 +165,17 @@ class PublicRepositorySimilarityTest extends TestCase
             ->assertExactJson(['error' => 'SIMILARITY_CAPACITY_EXCEEDED']);
     }
 
+    public function test_query_honors_a_configured_candidate_limit_above_the_previous_cap(): void
+    {
+        config()->set('researchnav.similarity.maximum_candidates', 251);
+        foreach (range(1, 251) as $index) {
+            $this->archivedPublic('Candidate '.$index);
+        }
+        $this->useTestWorker();
+
+        $this->postJson('/api/repository/similarity', ['q' => 'query'])->assertOk();
+    }
+
     public function test_query_rejects_results_when_a_candidate_leaves_the_public_catalog_during_scoring(): void
     {
         $candidate = $this->archivedPublic('Candidate');
@@ -261,20 +272,36 @@ class PublicRepositorySimilarityTest extends TestCase
         $this->archivedPublic('Candidate');
         $this->useTestWorker();
 
-        $this->postJson('/api/repository/similarity', ['q' => 'query'])->assertOk();
-        $this->postJson('/api/repository/similarity', ['q' => 'query'])->assertOk();
+        foreach (range(1, 10) as $request) {
+            $this->postJson('/api/repository/similarity', ['q' => 'query'])->assertOk();
+        }
         $this->postJson('/api/repository/similarity', ['q' => 'query'])
             ->assertStatus(429)
             ->assertExactJson(['error' => 'RATE_LIMIT_EXCEEDED']);
 
         $this->travel(1)->minute();
-        foreach (range(1, 18) as $request) {
+        foreach (range(1, 10) as $request) {
             $this->postJson('/api/repository/similarity', ['q' => 'query'])->assertOk();
-            $this->travel(1)->minute();
         }
         $this->postJson('/api/repository/similarity', ['q' => 'query'])
             ->assertStatus(429)
             ->assertExactJson(['error' => 'RATE_LIMIT_EXCEEDED']);
+    }
+
+    public function test_active_research_office_and_administrator_accounts_bypass_query_limits(): void
+    {
+        $this->archivedPublic('Candidate');
+        $this->useTestWorker();
+
+        foreach (['research-office', 'admin'] as $role) {
+            $actor = User::factory()->create(['role' => $role, 'access_status' => 'active']);
+
+            foreach (range(1, 12) as $request) {
+                $this->withSession(['user_id' => (string) $actor->id])
+                    ->postJson('/api/repository/similarity', ['q' => 'query'])
+                    ->assertOk();
+            }
+        }
     }
 
     public function test_query_worker_cannot_receive_laravel_secrets(): void

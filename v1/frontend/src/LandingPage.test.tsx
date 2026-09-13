@@ -9,7 +9,6 @@ const record: ResearchRecord = {
   authors: "Example Author",
   year: 2026,
   institutionName: "Example College",
-  academicUnit: "Institute of Computer Studies",
   degreeProgram: "Bachelor of Science in Computer Science",
   institute: "Institute of Computer Studies",
   program: "Bachelor of Science in Computer Science",
@@ -42,7 +41,7 @@ describe("LandingPage", () => {
     );
   });
 
-  it("counts only distinct, identified programs in repository statistics", () => {
+  it("shows the configured institute total in repository statistics", () => {
     render(
       <LandingPage
         onSignIn={vi.fn()}
@@ -55,18 +54,23 @@ describe("LandingPage", () => {
           {
             ...record,
             id: "2",
+            institute: "Institute of Teacher Education",
             degreeProgram: "Bachelor of Science in Information Technology",
             program: "Bachelor of Science in Information Technology",
           },
-          { ...record, id: "3", degreeProgram: "", program: "" },
+          {
+            ...record,
+            id: "3",
+            institute: "",
+            degreeProgram: "",
+            program: "",
+          },
         ]}
       />,
     );
 
     const statistics = within(screen.getByLabelText("Repository statistics"));
-    expect(statistics.getByText("2")).toBeInTheDocument();
-    expect(
-      statistics.getByText("academic programs represented"),
-    ).toBeInTheDocument();
+    expect(statistics.getByText("6")).toBeInTheDocument();
+    expect(statistics.getByText("institutes represented")).toBeInTheDocument();
   });
 });

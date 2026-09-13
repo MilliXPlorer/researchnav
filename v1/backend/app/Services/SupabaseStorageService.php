@@ -13,6 +13,8 @@ class SupabaseStorageService
 
     private const UPLOAD_TIMEOUT_SECONDS = 120;
 
+    private const LIST_PAGE_SIZE = 1000;
+
     private const INSTITUTES = [
         'Institute of Computer Studies',
         'Institute of Health Sciences',
@@ -23,8 +25,80 @@ class SupabaseStorageService
         'Unclassified',
     ];
 
+    private const INSTITUTE_CODES = [
+        'IHS' => 'Institute of Health Sciences',
+        'ICS' => 'Institute of Computer Studies',
+        'IBFS' => 'Institute of Business and Financial Management',
+        'ICJE' => 'Institute of Criminal Justice Education',
+        'ITE' => 'Institute of Teacher Education',
+        'IAS' => 'Institute of Arts and Sciences',
+    ];
+
     /** @var array{url:string,secret_key:string,storage_bucket:string}|null */
     private ?array $configuration = null;
+
+    /** @return list<array{institute:string,total:int}> */
+    public function manuscriptCountsByInstitute(): array
+    {
+        return collect(array_slice(self::INSTITUTES, 0, 6))
+            ->map(function (string $institute): array {
+                $total = 0;
+                foreach ($this->listFolders($institute) as $year) {
+                    $total += count($this->listFolders($institute.'/'.$year));
+                }
+
+                return ['institute' => $institute, 'total' => $total];
+            })
+            ->all();
+    }
+
+    /** @return list<array{year:string,title:string}> */
+    public function studiesForInstitute(string $code): array
+    {
+        $institute = $this->instituteForCode($code);
+        $studies = [];
+        foreach ($this->listFolders($institute) as $year) {
+            foreach ($this->listFolders($institute.'/'.$year) as $title) {
+                $studies[] = ['year' => $year, 'title' => $title];
+            }
+        }
+        usort($studies, fn (array $left, array $right): int => ($right['year'] <=> $left['year']) ?: strcasecmp($left['title'], $right['title']));
+
+        return $studies;
+    }
+
+    /** @return list<array{name:string,path:string,extension:string}> */
+    public function filesForStudy(string $code, string $year, string $title): array
+    {
+        $institute = $this->instituteForCode($code);
+        if (preg_match('/\A\d{4}\z/', $year) !== 1 || $title === '' || str_contains($title, '/') || str_contains($title, '\\') || $title === '..') {
+            throw new SupabaseStorageException('The manuscript storage path is invalid.');
+        }
+
+        return collect($this->listEntries($institute.'/'.$year.'/'.$title))
+            ->filter(function (array $entry): bool {
+                $name = $entry['name'] ?? null;
+
+                return is_string($name)
+                    && $name !== ''
+                    && ($entry['id'] ?? null) !== null
+                    && preg_match('/[\x00-\x1F\x7F\\\\\/]/', $name) !== 1
+                    && $name !== '..';
+            })
+            ->map(function (array $entry) use ($institute, $year, $title): array {
+                $name = $entry['name'];
+
+                return [
+                    'name' => $name,
+                    'path' => $institute.'/'.$year.'/'.$title.'/'.$name,
+                    'extension' => strtolower(pathinfo($name, PATHINFO_EXTENSION)),
+                ];
+            })
+            ->filter(fn (array $file): bool => in_array($file['extension'], ['pdf', 'doc', 'docx'], true))
+            ->sortBy(fn (array $file): string => strtolower($file['name']), SORT_NATURAL)
+            ->values()
+            ->all();
+    }
 
     public function upload(string $path, string $contents, string $mimeType): void
     {
@@ -96,6 +170,21 @@ class SupabaseStorageService
         }
 
         return $contents;
+    }
+
+    public function downloadTo(string $path, string $destination): void
+    {
+        $contents = $this->download($path);
+        $directory = dirname($destination);
+        if (! is_dir($directory) || ! is_writable($directory) || is_link($destination)) {
+            throw new SupabaseStorageException('The manuscript could not be retrieved.');
+        }
+
+        $written = @file_put_contents($destination, $contents, LOCK_EX);
+        if ($written !== strlen($contents)) {
+            @unlink($destination);
+            throw new SupabaseStorageException('The manuscript could not be retrieved.');
+        }
     }
 
     public function exists(string $path): bool
@@ -206,6 +295,69 @@ class SupabaseStorageService
     private function signUrl(string $path): string
     {
         return $this->config()['url'].'/storage/v1/object/sign/'.$this->config()['storage_bucket'].'/'.$this->encodedPath($path);
+    }
+
+    /** @return list<string> */
+    private function listFolders(string $prefix): array
+    {
+        return collect($this->listEntries($prefix))
+            ->filter(fn (array $entry): bool => is_string($entry['name'] ?? null) && ($entry['id'] ?? null) === null)
+            ->pluck('name')
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function listEntries(string $prefix): array
+    {
+        $results = [];
+        for ($offset = 0; $offset < 100_000; $offset += self::LIST_PAGE_SIZE) {
+            try {
+                $response = $this->http(20)
+                    ->withHeaders($this->headers())
+                    ->post($this->listUrl(), [
+                        'prefix' => $prefix,
+                        'limit' => self::LIST_PAGE_SIZE,
+                        'offset' => $offset,
+                        'sortBy' => ['column' => 'name', 'order' => 'asc'],
+                    ]);
+            } catch (ConnectionException) {
+                throw new SupabaseStorageException('The manuscript storage service is unavailable.');
+            }
+
+            if (! $response->successful() || ! is_array($response->json())) {
+                Log::warning('Supabase manuscript listing failed.', ['status' => $response->status()]);
+                throw new SupabaseStorageException('The manuscript storage service is unavailable.');
+            }
+
+            $entries = $response->json();
+            foreach ($entries as $entry) {
+                if (is_array($entry)) {
+                    $results[] = $entry;
+                }
+            }
+            if (count($entries) < self::LIST_PAGE_SIZE) {
+                break;
+            }
+        }
+
+        return $results;
+    }
+
+    private function listUrl(): string
+    {
+        return $this->config()['url'].'/storage/v1/object/list/'.rawurlencode($this->config()['storage_bucket']);
+    }
+
+    private function instituteForCode(string $code): string
+    {
+        $institute = self::INSTITUTE_CODES[strtoupper($code)] ?? null;
+        if ($institute === null) {
+            throw new SupabaseStorageException('The institute is invalid.');
+        }
+
+        return $institute;
     }
 
     private function encodedPath(string $path): string

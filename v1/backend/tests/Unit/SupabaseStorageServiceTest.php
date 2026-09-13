@@ -58,4 +58,49 @@ class SupabaseStorageServiceTest extends TestCase
         Http::assertSent(fn ($request) => $request->method() === 'GET'
             && $request->hasHeader('apikey', 'sb_secret_test'));
     }
+
+    public function test_private_manuscript_can_be_downloaded_to_a_local_extraction_file(): void
+    {
+        Http::fake(['*' => Http::response('%PDF-private-manuscript', 200)]);
+        $destination = sys_get_temp_dir().DIRECTORY_SEPARATOR.'researchnav-storage-test-'.uniqid().'.pdf';
+
+        try {
+            (new SupabaseStorageService)->downloadTo(
+                'Institute of Computer Studies/2026/Title/manuscript.pdf',
+                $destination,
+            );
+
+            $this->assertSame('%PDF-private-manuscript', file_get_contents($destination));
+        } finally {
+            if (is_file($destination)) {
+                unlink($destination);
+            }
+        }
+    }
+
+    public function test_manuscript_counts_are_based_on_supabase_title_folders(): void
+    {
+        Http::fake(function ($request) {
+            $prefix = $request->data()['prefix'] ?? null;
+
+            return match ($prefix) {
+                'Institute of Computer Studies' => Http::response([
+                    ['name' => '2026', 'id' => null, 'metadata' => null],
+                ]),
+                'Institute of Computer Studies/2026' => Http::response([
+                    ['name' => 'Research A', 'id' => null, 'metadata' => null],
+                    ['name' => 'Research B', 'id' => null, 'metadata' => null],
+                ]),
+                default => Http::response([]),
+            };
+        });
+
+        $counts = collect((new SupabaseStorageService)->manuscriptCountsByInstitute())
+            ->keyBy('institute');
+
+        $this->assertSame(2, $counts['Institute of Computer Studies']['total']);
+        $this->assertSame(0, $counts['Institute of Health Sciences']['total']);
+        Http::assertSent(fn ($request) => $request->method() === 'POST'
+            && str_contains($request->url(), '/storage/v1/object/list/research-manuscripts'));
+    }
 }

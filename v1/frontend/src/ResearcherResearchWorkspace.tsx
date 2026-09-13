@@ -870,12 +870,7 @@ export default function ResearcherResearchWorkspace({
         forceMock={source === "mock"}
       />
       {source === "live" ? (
-        <SimilarityResults
-          researchDocumentId={research.id}
-          onOpenCatalog={(title) =>
-            navigate(`/catalog?q=${encodeURIComponent(title)}`)
-          }
-        />
+        <SimilarityResults researchDocumentId={research.id} />
       ) : (
         <section className="panel-card">
           <p className="eyebrow">Similarity</p>

@@ -93,6 +93,130 @@ class SimilarityProcessRunner implements SimilarityProcess
             ->all();
     }
 
+    /**
+     * Run a title-only query. Candidate manuscript text is deliberately omitted
+     * so this path cannot calculate or use content similarity.
+     *
+     * @param  Collection<int, ResearchDocument>  $candidates
+     * @return array<int, array<string, mixed>>
+     */
+    public function runTitleQuery(string $query, Collection $candidates): array
+    {
+        $decoded = $this->execute([
+            'query' => $query,
+            'candidates' => $candidates->map(fn (ResearchDocument $candidate): array => $this->record($candidate))->values()->all(),
+        ]);
+        $policy = $this->policy ?? app(SimilarityScorePolicy::class);
+
+        return collect($this->validateQueryOutput($decoded, $candidates))
+            ->map(function (array $result) use ($policy): array {
+                $score = SimilarityScorePolicy::blendStandalone(
+                    $result['title_similarity_score'],
+                    $result['fasttext_support_score'],
+                );
+                $calculated = $policy->evaluate($score, null);
+                $standalone = $policy->evaluateStandalone($score, true);
+
+                return [
+                    ...$result,
+                    ...$calculated,
+                    ...$standalone,
+                    'title_similarity_score' => $score,
+                    'score_status' => 'title_only',
+                ];
+            })
+            ->sortByDesc('title_similarity_score')
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Compare typed keywords only with trusted cached candidate content.
+     *
+     * @param  Collection<int, ResearchDocument>  $candidates
+     * @return array<int, array<string, mixed>>
+     */
+    public function runContentTextQuery(string $query, Collection $candidates): array
+    {
+        $decoded = $this->execute([
+            'query' => $query,
+            'candidates' => $candidates->map(fn (ResearchDocument $candidate): array => $this->queryRecord($candidate))->values()->all(),
+        ]);
+        $policy = $this->policy ?? app(SimilarityScorePolicy::class);
+
+        return collect($this->validateQueryOutput($decoded, $candidates))
+            ->map(function (array $result) use ($policy): array {
+                $score = $result['content_similarity_score'] === null
+                    ? null
+                    : SimilarityScorePolicy::blendStandalone(
+                        $result['content_similarity_score'],
+                        $result['fasttext_support_score'],
+                    );
+
+                return $score === null ? $result + ['score_status' => 'content_unavailable'] : [
+                    ...$result,
+                    ...$policy->evaluateStandalone($score, false),
+                    'title_similarity_score' => $score,
+                    'content_similarity_score' => $score,
+                    'score_status' => 'scored',
+                ];
+            })
+            ->sortByDesc('content_similarity_score')
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Compare cached manuscript text only. The title is retained solely for the
+     * worker record schema and never contributes to the returned score.
+     *
+     * @param  Collection<int, ResearchDocument>  $candidates
+     * @return array<int, array<string, mixed>>
+     */
+    public function runContentQuery(ResearchDocument $source, Collection $candidates): array
+    {
+        $content = ($this->content ?? app(ManuscriptSimilarityContentService::class))->contentFor($source, $candidates);
+        if ($content['source']['text'] === null) {
+            throw new SimilarityUnavailableException('The selected manuscript has no cached text available.');
+        }
+
+        $decoded = $this->execute([
+            'source' => $this->record($source, $content['source']['text']),
+            'candidates' => $candidates->map(fn (ResearchDocument $candidate): array => $this->record(
+                $candidate,
+                $content['candidates'][(int) $candidate->id]['text'] ?? null,
+            ))->all(),
+        ]);
+
+        return collect($this->validateOutput($decoded, $candidates))
+            ->map(function (array $result) use ($content): array {
+                $candidate = $content['candidates'][(int) $result['matched_research_id']];
+                $score = $candidate === null ? null : $result['content_similarity_score'];
+                $exact = $candidate !== null && $content['source']['text'] === $candidate['text'];
+                if ($exact) {
+                    $score = '1.000000000000';
+                } elseif ($score === '1.000000000000') {
+                    // Reserve 100% for an exact cached-text match.
+                    $score = '0.999999999999';
+                }
+
+                $standalone = $score === null
+                    ? []
+                    : ($this->policy ?? app(SimilarityScorePolicy::class))->evaluateStandalone($score, false);
+
+                return [
+                    ...$result,
+                    ...$standalone,
+                    'title_similarity_score' => $score,
+                    'content_similarity_score' => $score,
+                    'score_status' => $score === null ? 'content_unavailable' : 'scored',
+                ];
+            })
+            ->sortByDesc('content_similarity_score')
+            ->values()
+            ->all();
+    }
+
     /** @param array<string, mixed> $payload
      * @return array<string, mixed>
      */
@@ -347,6 +471,7 @@ class SimilarityProcessRunner implements SimilarityProcess
         }
 
         $environment['SIMILARITY_FASTTEXT_MODEL_PATH'] = (string) config('researchnav.similarity.fasttext_model_path');
+        $environment['SIMILARITY_MAXIMUM_CANDIDATES'] = (string) config('researchnav.similarity.maximum_candidates');
         $environment['SIMILARITY_MAXIMUM_INPUT_BYTES'] = (string) config('researchnav.similarity.maximum_input_bytes');
         $environment['SIMILARITY_MAXIMUM_CONTENT_CHARACTERS'] = (string) config('researchnav.manuscript_search.maximum_text_characters');
 

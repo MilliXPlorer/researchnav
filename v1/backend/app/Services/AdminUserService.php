@@ -65,6 +65,30 @@ class AdminUserService
         }, 3);
     }
 
+    public function delete(User $actor, string $targetId, Request $request): void
+    {
+        DB::transaction(function () use ($actor, $targetId, $request): void {
+            $lockedActor = User::query()->with('roleDefinition')->lockForUpdate()->find($actor->id);
+            $target = User::query()->with('roleDefinition')->lockForUpdate()->find($targetId);
+
+            if ($lockedActor === null || ! DomainAuthorization::isActiveAdministrator($lockedActor)) {
+                throw new AdminUserMutationException('ADMINISTRATOR_ACCESS_REVOKED');
+            }
+            if ($target === null) {
+                throw (new ModelNotFoundException)->setModel(User::class, [$targetId]);
+            }
+            if ($lockedActor->is($target)) {
+                throw new AdminUserMutationException('SELF_MODIFICATION_NOT_ALLOWED');
+            }
+            if (DomainAuthorization::isActiveAdministrator($target) && ! $this->hasAnotherActiveAdministrator($target->id)) {
+                throw new AdminUserMutationException('LAST_ACTIVE_ADMIN_REQUIRED');
+            }
+
+            $this->audit->log($lockedActor, 'ADMIN_USER_DELETED', $target, 'Administrator deleted user ['.$target->email.'].', $request);
+            $target->deleteOrFail();
+        }, 3);
+    }
+
     private function hasAnotherActiveAdministrator(string $targetId): bool
     {
         return User::query()->whereKeyNot($targetId)->where('role', 'admin')->where('is_admin', true)

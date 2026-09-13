@@ -505,7 +505,16 @@ class DomainServicesTest extends TestCase
 
     private function metadata(Category $category): array
     {
-        return ['category_id' => $category->id, 'title' => 'Research '.fake()->unique()->word(), 'abstract' => 'An abstract.', 'keywords' => 'research', 'publication_year' => 2025, 'research_stage' => 'title_proposal'];
+        return [
+            'category_id' => $category->id,
+            'title' => 'Research '.fake()->unique()->word(),
+            'abstract' => 'An abstract.',
+            'keywords' => 'research',
+            'publication_year' => 2025,
+            'institute' => 'Institute of Computer Studies',
+            'degree_program' => 'Bachelor of Science in Computer Science',
+            'research_stage' => 'title_proposal',
+        ];
     }
 
     private function category(): Category

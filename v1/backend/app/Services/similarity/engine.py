@@ -150,7 +150,8 @@ def compare_query(
         support = None
         if fasttext_model is not None:
             try:
-                support = contextual_support(fasttext_model, query, candidate_text)
+                semantic_text = candidate.get("content") or candidate["title"]
+                support = contextual_support(fasttext_model, query, semantic_text)
             except (TypeError, ValueError, ArithmeticError, RuntimeError):
                 # Public FastText is supporting-only: a model/vector fault must
                 # not prevent deterministic TF-IDF/cosine scoring.

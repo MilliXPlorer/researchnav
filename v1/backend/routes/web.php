@@ -1,6 +1,5 @@
 <?php
 
-use App\Http\Controllers\AcademicsController;
 use App\Http\Controllers\AccessRequestController;
 use App\Http\Controllers\AdminController;
 use App\Http\Controllers\AdviserController;
@@ -68,6 +67,8 @@ Route::prefix('api')
             Route::get('users', [AdminController::class, 'users']);
             Route::patch('users/{user}', [AdminController::class, 'updateUser'])
                 ->middleware(['origin.allowed', 'throttle:domain-mutations']);
+            Route::delete('users/{user}', [AdminController::class, 'deleteUser'])
+                ->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('audit-logs', [AdminController::class, 'auditLogs']);
             Route::get('system-status', [AdminController::class, 'systemStatus']);
 
@@ -105,14 +106,19 @@ Route::prefix('api')
             Route::post('sections', [InstructorController::class, 'storeSection'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::patch('sections/{classSection}', [InstructorController::class, 'updateSection'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('sections/{classSection}/documents', [InstructorController::class, 'sectionDocuments']);
-            Route::get('sections/{classSection}/available-documents', [InstructorController::class, 'availableSectionDocuments']);
-            Route::put('sections/{classSection}/documents', [InstructorController::class, 'assignDocuments'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
+            Route::post('sections/{classSection}/documents', [InstructorController::class, 'createSectionProject'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
+            Route::patch('sections/{classSection}/documents/{researchDocument}', [InstructorController::class, 'updateSectionProjectTitle'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
+            Route::delete('sections/{classSection}/documents/{researchDocument}', [InstructorController::class, 'deleteSectionProject'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('sections/{classSection}/members', [InstructorController::class, 'sectionMembers']);
             Route::put('sections/{classSection}/members', [InstructorController::class, 'addSectionMembers'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::delete('sections/{classSection}/members/{user}', [InstructorController::class, 'removeSectionMember'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('sections/{classSection}/documents/{researchDocument}/members', [InstructorController::class, 'documentMembers']);
             Route::put('sections/{classSection}/documents/{researchDocument}/members/{user}', [InstructorController::class, 'addDocumentMember'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::delete('sections/{classSection}/documents/{researchDocument}/members/{user}', [InstructorController::class, 'removeDocumentMember'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
+            Route::get('sections/{classSection}/documents/{researchDocument}/team', [InstructorController::class, 'documentTeam']);
+            Route::put('sections/{classSection}/documents/{researchDocument}/team', [InstructorController::class, 'replaceDocumentTeam'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
+            Route::put('sections/{classSection}/documents/{researchDocument}/team/role', [InstructorController::class, 'replaceDocumentTeamRole'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
+            Route::get('sections/{classSection}/documents/{researchDocument}/team/candidates', [InstructorController::class, 'documentTeamCandidates']);
             Route::get('students', [InstructorController::class, 'students']);
             Route::get('title-proposals', [InstructorController::class, 'titleProposals']);
             Route::get('similarity-overview', [InstructorController::class, 'similarityOverview']);
@@ -182,28 +188,22 @@ Route::prefix('api')
             Route::get('users', [ResearchOfficeController::class, 'users']);
             Route::patch('users/{user}', [ResearchOfficeController::class, 'updateUser'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('reports', [ResearchOfficeController::class, 'reports']);
-            Route::get('privacy-logs', [ResearchOfficeController::class, 'privacyLogs']);
-            Route::post('privacy-logs', [ResearchOfficeController::class, 'recordPrivacyLog'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
-            Route::post('bulk-import/preview', [ResearchOfficeBulkImportController::class, 'preview'])->middleware(['origin.allowed', 'throttle:research-bulk-import']);
+            Route::get('institutes/{institute}/studies', [ResearchOfficeController::class, 'instituteStudies']);
+            Route::get('institutes/{institute}/studies/{year}/{title}/open', [ResearchOfficeController::class, 'openInstituteStudy'])->name('office.institute-study.open');
+            Route::get('institutes/{institute}/studies/{year}/{title}/download', [ResearchOfficeController::class, 'downloadInstituteStudy'])->name('office.institute-study.download');
+            Route::post('bulk-import/preview', [ResearchOfficeBulkImportController::class, 'preview'])->middleware(['origin.allowed', 'throttle:research-bulk-preview']);
             Route::post('bulk-import', [ResearchOfficeBulkImportController::class, 'import'])->middleware(['origin.allowed', 'throttle:research-bulk-import']);
         });
 
-        Route::prefix('academics')->middleware(['current.user', 'account.active', 'role:academics'])->group(function (): void {
-            Route::get('library', [AcademicsController::class, 'library']);
-            Route::post('library', [AcademicsController::class, 'saveLibraryItem'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
-            Route::delete('library/{savedLibraryItem}', [AcademicsController::class, 'removeLibraryItem'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
-            Route::get('recommendations', [AcademicsController::class, 'recommendations']);
-            Route::get('categories', [AcademicsController::class, 'categories']);
-        });
-
-        // Public repository reads and query scoring are intentionally sessionless
-        // and can never initialize a browser session for repository visitors.
+        // Public repository reads remain sessionless and never initialize a
+        // browser session for repository visitors.
         Route::middleware([])->withoutMiddleware([StartSession::class, ShareErrorsFromSession::class, PreventRequestForgery::class])->group(function (): void {
             Route::get('categories', [CategoryController::class, 'index']);
             Route::get('repository', [PublicRepositoryController::class, 'index'])->middleware('throttle:public-search');
-            Route::post('repository/similarity', [PublicRepositoryController::class, 'similarity'])->middleware('throttle:public-repository-similarity');
             Route::get('repository/{researchDocument}', [PublicRepositoryController::class, 'show']);
         });
+        Route::post('repository/similarity', [PublicRepositoryController::class, 'similarity'])
+            ->middleware(['optional.current.user', 'throttle:public-repository-similarity']);
 
         Route::middleware(['current.user', 'account.active'])->group(function (): void {
             Route::get('monitoring/research', [SharedMonitoringController::class, 'research']);
@@ -243,6 +243,7 @@ Route::prefix('api')
             // Pre-submission duplicate check for a typed title or keywords. It
             // needs no research record and writes nothing.
             Route::post('similarity/query', [SimilarityController::class, 'query'])->middleware(['origin.allowed', 'throttle:similarity-query']);
+            Route::post('similarity/content-query', [SimilarityController::class, 'contentQuery'])->middleware(['origin.allowed', 'throttle:similarity-query']);
 
             Route::get('research/{researchDocument}/feedback', [FeedbackController::class, 'index']);
             Route::post('research/{researchDocument}/feedback', [FeedbackController::class, 'store'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
@@ -262,6 +263,6 @@ Route::prefix('api')
 
             Route::post('categories', [CategoryController::class, 'store'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::patch('categories/{category}', [CategoryController::class, 'update'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
-            Route::get('repository/{researchDocument}/download', [PublicRepositoryController::class, 'download'])->middleware('throttle:catalog-download');
+            Route::get('repository/{researchDocument}/download', [PublicRepositoryController::class, 'download'])->name('repository.download')->middleware('throttle:catalog-download');
         });
     });

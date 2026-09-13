@@ -80,6 +80,7 @@ export interface RoleDashboard {
   role: Role;
   sections: RoleDashboardSection[];
   analytics?: RoleDashboardAnalytics;
+  institutional_overview?: Array<{ institute: string; total: number }> | null;
 }
 
 export interface RoleDashboardResponse {
@@ -235,6 +236,10 @@ export interface InternalResearchResource {
   abstract: string | null;
   keywords: string | null;
   publication_year: number | null;
+  institute?: string | null;
+  degree_program?: string | null;
+  manuscript_date_label?: string | null;
+  abstract_provenance?: string | null;
   research_stage: "title_proposal" | "ongoing" | "completed";
   submission_status:
     | "draft"
@@ -246,6 +251,7 @@ export interface InternalResearchResource {
   archive_status: "not_archived" | "pending_archiving" | "archived";
   visibility: "private" | "registered_only" | "public";
   is_imported?: boolean;
+  can_update_metadata?: boolean;
 }
 
 export interface ResearchRevisionResource {
@@ -289,6 +295,9 @@ export interface ResearchMetadataInput {
   abstract: string | null;
   keywords: string | null;
   publication_year: number | null;
+  institute?: string | null;
+  degree_program?: string | null;
+  manuscript_date_label?: string | null;
   research_stage: InternalResearchResource["research_stage"];
 }
 
@@ -1073,6 +1082,17 @@ export async function updateAdminUser(
   ).data;
 }
 
+export async function deleteAdminUser(
+  id: string,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<void> {
+  await apiRequest<void>(
+    `/api/admin/users/${encodeURIComponent(id)}`,
+    { method: "DELETE" },
+    fetcher,
+  );
+}
+
 export function listAdminAuditLogs(
   input: {
     action?: string;
@@ -1115,7 +1135,7 @@ export interface PublicResearchResource {
   year?: number | string;
   institution_name?: string;
   institution_location?: string;
-  academic_unit?: string;
+  institute?: string;
   degree_program?: string;
   category?: { name?: string } | string | null;
   abstract?: string;
@@ -1227,7 +1247,7 @@ function toResearchStage(researchStage?: string) {
 export function toResearchRecord(
   resource: PublicResearchResource,
 ): ResearchRecord {
-  const academicUnit = resource.academic_unit ?? "";
+  const institute = resource.institute ?? "";
   const degreeProgram = resource.degree_program ?? "";
   return {
     id: String(resource.id),
@@ -1239,9 +1259,8 @@ export function toResearchRecord(
     year: Number(resource.publication_year ?? resource.year ?? 0),
     institutionName: resource.institution_name ?? "",
     institutionLocation: resource.institution_location,
-    academicUnit,
+    institute,
     degreeProgram,
-    institute: academicUnit,
     program: degreeProgram,
     category: toCategory(resource.category),
     abstract: resource.abstract ?? "",
@@ -1284,7 +1303,7 @@ export async function listPublicResearch(
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<ResearchRecord[]> {
   const records: ResearchRecord[] = [];
-  let next: string | null = "/api/repository?per_page=50";
+  let next: string | null = "/api/repository?per_page=1000";
   const maxPages = 100;
 
   for (let page = 0; next && page < maxPages; page += 1) {
@@ -1297,6 +1316,19 @@ export async function listPublicResearch(
   }
 
   return records;
+}
+
+export async function getPublicResearch(
+  researchDocumentId: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<ResearchRecord> {
+  const response = await apiRequest<{ data: PublicResearchResource }>(
+    `/api/repository/${encodeURIComponent(String(researchDocumentId))}`,
+    undefined,
+    fetcher,
+  );
+
+  return toResearchRecord(response.data);
 }
 
 /**
@@ -1312,6 +1344,7 @@ export type PublicResearchFilters = {
   author?: string;
   keywords?: string;
   category?: string;
+  institute?: string;
   year?: string | number;
   yearFrom?: string | number;
   yearTo?: string | number;
@@ -1334,6 +1367,7 @@ export async function searchPublicResearch(
   append("author", filters.author);
   append("keywords", filters.keywords);
   append("category", filters.category);
+  append("institute", filters.institute);
   append("year", filters.year);
   append("year_from", filters.yearFrom);
   append("year_to", filters.yearTo);
@@ -1394,6 +1428,19 @@ export async function checkTitleQuerySimilarity(
 ): Promise<ResearchRecord[]> {
   const response = await apiRequest<PublicRepositorySimilarityResponse>(
     "/api/similarity/query",
+    { method: "POST", body: JSON.stringify({ q }), signal },
+    fetcher,
+  );
+  return (response.data ?? []).map(toResearchRecord);
+}
+
+export async function checkContentQuerySimilarity(
+  q: string,
+  fetcher: ApiFetch = globalThis.fetch,
+  signal?: AbortSignal,
+): Promise<ResearchRecord[]> {
+  const response = await apiRequest<PublicRepositorySimilarityResponse>(
+    "/api/similarity/content-query",
     { method: "POST", body: JSON.stringify({ q }), signal },
     fetcher,
   );
@@ -1461,7 +1508,7 @@ export interface ResearchDocumentSummaryResource {
   publication_year: number | null;
   institution_name: string | null;
   institution_location: string | null;
-  academic_unit: string | null;
+  institute: string | null;
   degree_program: string | null;
   manuscript_date_label: string | null;
   abstract_provenance: string | null;
@@ -1478,6 +1525,8 @@ export interface ResearchDocumentSummaryResource {
 
 export interface ResearchDraftInput {
   category_id?: number | null;
+  institute?: string | null;
+  degree_program?: string | null;
   title: string;
   abstract?: string | null;
   keywords?: string | null;
@@ -1633,6 +1682,7 @@ export async function saveAdviserMonitoring(
 export interface InstructorSectionResource {
   id: number;
   name: string;
+  section_code: string | null;
   academic_year: string | null;
   is_active: boolean;
   documents_count: number;
@@ -1642,6 +1692,7 @@ export interface InstructorSectionResource {
 
 export interface InstructorSectionInput {
   name: string;
+  section_code: string;
   academic_year?: string | null;
 }
 
@@ -1785,36 +1836,6 @@ export async function listSectionDocuments(
   ).data;
 }
 
-export async function listAssignableSectionDocuments(
-  sectionId: string | number,
-  fetcher: ApiFetch = globalThis.fetch,
-): Promise<InstructorSectionDocumentItem[]> {
-  return (
-    await apiRequest<{ data: InstructorSectionDocumentItem[] }>(
-      `/api/instructor/sections/${encodeURIComponent(String(sectionId))}/available-documents`,
-      undefined,
-      fetcher,
-    )
-  ).data;
-}
-
-export async function assignSectionDocuments(
-  sectionId: string | number,
-  researchDocumentIds: number[],
-  fetcher: ApiFetch = globalThis.fetch,
-): Promise<InstructorSectionResource> {
-  return (
-    await apiRequest<{ data: InstructorSectionResource }>(
-      `/api/instructor/sections/${encodeURIComponent(String(sectionId))}/documents`,
-      {
-        method: "PUT",
-        body: JSON.stringify({ research_document_ids: researchDocumentIds }),
-      },
-      fetcher,
-    )
-  ).data;
-}
-
 export interface InstructorStudentResource {
   id: string;
   email: string;
@@ -1823,6 +1844,140 @@ export interface InstructorStudentResource {
   middle_name: string | null;
   last_name: string | null;
   added_at: string | null;
+}
+
+export type ProjectTeamRole =
+  "adviser" | "research_office_representative" | "chair" | "panel_member";
+
+export interface ProjectTeamPerson {
+  user_id: string;
+  name: string;
+  email: string;
+  team_role: ProjectTeamRole;
+}
+
+export interface InstructorProjectTeam {
+  section_id: number;
+  research_document_id: number;
+  adviser: ProjectTeamPerson | null;
+  research_office_representative: ProjectTeamPerson | null;
+  chair: ProjectTeamPerson | null;
+  panel_members: ProjectTeamPerson[];
+  complete: boolean;
+}
+
+export interface InstructorProjectTeamInput {
+  adviser_id: string | null;
+  research_office_representative_id: string | null;
+  chair_id: string | null;
+  panel_member_ids: string[];
+}
+
+export type InstructorProjectTeamRoleKey =
+  "adviser" | "researchOffice" | "chair" | "panelMembers";
+
+export async function getInstructorProjectTeam(
+  sectionId: string | number,
+  researchDocumentId: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<InstructorProjectTeam> {
+  return (
+    await apiRequest<{ data: InstructorProjectTeam }>(
+      `/api/instructor/sections/${encodeURIComponent(String(sectionId))}/documents/${encodeURIComponent(String(researchDocumentId))}/team`,
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export async function listInstructorProjectTeamCandidates(
+  sectionId: string | number,
+  researchDocumentId: string | number,
+  teamRole: ProjectTeamRole,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<ProjectTeamPerson[]> {
+  return (
+    await apiRequest<{ data: ProjectTeamPerson[] }>(
+      `/api/instructor/sections/${encodeURIComponent(String(sectionId))}/documents/${encodeURIComponent(String(researchDocumentId))}/team/candidates?team_role=${encodeURIComponent(teamRole)}`,
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export async function replaceInstructorProjectTeam(
+  sectionId: string | number,
+  researchDocumentId: string | number,
+  input: InstructorProjectTeamInput,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<InstructorProjectTeam> {
+  return (
+    await apiRequest<{ data: InstructorProjectTeam }>(
+      `/api/instructor/sections/${encodeURIComponent(String(sectionId))}/documents/${encodeURIComponent(String(researchDocumentId))}/team`,
+      { method: "PUT", body: JSON.stringify(input) },
+      fetcher,
+    )
+  ).data;
+}
+
+export async function replaceInstructorProjectTeamRole(
+  sectionId: string | number,
+  researchDocumentId: string | number,
+  teamRole: ProjectTeamRole,
+  userId: string | null,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<InstructorProjectTeam> {
+  return (
+    await apiRequest<{ data: InstructorProjectTeam }>(
+      `/api/instructor/sections/${encodeURIComponent(String(sectionId))}/documents/${encodeURIComponent(String(researchDocumentId))}/team/role`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ team_role: teamRole, user_id: userId }),
+      },
+      fetcher,
+    )
+  ).data;
+}
+
+export async function createSectionProject(
+  sectionId: string | number,
+  title: string,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<InstructorSectionDocumentItem> {
+  return (
+    await apiRequest<{ data: InstructorSectionDocumentItem }>(
+      `/api/instructor/sections/${encodeURIComponent(String(sectionId))}/documents`,
+      { method: "POST", body: JSON.stringify({ title }) },
+      fetcher,
+    )
+  ).data;
+}
+
+export async function updateSectionProjectTitle(
+  sectionId: string | number,
+  researchDocumentId: string | number,
+  title: string,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<InstructorSectionDocumentItem> {
+  return (
+    await apiRequest<{ data: InstructorSectionDocumentItem }>(
+      `/api/instructor/sections/${encodeURIComponent(String(sectionId))}/documents/${encodeURIComponent(String(researchDocumentId))}`,
+      { method: "PATCH", body: JSON.stringify({ title }) },
+      fetcher,
+    )
+  ).data;
+}
+
+export async function deleteSectionProject(
+  sectionId: string | number,
+  researchDocumentId: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<void> {
+  await apiRequest<void>(
+    `/api/instructor/sections/${encodeURIComponent(String(sectionId))}/documents/${encodeURIComponent(String(researchDocumentId))}`,
+    { method: "DELETE" },
+    fetcher,
+  );
 }
 
 export async function listSectionDocumentMembers(
@@ -2979,27 +3134,13 @@ export interface InstitutionalReport {
     evaluations_submitted: number;
     methodology_signed_off: number;
   };
-  by_academic_unit: Array<{ academic_unit: string; total: number }>;
+  by_institute: Array<{ institute: string; total: number }>;
   by_status: Array<{ status: string; total: number }>;
 }
 
-export interface PrivacyLogEntry {
-  id: number;
-  user: { id: string; email: string; name: string } | null;
-  action: string;
-  details: string | null;
-  performed_by: string | null;
-  activity_date: string | null;
-}
-
-export interface PrivacyLogInput {
-  user_id?: string | null;
-  action:
-    | "consent_recorded"
-    | "consent_withdrawn"
-    | "consent_log_requested"
-    | "data_export";
-  details?: string | null;
+export interface OfficeInstituteStudy {
+  year: string;
+  title: string;
 }
 
 export async function listComplianceQueue(
@@ -3121,134 +3262,24 @@ export async function getInstitutionalReport(
   ).data;
 }
 
-export async function listPrivacyLogs(
+export async function listOfficeInstituteStudies(
+  institute: string,
   fetcher: ApiFetch = globalThis.fetch,
-): Promise<PrivacyLogEntry[]> {
+): Promise<OfficeInstituteStudy[]> {
   return (
-    await apiRequest<{ data: PrivacyLogEntry[] }>(
-      "/api/office/privacy-logs",
+    await apiRequest<{ data: OfficeInstituteStudy[] }>(
+      `/api/office/institutes/${encodeURIComponent(institute)}/studies`,
       undefined,
       fetcher,
     )
   ).data;
 }
 
-export async function recordPrivacyLog(
-  input: PrivacyLogInput,
-  fetcher: ApiFetch = globalThis.fetch,
-): Promise<{
-  id: number;
-  user_id: string | null;
-  action: string;
-  details: string | null;
-  activity_date: string | null;
-}> {
-  return (
-    await apiRequest<{
-      data: {
-        id: number;
-        user_id: string | null;
-        action: string;
-        details: string | null;
-        activity_date: string | null;
-      };
-    }>(
-      "/api/office/privacy-logs",
-      { method: "POST", body: JSON.stringify(input) },
-      fetcher,
-    )
-  ).data;
-}
-
-/* -------------------------------- Academics APIs -------------------------------- */
-
-export interface LibraryItemResource {
-  id: number;
-  research_document_id: number;
-  title: string | null;
-  publication_year: number | null;
-  saved_at: string | null;
-}
-
-export interface RecommendationResource {
-  research_document_id: number;
-  title: string | null;
-  publication_year: number | null;
-  overall_similarity_score: string | null;
-  classification: "low" | "moderate" | "high" | null;
-  adviser_review_required: boolean;
-}
-
-export interface CategoryCountResource {
-  id: number;
-  name: string;
-  slug: string;
-  records_count: number;
-}
-
-export async function listLibraryItems(
-  fetcher: ApiFetch = globalThis.fetch,
-): Promise<LibraryItemResource[]> {
-  return (
-    await apiRequest<{ data: LibraryItemResource[] }>(
-      "/api/academics/library",
-      undefined,
-      fetcher,
-    )
-  ).data;
-}
-
-export async function saveLibraryItem(
-  researchDocumentId: string | number,
-  fetcher: ApiFetch = globalThis.fetch,
-): Promise<LibraryItemResource> {
-  return (
-    await apiRequest<{ data: LibraryItemResource }>(
-      "/api/academics/library",
-      {
-        method: "POST",
-        body: JSON.stringify({
-          research_document_id: Number(researchDocumentId),
-        }),
-      },
-      fetcher,
-    )
-  ).data;
-}
-
-export async function removeLibraryItem(
-  itemId: string | number,
-  fetcher: ApiFetch = globalThis.fetch,
-): Promise<void> {
-  return apiRequest<void>(
-    `/api/academics/library/${encodeURIComponent(String(itemId))}`,
-    { method: "DELETE" },
-    fetcher,
-  );
-}
-
-export async function listRecommendations(
-  fetcher: ApiFetch = globalThis.fetch,
-): Promise<RecommendationResource[]> {
-  return (
-    await apiRequest<{ data: RecommendationResource[] }>(
-      "/api/academics/recommendations",
-      undefined,
-      fetcher,
-    )
-  ).data;
-}
-
-export async function listCategoryCounts(
-  fetcher: ApiFetch = globalThis.fetch,
-): Promise<CategoryCountResource[]> {
-  return (
-    await apiRequest<{ data: CategoryCountResource[] }>(
-      "/api/academics/categories",
-      undefined,
-      fetcher,
-    )
-  ).data;
+export function officeInstituteStudyOpenUrl(
+  institute: string,
+  study: OfficeInstituteStudy,
+): string {
+  return `/api/office/institutes/${encodeURIComponent(institute)}/studies/${encodeURIComponent(study.year)}/${encodeURIComponent(study.title)}/open`;
 }
 
 /* -------------------------------- Researcher APIs -------------------------------- */
@@ -3339,8 +3370,8 @@ export const REQUESTABLE_ROLES = [
   "statistician",
   "coordinator",
   "librarian",
+  "research_editor",
   "research-office",
-  "academics",
 ] as const;
 
 export type RequestableRole = (typeof REQUESTABLE_ROLES)[number];

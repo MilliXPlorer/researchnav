@@ -7,6 +7,7 @@ import {
   archiveInternalResearch,
   checkTitleQuerySimilarity,
   createFeedback,
+  deleteAdminUser,
   deleteOwnProfilePhoto,
   getOwnProfile,
   listNotifications,
@@ -26,8 +27,7 @@ import {
   listSectionDocumentMembers,
   addSectionMembers,
   addSectionDocumentMember,
-  assignSectionDocuments,
-  listAssignableSectionDocuments,
+  deleteSectionProject,
   removeSectionMember,
   removeSectionDocumentMember,
   listInstructorStudents,
@@ -41,7 +41,6 @@ import {
   replaceResearchAuthors,
   replaceReviewAssignments,
   researchFileDownloadUrl,
-  recordPrivacyLog,
   saveStatisticianChecklist,
   signOffMethodology,
   submitInternalResearch,
@@ -51,7 +50,6 @@ import {
   decideCompliance,
   getInstitutionalReport,
   listOfficeUsers,
-  listPrivacyLogs,
   listRepositoryCatalog,
   updateOfficeUserAccess,
   updateOwnProfile,
@@ -94,7 +92,7 @@ const resource = (id: number, authorName: string, authorOrder = 1) => ({
   ],
   publication_year: 2026,
   institution_name: "Example College",
-  academic_unit: "Example Unit",
+  institute: "Example Unit",
   degree_program: "Example Program",
   category: { name: "Example Category" },
   abstract: "Public abstract.",
@@ -115,7 +113,7 @@ describe("public repository API", () => {
 
   it("accumulates Laravel pages and normalizes an absolute next URL", async () => {
     const fetchMock = vi.fn(async (path: string) => {
-      if (path === "/api/repository?per_page=50") {
+      if (path === "/api/repository?per_page=1000") {
         return new Response(
           JSON.stringify({
             data: [resource(1, "First Author")],
@@ -392,6 +390,9 @@ describe("administrator API", () => {
         fetchMock,
       ),
     ).resolves.toEqual([]);
+    await expect(
+      deleteAdminUser("uuid/with space", fetchMock),
+    ).resolves.toBeUndefined();
     await expect(getSystemStatus(fetchMock)).resolves.toEqual({
       schema_version: 1,
     });
@@ -409,6 +410,10 @@ describe("administrator API", () => {
         method: "PATCH",
         body: JSON.stringify({ role: "adviser", access_status: "active" }),
       }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/users/uuid%2Fwith%20space",
+      expect.objectContaining({ method: "DELETE" }),
     );
   });
 });
@@ -513,11 +518,6 @@ describe("specialist workspace API routes", () => {
     );
     await updateOfficeUserAccess("office/user", "active", fetchMock);
     await getInstitutionalReport(fetchMock);
-    await listPrivacyLogs(fetchMock);
-    await recordPrivacyLog(
-      { action: "data_export", details: "Requested export." },
-      fetchMock,
-    );
 
     expect(
       fetchMock.mock.calls.map(([path, init]) => ({
@@ -566,19 +566,6 @@ describe("specialist workspace API routes", () => {
         body: JSON.stringify({ access_status: "active" }),
       },
       { path: "/api/office/reports", method: "GET", body: undefined },
-      {
-        path: "/api/office/privacy-logs",
-        method: "GET",
-        body: undefined,
-      },
-      {
-        path: "/api/office/privacy-logs",
-        method: "POST",
-        body: JSON.stringify({
-          action: "data_export",
-          details: "Requested export.",
-        }),
-      },
     ]);
   });
 });
@@ -1184,41 +1171,14 @@ describe("instructor section member API", () => {
     );
   });
 
-  it("assigns documents through the matching instructor endpoint", async () => {
-    const section = {
-      id: 7,
-      name: "CS-101",
-      academic_year: null,
-      is_active: true,
-      documents_count: 2,
-      members_count: 1,
-      created_at: null,
-    };
-    const fetchMock = vi.fn(
-      async () => new Response(JSON.stringify({ data: section })),
-    );
+  it("deletes a section research project through the matching endpoint", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(assignSectionDocuments(7, [42, 43])).resolves.toEqual(section);
+    await expect(deleteSectionProject(7, 42)).resolves.toBeUndefined();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/instructor/sections/7/documents",
-      expect.objectContaining({
-        method: "PUT",
-        body: JSON.stringify({ research_document_ids: [42, 43] }),
-      }),
-    );
-  });
-
-  it("lists research titles available to a class section", async () => {
-    const fetchMock = vi.fn(
-      async () => new Response(JSON.stringify({ data: [] })),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(listAssignableSectionDocuments(7)).resolves.toEqual([]);
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/instructor/sections/7/available-documents",
-      expect.objectContaining({ credentials: "include" }),
+      "/api/instructor/sections/7/documents/42",
+      expect.objectContaining({ method: "DELETE" }),
     );
   });
 

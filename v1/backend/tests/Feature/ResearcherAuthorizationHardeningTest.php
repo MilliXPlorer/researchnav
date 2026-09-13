@@ -19,7 +19,7 @@ class ResearcherAuthorizationHardeningTest extends TestCase
 
     public function test_non_researcher_owners_cannot_start_or_operate_researcher_workflow_actions(): void
     {
-        foreach (['adviser', 'instructor', 'panel', 'statistician', 'coordinator', 'librarian', 'research-office', 'academics'] as $role) {
+        foreach (['adviser', 'instructor', 'panel', 'statistician', 'coordinator', 'librarian', 'research-office', 'research_editor'] as $role) {
             $actor = User::factory()->create(['role' => $role]);
             $category = Category::query()->create(['name' => 'Category '.$role, 'slug' => 'category-'.$role]);
             $research = ResearchDocument::factory()->create(['submitted_by' => $actor->id, 'category_id' => $category->id, 'submission_status' => 'draft']);

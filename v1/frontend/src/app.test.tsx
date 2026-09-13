@@ -12,7 +12,7 @@ import CatalogPage from "./CatalogPage";
 import Dashboard from "./Dashboard";
 import RoleWorkspace from "./RoleWorkspaces";
 import { ApiError, type RoleDashboard } from "./api";
-import { defaultUserSession } from "./data";
+import { defaultUserSession, roleConfigs } from "./data";
 import { type InitialState } from "./ssr";
 import type { ResearchRecord, Role } from "./types";
 
@@ -23,7 +23,6 @@ const reviewedRecord: ResearchRecord = {
   year: 2026,
   institutionName: "API College",
   institutionLocation: "Tangub City",
-  academicUnit: "API Academic Unit",
   degreeProgram: "API Program",
   institute: "API Academic Unit",
   program: "API Program",
@@ -53,7 +52,7 @@ const repositoryResource = {
   publication_year: 2026,
   institution_name: "API College",
   institution_location: "Tangub City",
-  academic_unit: "API Academic Unit",
+  institute: "API Academic Unit",
   degree_program: "API Program",
   category: { name: "API Category" },
   abstract: "A public repository response.",
@@ -78,7 +77,7 @@ beforeEach(() => {
           { status: 401, headers: { "Content-Type": "application/json" } },
         );
       }
-      if (String(input) === "/api/repository?per_page=50") {
+      if (String(input) === "/api/repository?per_page=1000") {
         return new Response(
           JSON.stringify({ data: [repositoryResource], links: { next: null } }),
           { headers: { "Content-Type": "application/json" } },
@@ -296,15 +295,9 @@ describe("role workspaces", () => {
     ],
     [
       "research-office",
-      /Institutional research oversight/,
+      /Institutional research dashboard/,
       "submission_queue",
       "Submission queue",
-    ],
-    [
-      "academics",
-      /Your research reading room/,
-      "repository_references",
-      "Repository references",
     ],
   ];
 
@@ -317,7 +310,6 @@ describe("role workspaces", () => {
     coordinator: "schedules",
     librarian: "archiving_queue",
     "research-office": "pending_archiving",
-    academics: "saved_library",
     research_editor: "assigned_reviews",
   };
 
@@ -404,7 +396,72 @@ describe("role workspaces", () => {
     fireEvent.click(
       within(menu).getByRole("button", { name: "Similarity Check" }),
     );
+    expect(
+      within(menu).getByRole("button", { name: "Title Checker" }),
+    ).toBeInTheDocument();
+    expect(
+      within(menu).getByRole("button", { name: "Content Checker" }),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      within(menu).getByRole("button", { name: "Title Checker" }),
+    );
     expect(menu).not.toBeInTheDocument();
+  });
+
+  it("leaves instructor section routes when another sidebar page is selected", async () => {
+    const session = {
+      email: "instructor@example.test",
+      role: "instructor" as const,
+      accessStatus: "active" as const,
+      isAdmin: false,
+      firstName: "Research",
+      middleName: null,
+      lastName: "Instructor",
+      studentEmployeeId: null,
+      displayName: "Research Instructor",
+      profilePhotoUrl: null,
+    };
+    const navigate = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        if (String(input) === "/api/notifications") {
+          return new Response(
+            JSON.stringify({ data: [], links: { next: null } }),
+          );
+        }
+        if (String(input) === "/api/instructor/sections") {
+          return new Response(JSON.stringify({ data: [] }));
+        }
+        return new Response(
+          JSON.stringify({
+            data: { schema_version: 1, role: "instructor", sections: [] },
+          }),
+        );
+      }),
+    );
+
+    render(
+      <Dashboard
+        session={session}
+        navigate={navigate}
+        initialNav="My Sections"
+        instructorSectionsRoute
+        instructorSectionId="7"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Assigned Research" }));
+    expect(navigate).toHaveBeenCalledWith("/app");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open workspace navigation" }),
+    );
+    const menu = screen.getByRole("navigation", {
+      name: "Research Instructor workspace navigation",
+    });
+    fireEvent.click(within(menu).getByRole("button", { name: "My Sections" }));
+    expect(navigate).toHaveBeenCalledWith("/app/instructor/sections");
   });
 
   it("opens a researcher record from My Submissions without a refresh", async () => {
@@ -504,20 +561,21 @@ describe("role workspaces", () => {
   });
 
   it.each(cases)(
-    "renders live %s workspace counts, unavailable sections, and records",
+    "opens live %s workspace records from its statistic card",
     (role, heading, readyKey, sectionHeading) => {
       render(<RoleWorkspace {...readyProps(role, readyKey)} />);
       expect(
         screen.getByRole("heading", { level: 1, name: heading }),
       ).toBeInTheDocument();
+      const sectionButton = screen.getByRole("button", {
+        name: `View ${sectionHeading}`,
+      });
+      expect(sectionButton).toBeInTheDocument();
       expect(
-        screen.getByRole("heading", { level: 2, name: sectionHeading }),
-      ).toBeInTheDocument();
+        screen.queryByRole("heading", { level: 2, name: sectionHeading }),
+      ).not.toBeInTheDocument();
       expect(
         screen.getByRole("heading", { level: 2, name: "Statistics" }),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByText(sectionHeading, { selector: "dt" }),
       ).toBeInTheDocument();
       expect(
         screen.getByRole("heading", { level: 3, name: "Current workload" }),
@@ -526,22 +584,114 @@ describe("role workspaces", () => {
         screen.getByRole("meter", { name: sectionHeading }),
       ).toHaveAttribute("aria-valuenow", "7");
       expect(screen.getByText("7")).toBeInTheDocument();
+      fireEvent.click(sectionButton);
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
       expect(screen.getByText(`${role} API RECORD`)).toBeInTheDocument();
-      expect(screen.getByText("Unavailable")).toBeInTheDocument();
-      expect(
-        screen.getByText(
-          "This information is not modeled in the current workspace.",
-        ),
-      ).toBeInTheDocument();
+      expect(screen.queryByText("Unavailable")).not.toBeInTheDocument();
     },
   );
+
+  it("merges the research office navigation and shows institute totals below analytics", async () => {
+    const officeNav = roleConfigs.find(
+      (config) => config.id === "research-office",
+    )?.nav;
+    expect(officeNav).toEqual([
+      "Dashboard",
+      "Upload Manuscript",
+      "User & Role Management",
+      "Reports & Exports",
+    ]);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const path = String(input);
+        if (path === "/api/office/institutes/IHS/studies") {
+          return new Response(
+            JSON.stringify({
+              data: [{ year: "2026", title: "Community Health Study" }],
+            }),
+          );
+        }
+        if (
+          path ===
+          "/api/office/institutes/IHS/studies/2026/Community%20Health%20Study/files"
+        ) {
+          return new Response(
+            JSON.stringify({
+              data: [
+                {
+                  name: "manuscript.pdf",
+                  path: "Institute of Health Sciences/2026/Community Health Study/manuscript.pdf",
+                  extension: "pdf",
+                },
+              ],
+            }),
+          );
+        }
+        return new Response(JSON.stringify({ error: "NOT_FOUND" }), {
+          status: 404,
+        });
+      }),
+    );
+
+    render(
+      <RoleWorkspace
+        {...readyProps("research-office", "submission_queue")}
+        dashboardState={{
+          scope: dashboardScopeFor("research-office"),
+          status: "ready",
+          dashboard: {
+            ...dashboardFor("research-office", "submission_queue"),
+            analytics: {
+              title: "Research activity",
+              period: "Last six months",
+              series: [],
+            },
+            institutional_overview: [
+              { institute: "Institute of Health Sciences", total: 4 },
+            ],
+          },
+        }}
+      />,
+    );
+
+    const analytics = screen.getByText("Supabase analytics");
+    const overview = await screen.findByRole("heading", {
+      name: "Institutional Overview",
+    });
+    expect(
+      analytics.compareDocumentPosition(overview) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      screen.getByLabelText("Institute of Health Sciences: 4 research records"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText(
+        "Institute of Business and Financial Management: 0 research records",
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByLabelText("Institute of Health Sciences: 4 research records"),
+    );
+    const studyLink = await screen.findByRole("link", {
+      name: /Community Health Study/,
+    });
+    expect(studyLink).toHaveAttribute("target", "_blank");
+    expect(studyLink).toHaveAttribute(
+      "href",
+      expect.stringContaining(
+        "/api/office/institutes/IHS/studies/2026/Community%20Health%20Study/open",
+      ),
+    );
+  });
 
   it("renders every administrator dashboard section and opens internal records", () => {
     const navigate = vi.fn();
     const adminSections = [
-      ["active_accounts", "Active accounts"],
       ["pending_accounts", "Pending accounts"],
-      ["audit_events", "Audit events"],
       ["draft_research", "Draft research"],
       ["submission_queue", "Submission queue"],
       ["revision_required", "Revision required"],
@@ -586,14 +736,55 @@ describe("role workspaces", () => {
 
     adminSections.forEach(([, label]) => {
       expect(
-        screen.getByRole("heading", { level: 2, name: label }),
+        screen.getByRole("button", { name: `View ${label}` }),
       ).toBeInTheDocument();
     });
     expect(screen.getAllByText("1")).toHaveLength(adminSections.length);
+    expect(screen.queryByText("ADMIN RECORD 4")).not.toBeInTheDocument();
     fireEvent.click(
-      screen.getAllByRole("button", { name: "Open internal record" })[0],
+      screen.getByRole("button", { name: "View Draft research" }),
     );
-    expect(navigate).toHaveBeenCalledWith("/research/4");
+    expect(screen.getByText("ADMIN RECORD 2")).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open internal record" }),
+    );
+    expect(navigate).toHaveBeenCalledWith("/research/2");
+  });
+
+  it("shows totals and a details action for count-only dashboard cards", () => {
+    const selectNav = vi.fn();
+    render(
+      <RoleWorkspace
+        {...readyProps("admin", "pending_accounts")}
+        selectNav={selectNav}
+        dashboardState={{
+          scope: dashboardScopeFor("admin"),
+          status: "ready",
+          dashboard: {
+            schema_version: 1,
+            role: "admin",
+            sections: [
+              {
+                key: "pending_accounts",
+                state: "ready",
+                total: 3,
+                reason: null,
+                items: [],
+              },
+            ],
+          },
+        }}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "View Pending accounts" }),
+    );
+    expect(
+      screen.getByText("3 matching records are available."),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open details" }));
+    expect(selectNav).toHaveBeenCalledWith("User & Role Management");
   });
 
   it("uses loading and retry states without a statistician checklist", () => {
@@ -658,6 +849,12 @@ describe("role workspaces", () => {
     );
     expect(screen.getByText("0")).toBeInTheDocument();
     expect(
+      screen.queryByText("No records are currently available."),
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "View Assigned reviews" }),
+    );
+    expect(
       screen.getByText("No records are currently available."),
     ).toBeInTheDocument();
   });
@@ -689,6 +886,9 @@ describe("role workspaces", () => {
           },
         }}
       />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "View Repository references" }),
     );
     fireEvent.click(
       screen.getByRole("button", { name: "Open public catalog" }),
@@ -730,6 +930,9 @@ describe("role workspaces", () => {
     );
 
     fireEvent.click(
+      screen.getByRole("button", { name: "View Repository references" }),
+    );
+    fireEvent.click(
       screen.getByRole("button", { name: "Open public catalog" }),
     );
 
@@ -752,6 +955,9 @@ describe("role workspaces", () => {
         }}
       />,
     );
+    fireEvent.click(
+      screen.getByRole("button", { name: "View Repository references" }),
+    );
     expect(screen.getByText("Registered workspace")).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Open public catalog" }),
@@ -759,13 +965,16 @@ describe("role workspaces", () => {
     unmount();
 
     render(<RoleWorkspace {...readyProps("adviser", "assigned_reviews")} />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "View Assigned reviews" }),
+    );
     expect(screen.getByText("Internal workspace")).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /Open (record|public catalog)/ }),
     ).not.toBeInTheDocument();
   });
 
-  it("routes librarian and academics catalog actions to the public catalog", () => {
+  it("routes the librarian catalog action to the public catalog", () => {
     const librarianNavigate = vi.fn();
     render(
       <RoleWorkspace
@@ -775,16 +984,6 @@ describe("role workspaces", () => {
     );
     fireEvent.click(screen.getAllByRole("button", { name: "Open catalog" })[0]);
     expect(librarianNavigate).toHaveBeenCalledWith("/catalog");
-
-    const academicsNavigate = vi.fn();
-    render(
-      <RoleWorkspace
-        {...readyProps("academics", "repository_references")}
-        navigate={academicsNavigate}
-      />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Browse catalog" }));
-    expect(academicsNavigate).toHaveBeenCalledWith("/catalog");
   });
 
   it("renders live researcher sections from dashboard data", () => {
@@ -1516,6 +1715,9 @@ describe("authenticated notifications", () => {
     const { rerender } = render(
       <Dashboard session={adviserSession} navigate={vi.fn()} />,
     );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "View Assigned reviews" }),
+    );
     expect(await screen.findByText("ADVISER ASSIGNMENT")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Assigned Research" }));
 
@@ -1640,6 +1842,9 @@ describe("authenticated notifications", () => {
       ),
     );
 
+    fireEvent.click(
+      await screen.findByRole("button", { name: "View Title proposals" }),
+    );
     expect(
       await screen.findByText("CURRENT INSTRUCTOR PROPOSAL"),
     ).toBeInTheDocument();
@@ -1687,6 +1892,9 @@ describe("authenticated notifications", () => {
     const { rerender } = render(
       <Dashboard session={adviserA} navigate={vi.fn()} />,
     );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "View Assigned reviews" }),
+    );
     expect(await screen.findByText("ADVISER A ASSIGNMENT")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Assigned Research" }));
 
@@ -1705,6 +1913,9 @@ describe("authenticated notifications", () => {
     await waitFor(() => expect(dashboardRequests).toBe(2));
 
     resolveAdviserB(adviserDashboardResponse("ADVISER B ASSIGNMENT", 88));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "View Assigned reviews" }),
+    );
     expect(await screen.findByText("ADVISER B ASSIGNMENT")).toBeInTheDocument();
     expect(screen.queryByText("ADVISER A ASSIGNMENT")).not.toBeInTheDocument();
   });
@@ -1766,6 +1977,9 @@ describe("authenticated notifications", () => {
     ).toBeInTheDocument();
 
     resolveAdviserB(adviserDashboardResponse("ADVISER B ASSIGNMENT", 88));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "View Assigned reviews" }),
+    );
     expect(await screen.findByText("ADVISER B ASSIGNMENT")).toBeInTheDocument();
     expect(
       screen.queryByText("STALE ADVISER A ASSIGNMENT"),
@@ -1940,7 +2154,7 @@ describe("sign out middleware", () => {
               status: logoutStatus,
             });
       }
-      if (path === "/api/repository?per_page=50") {
+      if (path === "/api/repository?per_page=1000") {
         return new Response(
           JSON.stringify({ data: [], links: { next: null } }),
         );

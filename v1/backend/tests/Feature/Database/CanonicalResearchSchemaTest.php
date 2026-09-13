@@ -25,7 +25,7 @@ class CanonicalResearchSchemaTest extends TestCase
             'similarity_results', 'feedback_comments', 'revisions', 'monitoring_logs', 'notifications',
             'title_validations', 'audit_logs', 'research_review_assignments', 'class_sections',
             'class_section_members', 'defense_schedules', 'evaluations', 'methodology_reviews',
-            'compliance_reviews', 'metadata_reviews', 'saved_library_items', 'retention_logs', 'privacy_logs',
+            'compliance_reviews', 'metadata_reviews', 'retention_logs', 'privacy_logs',
         ] as $table) {
             $this->assertTrue(Schema::hasTable($table), $table.' was not migrated.');
         }
@@ -35,7 +35,7 @@ class CanonicalResearchSchemaTest extends TestCase
             'account_status', 'email_verified_at', 'remember_token', 'deleted_at', 'role', 'access_status',
         ]));
         $this->assertFalse(Schema::hasTable('app_users'));
-        $this->assertSame(8, UserRole::query()->count());
+        $this->assertSame(9, UserRole::query()->count());
 
         $this->assertTrue(Schema::hasColumns('similarity_results', [
             'source_title', 'matched_title', 'tfidf_score', 'title_similarity_score',
@@ -67,14 +67,13 @@ class CanonicalResearchSchemaTest extends TestCase
             'user_id', 'action', 'entity_type', 'entity_id', 'description', 'ip_address', 'user_agent', 'created_at',
         ]));
         $this->assertTrue(Schema::hasColumn('research_documents', 'section_id'));
-        $this->assertTrue(Schema::hasColumns('class_sections', ['instructor_id', 'name', 'academic_year', 'is_active']));
+        $this->assertTrue(Schema::hasColumns('class_sections', ['instructor_id', 'name', 'section_code', 'academic_year', 'is_active']));
         $this->assertTrue(Schema::hasColumns('class_section_members', ['class_section_id', 'research_document_id', 'user_id']));
         $this->assertTrue(Schema::hasColumns('defense_schedules', ['research_document_id', 'created_by', 'scheduled_at', 'status']));
         $this->assertTrue(Schema::hasColumns('evaluations', ['research_document_id', 'panelist_id', 'originality', 'methodology', 'clarity', 'submitted_at']));
         $this->assertTrue(Schema::hasColumns('methodology_reviews', ['research_document_id', 'statistician_id', 'design_fit', 'sample_size', 'review_status']));
         $this->assertTrue(Schema::hasColumns('compliance_reviews', ['research_document_id', 'reviewed_by', 'format_compliant', 'review_status', 'decided_at']));
         $this->assertTrue(Schema::hasColumns('metadata_reviews', ['research_document_id', 'reviewed_by', 'title_complete', 'review_status']));
-        $this->assertTrue(Schema::hasColumns('saved_library_items', ['user_id', 'research_document_id']));
         $this->assertTrue(Schema::hasColumns('retention_logs', ['research_document_id', 'performed_by', 'action', 'activity_date']));
         $this->assertTrue(Schema::hasColumns('privacy_logs', ['user_id', 'performed_by', 'action', 'details', 'activity_date']));
         $this->assertFalse(Schema::hasColumn('retention_logs', 'updated_at'));
@@ -91,7 +90,6 @@ class CanonicalResearchSchemaTest extends TestCase
             ['methodology_reviews', 'methodology_review_document_statistician_unique'],
             ['compliance_reviews', 'compliance_review_document_unique'],
             ['metadata_reviews', 'metadata_review_document_unique'],
-            ['saved_library_items', 'saved_library_user_document_unique'],
         ] as [$table, $index]) {
             $indexes = collect(Schema::getIndexes($table))->keyBy('name');
             $this->assertTrue($indexes->has($index), $index.' was not migrated on '.$table.'.');
@@ -155,7 +153,7 @@ class CanonicalResearchSchemaTest extends TestCase
             'coordinator' => UserRole::RESEARCH_OFFICE,
             'librarian' => UserRole::LIBRARIAN,
             'research-office' => UserRole::RESEARCH_OFFICE,
-            'academics' => UserRole::RESEARCH_OFFICE,
+            'research_editor' => UserRole::RESEARCH_EDITOR,
         ];
 
         foreach ($expected as $legacyRole => $canonicalRole) {

@@ -18,7 +18,7 @@ class DocumentFilePolicy
         if (in_array($research->submission_status, ['draft', 'revision_required'], true)) {
             return $documentType !== 'final_manuscript'
                 && (DomainAuthorization::isResearcherParticipant($user, $research)
-                    || DomainAuthorization::isActiveAdministrator($user));
+                    || DomainAuthorization::isOffice($user));
         }
 
         return $research->submission_status === 'approved'
@@ -58,7 +58,7 @@ class DocumentFilePolicy
 
         if (in_array($research->submission_status, ['draft', 'revision_required'], true)) {
             return $file->document_type !== 'final_manuscript'
-                && (DomainAuthorization::isResearcherParticipant($user, $research) || DomainAuthorization::isActiveAdministrator($user));
+                && (DomainAuthorization::isResearcherParticipant($user, $research) || DomainAuthorization::isOffice($user));
         }
 
         return $research->submission_status === 'approved'

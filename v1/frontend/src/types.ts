@@ -8,7 +8,6 @@ export type Role =
   | "coordinator"
   | "librarian"
   | "research-office"
-  | "academics"
   | "research_editor";
 
 export type Status =
@@ -28,10 +27,8 @@ export interface ResearchRecord {
   year: number;
   institutionName: string;
   institutionLocation?: string;
-  academicUnit: string;
-  degreeProgram: string;
-  /** @deprecated Use academicUnit. Kept for existing workspace layouts. */
   institute: string;
+  degreeProgram: string;
   /** @deprecated Use degreeProgram. Kept for existing workspace layouts. */
   program: string;
   category: string;
