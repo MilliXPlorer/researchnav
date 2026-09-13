@@ -135,6 +135,328 @@ export interface LaravelPaginatedResponse<T> {
   meta: LaravelPaginationMeta;
 }
 
+/** Capabilities are supplied by Repository Management for the current actor. */
+export interface RepositoryDocumentCapabilities {
+  view: boolean;
+  update: boolean;
+  management_archive: boolean;
+  management_restore: boolean;
+  permanent_delete: boolean;
+}
+
+export interface RepositoryManagementCapabilities {
+  schema_version: 1;
+  data: {
+    enabled: boolean;
+    filters: Array<
+      | "q"
+      | "submission_status"
+      | "archive_status"
+      | "visibility"
+      | "management_state"
+      | "deletion_state"
+    >;
+    sorts: Array<
+      | "submission_reference"
+      | "title"
+      | "created_at"
+      | "updated_at"
+      | "management_archived_at"
+    >;
+    max_per_page: number;
+    editable_fields: string[];
+    management_archive: boolean;
+    management_restore: boolean;
+    permanent_delete: {
+      reason_min: number;
+      reason_max: number;
+      confirmation_template: string;
+      idempotency_header: "Idempotency-Key";
+    };
+    etag: {
+      required_for: Array<
+        | "patch"
+        | "management_archive"
+        | "management_restore"
+        | "permanent_delete"
+      >;
+      header: "If-Match";
+      format: string;
+    };
+  };
+}
+
+export interface RepositoryManagementItem {
+  id: number;
+  submission_reference: string;
+  /** Server-issued exact phrase required by the permanent-delete endpoint. */
+  permanent_delete_confirmation: string;
+  title: string;
+  publication_year: number | null;
+  institute: string | null;
+  degree_program: string | null;
+  research_stage: InternalResearchResource["research_stage"];
+  submission_status: InternalResearchResource["submission_status"];
+  publication: {
+    submission_status: InternalResearchResource["submission_status"];
+    archive_status: InternalResearchResource["archive_status"];
+    visibility: InternalResearchResource["visibility"];
+  };
+  management: {
+    deleted_at: string | null;
+    management_archived_at: string | null;
+    deletion_state: "none" | "accepted" | "terminal";
+  };
+  import: { is_imported: boolean };
+  created_at: string | null;
+  updated_at: string | null;
+  row_version: number;
+  /** Strong validator returned by the service for state-changing requests. */
+  etag: string;
+  capabilities: RepositoryDocumentCapabilities;
+  authors: ResearchAuthorResource[];
+}
+
+/** Full record returned from the canonical Repository Management show route. */
+export interface RepositoryManagementDetail extends RepositoryManagementItem {
+  abstract: string | null;
+  keywords: string | null;
+  category_id: number | null;
+  manuscript_date_label: string | null;
+  management_archived_by: string | null;
+  restored_at: string | null;
+  restored_by: string | null;
+  permanent_delete_queued_by: string | null;
+  deletion: RepositoryDeletionAggregate | null;
+  files?: DocumentFileResource[];
+  reviewers?: ReviewAssignmentResource[];
+  feedback?: FeedbackResource[];
+  revisions?: ResearchRevisionResource[];
+  monitoring?: MonitoringLogResource[];
+  validations?: TitleValidationResource[];
+  similarity?: SimilarityResultResource[];
+}
+
+export interface RepositoryManagementFilters {
+  q?: string;
+  submission_status?: string;
+  archive_status?: string;
+  visibility?: string;
+  management_state?: "active" | "management_archived" | "legacy_soft_deleted";
+  deletion_state?: "none" | "accepted" | "terminal";
+  sort?:
+    | "submission_reference"
+    | "title"
+    | "created_at"
+    | "updated_at"
+    | "management_archived_at"
+    | "-submission_reference"
+    | "-title"
+    | "-created_at"
+    | "-updated_at"
+    | "-management_archived_at";
+  per_page?: number;
+  page?: number;
+}
+
+export interface RepositoryDocumentListResponse extends LaravelPaginatedResponse<RepositoryManagementItem> {
+  schema_version: 1;
+}
+
+export interface RepositoryDeletionAggregate {
+  id: number;
+  status:
+    | "queued"
+    | "deleting"
+    | "purge_retryable"
+    | "purge_deleting"
+    | "completed"
+    | "storage_failed"
+    | "purge_failed";
+  object_count: number;
+  objects_deleted_count: number;
+  objects_terminal_failed_count: number;
+  queued_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface RepositoryDeletionLedgerResource extends RepositoryDeletionAggregate {
+  submission_reference: string;
+  title: string;
+}
+
+/** Initial permanent-delete acceptance is intentionally aggregate-free. */
+export interface RepositoryPermanentDeleteAcceptedResponse {
+  ledger_id: number;
+  status: "queued";
+  idempotent_replay: false;
+}
+
+/** A repeated idempotency key returns the original aggregate ledger resource. */
+export interface RepositoryPermanentDeleteReplayResponse extends RepositoryDeletionAggregate {
+  ledger_id: number;
+  idempotent_replay: true;
+}
+
+export type RepositoryPermanentDeleteResponse =
+  | RepositoryPermanentDeleteAcceptedResponse
+  | RepositoryPermanentDeleteReplayResponse;
+
+export type RepositoryMetadataInput = Partial<
+  Pick<
+    ResearchMetadataInput,
+    | "title"
+    | "abstract"
+    | "keywords"
+    | "publication_year"
+    | "institute"
+    | "degree_program"
+    | "manuscript_date_label"
+    | "research_stage"
+  >
+> & {
+  category_id?: number | null;
+  authors?: ResearchAuthorInput[];
+};
+
+const repositoryManagementPath = "/api/office/repository-management";
+const repositoryDocumentsPath = `${repositoryManagementPath}/documents`;
+
+function repositoryManagementQuery(filters: RepositoryManagementFilters) {
+  const query = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== "") query.set(key, String(value));
+  });
+  const serialized = query.toString();
+  return serialized
+    ? `${repositoryDocumentsPath}?${serialized}`
+    : repositoryDocumentsPath;
+}
+
+function repositoryManagementItemPath(id: string | number) {
+  return `${repositoryDocumentsPath}/${encodeURIComponent(String(id))}`;
+}
+
+/** Both authorized roles use the one canonical Repository Management API. */
+export function listRepositoryManagement(
+  filters: RepositoryManagementFilters = {},
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<RepositoryDocumentListResponse> {
+  return apiRequest(repositoryManagementQuery(filters), undefined, fetcher);
+}
+
+export function getRepositoryManagementCapabilities(
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<RepositoryManagementCapabilities> {
+  return apiRequest(
+    `${repositoryDocumentsPath}/capabilities`,
+    undefined,
+    fetcher,
+  );
+}
+
+export async function getRepositoryManagement(
+  id: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<RepositoryManagementDetail> {
+  return (
+    await apiRequest<{ data: RepositoryManagementDetail }>(
+      repositoryManagementItemPath(id),
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export async function updateRepositoryManagement(
+  id: string | number,
+  metadata: RepositoryMetadataInput,
+  etag: string,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<RepositoryManagementDetail> {
+  return (
+    await apiRequest<{ data: RepositoryManagementDetail }>(
+      repositoryManagementItemPath(id),
+      {
+        method: "PATCH",
+        body: JSON.stringify(metadata),
+        headers: { "If-Match": etag },
+      },
+      fetcher,
+    )
+  ).data;
+}
+
+export async function managementArchiveRepository(
+  id: string | number,
+  etag: string,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<RepositoryManagementItem> {
+  return (
+    await apiRequest<{ data: RepositoryManagementItem }>(
+      `${repositoryManagementItemPath(id)}/management-archive`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+        headers: { "If-Match": etag },
+      },
+      fetcher,
+    )
+  ).data;
+}
+
+export async function managementRestoreRepository(
+  id: string | number,
+  etag: string,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<RepositoryManagementItem> {
+  return (
+    await apiRequest<{ data: RepositoryManagementItem }>(
+      `${repositoryManagementItemPath(id)}/management-restore`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+        headers: { "If-Match": etag },
+      },
+      fetcher,
+    )
+  ).data;
+}
+
+export async function permanentDeleteRepository(
+  id: string | number,
+  input: { reason: string; confirmation: string },
+  etag: string,
+  idempotencyKey: string,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<RepositoryPermanentDeleteResponse> {
+  return apiRequest(
+    `${repositoryManagementItemPath(id)}/permanent-delete`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+      headers: { "If-Match": etag, "Idempotency-Key": idempotencyKey },
+    },
+    fetcher,
+  );
+}
+
+export function listDeletionLedger(
+  filters: Pick<RepositoryManagementFilters, "page" | "per_page"> = {},
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<LaravelPaginatedResponse<RepositoryDeletionLedgerResource>> {
+  const query = new URLSearchParams();
+  if (filters.page) query.set("page", String(filters.page));
+  if (filters.per_page) query.set("per_page", String(filters.per_page));
+  const suffix = query.size ? `?${query.toString()}` : "";
+  return apiRequest(
+    `${repositoryManagementPath}/deletions${suffix}`,
+    undefined,
+    fetcher,
+  );
+}
+
 /** The exact public representation from AdminAuditLogResource. */
 export interface AdminAuditLogResource {
   id: number;

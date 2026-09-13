@@ -144,6 +144,7 @@ const roles: AdminRole[] = [
   "research-office",
 ];
 import ResearchOfficeBulkImport from "./ResearchOfficeBulkImport";
+import RepositoryManagementWorkspace from "./RepositoryManagementWorkspace";
 
 const accessStatuses: AccessStatus[] = ["active", "invited", "blocked"];
 const researchStages = ["title_proposal", "ongoing", "completed"];
@@ -337,6 +338,9 @@ export default function RoleSidebarPage({
       }
     case "research-office":
       switch (selectedNav) {
+        case "Repository Management":
+          return <RepositoryManagementWorkspace context="office" />;
+
         case "Upload Manuscript":
           return <ResearchOfficeBulkImport />;
 
