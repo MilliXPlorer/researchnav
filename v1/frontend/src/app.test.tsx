@@ -597,6 +597,7 @@ describe("role workspaces", () => {
     )?.nav;
     expect(officeNav).toEqual([
       "Dashboard",
+      "Repository Management",
       "Upload Manuscript",
       "User & Role Management",
       "Reports & Exports",

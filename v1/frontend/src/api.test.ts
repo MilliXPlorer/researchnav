@@ -16,6 +16,7 @@ import {
   listAdminUsers,
   listFeedback,
   listMonitoringLogs,
+  listDeletionLedger,
   listPersistedSimilarityResults,
   listPublicResearch,
   listResearchRevisions,
@@ -57,10 +58,21 @@ import {
   updateAdminUser,
   updateFeedbackStatus,
   updateTitleValidation,
+  getRepositoryManagement,
+  getRepositoryManagementCapabilities,
+  listRepositoryManagement,
+  managementArchiveRepository,
+  managementRestoreRepository,
+  permanentDeleteRepository,
+  updateRepositoryManagement,
   uploadResearchFile,
   uploadOwnProfilePhoto,
 } from "./api";
-import type { RoleDashboard } from "./api";
+import type {
+  RepositoryManagementDetail,
+  RepositoryManagementItem,
+  RoleDashboard,
+} from "./api";
 
 const profileSession = {
   email: "ada@example.test",
@@ -414,6 +426,248 @@ describe("administrator API", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/admin/users/uuid%2Fwith%20space",
       expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+});
+
+describe("repository management API", () => {
+  const item: RepositoryManagementItem = {
+    id: 42,
+    submission_reference: "RN-42",
+    permanent_delete_confirmation: "DELETE RN-42",
+    title: "Managed study",
+    degree_program: "BS Computer Science",
+    publication_year: 2026,
+    research_stage: "completed",
+    submission_status: "approved",
+    institute: "Institute of Computer Studies",
+    publication: {
+      submission_status: "approved",
+      archive_status: "not_archived",
+      visibility: "private",
+    },
+    management: {
+      deleted_at: null,
+      management_archived_at: null,
+      deletion_state: "none",
+    },
+    import: { is_imported: false },
+    created_at: "2026-09-01T00:00:00Z",
+    updated_at: "2026-09-13T00:00:00Z",
+    row_version: 1,
+    etag: '"repository-document-42-v1"',
+    capabilities: {
+      view: true,
+      update: true,
+      management_archive: true,
+      management_restore: false,
+      permanent_delete: false,
+    },
+    authors: [],
+  };
+  const detail: RepositoryManagementDetail = {
+    ...item,
+    abstract: "Repository abstract",
+    keywords: "repository, management",
+    category_id: 7,
+    manuscript_date_label: "September 2026",
+    management_archived_by: null,
+    restored_at: null,
+    restored_by: null,
+    permanent_delete_queued_by: null,
+    deletion: null,
+  };
+  const response = {
+    schema_version: 1,
+    data: [item],
+    links: { first: null, last: null, prev: null, next: null },
+    meta: {
+      current_page: 2,
+      from: 26,
+      last_page: 3,
+      links: [],
+      path: "/api/office/repository-management/documents",
+      per_page: 25,
+      to: 50,
+      total: 51,
+    },
+  };
+
+  it("uses only the canonical path for both role callers and serializes filters", async () => {
+    const fetchMock = vi.fn(
+      async (path: RequestInfo | URL, _init?: RequestInit) => {
+        void _init;
+        return new Response(
+          JSON.stringify(
+            String(path).endsWith("/42") ? { data: detail } : response,
+          ),
+        );
+      },
+    );
+    await expect(
+      listRepositoryManagement(
+        {
+          q: "inventory",
+          management_state: "management_archived",
+          deletion_state: "accepted",
+          sort: "-updated_at",
+          page: 2,
+          per_page: 25,
+        },
+        fetchMock,
+      ),
+    ).resolves.toEqual(response);
+    await expect(getRepositoryManagement(42, fetchMock)).resolves.toEqual(
+      detail,
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/office/repository-management/documents?q=inventory&management_state=management_archived&deletion_state=accepted&sort=-updated_at&page=2&per_page=25",
+      expect.objectContaining({ credentials: "include" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/office/repository-management/documents/42",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
+  it("loads document capabilities from the canonical endpoint", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            schema_version: 1,
+            data: {
+              enabled: true,
+              filters: ["q"],
+              sorts: ["title"],
+              max_per_page: 100,
+              editable_fields: ["title"],
+              management_archive: true,
+              management_restore: true,
+              permanent_delete: {
+                reason_min: 1,
+                reason_max: 5000,
+                confirmation_template: "DELETE {submission_reference}",
+                idempotency_header: "Idempotency-Key",
+              },
+              etag: {
+                required_for: ["patch"],
+                header: "If-Match",
+                format: '"repository-document-{id}-v{row_version}"',
+              },
+            },
+          }),
+        ),
+    );
+    await getRepositoryManagementCapabilities(fetchMock);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/office/repository-management/documents/capabilities",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
+  it("sends strong ETags, empty archive/restore bodies, and a UUID idempotency key", async () => {
+    const fetchMock = vi.fn(
+      async (path: RequestInfo | URL, _init?: RequestInit) => {
+        void _init;
+        return new Response(
+          JSON.stringify(
+            String(path).endsWith("permanent-delete")
+              ? {
+                  ledger_id: 7,
+                  idempotent_replay: false,
+                  status: "queued",
+                }
+              : String(path).includes("/deletions")
+                ? { ...response, data: [] }
+                : { data: item },
+          ),
+        );
+      },
+    );
+    const etag = '"repository-document-42-v1"';
+    await updateRepositoryManagement(
+      42,
+      {
+        title: "Corrected title",
+        category_id: 7,
+        authors: [
+          {
+            user_id: null,
+            author_name: "Corrected Author",
+            is_corresponding_author: true,
+          },
+        ],
+      },
+      etag,
+      fetchMock,
+    );
+    await managementArchiveRepository(42, etag, fetchMock);
+    await managementRestoreRepository(42, etag, fetchMock);
+    await permanentDeleteRepository(
+      42,
+      { reason: "Duplicate import", confirmation: "DELETE RN-42" },
+      etag,
+      "8ce7d9b4-03e6-4f5f-83a6-4a6907cc4db3",
+      fetchMock,
+    );
+    await listDeletionLedger({ per_page: 25 }, fetchMock);
+
+    const calls = fetchMock.mock.calls.map(([path, init]) => ({
+      path: String(path),
+      method: init?.method ?? "GET",
+      body: init?.body,
+      headers: new Headers(init?.headers),
+    }));
+    expect(
+      calls.map(({ path, method, body }) => ({ path, method, body })),
+    ).toEqual([
+      {
+        path: "/api/office/repository-management/documents/42",
+        method: "PATCH",
+        body: JSON.stringify({
+          title: "Corrected title",
+          category_id: 7,
+          authors: [
+            {
+              user_id: null,
+              author_name: "Corrected Author",
+              is_corresponding_author: true,
+            },
+          ],
+        }),
+      },
+      {
+        path: "/api/office/repository-management/documents/42/management-archive",
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+      {
+        path: "/api/office/repository-management/documents/42/management-restore",
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+      {
+        path: "/api/office/repository-management/documents/42/permanent-delete",
+        method: "POST",
+        body: JSON.stringify({
+          reason: "Duplicate import",
+          confirmation: "DELETE RN-42",
+        }),
+      },
+      {
+        path: "/api/office/repository-management/deletions?per_page=25",
+        method: "GET",
+        body: undefined,
+      },
+    ]);
+    calls
+      .slice(0, 4)
+      .forEach(({ headers }) => expect(headers.get("If-Match")).toBe(etag));
+    expect(calls[3]?.headers.get("Idempotency-Key")).toBe(
+      "8ce7d9b4-03e6-4f5f-83a6-4a6907cc4db3",
     );
   });
 });

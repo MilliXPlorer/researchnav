@@ -65,6 +65,7 @@ export const roleConfigs: RoleConfig[] = [
       "Dashboard",
       "User & Role Management",
       "Audit Logs",
+      "Repository Management",
       "Upload Manuscript",
       "System Settings",
     ],
@@ -185,6 +186,7 @@ export const roleConfigs: RoleConfig[] = [
 
     nav: [
       "Dashboard",
+      "Repository Management",
       "Upload Manuscript",
       "User & Role Management",
       "Reports & Exports",

@@ -24,6 +24,7 @@ import { Button } from "./components";
 import { DatePickerInput } from "./dateControls";
 import { ConfirmDialog, Modal } from "./Modal";
 import ResearchOfficeBulkImport from "./ResearchOfficeBulkImport";
+import RepositoryManagementWorkspace from "./RepositoryManagementWorkspace";
 import { useLiveFilters } from "./useLiveFilters";
 import { filterUserRows } from "./userManagement";
 
@@ -57,6 +58,8 @@ export default function AdminSidebarPage({
       return <AllUsers />;
     case "Audit Logs":
       return <AuditLogs />;
+    case "Repository Management":
+      return <RepositoryManagementWorkspace context="admin" />;
     case "Upload Manuscript":
       return <ResearchOfficeBulkImport contextLabel="System Administrator" />;
     case "System Settings":

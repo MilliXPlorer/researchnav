@@ -71,6 +71,7 @@ const primaryNav: Record<Role, string> = {
 const navIcons: Record<string, LucideIcon> = {
   "Audit Logs": ScrollText,
   "Upload Manuscript": FileUp,
+  "Repository Management": FolderKanban,
   "System Settings": Settings,
   Dashboard: LayoutDashboard,
   "My Research": FolderKanban,
