@@ -1,473 +1,346 @@
 # Shared Repository Management Implementation Plan
 
 ## Document Status
+
 - **Artifact:** canonical planning document only; no product implementation is authorized by this file.
 - **Evidence date:** 2026-09-13.
-- **Repository / checkout:** `D:\ResearchNav\v1`, inside repository `D:\ResearchNav`.
-- **Scope:** shared Repository Management for active Research Office and System Admin: live search/filter, existing workspace view/edit, management archive/restore icons, permanent-delete icon only for management-archived rows; mandatory reason plus exact `DELETE {submission_reference}` confirmation; durable scheduled deletion ledger deletes tracked local/Supabase objects first, then dependent Laravel DB graph transactionally, preserving immutable audits and retrying partial failures.
+- **Scope:** shared Repository Management for active Research Office and System Admin. It provides document search, existing-workspace view/edit, management archive and restore, queued permanent deletion, a durable deletion ledger, and immutable audit/activity/monitoring/retention snapshots.
 
 ---
 
-## Architecture Decisions (Pre-Approved)
+## Architecture Decisions
 
-| Decision | Detail |
-|----------|--------|
-| **Management archive signal** | `deleted_at` on `research_documents` serves as the management archive flag. A row with `deleted_at` set is "management-archived." |
-| **Repository archive provenance** | New column `archive_provenance` (enum: `office_archived` | `management_archived` | `legacy_import`) records *why* a record reached the archive. `office_archived` = approved→archived via Research Office workflow. `management_archived` = soft-deleted by Research Office/Admin via Repository Management. `legacy_import` = imported records with `import_source_sha256`. |
-| **Legacy soft-deleted rows** | Any pre-existing `deleted_at` rows without `archive_provenance = 'management_archived'` are **not safely restorable**. Restore UI must be hidden for them. |
-| **Scheduled processor** | A dedicated console command `repository:process-deletion-ledger` runs on a scheduler (e.g., every 5 minutes). It picks up `queued` ledger rows, executes storage deletion, then DB purge in a transaction. |
-| **Deletion ledger states** | `queued` → `deleting` → `storage_failed` / `purge_failed` / `completed`. No cancellation state. |
-| **Storage absence** | If the storage object is already gone, treat as idempotent success; do not fail the ledger row. |
-| **No cancellation** | Once a ledger row is `queued`, it proceeds to completion or terminal failure. No user-facing cancel. |
-| **Immutable audits** | `audit_logs` and `activity_logs`/`monitoring_logs` are **never deleted** by the scheduled processor. They are preserved for compliance. |
+| Decision                     | Detail                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Shared authority             | All routes use the shared `office.authority` middleware. Research Office and active System Admin use the same resources and policies.                                                                                                                                                                                                                                                                                                                                                           |
+| Canonical route tree         | The canonical document collection is `/api/office/repository-management/documents`. Document actions are beneath `/api/office/repository-management/documents/{researchDocument}/...`. Deletion resources are `/api/office/repository-management/deletions`. No alternate admin route tree exists.                                                                                                                                                                                              |
+| Management state             | Management archive eligibility and restore eligibility are derived only from `deleted_at` and `management_archived_at`: a document is management-archived only when both are non-null. A soft-deleted row with `management_archived_at` null is legacy or workflow-deleted and is not restoreable or permanently deletable through Repository Management. The deletion ledger records a queued deletion independently of the document lifecycle.                                                |
+| Archive and restore contract | `POST` archive and restore requests require the body `{}`. They preserve `archive_status`, `submission_status`, and `visibility` exactly; neither action changes publication state.                                                                                                                                                                                                                                                                                                             |
+| Permanent-delete contract    | Permanent delete requires a reason, exact `DELETE {submission_reference}` confirmation, current strong `If-Match` ETag, and an `Idempotency-Key`. The initial acceptance returns `202`; a same-fingerprint idempotency replay returns `200` with the original aggregate ledger resource.                                                                                                                                                                                                        |
+| Actors                       | User primary keys are UUIDs in `users.id`. All actor columns are UUID FKs to `users.id`; application code uses `actor.id`.                                                                                                                                                                                                                                                                                                                                                                      |
+| Durable deletion             | A ledger has an `unsignedBigInteger target_research_document_id` with **no FK** to `research_documents`, plus immutable document-identifying snapshots. Each storage object has one durable `repository_deletion_objects` row with an encrypted locator.                                                                                                                                                                                                                                        |
+| Privacy                      | APIs never return storage paths, decrypted locators, raw storage errors, idempotency keys, hashes, or request fingerprints.                                                                                                                                                                                                                                                                                                                                                                     |
+| Immutable history            | `repository_document_history_snapshots` and audit/activity history are snapshotted/retained before purge. MariaDB's canonical immutable event history is the `activity_logs` stream: its typed `monitoring_logs` and `retention_logs` tables are migrated into that stream as applicable and then dropped. SQLite retains its typed monitoring/retention tables, whose direct document references must be nullable with `ON DELETE SET NULL`. Non-history `research_review_records` are purged. |
 
 ---
 
 ## Data Model Changes
 
-### 1. `research_documents` table additions (migration)
-| Column | Type | Constraints | Default | Purpose |
-|--------|------|-------------|---------|---------|
-| `archive_provenance` | `enum('office_archived','management_archived','legacy_import')` | nullable | `NULL` | Provenance of archive state. |
-| `management_archived_at` | `timestamp(6)` | nullable | `NULL` | Timestamp when management-archived (mirrors `deleted_at` for clarity). |
-| `management_archived_by` | `unsignedBigInteger` | nullable, FK→`users.id` | `NULL` | Actor who triggered management archive. |
-| `management_archive_reason` | `text` | nullable | `NULL` | Mandatory reason text at archive time. |
+### 1. `research_documents` additions
 
-> `deleted_at` (from `SoftDeletes`) remains the authoritative "is management-archived" flag. `management_archived_at` is a convenience mirror; both are set/cleared together.
+| Column                       | Type             | Constraints                                      | Purpose                                                                                                                          |
+| ---------------------------- | ---------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `management_archived_at`     | `timestamp(6)`   | nullable                                         | Set together with `deleted_at` by management archive; its presence distinguishes a management archive from other soft deletions. |
+| `management_archived_by`     | UUID             | nullable, FK to `users.id`, `ON DELETE SET NULL` | Archiving actor.                                                                                                                 |
+| `restored_at`                | `timestamp(6)`   | nullable                                         | Last management restore time.                                                                                                    |
+| `restored_by`                | UUID             | nullable, FK to `users.id`, `ON DELETE SET NULL` | Restoring actor.                                                                                                                 |
+| `permanent_delete_queued_at` | `timestamp(6)`   | nullable                                         | Time a permanent-delete request was accepted.                                                                                    |
+| `permanent_delete_queued_by` | UUID             | nullable, FK to `users.id`, `ON DELETE SET NULL` | Actor who queued deletion.                                                                                                       |
+| `row_version`                | unsigned integer | not null, default `1`                            | Optimistic-lock version, incremented for every mutation.                                                                         |
 
-### 2. New table: `repository_deletion_ledger` (migration)
-| Column | Type | Constraints | Purpose |
-|--------|------|-------------|---------|
-| `id` | `bigIncrements` | PK | |
-| `research_document_id` | `unsignedBigInteger` | FK→`research_documents.id`, restrictOnDelete | Target record. |
-| `submission_reference` | `string(50)` | not null | Immutable copy for confirmation UI. |
-| `status` | `enum('queued','deleting','storage_failed','purge_failed','completed')` | not null, default `'queued'` | Processor state machine. |
-| `storage_paths` | `json` | not null | Array of storage paths (local + Supabase) to delete. |
-| `storage_deletion_attempts` | `unsignedInteger` | default `0` | Retry counter for storage phase. |
-| `purge_attempts` | `unsignedInteger` | default `0` | Retry counter for DB purge phase. |
-| `last_error` | `text` | nullable | Last failure message for observability. |
-| `queued_at` | `timestamp(6)` | not null | When the ledger row was created. |
-| `started_at` | `timestamp(6)` | nullable | When processor picked it up. |
-| `completed_at` | `timestamp(6)` | nullable | Terminal success timestamp. |
-| `created_at` / `updated_at` | `timestamp(6)` | | Laravel timestamps. |
+`deleted_at` and `management_archived_at` are the management-state pair. Management archive sets both in one transaction. Management restore clears both in one transaction. No archive reason is stored because archive requests use `{}`.
 
-Indexes:
-- `idx_repository_deletion_ledger_status_queued_at` on (`status`, `queued_at`) for processor polling.
-- `idx_repository_deletion_ledger_research_document_id` on (`research_document_id`) unique (one ledger row per document).
+`ResearchDocument` scopes:
 
-### 3. Model updates
-- `ResearchDocument`:
-  - Add `archive_provenance`, `management_archived_at`, `management_archived_by`, `management_archive_reason` to `$fillable`.
-  - Add casts for `management_archived_at` → `datetime`.
-  - Scopes: `scopeManagementArchived` (where `deleted_at` not null AND `archive_provenance = 'management_archived'`), `scopeRestorableManagementArchived` (management-archived AND `archive_provenance = 'management_archived'`).
-  - Booted: when `deleted` event fires via `SoftDeletes`, if `archive_provenance` is null, set to `'management_archived'` and populate `management_archived_at`/`by`/`reason` from a transient context (set by the controller before delete).
-- New `RepositoryDeletionLedger` model with the above columns, `$casts` for `storage_paths` → `array`.
+- `scopeManagementArchived`: `deleted_at IS NOT NULL AND management_archived_at IS NOT NULL`.
+- `scopeLegacySoftDeleted`: `deleted_at IS NOT NULL AND management_archived_at IS NULL`.
+- `scopeRestorableManagementArchived`: the same predicate as `scopeManagementArchived`, excluding every row with any deletion ledger, including failed ledgers whose storage may already be partially removed.
 
----
+### 2. `repository_deletion_ledger`
 
-## Backend Workstreams (Owner: Backend Security & API Builder)
+| Column                                    | Type                 | Constraints                                     | Purpose                                                                                                                                  |
+| ----------------------------------------- | -------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                                      | `bigIncrements`      | PK                                              | Ledger identifier.                                                                                                                       |
+| `target_research_document_id`             | `unsignedBigInteger` | not null, **no FK**                             | Durable target identity after document purge.                                                                                            |
+| `submission_reference`                    | `VARCHAR(40)`        | not null                                        | Immutable confirmation/audit snapshot.                                                                                                   |
+| `title`                                   | `VARCHAR(500)`       | not null                                        | Immutable title snapshot retained after purge.                                                                                           |
+| `requested_by`                            | UUID                 | nullable FK to `users.id`, `ON DELETE SET NULL` | Requesting actor.                                                                                                                        |
+| `idempotency_key_hash`                    | `char(64)`           | not null                                        | SHA-256 hash of the normalized idempotency key; never expose it.                                                                         |
+| `request_fingerprint`                     | `char(64)`           | not null                                        | Persisted SHA-256 fingerprint of target, reason, confirmation, and request semantics; used to reject key reuse with a different request. |
+| `reason`                                  | `text`               | not null                                        | Permanent-delete reason, retained in the internal ledger/audit record.                                                                   |
+| `status`                                  | enum                 | not null                                        | `queued`, `deleting`, `purge_retryable`, `purge_deleting`, `completed`, `storage_failed`, or `purge_failed`.                             |
+| `object_count`                            | unsigned integer     | not null, default `0`                           | Number of durable object rows created with the ledger.                                                                                   |
+| `objects_deleted_count`                   | unsigned integer     | not null, default `0`                           | Projection of rows in terminal `deleted` state.                                                                                          |
+| `objects_terminal_failed_count`           | unsigned integer     | not null, default `0`                           | Projection of rows in terminal `terminal_failed` state.                                                                                  |
+| `purge_attempts`                          | unsigned integer     | not null, default `0`                           | DB-purge attempts.                                                                                                                       |
+| `last_error_code`                         | string               | nullable                                        | Generic stable error code only.                                                                                                          |
+| `lease_token`                             | `char(36)`           | nullable                                        | Opaque token for the worker that owns a `deleting` or `purge_deleting` claim.                                                            |
+| `lease_expires_at`                        | `timestamp(6)`       | nullable, indexed with status                   | Claim expiry; an expired claim is recoverable.                                                                                           |
+| `next_attempt_at`                         | `timestamp(6)`       | nullable, indexed with status                   | Earliest time a `purge_retryable` ledger may be claimed; null for a newly queued ledger.                                                 |
+| `queued_at`, `started_at`, `completed_at` | `timestamp(6)`       | as applicable                                   | Lifecycle timestamps.                                                                                                                    |
+| `created_at`, `updated_at`                | `timestamp(6)`       | Laravel timestamps                              | Audit timestamps.                                                                                                                        |
 
-### Workstream B1 — Database Migrations & Models
-**Files (exclusive ownership):**
-- `v1/backend/database/migrations/2026_09_13_000001_add_archive_provenance_to_research_documents.php`
-- `v1/backend/database/migrations/2026_09_13_000002_create_repository_deletion_ledger_table.php`
-- `v1/backend/app/Models/ResearchDocument.php` (add columns, scopes, booted logic)
-- `v1/backend/app/Models/RepositoryDeletionLedger.php` (new)
+Indexes and constraints:
 
-**Acceptance checks:**
-- Fresh MariaDB migration runs; `research_documents` has new columns; `repository_deletion_ledger` created with indexes.
-- `ResearchDocument::factory()->create()` works; `archive_provenance` nullable.
-- `ResearchDocument::scopeManagementArchived()` returns only rows with `deleted_at` not null AND `archive_provenance = 'management_archived'`.
-- `ResearchDocument::scopeRestorableManagementArchived()` returns only management-archived rows with provenance `management_archived`.
+- Unique (`idempotency_key_hash`) makes a normalized idempotency key globally single-use, independent of target, without a document FK.
+- Index (`status`, `queued_at`) supports polling; index (`status`, `next_attempt_at`) supports due purge retries.
+- Unique (`target_research_document_id`) permits only one deletion ledger for a document, regardless of idempotency key.
+- In the acceptance transaction, the service locks the target document and the matching global idempotency row (`lockForUpdate`). It computes the fingerprint from the target, reason, exact confirmation, and versioned request semantics before deciding: the same hash plus the same fingerprint is a replay of the original ledger; the same hash plus a different fingerprint (including a different target) is `409 IDEMPOTENCY_CONFLICT`. If concurrent first use races before a row exists, the unique-key loser catches the duplicate-key result and re-reads/locks that hash before applying the same replay/conflict decision.
 
-### Workstream B2 — Repository Management API (Research Office + Admin)
-**New routes (under `office` and `admin` prefixes):**
-| Method | Path | Controller | Middleware |
-|--------|------|------------|------------|
-| `GET` | `/api/office/repository` | `ResearchOfficeController@repositoryIndex` | `office.authority` |
-| `GET` | `/api/office/repository/{researchDocument}` | `ResearchOfficeController@repositoryShow` | `office.authority` |
-| `PATCH` | `/api/office/repository/{researchDocument}` | `ResearchOfficeController@repositoryUpdate` | `office.authority`, `throttle:domain-mutations` |
-| `POST` | `/api/office/repository/{researchDocument}/management-archive` | `ResearchOfficeController@managementArchive` | `office.authority`, `throttle:domain-mutations` |
-| `POST` | `/api/office/repository/{researchDocument}/management-restore` | `ResearchOfficeController@managementRestore` | `office.authority`, `throttle:domain-mutations` |
-| `POST` | `/api/office/repository/{researchDocument}/permanent-delete` | `ResearchOfficeController@permanentDelete` | `office.authority`, `throttle:domain-mutations` |
-| `GET` | `/api/admin/repository` | `AdminController@repositoryIndex` | `active.admin` |
-| `GET` | `/api/admin/repository/{researchDocument}` | `AdminController@repositoryShow` | `active.admin` |
-| `PATCH` | `/api/admin/repository/{researchDocument}` | `AdminController@repositoryUpdate` | `active.admin`, `throttle:domain-mutations` |
-| `POST` | `/api/admin/repository/{researchDocument}/management-archive` | `AdminController@managementArchive` | `active.admin`, `throttle:domain-mutations` |
-| `POST` | `/api/admin/repository/{researchDocument}/management-restore` | `AdminController@managementRestore` | `active.admin`, `throttle:domain-mutations` |
-| `POST` | `/api/admin/repository/{researchDocument}/permanent-delete` | `AdminController@permanentDelete` | `active.admin`, `throttle:domain-mutations` |
+### 3. `repository_deletion_objects`
 
-**Controller logic (shared via trait or service):**
-- `repositoryIndex`: paginated list with live search/filter (title, submission_reference, institute, submission_status, archive_status, visibility, date range). Includes `deleted_at` (management-archived) rows. Returns `archive_provenance` and `management_archived_at`.
-- `repositoryShow`: full record with files, authors, reviewers, feedback, revisions, monitoring, validations, similarity — same shape as `AdminResearchWorkspace` but read-only for non-management-archived; for management-archived, includes `archive_provenance`, `management_archive_reason`, `management_archived_by`, `management_archived_at`.
-- `repositoryUpdate`: allows metadata edit (title, abstract, keywords, etc.) for any row **except** `archive_status = 'archived'` with `archive_provenance = 'office_archived'` (those are immutable post-office-archive). For management-archived rows, allow edit to support correction before restore.
-- `managementArchive`:
-  - **Authorization:** Research Office or Admin only.
-  - **Precondition:** row must NOT already be `deleted_at` (i.e., not already management-archived). Office-archived rows (`archive_provenance = 'office_archived'`) CAN be management-archived (adds a second archive layer).
-  - **Input validation:** `reason` (required, string, max 5000), `confirmation` (required, string, must exactly equal `DELETE {submission_reference}`).
-  - **Action:** set `deleted_at = now()`, `archive_provenance = 'management_archived'`, `management_archived_at = now()`, `management_archived_by = actor.id`, `management_archive_reason = reason`. Audit log `RESEARCH_MANAGEMENT_ARCHIVED`. Monitoring log.
-- `managementRestore`:
-  - **Authorization:** Research Office or Admin only.
-  - **Precondition:** `deleted_at` not null AND `archive_provenance = 'management_archived'`. Legacy soft-deleted rows (provenance null or `legacy_import`) are **not restorable** — return 409 `NOT_RESTORABLE`.
-  - **Action:** clear `deleted_at`, `archive_provenance = null`, `management_archived_at = null`, `management_archived_by = null`, `management_archive_reason = null`. Also clear `archive_status = 'not_archived'`, `submission_status` revert to `'approved'` (or previous if tracked), `visibility = 'private'`. Audit log `RESEARCH_MANAGEMENT_RESTORED`. Monitoring log.
-- `permanentDelete`:
-  - **Authorization:** Research Office or Admin only.
-  - **Precondition:** `deleted_at` not null AND `archive_provenance = 'management_archived'`. Only management-archived rows eligible.
-  - **Input validation:** `reason` (required, string, max 5000), `confirmation` (required, string, must exactly equal `DELETE {submission_reference}`).
-  - **Action:** Create `RepositoryDeletionLedger` row with `status = 'queued'`, `storage_paths` = all `document_files.file_path` for this document + any Supabase study paths (from `instituteStudies` if applicable), `submission_reference` copied. Return 202 Accepted with ledger ID. Audit log `RESEARCH_PERMANENT_DELETE_QUEUED`.
+| Column                     | Type                      | Constraints                                                         | Purpose                                                              |
+| -------------------------- | ------------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `id`                       | `bigIncrements`           | PK                                                                  | Object identifier.                                                   |
+| `ledger_id`                | `unsignedBigInteger`      | not null, FK to `repository_deletion_ledger.id`, restrict on delete | Ledger parent.                                                       |
+| `encrypted_locator`        | `text`                    | not null                                                            | Encrypted storage locator.                                           |
+| `storage_type`             | enum(`local`, `supabase`) | not null                                                            | Storage backend.                                                     |
+| `status`                   | enum                      | not null, default `pending`                                         | `pending`, `deleting`, `retryable`, `deleted`, or `terminal_failed`. |
+| `attempts`                 | unsigned integer          | not null, default `0`                                               | Claimed storage-delete attempts.                                     |
+| `next_attempt_at`          | `timestamp(6)`            | nullable                                                            | Retry schedule.                                                      |
+| `last_error_code`          | string                    | nullable                                                            | Generic internal error code only.                                    |
+| `lease_token`              | `char(36)`                | nullable                                                            | Opaque token for the worker that owns a `deleting` claim.            |
+| `lease_expires_at`         | `timestamp(6)`            | nullable, indexed with status                                       | Claim expiry; an expired claim is recoverable.                       |
+| `deleted_at`               | `timestamp(6)`            | nullable                                                            | Successful/idempotent storage-delete time.                           |
+| `created_at`, `updated_at` | `timestamp(6)`            | Laravel timestamps                                                  | Audit timestamps.                                                    |
 
-**Files (exclusive ownership):**
-- `v1/backend/app/Http/Controllers/ResearchOfficeController.php` (add 5 methods)
-- `v1/backend/app/Http/Controllers/AdminController.php` (add 5 methods)
-- `v1/backend/app/Services/RepositoryManagementService.php` (new — shared logic)
-- `v1/backend/routes/web.php` (add routes)
+Indexes: (`ledger_id`, `status`, `next_attempt_at`), (`ledger_id`, `status`, `lease_expires_at`), and (`ledger_id`). Object rows are created in the same transaction as their ledger. The ledger cannot be queued without its complete object inventory.
 
-**Acceptance checks:**
-- `GET /api/office/repository` returns paginated data with search/filter; includes management-archived rows.
-- `managementArchive` requires exact `DELETE {submission_reference}`; rejects mismatched confirmation with 422 `INVALID_CONFIRMATION`.
-- `managementRestore` returns 409 `NOT_RESTORABLE` for legacy soft-deleted rows.
-- `permanentDelete` returns 202 with ledger ID; ledger row created with correct `storage_paths`.
-- All mutations emit audit logs with actor, reason, submission_reference.
-- Policies: `ResearchDocumentPolicy@managementArchive`, `@managementRestore`, `@permanentDelete` enforce office/admin authority.
+### 4. Models and migrations
 
-### Workstream B3 — Scheduled Deletion Processor
-**Files (exclusive ownership):**
-- `v1/backend/app/Console/Commands/ProcessRepositoryDeletionLedger.php` (new)
-- `v1/backend/app/Services/RepositoryDeletionProcessor.php` (new)
-- `v1/backend/app/Services/SupabaseStorageService.php` (reuse existing `delete` method)
-- `v1/backend/config/console.php` (schedule registration)
+- `ResearchDocument` adds the fields above, casts timestamps and `row_version`, and increments `row_version` with the mutation that changes the row.
+- `RepositoryDeletionLedger` owns the ledger fields and aggregate projection refresh method.
+- `RepositoryDeletionObject` owns encrypted locator persistence and retry metadata.
+- `RepositoryDocumentHistorySnapshot` owns the immutable pre-purge history context.
+- Migration names and model names use `repository_deletion_objects`, not locator terminology.
+- All actor FK migrations use the UUID type and reference `users.id` with `nullOnDelete()`.
 
-**Processor logic (`RepositoryDeletionProcessor::process(RepositoryDeletionLedger $ledger)`):**
-1. **Transition to `deleting`**: `$ledger->update(['status' => 'deleting', 'started_at' => now()])`.
-2. **Storage deletion phase**:
-   - For each path in `$ledger->storage_paths`:
-     - If Supabase path: call `SupabaseStorageService::delete($path)`. Catch `SupabaseStorageException` → mark failure.
-     - Else local disk: `Storage::disk('researchnav_private')->delete($path)`. If file not found → treat as success (idempotent).
-   - If **any** storage deletion fails: increment `storage_deletion_attempts`, set `status = 'storage_failed'`, `last_error = ...`, save, return `false`.
-   - If all succeed: proceed.
-3. **DB purge phase (single transaction)**:
-   - `DB::transaction(function () use ($ledger) {`
-     - Lock `ResearchDocument` row: `ResearchDocument::whereKey($ledger->research_document_id)->lockForUpdate()->firstOrFail()`.
-     - Delete dependent rows in FK order (children first):
-       - `DocumentFile` (already soft-deleted via `deleted_at` on parent? No — `DocumentFile` has no `SoftDeletes`. Must force delete.)
-       - `ResearchAuthor`, `Revision`, `FeedbackComment`, `MonitoringLog`, `TitleValidation`, `ReviewAssignment`, `ResearchProjectTeamMember`, `SimilarityResult` (both source/matched), `DefenseSchedule`, `Evaluation`, `MethodologyReview`, `ComplianceReview`, `MetadataReview`, `ManuscriptSearchDocument`, `PendingPrivateFileDeletion` (by `research_document_id`).
-       - **Do NOT delete:** `audit_logs`, `activity_logs`/`monitoring_logs` (these are immutable; they reference the research document but must remain).
-     - Finally: `$researchDocument->forceDelete()` (hard delete, bypassing `SoftDeletes`).
-   - `}`)
-   - If transaction throws: increment `purge_attempts`, set `status = 'purge_failed'`, `last_error = ...`, save, return `false`.
-4. **Success**: `$ledger->update(['status' => 'completed', 'completed_at' => now()])`. Return `true`.
+### 5. Storage inventory, history snapshots, and FK disposition
 
-**Retry policy:**
-- Scheduler runs `ProcessRepositoryDeletionLedger` every 5 minutes.
-- Command picks up to 50 rows where `status IN ('queued', 'storage_failed', 'purge_failed')` ordered by `queued_at`.
-- Max attempts: storage 10, purge 5 (configurable via `config('researchnav.repository_deletion.max_storage_attempts')` etc.). After max, status stays failed; alert via log/monitoring.
+**Storage inventory is allowlisted and complete before queueing.** Under the target-document lock, inventory is read only from `document_files.file_path` and `pending_private_file_deletions.storage_path` where `research_document_id` is the target. It must not read `instituteStudies`, infer paths from metadata, enumerate a disk/bucket/prefix/folder, or call a storage listing API. Each candidate is normalized to the configured canonical relative locator, rejected if it is empty, absolute, contains `..`, a backslash, control characters, or an unrecognized storage prefix/type, then deduplicated by (`storage_type`, canonical locator) before encryption and object-row insertion. A queued ledger has exactly one object row for each valid deduplicated candidate; invalid candidates reject the request without creating any queue state.
 
-**Acceptance checks:**
-- Processor picks `queued` row, deletes storage objects (local + Supabase), then purges DB graph in one transaction.
-- Storage absence → idempotent success (no failure).
-- Audit logs and activity/monitoring logs **preserved** after purge.
-- Partial storage failure → `storage_failed`, retried on next run.
-- Partial purge failure → `purge_failed`, retried on next run.
-- Completed row → `status = 'completed'`, `completed_at` set.
-- No cancellation path exists.
+**History snapshot.** The permanent-delete transaction writes one immutable `repository_document_history_snapshots` record before child purge. It has `ledger_id` (FK to the ledger), scalar `target_research_document_id`, `submission_reference VARCHAR(40)`, `snapshot_json`, `actor_id`, and timestamps. The snapshot supplies document identity/context after retained history references are nulled. `audit_logs` and `activity_logs` are never deleted. On MariaDB, `activity_logs` is canonical history after consolidation. Migration `000045` already dropped `retention_logs` without copying it, so this feature reports that pre-existing gap and does not claim to recover or fabricate missing historical retention rows; new repository-management evidence is written directly to `activity_logs`. SQLite retains `monitoring_logs` and `retention_logs` as immutable typed history.
 
-### Workstream B4 — Policy & Authorization
-**Files (exclusive ownership):**
-- `v1/backend/app/Policies/ResearchDocumentPolicy.php` (add `managementArchive`, `managementRestore`, `permanentDelete` methods)
-- `v1/backend/bootstrap/providers.php` (ensure policy registered)
+**Exact FK disposition, by driver.** The migration must discover live constraint names rather than assume Laravel-generated names. On MariaDB, it uses `information_schema.KEY_COLUMN_USAGE` joined to `REFERENTIAL_CONSTRAINTS` to make `activity_logs.research_document_id` nullable and recreate that FK with `ON DELETE SET NULL`; `notifications.research_document_id` is verified as nullable/SET NULL. Consolidated MariaDB does not recreate typed monitoring or retention tables. On SQLite, it rebuilds each retained affected table with a nullable column and `ON DELETE SET NULL`, copying rows and restoring indexes/triggers while foreign-key enforcement is controlled for the rebuild. SQLite applies this to `activity_logs.research_document_id`, `monitoring_logs.research_document_id`, `retention_logs.research_document_id`, and, only if verification finds it is not already compliant, `notifications.research_document_id`. `audit_logs` has no direct document FK and is retained with the snapshot.
 
-**Policy rules:**
-- `managementArchive`: `DomainAuthorization::isOffice($actor) || DomainAuthorization::isActiveAdministrator($actor)`.
-- `managementRestore`: same + `archive_provenance === 'management_archived'`.
-- `permanentDelete`: same + `archive_provenance === 'management_archived'`.
+| Referencing rows                                                                                                                                                                                                    | MariaDB and SQLite disposition before `research_documents` hard delete                                                                                                                                     |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `activity_logs`, `notifications`                                                                                                                                                                                    | Retain on both drivers; snapshot context first; direct document FK is nullable with `SET NULL`.                                                                                                            |
+| `monitoring_logs`, `retention_logs`                                                                                                                                                                                 | MariaDB: absent after consolidation; new evidence uses canonical `activity_logs`, and pre-existing retention loss is reported rather than fabricated. SQLite: retain with nullable `SET NULL` document FK. |
+| `research_review_records`                                                                                                                                                                                           | Purge by `research_document_id`; it is non-history, including any driver-present restrictive FK.                                                                                                           |
+| `document_files`, `pending_private_file_deletions`, `research_authors`, `research_review_assignments`, `defense_schedules`, `manuscript_search_documents`, `research_project_team_members`, `class_section_members` | Purge by `research_document_id`.                                                                                                                                                                           |
+| `saved_library_items` when the retired legacy table exists                                                                                                                                                          | Purge by `research_document_id` before the parent because its historical FK is restrictive.                                                                                                                |
+| `similarity_results`                                                                                                                                                                                                | Purge where `source_research_id = target` **or** `matched_research_id = target`.                                                                                                                           |
+| Driver-present legacy mutable tables: `feedback_comments`, `revisions`, `title_validations`, `evaluations`, `methodology_reviews`, `compliance_reviews`, `metadata_reviews`                                         | Purge by `research_document_id` before the parent.                                                                                                                                                         |
+
+The purge transaction deletes the listed mutable rows in child-safe order, then force-deletes the document. It never relies on `CASCADE` as an undocumented cleanup path. MariaDB typed-history removal occurs in the migration/rollout before repository purges, not as an unrecorded per-document purge action.
 
 ---
 
-## Frontend Workstreams (Owner: Frontend Builder)
+## API Contract
 
-### Workstream F1 — API Layer Extensions
-**Files (exclusive ownership):**
-- `v1/frontend/src/api.ts` (add types and functions)
+| Method  | Canonical path                                                                      | Operation                                                                         |
+| ------- | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `GET`   | `/api/office/repository-management/documents`                                       | Paginated document search/filter, including soft-deleted documents.               |
+| `GET`   | `/api/office/repository-management/documents/capabilities`                          | Feature flags, supported filters/sort, page limit, ETag and idempotency contract. |
+| `GET`   | `/api/office/repository-management/documents/{researchDocument}`                    | Document workspace resource and ETag.                                             |
+| `PATCH` | `/api/office/repository-management/documents/{researchDocument}`                    | Metadata update with `If-Match`.                                                  |
+| `POST`  | `/api/office/repository-management/documents/{researchDocument}/management-archive` | Management archive; body exactly `{}`.                                            |
+| `POST`  | `/api/office/repository-management/documents/{researchDocument}/management-restore` | Management restore; body exactly `{}`.                                            |
+| `POST`  | `/api/office/repository-management/documents/{researchDocument}/permanent-delete`   | Queue permanent deletion.                                                         |
+| `GET`   | `/api/office/repository-management/deletions`                                       | Paginated aggregate deletion ledger.                                              |
+| `GET`   | `/api/office/repository-management/deletions/{deletion}`                            | One aggregate deletion ledger resource.                                           |
 
-**New types:**
-```typescript
-export interface RepositoryManagementItem {
-  id: number;
-  submission_reference: string;
-  title: string;
-  institute: string | null;
-  submission_status: InternalResearchResource["submission_status"];
-  archive_status: InternalResearchResource["archive_status"];
-  visibility: InternalResearchResource["visibility"];
-  archive_provenance: "office_archived" | "management_archived" | "legacy_import" | null;
-  management_archived_at: string | null;
-  management_archived_by: string | null;
-  management_archive_reason: string | null;
-  deleted_at: string | null;
-  submitted_at: string | null;
-  archived_at: string | null;
-  authors: ResearchAuthorResource[];
-}
+All routes use `office.authority`; every `PATCH`/`POST` mutation additionally uses `origin.allowed` and the domain-mutation throttle. No legacy route variants exist. Show, update, archive, and restore explicitly resolve with `withTrashed()`. Permanent delete receives a validated scalar document ID instead of implicit model binding: it resolves the global idempotency hash and ledger replay/conflict first, then loads and locks the `withTrashed()` document only for a new request. This preserves replay after the document has been force-deleted.
 
-export interface RepositoryManagementFilters {
-  q?: string;
-  submission_reference?: string;
-  institute?: string;
-  submission_status?: string;
-  archive_status?: string;
-  visibility?: string;
-  provenance?: "office_archived" | "management_archived" | "legacy_import";
-  date_from?: string;
-  date_to?: string;
-  per_page?: number;
-  page?: number;
-}
+### Document representations
 
-export interface RepositoryDeletionLedgerResource {
-  id: number;
-  research_document_id: number;
-  submission_reference: string;
-  status: "queued" | "deleting" | "storage_failed" | "purge_failed" | "completed";
-  storage_paths: string[];
-  storage_deletion_attempts: number;
-  purge_attempts: number;
-  last_error: string | null;
-  queued_at: string;
-  started_at: string | null;
-  completed_at: string | null;
-}
+- The list response is `{ schema_version: 1, data, links, meta }`. Each item contains `id`, `submission_reference`, `title`, `authors`, `institute`, `degree_program`, `publication_year`, `research_stage`, `submission_status`, a `publication` object, a `management` object with aggregate deletion state, `import.is_imported`, timestamps, server-provided `capabilities`, `permanent_delete_confirmation`, `row_version`, and `etag`. `links` and `meta` retain the standard Laravel paginator shape plus normalized sort and filters.
+- List accepts only these query parameters: `q` (submission-reference/title search), `submission_status`, `archive_status`, `visibility`, `management_state` (`active`, `management_archived`, or `legacy_soft_deleted`), `deletion_state` (`none`, `accepted`, or `terminal`), `sort` (`submission_reference`, `title`, `created_at`, `updated_at`, or `management_archived_at`, optionally prefixed with `-`), `page`, and `per_page`. Unknown filters/sorts, invalid enum values, and page values outside the advertised limit return `422 VALIDATION_ERROR`.
+- Show returns `{ data }`, where `data` contains every list field plus editable workspace metadata (`abstract`, `keywords`, and the fields accepted by `PATCH`), `management_archived_by`, `restored_at`, `restored_by`, `permanent_delete_queued_by`, and an aggregate `deletion` value of `null` or `{ id, status, object_count, objects_deleted_count, objects_terminal_failed_count, queued_at, started_at, completed_at }`. The current strong ETag is sent as `ETag: "repository-document-{id}-v{row_version}"` and duplicated in `data.etag`.
+- `GET /documents/capabilities` returns `{ schema_version: 1, data }` with `data.enabled`, `filters`, `sorts`, `max_per_page`, `editable_fields`, `management_archive`, `management_restore`, `permanent_delete`, and `etag`. `etag` declares `required_for: ["patch", "management_archive", "management_restore", "permanent_delete"]`, `header: "If-Match"`, and strong `"repository-document-{id}-v{row_version}"` format. `permanent_delete` declares `reason_min: 1`, `reason_max: 5000`, confirmation template `DELETE {submission_reference}`, and `idempotency_header: "Idempotency-Key"`.
+- `PATCH` and all three document actions require current `If-Match`; missing is `428 PRECONDITION_REQUIRED`, and malformed/stale/nonmatching is `412 PRECONDITION_FAILED`. Validation is `422 VALIDATION_ERROR` with a field-error map; missing document is `404 DOCUMENT_NOT_FOUND`; policy denial is `403 FORBIDDEN`; invalid lifecycle is `409 NOT_ELIGIBLE`; an existing target ledger under another key is `409 DELETION_ALREADY_QUEUED`; and key reuse with another fingerprint is `409 IDEMPOTENCY_CONFLICT`. Authentication is `401 AUTHENTICATION_REQUIRED`, origin denial `403 ORIGIN_NOT_ALLOWED`, oversized body `413 PAYLOAD_TOO_LARGE`, and throttling `429 RATE_LIMIT_EXCEEDED`. Errors never expose SQL, paths, locators, provider responses, or exception text.
+- Do not expose encrypted locators, object rows, raw errors, idempotency keys, `idempotency_key_hash`, or `request_fingerprint`.
+- A document is editable unless policy forbids it for the existing publication/workflow state. Management archive state alone does not alter publication state.
+- `PATCH` accepts only: `title` (filled string, max 500), `abstract` (nullable string, max 50,000), `keywords` (nullable string, max 5,000), `publication_year` (nullable integer 1901–2155), `category_id` (nullable active category ID), `institute` (nullable configured institute), `degree_program` (nullable valid program for the resulting institute, max 255), `manuscript_date_label` (nullable string, max 50), `research_stage` (`title_proposal`, `ongoing`, or `completed`), and `authors` (1–50 ordered entries with nullable existing user UUID, required distinct trimmed `author_name` max 255, and boolean `is_corresponding_author`). At least one field is required. Unknown workflow, publication, storage, management, or identity fields are rejected.
+
+### Actions
+
+**Management archive**
+
+- Requires an exact empty JSON object: `{}`; reject fields or a non-object body with `422`.
+- Requires a current `If-Match` as specified above.
+- Requires `deleted_at IS NULL` and no active deletion ledger for the target.
+- In one transaction, set `deleted_at` and `management_archived_at` to the same time, set `management_archived_by = actor.id`, increment `row_version`, and write audit/activity/monitoring records.
+- Preserve `archive_status`, `submission_status`, and `visibility` without modification.
+
+**Management restore**
+
+- Requires `{}` and `deleted_at IS NOT NULL AND management_archived_at IS NOT NULL`.
+- Requires a current `If-Match` as specified above.
+- Reject legacy/workflow soft-deleted rows and documents with any deletion ledger, including `storage_failed` or `purge_failed`, using `409 NOT_ELIGIBLE`.
+- In one transaction, clear `deleted_at`, `management_archived_at`, and `management_archived_by`; set `restored_at`, `restored_by = actor.id`; increment `row_version`; and write audit/activity/monitoring records.
+- Preserve `archive_status`, `submission_status`, and `visibility` without modification.
+
+**Permanent delete**
+
+- Requires `reason` (string, max 5000), `confirmation` exactly equal to `DELETE {submission_reference}`, a current strong `If-Match: "repository-document-{id}-v{row_version}"`, and `Idempotency-Key`.
+- In one transaction, lock the `withTrashed()` target and lock the row for the globally normalized key hash. Compute the versioned request fingerprint. If the row exists, equal fingerprints return its aggregate ledger resource with `200` and `idempotent_replay: true`; unequal fingerprints return `409 IDEMPOTENCY_CONFLICT`. This replay/conflict decision occurs before current-ETag and lifecycle eligibility checks, so a successful original request remains replayable after it has changed the row version/state. A concurrent absent-key race is resolved by the global unique constraint, then re-read and lock as described in the ledger model.
+- For a new key, require management state (`deleted_at` and `management_archived_at` both non-null), no existing accepted deletion for the target, and the current ETag. Build only the allowlisted, validated, deduplicated inventory; encrypt each locator; persist the key hash and fingerprint; create the ledger, every object row, and history snapshot; mark queue metadata with `actor.id`; increment `row_version`; and write immutable `RESEARCH_PERMANENT_DELETE_QUEUED` audit/activity entries containing `actor.id`, `reason`, and `submission_reference`, all in **one database transaction**. On SQLite, also write its retained typed monitoring record; on MariaDB, the canonical event is the activity stream. Any failure rolls back every one of these writes.
+- The initial response is `202 { ledger_id, status: "queued", idempotent_replay: false }`; the response and later deletion resources expose aggregate status only. A replay is `200` with that same aggregate shape and `idempotent_replay: true`, using the ledger's current status rather than creating another queue item.
+
+---
+
+## Deletion Processor
+
+### State machines
+
+**Object state transitions**
+
+```
+pending -> deleting -> deleted
+                    -> retryable -> deleting
+                    -> terminal_failed
 ```
 
-**New API functions:**
-- `listRepositoryManagement(filters, fetcher?)` → `LaravelPaginatedResponse<RepositoryManagementItem>`
-- `getRepositoryManagement(id, fetcher?)` → `RepositoryManagementItem` (with full relations)
-- `updateRepositoryManagement(id, metadata, fetcher?)` → `RepositoryManagementItem`
-- `managementArchiveRepository(id, { reason, confirmation }, fetcher?)` → `RepositoryManagementItem`
-- `managementRestoreRepository(id, fetcher?)` → `RepositoryManagementItem`
-- `permanentDeleteRepository(id, { reason, confirmation }, fetcher?)` → `{ ledger_id: number }`
-- `listDeletionLedger(filters?, fetcher?)` → `LaravelPaginatedResponse<RepositoryDeletionLedgerResource>`
+- A worker atomically claims only `pending` or due `retryable` rows by changing it to `deleting`, setting a fresh `lease_token` and `lease_expires_at`, and incrementing `attempts` exactly once.
+- Missing storage is a successful idempotent deletion and transitions to `deleted`.
+- A failure below the configured maximum transitions to `retryable` with `next_attempt_at`; the final failed attempt transitions to terminal `terminal_failed`.
+- Completion/failure updates require both prior `deleting` state and the matching unexpired object `lease_token` **and** a matching unexpired parent-ledger lease, and clear the object lease, preventing concurrent workers from completing or counting one object twice.
+- Before each batch, stale object claims (`status = deleting AND lease_expires_at < now()`) are recovered atomically to due `retryable` without incrementing `attempts`; a late worker with the old token cannot complete the reclaimed object.
 
-### Workstream F2 — Repository Management Workspace (Shared Component)
-**Files (exclusive ownership):**
-- `v1/frontend/src/RepositoryManagementWorkspace.tsx` (new — shared by Research Office and Admin)
-- `v1/frontend/src/RepositoryManagementWorkspace.test.tsx` (new)
+**Ledger state transitions**
 
-**Component structure:**
 ```
-RepositoryManagementWorkspace
-├── RepositoryManagementHeader
-│   ├── Live search/filter bar (debounced, uses useLiveFilters)
-│   ├── Provenance filter (All / Office-archived / Management-archived / Legacy-import)
-│   └── Refresh button
-├── RepositoryManagementTable
-│   ├── Columns: Title, Submission Ref, Institute, Submission Status, Archive Status, Visibility, Provenance, Management-archived At, Actions
-│   ├── Row actions (per row, conditional):
-│   │   ├── View/Edit (always) → opens RepositoryManagementDetailModal
-│   │   ├── Archive icon (box) → only if !deleted_at
-│   │   ├── Restore icon (rotate-ccw) → only if deleted_at && provenance === 'management_archived'
-│   │   ├── Permanent-delete icon (trash-2) → only if deleted_at && provenance === 'management_archived'
-│   └── Pagination
-├── RepositoryManagementDetailModal
-│   ├── Tabs: Overview, Files, Authors, Reviewers, Feedback, Revisions, Monitoring, Validations, Similarity
-│   ├── Edit mode (for metadata) — enabled for all rows except office-archived (provenance='office_archived' && archive_status='archived')
-│   ├── Archive confirmation dialog:
-│   │   ├── Mandatory reason textarea (max 5000)
-│   │   ├── Confirmation input: must type exactly `DELETE {submission_reference}`
-│   │   ├── Live validation: green check / red X
-│   │   └── Submit → calls managementArchive
-│   ├── Restore confirmation dialog: "Restore this management-archived record?" + reason display
-│   └── Permanent-delete confirmation dialog:
-│       ├── Mandatory reason textarea
-│       ├── Confirmation input: must type exactly `DELETE {submission_reference}`
-│       ├── Warning: "This queues permanent deletion. Storage objects and database rows will be irreversibly removed. Audit logs are preserved."
-│       └── Submit → calls permanentDelete → shows ledger ID + "Queued for permanent deletion"
-├── DeletionLedgerPanel (collapsible)
-│   ├── Shows queued/deleting/failed/completed ledger rows for this workspace
-│   ├── Auto-refresh every 30s
-│   └── Status badges with retry counts
+queued -> deleting -> purge_retryable -> purge_deleting -> completed
+                    -> storage_failed
+purge_deleting -> purge_retryable
+purge_deleting -> purge_failed
 ```
 
-**Integration points:**
-- Research Office sidebar: add "Repository Management" nav item → renders `<RepositoryManagementWorkspace context="office" />`
-- Admin sidebar: add "Repository Management" nav item → renders `<RepositoryManagementWorkspace context="admin" />`
-- Both share the exact same component; only API base path differs (`/api/office/repository` vs `/api/admin/repository`).
+- `storage_failed` and `purge_failed` are terminal. `purge_retryable` is explicitly retryable. A ledger remains `deleting` while any object is pending, claimed, or retryable, and its `next_attempt_at` is set to the earliest retryable child time.
+- A storage worker claims `queued -> deleting` with a fresh ledger `lease_token` and `lease_expires_at`; it may claim/process objects only while that parent lease is current. The object lease is independent and protects the individual storage operation.
+- After all object rows are `deleted`, the ledger transitions to `purge_retryable`. A processor claim changes it to `purge_deleting`, sets a fresh `lease_token`/`lease_expires_at`, and increments `purge_attempts` exactly once.
+- A purge failure below the configured maximum returns to `purge_retryable`; the final failure becomes terminal `purge_failed`.
+- Ledger completion/failure requires its matching unexpired lease token and clears the lease. Before selection, stale `purge_deleting` claims are atomically returned to due `purge_retryable` without incrementing `purge_attempts`; stale `deleting` storage claims recover expired child claims and clear the parent lease. The scheduler claims `queued`, due `deleting` rows without a live lease, and due `purge_retryable` rows; a due `deleting` row resumes only pending or due-retryable child objects. It never retries terminal ledger states without an explicitly authorized operational repair.
+
+### Counting and processing rules
+
+- Never increment ledger totals as a side effect of a retry. After every conditional object transition, recompute `object_count`, `objects_deleted_count`, and `objects_terminal_failed_count` from the durable object rows in the same transaction, or maintain them with an equivalent idempotent conditional transition.
+- A duplicate worker completion changes zero rows and therefore changes zero counts.
+- If any object is `terminal_failed`, set ledger `storage_failed` with `STORAGE_DELETION_FAILED`; never proceed to purge.
+- Purge only after all objects are `deleted`. Lock and locate the target by scalar `target_research_document_id`; tolerate an already-purged target as idempotent success.
+- Purge exactly the documented mutable FK inventory (including non-history `research_review_records`) before force-deleting the document in one transaction. Do not delete audit logs, activity logs, monitoring logs, or retention snapshots; their nullable document FKs use `ON DELETE SET NULL`.
+- The scheduler runs every five minutes, uses bounded batches and configured storage/purge retry limits, logs generic error codes, and provides neither a user retry nor a cancel operation.
+
+---
+
+## Workstreams and Acceptance Checks
+
+### B1 — Migrations and models
+
+**Exclusive files (Database Builder):**
+
+- `v1/backend/database/migrations/2026_09_13_000001_add_repository_management_state_to_research_documents.php`
+- `v1/backend/database/migrations/2026_09_13_000002_create_repository_deletion_ledger.php`
+- `v1/backend/database/migrations/2026_09_13_000003_create_repository_deletion_objects_and_history_snapshots.php`
+- `v1/backend/database/migrations/2026_09_13_000004_preserve_repository_history_foreign_keys.php`
+- `v1/backend/app/Models/ResearchDocument.php`
+- `v1/backend/app/Models/RepositoryDeletionLedger.php`
+- `v1/backend/app/Models/RepositoryDeletionObject.php`
+- `v1/backend/app/Models/RepositoryDocumentHistorySnapshot.php`
 
 **Acceptance checks:**
-- Live search/filter debounces 300ms; updates table without full reload.
-- Archive icon only on non-deleted rows; Restore + Permanent-delete only on management-archived rows (provenance='management_archived').
-- Legacy-import rows (provenance='legacy_import') show no Restore/Permanent-delete.
-- Archive dialog requires reason + exact `DELETE {submission_reference}`; Submit disabled until both valid.
-- Permanent-delete dialog shows ledger ID on success; DeletionLedgerPanel shows row with status.
-- Edit mode works for management-archived rows (correction before restore).
-- Office-archived rows (provenance='office_archived') are read-only in detail modal.
 
-### Workstream F3 — Sidebar Integration
-**Files (exclusive ownership):**
-- `v1/frontend/src/RoleSidebarPages.tsx` (add nav items for Research Office and Admin)
-- `v1/frontend/src/AdminSidebarPages.tsx` (add nav item for Admin)
+- Fresh migration creates the management timestamps, UUID actor FKs to `users.id`, `row_version`, `unsignedBigInteger` ledger scalar target without a document FK, `submission_reference VARCHAR(40)`, persisted hashes, leases, object table, and history snapshot table.
+- Management scope requires both `deleted_at` and `management_archived_at`; legacy scope requires `deleted_at` with null management timestamp.
+- Unique target/key hash and idempotency fingerprint behavior are tested.
+- Object/ledger retry and terminal states, lease-token claims, stale-claim recovery, and recomputed counts are tested.
+- Driver-specific nullable `SET NULL` history migrations and the full FK-inventory test pass.
+
+### B2 — Repository Management API
+
+**Exclusive files (Backend API Builder):**
+
+- `v1/backend/app/Http/Controllers/ResearchOfficeController.php`
+- `v1/backend/app/Services/RepositoryManagementService.php`
+- `v1/backend/app/Services/RepositoryDeletionInventory.php`
+- `v1/backend/app/Services/RepositoryDeletionLocatorCipher.php`
+- `v1/backend/app/Policies/ResearchDocumentPolicy.php`
+- `v1/backend/bootstrap/providers.php`
+- `v1/backend/routes/web.php`
 
 **Acceptance checks:**
-- Research Office sees "Repository Management" in sidebar; navigates to workspace.
-- Admin sees "Repository Management" in sidebar; navigates to workspace.
-- Both use shared `RepositoryManagementWorkspace` component.
+
+- Only the canonical `/api/office/repository-management/documents` and `/api/office/repository-management/deletions` resources and their documented descendants are registered.
+- Every mutation has `office.authority`, `origin.allowed`, and the domain-mutation throttle; archive and restore accept only `{}` and preserve all three publication fields.
+- `actor.id` is written to UUID actor columns.
+- Permanent delete persists the target scalar, key hash, request fingerprint, and only the canonical validated/deduplicated `document_files`/`pending_private_file_deletions` inventory; it never performs folder/bucket enumeration. Duplicate requests are idempotent or conflict as specified.
+- Ledger, object rows, queue metadata, history snapshot, and `RESEARCH_PERMANENT_DELETE_QUEUED` audit/activity/monitoring entries with `actor.id`, reason, and submission reference commit atomically.
+- Deletion responses contain aggregate state only.
+
+### B3 — Scheduled deletion processor
+
+**Exclusive files (Backend Processor Builder):**
+
+- `v1/backend/app/Console/Commands/ProcessRepositoryDeletionLedger.php`
+- `v1/backend/app/Services/RepositoryDeletionProcessor.php`
+- `v1/backend/app/Services/RepositoryDeletionStorageAdapter.php`
+- `v1/backend/config/console.php`
+
+**Acceptance checks:**
+
+- Local and Supabase deletion are idempotent for an absent object.
+- Retryable versus terminal object and ledger transitions, token-checked completion, and stale lease recovery follow the state machines.
+- Concurrent processing cannot double increment attempts or aggregate counts.
+- DB purge is transactional, purges non-history `research_review_records`, and preserves immutable snapshots with null document references.
+
+### F1–F3 — Frontend API, workspace, and navigation
+
+**Exclusive files (Frontend Builder):**
+
+- F1: `v1/frontend/src/api.ts`
+- F2: `v1/frontend/src/RepositoryManagementWorkspace.tsx`, `v1/frontend/src/RepositoryManagementWorkspace.test.tsx`
+- F3: `v1/frontend/src/RoleSidebarPages.tsx`, `v1/frontend/src/AdminSidebarPages.tsx`
+
+No file above is assigned to another workstream. Existing storage services are consumed through their public interface and are not edited by this plan.
+
+- Use only the canonical document and deletion paths.
+- Archive and restore dialogs send `{}` and state that publication state is preserved.
+- Restore and permanent-delete controls appear only when both management-state timestamps are present and no accepted deletion is active.
+- Permanent deletion requires reason, exact confirmation, ETag, and client-generated idempotency key.
+- Ledger UI displays aggregate counts and generic status only.
 
 ---
 
 ## Test Gates
 
-### Backend Test Gates (run from `backend/`)
-| Gate | Command | Must Pass |
-|------|---------|-----------|
-| Migration fresh + seed | `php artisan migrate:fresh --seed` | ✅ |
-| Migration up/down (fresh DB) | `php artisan migrate` → `php artisan migrate:rollback --step=2` | ✅ |
-| Unit: RepositoryManagementService | `php artisan test --filter=RepositoryManagementServiceTest` | ✅ |
-| Unit: RepositoryDeletionProcessor | `php artisan test --filter=RepositoryDeletionProcessorTest` | ✅ |
-| Feature: Office repository API | `php artisan test --filter=ResearchOfficeRepositoryTest` | ✅ |
-| Feature: Admin repository API | `php artisan test --filter=AdminRepositoryTest` | ✅ |
-| Feature: Deletion ledger processor | `php artisan test --filter=ProcessRepositoryDeletionLedgerTest` | ✅ |
-| Policy tests | `php artisan test --filter=ResearchDocumentPolicyTest` | ✅ |
-| Full suite | `composer test` | 271+ passed, 0 failed |
+### Backend
 
-**Key test scenarios:**
-- `managementArchive` with wrong confirmation → 422 `INVALID_CONFIRMATION`.
-- `managementArchive` with valid confirmation → 200, row soft-deleted, provenance set, audit logged.
-- `managementRestore` on management-archived → 200, row restored, provenance cleared.
-- `managementRestore` on legacy-import → 409 `NOT_RESTORABLE`.
-- `permanentDelete` on management-archived → 202, ledger created.
-- `permanentDelete` on non-management-archived → 409 `NOT_ELIGIBLE`.
-- Processor: storage success → DB purge success → ledger `completed`.
-- Processor: storage failure → ledger `storage_failed`, retries.
-- Processor: purge failure → ledger `purge_failed`, retries.
-- Processor: storage object missing → idempotent success.
-- Audit logs preserved after purge.
-- Activity/monitoring logs preserved after purge.
+- `php artisan migrate:fresh --seed`
+- `php artisan test --filter=RepositoryManagementServiceTest`
+- `php artisan test --filter=RepositoryDeletionProcessorTest`
+- `php artisan test --filter=ResearchOfficeRepositoryTest`
+- `php artisan test --filter=DeletionLedgerApiTest`
+- `php artisan test --filter=ResearchDocumentPolicyTest`
+- `composer test`
 
-### Frontend Test Gates (run from `frontend/`)
-| Gate | Command | Must Pass |
-|------|---------|-----------|
-| TypeScript | `npm run typecheck` | ✅ |
-| Lint | `npm run lint` | ✅ |
-| Format | `npm run format:check` | ✅ |
-| Unit/Component tests | `npm run test -- --run src/RepositoryManagementWorkspace.test.tsx` | ✅ |
-| Build | `npm run build` | ✅ |
-| Focused API/contract tests | `npm run test -- --run src/api.test.ts` | ✅ |
+Key scenarios include archive/restore `{}` validation and publication preservation; `origin.allowed` on every mutation; management-state derivation; `users.id` actor FKs; `VARCHAR(40)` submission-reference and unsigned-BIGINT target schema; idempotency replay/conflict; no document FK on the scalar target; only table-sourced canonical/deduplicated storage inventory with no listing/enumeration; atomic queued audit with actor/reason/reference; durable object transitions; stale object and ledger claim recovery; no double counts under retry/concurrency; absent-object success; terminal failures not reprocessed; and no sensitive storage/idempotency data in responses.
 
-**Key test scenarios:**
-- Filter bar updates URL/query and reloads table.
-- Archive icon visibility logic.
-- Restore/Permanent-delete icon visibility logic (provenance gating).
-- Archive confirmation: reason required, confirmation must match exactly.
-- Permanent-delete confirmation: reason required, confirmation must match exactly.
-- Detail modal tabs load correct data.
-- Edit mode enabled/disabled per provenance rules.
-- DeletionLedgerPanel shows ledger rows with status badges.
+**Full FK-inventory gate:** `RepositoryDeletionForeignKeyInventoryTest` runs after fresh migration on both supported drivers. For MariaDB it reads `information_schema.KEY_COLUMN_USAGE` plus `REFERENTIAL_CONSTRAINTS`; for SQLite it executes `PRAGMA foreign_key_list` for every application table. It fails on any FK that references `research_documents.id` but is absent from the disposition table above, on any retained-history reference that is not nullable/`SET NULL`, or when a seeded permanent purge leaves a mutable child (especially `research_review_records`) or cannot null retained history. This is an inventory assertion, not merely a test of the known model relations.
+
+### Frontend
+
+- `npm run typecheck`
+- `npm run lint`
+- `npm run format:check`
+- `npm run test -- --run src/RepositoryManagementWorkspace.test.tsx`
+- `npm run build`
+
+Key scenarios include canonical paths, `{}` archive/restore requests, publication-state preservation, state-derived action visibility, ETag/idempotency permanent-delete submission, and aggregate-only deletion display.
 
 ---
 
-## Migration & Rollout Controls
+## Migration and Rollout
 
-### Migration Sequence
-1. **Deploy migrations only** (no code):
-   - Run `2026_09_13_000001_add_archive_provenance_to_research_documents.php`
-   - Run `2026_09_13_000002_create_repository_deletion_ledger_table.php`
-   - Verify on staging: columns exist, indexes created, no data loss.
-   - **Backfill:** For existing `deleted_at` rows:
-     - If `import_source_sha256` not null → `archive_provenance = 'legacy_import'`.
-     - Else if `archive_status = 'archived'` → `archive_provenance = 'office_archived'`.
-     - Else → `archive_provenance = 'management_archived'` (assume prior management action).
-     - Set `management_archived_at = deleted_at` where provenance = 'management_archived'.
-   - Record backup SHA-256 before and after.
-
-2. **Deploy backend code** (controllers, service, processor, policies):
-   - Enable scheduler for `repository:process-deletion-ledger` (every 5 min).
-   - Verify processor picks up zero rows initially.
-
-3. **Deploy frontend code** (workspace component, sidebar integration):
-   - Feature flag or branch deploy to staging.
-   - Smoke test: Office + Admin can see repository, archive/restore/permanent-delete flow works.
-
-### Rollback Plan
-- **Migrations:** Down migrations drop columns/table. **Data loss:** `archive_provenance`, `management_archived_*`, and ledger rows are lost. Restore from pre-migration backup if needed.
-- **Code:** Revert backend/frontend commits. Scheduler disabled by removing schedule entry.
-
-### Feature Flag (Optional)
-- `REPOSITORY_MANAGEMENT_ENABLED` in `.env` → gates frontend nav items and backend routes (return 404 if disabled). Allows dark deploy.
-
----
-
-## Acceptance Criteria Summary (Definition of Done)
-
-| # | Criterion | Verification |
-|---|-----------|--------------|
-| 1 | Research Office sees Repository Management in sidebar | Manual + Cypress |
-| 2 | Admin sees Repository Management in sidebar | Manual + Cypress |
-| 3 | Live search/filter works (title, ref, institute, status, provenance, date) | Automated test |
-| 4 | Table shows all rows including management-archived (deleted_at) | Automated test |
-| 5 | Archive icon only on non-deleted rows | Automated test |
-| 6 | Restore icon only on management-archived (provenance='management_archived') | Automated test |
-| 7 | Permanent-delete icon only on management-archived | Automated test |
-| 8 | Legacy-import rows show no Restore/Permanent-delete | Automated test |
-| 9 | Archive dialog: mandatory reason + exact `DELETE {submission_reference}` | Automated test |
-| 10 | Restore dialog: confirms, restores row, clears provenance | Automated test |
-| 11 | Permanent-delete dialog: mandatory reason + exact confirmation → 202 + ledger ID | Automated test |
-| 12 | Ledger row created with all storage_paths | Automated test |
-| 13 | Processor deletes storage (local + Supabase) idempotently | Automated test |
-| 14 | Processor purges DB graph in transaction (children first) | Automated test |
-| 15 | Audit logs & activity/monitoring logs preserved after purge | Automated test |
-| 16 | Storage failure → `storage_failed`, retries | Automated test |
-| 17 | Purge failure → `purge_failed`, retries | Automated test |
-| 18 | No cancellation path exists | Code review |
-| 19 | All mutations emit audit logs with reason, actor, submission_reference | Automated test |
-| 20 | Policies enforce Office/Admin only | Automated test |
-| 21 | Office-archived rows read-only in detail modal | Automated test |
-| 22 | Management-archived rows editable in detail modal (pre-restore) | Automated test |
-| 23 | DeletionLedgerPanel shows real-time status | Manual + automated |
-| 24 | Full backend suite passes (271+ tests) | CI gate |
-| 25 | Full frontend suite passes | CI gate |
-
----
-
-## File Ownership Summary (No Overlaps)
-
-| Workstream | Owner | Exclusive Paths |
-|------------|-------|-----------------|
-| B1 Migrations/Models | Backend Security & API Builder | `v1/backend/database/migrations/2026_09_13_000001_*`, `2026_09_13_000002_*`, `v1/backend/app/Models/ResearchDocument.php`, `v1/backend/app/Models/RepositoryDeletionLedger.php` |
-| B2 Repository API | Backend Security & API Builder | `v1/backend/app/Http/Controllers/ResearchOfficeController.php`, `v1/backend/app/Http/Controllers/AdminController.php`, `v1/backend/app/Services/RepositoryManagementService.php`, `v1/backend/app/Policies/ResearchDocumentPolicy.php`, `v1/backend/routes/web.php` |
-| B3 Deletion Processor | Backend Security & API Builder | `v1/backend/app/Console/Commands/ProcessRepositoryDeletionLedger.php`, `v1/backend/app/Services/RepositoryDeletionProcessor.php`, `v1/backend/config/console.php` |
-| F1 API Types/Functions | Frontend Builder | `v1/frontend/src/api.ts` (new types + functions only) |
-| F2 Workspace Component | Frontend Builder | `v1/frontend/src/RepositoryManagementWorkspace.tsx`, `v1/frontend/src/RepositoryManagementWorkspace.test.tsx` |
-| F3 Sidebar Integration | Frontend Builder | `v1/frontend/src/RoleSidebarPages.tsx`, `v1/frontend/src/AdminSidebarPages.tsx` |
-
-> **No workstream may edit files outside its exclusive paths.** If a shared file is needed (e.g., `api.ts` for types), the Frontend Builder owns the *addition* of types/functions; the Backend Builder owns the *contract shape* and must coordinate via Plan Coordinator.
-
----
-
-## Dependencies & Ordering
-
-```
-B1 (Migrations/Models)
-  → B2 (Repository API) ← B4 (Policies, can parallel after B1)
-  → B3 (Deletion Processor) ← B1
-F1 (API Types) ← B2 (contract freeze)
-  → F2 (Workspace Component)
-    → F3 (Sidebar Integration)
-```
-
-**Hard gates:**
-- B1 must complete and migrate on staging before B2/B3/F1 start.
-- B2 contract (response shapes, error codes) must be frozen before F1 implements types.
-- F1 must complete before F2 begins (component uses API functions).
-- F2 must complete before F3 (sidebar mounts workspace).
+1. Deploy migrations with queue processing disabled. Verify UUID actor FKs reference `users.id`, the ledger target has no document FK, `submission_reference` is `VARCHAR(40)`, leases and object/history rows/indexes exist, and the full driver-specific FK inventory passes.
+2. Backfill only `management_archived_at` for records known to have been management-archived. Do not infer management state from publication/workflow fields. Existing soft-deleted rows without a reliable management timestamp remain legacy/workflow-deleted and are not eligible for management restore or permanent delete.
+3. Verify immutable history snapshots and their nullable `ON DELETE SET NULL` FKs using the full inventory gate.
+4. Deploy API and processor, enable the five-minute scheduler only after a zero-queue check, then deploy frontend navigation behind the optional `REPOSITORY_MANAGEMENT_ENABLED` flag.
+5. **Rollback guard for all deletion evidence:** rollback is prohibited while any ledger, deletion-object, or history-snapshot row exists, including failed and completed rows. First disable queueing and scheduler workers, export every ledger/object/history-snapshot row plus corresponding `audit_logs`, `activity_logs`, and SQLite retained `monitoring_logs`/`retention_logs` evidence with checksums and a tested restoration runbook, then drain or operationally resolve in-flight work and clear expired leases. Only explicit data-owner authorization after verified evidence preservation permits rollback; otherwise the additive tables and nullable history FKs remain. Never drop deletion evidence merely because a backup exists.
 
 ---
 
 ## Handoff
 
-This plan is the **sole authoritative artifact** for Shared Repository Management. Implementation must not begin until:
-
-1. Plan Coordinator approves this document.
-2. Git/Repository Steward provides a clean baseline SHA (per T00 in roadmap).
-3. Database Builder confirms migration safety on MariaDB (per T01).
-4. Backend Security & API Builder and Frontend Builder acknowledge exclusive file ownership.
-
-**Next action:** Plan Coordinator creates implementation branch `feat/repository-management` from approved clean baseline, then assigns workstreams to owners via GitHub issues referencing this plan.
+Implementation starts only after plan approval, a clean baseline SHA, MariaDB migration-safety confirmation, and workstream ownership acknowledgement. The Plan Coordinator creates `feat/repository-management` from the approved baseline and assigns the workstreams.
