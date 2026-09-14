@@ -1,23 +1,35 @@
-import { ArrowLeft, Eye, Pencil, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  Eye,
+  Folder,
+  Pencil,
+  Trash2,
+  UserRoundCheck,
+  UserRoundPlus,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getInternalResearch,
   getResearchPeople,
+  listEligibleSupportUsers,
+  listResearchFolders,
   listResearchFiles,
   listResearchRevisions,
+  listResearchSupportAssignments,
   listTitleValidations,
   deleteResearchFile,
   renameResearchFile,
   researchFileDownloadUrl,
   researchFilePreviewUrl,
   reportResearchProgress,
-  requestTitleValidation,
+  requestResearchSupport,
   resubmitResearchRevision,
   uploadResearchFile,
   type DocumentFileResource,
   type ResearchDocumentSummaryResource,
   type ResearchPeopleResource,
   type ResearchRevisionResource,
+  type SupportAssignmentResource,
   type TitleValidationResource,
 } from "./api";
 import { Button } from "./components";
@@ -25,6 +37,7 @@ import { ConfirmDialog, Modal } from "./Modal";
 import ResearchActivity from "./ResearchActivity";
 import { ResearcherNewSubmission } from "./RoleSidebarPages";
 import SimilarityResults from "./SimilarityResults";
+import ManuscriptFilePicker from "./ManuscriptFilePicker";
 
 type WorkspaceContext = {
   research: ResearchDocumentSummaryResource;
@@ -32,9 +45,20 @@ type WorkspaceContext = {
   revisions: ResearchRevisionResource[];
   validations: TitleValidationResource[];
   people: ResearchPeopleResource;
+  folders: string[];
+  supportAssignments: SupportAssignmentResource[];
 };
 
-type ResearcherSection = "files" | "revisions" | "validations" | "people";
+type ResearcherSection =
+  "files" | "revisions" | "validations" | "people" | "folders" | "support";
+
+type SupportRole = SupportAssignmentResource["assignment_role"];
+
+const supportRoles: Array<{ role: SupportRole; label: string }> = [
+  { role: "research_editor", label: "Editor" },
+  { role: "statistician", label: "Statistician" },
+  { role: "librarian", label: "Librarian" },
+];
 
 const maxFileBytes = 25 * 1024 * 1024;
 const allowedExtensions = new Set(["pdf", "docx"]);
@@ -164,6 +188,14 @@ export default function ResearcherResearchWorkspace({
   const [upload, setUpload] = useState<File | null>(null);
   const [uploadType, setUploadType] =
     useState<DocumentFileResource["document_type"]>("title_proposal");
+  const [uploadFolder, setUploadFolder] = useState("");
+  const [supportRole, setSupportRole] = useState<SupportRole | null>(null);
+  const [supportCandidates, setSupportCandidates] = useState<
+    Array<{ id: string; name: string; email: string }>
+  >([]);
+  const [supportCandidateId, setSupportCandidateId] = useState("");
+  const [supportCandidatesLoading, setSupportCandidatesLoading] =
+    useState(false);
   const [renaming, setRenaming] = useState<DocumentFileResource | null>(null);
   const [filename, setFilename] = useState("");
   const [deleting, setDeleting] = useState<DocumentFileResource | null>(null);
@@ -194,13 +226,21 @@ export default function ResearcherResearchWorkspace({
         throw new Error("RESEARCHER_RECORD_INVALID");
       }
 
-      const [filesResult, revisionsResult, validationsResult, peopleResult] =
-        await Promise.allSettled([
-          listResearchFiles(researchDocumentId),
-          listResearchRevisions(researchDocumentId),
-          listTitleValidations(researchDocumentId),
-          getResearchPeople(researchDocumentId),
-        ]);
+      const [
+        filesResult,
+        revisionsResult,
+        validationsResult,
+        peopleResult,
+        foldersResult,
+        supportResult,
+      ] = await Promise.allSettled([
+        listResearchFiles(researchDocumentId),
+        listResearchRevisions(researchDocumentId),
+        listTitleValidations(researchDocumentId),
+        getResearchPeople(researchDocumentId),
+        listResearchFolders(researchDocumentId),
+        listResearchSupportAssignments(researchDocumentId),
+      ]);
       if (!mounted.current || generation.current !== request) return;
 
       const nextMockSections: ResearcherSection[] = [];
@@ -228,12 +268,25 @@ export default function ResearcherResearchWorkspace({
         nextSectionErrors.push("people");
       }
 
+      const folders = readArraySection(
+        foldersResult,
+        "folders",
+        nextSectionErrors,
+      );
+      const supportAssignments = readArraySection(
+        supportResult,
+        "support",
+        nextSectionErrors,
+      );
+
       setContext({
         research,
         files,
         revisions,
         validations,
         people,
+        folders,
+        supportAssignments,
       });
       setSource("live");
       setMockSections(nextMockSections);
@@ -242,6 +295,9 @@ export default function ResearcherResearchWorkspace({
         research.submission_status === "revision_required"
           ? "revised_manuscript"
           : "title_proposal",
+      );
+      setUploadFolder((current) =>
+        folders.includes(current) ? current : (folders[0] ?? ""),
       );
     } catch {
       if (!mounted.current || generation.current !== request) return;
@@ -264,16 +320,14 @@ export default function ResearcherResearchWorkspace({
     source === "live" &&
     (research?.submission_status === "draft" ||
       research?.submission_status === "revision_required");
-  const canRequestValidation =
-    research !== undefined &&
-    ["draft", "submitted", "under_review", "revision_required"].includes(
-      research.submission_status,
-    );
   const canReportProgress =
     research?.research_stage === "ongoing" &&
     research.submission_status !== "archived";
   const revisions = [...(context?.revisions ?? [])].sort(
     (first, second) => second.revision_number - first.revision_number,
+  );
+  const completedValidations = (context?.validations ?? []).filter(
+    (validation) => validation.validation_status !== "pending",
   );
   const latestRevision = revisions.find((revision) =>
     ["requested", "in_progress"].includes(revision.revision_status),
@@ -305,6 +359,44 @@ export default function ResearcherResearchWorkspace({
         second.version_number - first.version_number,
     )[0]?.id;
 
+  function currentSupportAssignment(role: SupportRole) {
+    return (context?.supportAssignments ?? []).find(
+      (assignment) =>
+        assignment.assignment_role === role &&
+        ["requested", "pending", "accepted", "confirmed", "active"].includes(
+          assignment.status,
+        ),
+    );
+  }
+
+  function supportRoleLabel(role: SupportRole) {
+    return (
+      supportRoles.find((item) => item.role === role)?.label ?? humanize(role)
+    );
+  }
+
+  async function openSupportPicker(role: SupportRole) {
+    if (mutation) return;
+    setSupportRole(role);
+    setSupportCandidateId("");
+    setSupportCandidates([]);
+    setSupportCandidatesLoading(true);
+    setMessage("");
+    try {
+      const candidates = await listEligibleSupportUsers(role);
+      if (!mounted.current) return;
+      const current = currentSupportAssignment(role);
+      setSupportCandidates(
+        candidates.filter((candidate) => candidate.id !== current?.user_id),
+      );
+    } catch {
+      if (mounted.current)
+        setMessage("Available research support accounts could not be loaded.");
+    } finally {
+      if (mounted.current) setSupportCandidatesLoading(false);
+    }
+  }
+
   async function runMutation(label: string, action: () => Promise<unknown>) {
     if (mutation || source === "mock") return;
     setMutation(label);
@@ -330,8 +422,32 @@ export default function ResearcherResearchWorkspace({
       return;
     }
     void runMutation("upload", () =>
-      uploadResearchFile(research.id, upload!, uploadType),
+      uploadResearchFile(
+        research.id,
+        upload!,
+        uploadType,
+        uploadFolder || null,
+      ),
     ).then(() => setUpload(null));
+  }
+
+  function submitSupportRequest(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!research || !supportRole || !supportCandidateId) return;
+    const current = currentSupportAssignment(supportRole);
+    const role = supportRole;
+    void runMutation(`support-${role}`, () =>
+      requestResearchSupport(
+        research.id,
+        supportCandidateId,
+        role,
+        Boolean(current),
+      ),
+    ).then(() => {
+      setSupportRole(null);
+      setSupportCandidateId("");
+      setSupportCandidates([]);
+    });
   }
 
   if (loading) {
@@ -352,8 +468,11 @@ export default function ResearcherResearchWorkspace({
           <Button variant="secondary" onClick={reload}>
             Retry
           </Button>
-          <Button variant="quiet" onClick={() => navigate("/app")}>
-            Back to dashboard
+          <Button
+            variant="quiet"
+            onClick={() => navigate("/app/researcher/submissions")}
+          >
+            Back to my research
           </Button>
         </section>
       </div>
@@ -371,8 +490,11 @@ export default function ResearcherResearchWorkspace({
             activity.
           </p>
         </div>
-        <Button variant="secondary" onClick={() => navigate("/app")}>
-          <ArrowLeft /> Back to dashboard
+        <Button
+          variant="secondary"
+          onClick={() => navigate("/app/researcher/submissions")}
+        >
+          <ArrowLeft /> Back to my research
         </Button>
       </header>
 
@@ -426,106 +548,196 @@ export default function ResearcherResearchWorkspace({
         </section>
       )}
 
+      <aside
+        className="researcher-folder-guide"
+        aria-label="Folder action guide"
+      >
+        <div>
+          <strong>Submitting research</strong>
+          <span>
+            Edit details and files, then submit the draft. Submission sends the
+            manuscript to reviewers and locks normal editing during review.
+          </span>
+        </div>
+        <div>
+          <strong>Reporting progress</strong>
+          <span>
+            Use Progress to share accomplishments, blockers, and next steps. A
+            progress update does not submit or approve the manuscript.
+          </span>
+        </div>
+      </aside>
+
       <nav
         className="researcher-section-nav"
         aria-label="Research record sections"
       >
         <a href="#submission-status">Status</a>
+        <a href="#research-support">Research team</a>
         <a href="#revision-history">Revisions</a>
         <a href="#research-files">Files</a>
-        <a href="#research-progress">Progress</a>
+        <a href="#research-progress">Progress updates</a>
         <a href="#research-feedback">Feedback</a>
       </nav>
 
-      <ResearchWorkflow status={research.submission_status} />
+      <div className="researcher-overview-grid">
+        <ResearchWorkflow status={research.submission_status} />
 
-      <section
-        id="submission-status"
-        className="panel-card researcher-record-summary"
-        aria-labelledby="researcher-summary-title"
-      >
-        <div className="section-heading">
-          <div>
-            <dt>Submission reference</dt>
-            <dd>{research.submission_reference ?? "Pending reference"}</dd>
+        <section
+          id="submission-status"
+          className="panel-card researcher-record-summary"
+          aria-labelledby="researcher-summary-title"
+        >
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Submission details</p>
+              <h2 id="researcher-summary-title">Record status</h2>
+              <p className="researcher-reference">
+                {research.submission_reference ?? "Pending reference"}
+              </p>
+            </div>
+            {editable && (
+              <Button
+                variant="secondary"
+                onClick={() => setEditing(true)}
+                disabled={Boolean(mutation)}
+              >
+                Edit metadata and authors
+              </Button>
+            )}
           </div>
-          <div>
-            <p className="eyebrow">Submission details</p>
-            <h2 id="researcher-summary-title">Record status</h2>
-          </div>
-          {editable && (
-            <Button
-              variant="secondary"
-              onClick={() => setEditing(true)}
-              disabled={Boolean(mutation)}
-            >
-              Edit metadata and authors
-            </Button>
+          <dl>
+            <div>
+              <dt>Status</dt>
+              <dd>
+                <span className="researcher-status-badge">
+                  {humanize(research.submission_status)}
+                </span>
+              </dd>
+            </div>
+            <div>
+              <dt>Stage</dt>
+              <dd>{humanize(research.research_stage)}</dd>
+            </div>
+            <div>
+              <dt>Institute</dt>
+              <dd>{research.institute ?? "Not specified"}</dd>
+            </div>
+            <div>
+              <dt>Submitted</dt>
+              <dd>{formatDate(research.submitted_at)}</dd>
+            </div>
+            <div>
+              <dt>Year</dt>
+              <dd>{research.publication_year ?? "—"}</dd>
+            </div>
+            <div>
+              <dt>Program</dt>
+              <dd>{research.degree_program ?? "Not specified"}</dd>
+            </div>
+          </dl>
+          {research.abstract && (
+            <div className="researcher-abstract">
+              <strong>Abstract</strong>
+              <p>{research.abstract}</p>
+            </div>
           )}
-        </div>
-        <dl>
-          <div>
-            <dt>Status</dt>
-            <dd>{humanize(research.submission_status)}</dd>
-          </div>
-          <div>
-            <dt>Stage</dt>
-            <dd>{humanize(research.research_stage)}</dd>
-          </div>
-          <div>
-            <dt>Category</dt>
-            <dd>{research.category?.name ?? "Uncategorized"}</dd>
-          </div>
-          <div>
-            <dt>Submitted</dt>
-            <dd>{formatDate(research.submitted_at)}</dd>
-          </div>
-          <div>
-            <dt>Year</dt>
-            <dd>{research.publication_year ?? "—"}</dd>
-          </div>
-          <div>
-            <dt>Authors</dt>
-            <dd>
+          <div className="researcher-authors">
+            <strong>Researchers</strong>
+            <p>
               {research.authors
                 .map((author) => author.author_name)
-                .join(", ") || "—"}
-            </dd>
+                .join(", ") || "Not specified"}
+            </p>
           </div>
-        </dl>
-        {research.abstract && (
-          <p className="researcher-abstract">{research.abstract}</p>
-        )}
-        {(context.people.section || context.people.reviewers.length > 0) && (
-          <div
-            className="researcher-people"
-            aria-label="Assigned research contacts"
-          >
-            <strong>Assigned contacts</strong>
-            {context.people.section && (
-              <p>
-                Section: {context.people.section.name}
-                {context.people.section.academic_year
-                  ? ` · ${context.people.section.academic_year}`
-                  : ""}
-                {context.people.section.instructor_name
-                  ? ` · Instructor: ${context.people.section.instructor_name}`
-                  : ""}
-              </p>
-            )}
-            {context.people.reviewers.length > 0 && (
-              <p>
-                Reviewers:{" "}
-                {context.people.reviewers
-                  .map(
-                    (reviewer) =>
-                      `${humanize(reviewer.review_role)}: ${reviewer.name ?? "Assigned reviewer"}`,
-                  )
-                  .join(" · ")}
-              </p>
-            )}
+          {(context.people.section || context.people.reviewers.length > 0) && (
+            <div
+              className="researcher-people"
+              aria-label="Assigned research contacts"
+            >
+              <strong>Assigned contacts</strong>
+              {context.people.section && (
+                <p>
+                  Section: {context.people.section.name}
+                  {context.people.section.academic_year
+                    ? ` · ${context.people.section.academic_year}`
+                    : ""}
+                  {context.people.section.instructor_name
+                    ? ` · Instructor: ${context.people.section.instructor_name}`
+                    : ""}
+                </p>
+              )}
+              {context.people.reviewers.length > 0 && (
+                <p>
+                  Reviewers:{" "}
+                  {context.people.reviewers
+                    .map(
+                      (reviewer) =>
+                        `${humanize(reviewer.review_role)}: ${reviewer.name ?? "Assigned reviewer"}`,
+                    )
+                    .join(" · ")}
+                </p>
+              )}
+            </div>
+          )}
+        </section>
+      </div>
+
+      <section
+        id="research-support"
+        className="panel-card researcher-support"
+        aria-labelledby="research-support-title"
+      >
+        <div className="researcher-support-heading">
+          <div>
+            <p className="eyebrow">Research support</p>
+            <h2 id="research-support-title">
+              Editor, Statistician, and Librarian
+            </h2>
+            <p>
+              Your group chooses these support actors. A new or replacement
+              assignment becomes active after the selected person accepts the
+              request.
+            </p>
           </div>
-        )}
+        </div>
+        <div className="researcher-support-grid">
+          {supportRoles.map(({ role: supportActorRole, label: actorLabel }) => {
+            const assignment = currentSupportAssignment(supportActorRole);
+            const canManage =
+              source === "live" && !sectionErrors.includes("support");
+            return (
+              <article
+                className="researcher-support-card"
+                key={supportActorRole}
+              >
+                <span className="researcher-support-icon" aria-hidden="true">
+                  {assignment ? <UserRoundCheck /> : <UserRoundPlus />}
+                </span>
+                <div>
+                  <span>{actorLabel}</span>
+                  <strong>{assignment?.name ?? "Not assigned"}</strong>
+                  <small>
+                    {assignment
+                      ? humanize(assignment.status)
+                      : "Choose an active account when needed."}
+                  </small>
+                </div>
+                {canManage && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    aria-label={`${assignment ? "Change" : "Add"} ${actorLabel}`}
+                    disabled={Boolean(mutation)}
+                    onClick={() => void openSupportPicker(supportActorRole)}
+                  >
+                    {assignment ? "Change" : "Add"}
+                  </Button>
+                )}
+              </article>
+            );
+          })}
+        </div>
       </section>
 
       {research.submission_status === "revision_required" && (
@@ -566,97 +778,92 @@ export default function ResearcherResearchWorkspace({
         </section>
       )}
 
-      <section
-        id="revision-history"
-        className="panel-card researcher-history"
-        aria-labelledby="revision-history-title"
-      >
-        <p className="eyebrow">Review workflow</p>
-        <h2 id="revision-history-title">Revision history</h2>
-        {revisions.length === 0 ? (
-          <p>No revisions have been requested.</p>
-        ) : (
-          <ol>
-            {revisions.map((revision) => (
-              <li key={revision.id}>
-                <strong>
-                  Revision {revision.revision_number} ·{" "}
-                  {humanize(revision.revision_status)}
-                </strong>
-                <p>
-                  {revision.revision_remarks ?? "No remarks were recorded."}
-                </p>
-                {revision.required_action && (
-                  <p>Required action: {revision.required_action}</p>
-                )}
-                <time>
-                  Requested {formatDate(revision.requested_at)} · Submitted{" "}
-                  {formatDate(revision.submitted_at)}
-                </time>
-              </li>
-            ))}
-          </ol>
-        )}
-      </section>
-
-      <section
-        className="panel-card researcher-history"
-        aria-labelledby="validation-history-title"
-      >
-        <p className="eyebrow">Title review</p>
-        <h2 id="validation-history-title">Title-validation history</h2>
-        <Button
-          variant="secondary"
-          hidden={
-            !canRequestValidation ||
-            source === "mock" ||
-            mockSections.includes("validations")
-          }
-          disabled={
-            Boolean(mutation) ||
-            context.validations.some(
-              (item) => item.validation_status === "pending",
-            )
-          }
-          onClick={() =>
-            void runMutation("title-validation", () =>
-              requestTitleValidation(research.id),
-            )
-          }
+      <div className="researcher-history-grid">
+        <section
+          id="revision-history"
+          className="panel-card researcher-history"
+          aria-labelledby="revision-history-title"
         >
-          {mutation === "title-validation"
-            ? "Requesting…"
-            : "Request title validation"}
-        </Button>
-        {context.validations.length === 0 ? (
-          <p>No title validations have been recorded.</p>
-        ) : (
-          <ol>
-            {context.validations.map((validation) => (
-              <li key={validation.id}>
-                <strong>{humanize(validation.validation_status)}</strong>
-                <p>
-                  {validation.adviser_remarks ?? "No remarks were recorded."}
-                </p>
-                {validation.validator_name && (
-                  <p>Reviewer: {validation.validator_name}</p>
-                )}
-                {validation.similarity_result && (
+          <p className="eyebrow">Review workflow</p>
+          <h2 id="revision-history-title">Revision history</h2>
+          {revisions.length === 0 ? (
+            <p>No revisions have been requested.</p>
+          ) : (
+            <ol>
+              {revisions.map((revision) => (
+                <li key={revision.id}>
+                  <strong>
+                    Revision {revision.revision_number} ·{" "}
+                    {humanize(revision.revision_status)}
+                  </strong>
                   <p>
-                    Linked similarity evidence:{" "}
-                    {validation.similarity_result.matched_title} · analyzed{" "}
-                    {formatDate(validation.similarity_result.analyzed_at)}
+                    {revision.revision_remarks ?? "No remarks were recorded."}
                   </p>
-                )}
-                <time>
-                  Created {formatDate(validation.created_at)} · Updated{" "}
-                  {formatDate(validation.updated_at)}
-                </time>
-              </li>
-            ))}
-          </ol>
+                  {revision.required_action && (
+                    <p>Required action: {revision.required_action}</p>
+                  )}
+                  <time>
+                    Requested {formatDate(revision.requested_at)} · Submitted{" "}
+                    {formatDate(revision.submitted_at)}
+                  </time>
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
+
+        <section
+          className="panel-card researcher-history"
+          aria-labelledby="validation-history-title"
+        >
+          <p className="eyebrow">Title review</p>
+          <h2 id="validation-history-title">Title review decisions</h2>
+          {completedValidations.length === 0 ? (
+            <p>No title review decisions have been recorded.</p>
+          ) : (
+            <ol>
+              {completedValidations.map((validation) => (
+                <li key={validation.id}>
+                  <strong>{humanize(validation.validation_status)}</strong>
+                  <p>
+                    {validation.adviser_remarks ?? "No remarks were recorded."}
+                  </p>
+                  {validation.validator_name && (
+                    <p>Reviewer: {validation.validator_name}</p>
+                  )}
+                  {validation.similarity_result && (
+                    <p>
+                      Linked similarity evidence:{" "}
+                      {validation.similarity_result.matched_title} · analyzed{" "}
+                      {formatDate(validation.similarity_result.analyzed_at)}
+                    </p>
+                  )}
+                  <time>
+                    Created {formatDate(validation.created_at)} · Updated{" "}
+                    {formatDate(validation.updated_at)}
+                  </time>
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
+
+        {source === "live" ? (
+          <SimilarityResults
+            researchDocumentId={research.id}
+            eyebrow="Title review"
+          />
+        ) : (
+          <section className="panel-card">
+            <p className="eyebrow">Title review</p>
+            <h2>Live similarity results unavailable</h2>
+            <p>
+              Similarity results are never fabricated. Use the existing
+              Similarity Check when the live service is available.
+            </p>
+          </section>
         )}
-      </section>
+      </div>
 
       <section
         id="research-files"
@@ -668,7 +875,7 @@ export default function ResearcherResearchWorkspace({
         {context.files.length === 0 ? (
           <p>No files have been uploaded.</p>
         ) : (
-          <div className="admin-table-wrap">
+          <div className="admin-table-wrap researcher-files-table">
             <table>
               <caption className="sr-only">
                 All uploaded document file versions
@@ -676,9 +883,11 @@ export default function ResearcherResearchWorkspace({
               <thead>
                 <tr>
                   <th>Filename</th>
+                  <th>Folder</th>
                   <th>Type</th>
                   <th>Version</th>
                   <th>Current</th>
+                  <th>Uploaded by</th>
                   <th>Size</th>
                   <th>Uploaded</th>
                   <th>Actions</th>
@@ -692,13 +901,23 @@ export default function ResearcherResearchWorkspace({
                     file.document_type !== "final_manuscript";
                   return (
                     <tr key={file.id}>
-                      <td>{file.original_filename}</td>
-                      <td>{humanize(file.document_type)}</td>
-                      <td>v{file.version_number}</td>
-                      <td>{file.is_current ? "Current" : "Previous"}</td>
-                      <td>{formatBytes(file.file_size)}</td>
-                      <td>{formatDate(file.uploaded_at)}</td>
-                      <td>
+                      <td data-label="Filename">{file.original_filename}</td>
+                      <td data-label="Folder">
+                        {file.relative_path ?? "Unfiled"}
+                      </td>
+                      <td data-label="Type">{humanize(file.document_type)}</td>
+                      <td data-label="Version">v{file.version_number}</td>
+                      <td data-label="Current">
+                        {file.is_current ? "Current" : "Previous"}
+                      </td>
+                      <td data-label="Uploaded by">
+                        {file.uploader_name ?? "Researcher"}
+                      </td>
+                      <td data-label="Size">{formatBytes(file.file_size)}</td>
+                      <td data-label="Uploaded">
+                        {formatDate(file.uploaded_at)}
+                      </td>
+                      <td data-label="Actions">
                         <span className="row-actions">
                           {filesAreLive && (
                             <a
@@ -762,15 +981,29 @@ export default function ResearcherResearchWorkspace({
         )}
         {editable && filesAreLive && (
           <div className="researcher-file-upload">
+            <ManuscriptFilePicker
+              label="New file or replacement"
+              help="PDF or DOCX, maximum 25 MB"
+              accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              file={upload}
+              onChange={(event) => setUpload(event.target.files?.[0] ?? null)}
+              disabled={Boolean(mutation)}
+            />
             <label>
-              New file or replacement
-              <input
-                aria-label="New file or replacement"
-                type="file"
-                accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                onChange={(event) => setUpload(event.target.files?.[0] ?? null)}
+              Document folder
+              <select
+                aria-label="Document folder"
+                value={uploadFolder}
+                onChange={(event) => setUploadFolder(event.target.value)}
                 disabled={Boolean(mutation)}
-              />
+              >
+                <option value="">Unfiled</option>
+                {(context.folders ?? []).map((folder) => (
+                  <option key={folder} value={folder}>
+                    {folder}
+                  </option>
+                ))}
+              </select>
             </label>
             <label>
               Document type
@@ -805,15 +1038,30 @@ export default function ResearcherResearchWorkspace({
         className="panel-card researcher-progress"
         aria-labelledby="progress-title"
       >
-        <p className="eyebrow">Progress monitoring</p>
-        <h2 id="progress-title">Report your research progress</h2>
+        <div className="researcher-progress-heading">
+          <div>
+            <p className="eyebrow">
+              Progress update, not manuscript submission
+            </p>
+            <h2 id="progress-title">Report your current progress</h2>
+            <p>
+              Keep your Research Instructor and assigned reviewers informed
+              about your group&apos;s current work and any support you need.
+            </p>
+          </div>
+          <span>{humanize(research.research_stage)}</span>
+        </div>
         {!canReportProgress ? (
-          <p className="admin-empty">
-            Progress updates are available for ongoing, non-archived research.
-          </p>
+          <div className="researcher-progress-unavailable">
+            <strong>Progress reporting is not available yet</strong>
+            <p>
+              This becomes available when the research reaches the Ongoing
+              stage. You can continue working with the files and actions above.
+            </p>
+          </div>
         ) : (
           <form
-            className="admin-inline-form"
+            className="researcher-progress-form"
             onSubmit={(event) => {
               event.preventDefault();
               if (!progressRemarks.trim()) {
@@ -830,56 +1078,157 @@ export default function ResearcherResearchWorkspace({
               ).then(() => setProgressRemarks(""));
             }}
           >
-            <label>
-              Progress status
-              <select
-                value={progressStatus}
-                onChange={(event) =>
-                  setProgressStatus(event.target.value as typeof progressStatus)
-                }
-                disabled={Boolean(mutation)}
-              >
-                <option value="on_track">On track</option>
-                <option value="at_risk">At risk</option>
-                <option value="delayed">Delayed</option>
-                <option value="completed">Completed</option>
-              </select>
-            </label>
-            <label className="submission-abstract-field">
-              Progress details
+            <fieldset className="researcher-progress-statuses">
+              <legend>How is the research progressing?</legend>
+              {(
+                [
+                  ["on_track", "On track", "Work is moving according to plan."],
+                  [
+                    "at_risk",
+                    "Needs attention",
+                    "A concern may affect the timeline.",
+                  ],
+                  [
+                    "delayed",
+                    "Delayed",
+                    "Work is behind the expected schedule.",
+                  ],
+                  [
+                    "completed",
+                    "Completed",
+                    "The current research work is finished.",
+                  ],
+                ] as const
+              ).map(([value, statusLabel, description]) => (
+                <label
+                  key={value}
+                  className={progressStatus === value ? "is-selected" : ""}
+                >
+                  <input
+                    type="radio"
+                    name="progress-status"
+                    value={value}
+                    checked={progressStatus === value}
+                    onChange={() => setProgressStatus(value)}
+                    disabled={Boolean(mutation)}
+                  />
+                  <span>
+                    <strong>{statusLabel}</strong>
+                    <small>{description}</small>
+                  </span>
+                </label>
+              ))}
+            </fieldset>
+            <label className="researcher-progress-details">
+              What has your group accomplished?
               <textarea
                 value={progressRemarks}
                 onChange={(event) => setProgressRemarks(event.target.value)}
                 maxLength={10000}
-                rows={3}
+                rows={5}
+                placeholder="Summarize completed work, current tasks, blockers, and the next step."
                 disabled={Boolean(mutation)}
               />
+              <small>
+                Include blockers or assistance needed so your instructor can
+                respond clearly.
+              </small>
             </label>
-            <Button disabled={Boolean(mutation) || !progressRemarks.trim()}>
-              {mutation === "progress" ? "Saving…" : "Save progress report"}
-            </Button>
+            <div className="researcher-progress-actions">
+              <span>
+                {progressRemarks.trim().length.toLocaleString()} / 10,000
+                characters
+              </span>
+              <Button disabled={Boolean(mutation) || !progressRemarks.trim()}>
+                {mutation === "progress" ? "Saving…" : "Submit progress update"}
+              </Button>
+            </div>
           </form>
         )}
       </section>
 
-      <ResearchActivity
-        researchDocumentId={research.id}
-        title={research.title}
-        refreshKey={attempt}
-        researcherActions
-        forceMock={source === "mock"}
-      />
-      {source === "live" ? (
-        <SimilarityResults researchDocumentId={research.id} />
-      ) : (
-        <section className="panel-card">
-          <p className="eyebrow">Similarity</p>
-          <h2>Live similarity results unavailable</h2>
-          <p>
-            Similarity results are never fabricated. Use the existing Similarity
-            Check when the live service is available.
-          </p>
-        </section>
+      <section
+        id="research-feedback"
+        className="panel-card researcher-activity-panel"
+        aria-label="Research feedback and activity"
+      >
+        <ResearchActivity
+          researchDocumentId={research.id}
+          title={research.title}
+          refreshKey={attempt}
+          researcherActions
+          forceMock={source === "mock"}
+        />
+      </section>
+      {supportRole && (
+        <Modal
+          label={`${currentSupportAssignment(supportRole) ? "Change" : "Add"} ${supportRoleLabel(supportRole)}`}
+          onClose={() => {
+            setSupportRole(null);
+            setSupportCandidateId("");
+            setSupportCandidates([]);
+          }}
+          busy={supportCandidatesLoading || Boolean(mutation)}
+        >
+          <form className="admin-inline-form" onSubmit={submitSupportRequest}>
+            <h2>
+              {currentSupportAssignment(supportRole) ? "Change" : "Add"}{" "}
+              {supportRoleLabel(supportRole)}
+            </h2>
+            <div className="support-assignment-summary">
+              <Folder aria-hidden="true" />
+              <span>
+                <strong>{research.title}</strong>
+                <small>
+                  {currentSupportAssignment(supportRole)
+                    ? `Current ${supportRoleLabel(supportRole)}: ${currentSupportAssignment(supportRole)?.name ?? "Assigned account"}`
+                    : `Choose the ${supportRoleLabel(supportRole)} for this study.`}
+                </small>
+              </span>
+            </div>
+            <label>
+              Select {supportRoleLabel(supportRole)}
+              <select
+                aria-label={`Select ${supportRoleLabel(supportRole)}`}
+                value={supportCandidateId}
+                onChange={(event) => setSupportCandidateId(event.target.value)}
+                disabled={supportCandidatesLoading || Boolean(mutation)}
+              >
+                <option value="">
+                  {supportCandidatesLoading
+                    ? "Loading available accounts…"
+                    : "Choose an account"}
+                </option>
+                {supportCandidates.map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.name} — {candidate.email}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {!supportCandidatesLoading && supportCandidates.length === 0 && (
+              <p className="admin-empty">
+                No other active accounts are available for this role.
+              </p>
+            )}
+            <div className="modal-actions">
+              <Button
+                type="submit"
+                disabled={
+                  !supportCandidateId ||
+                  supportCandidatesLoading ||
+                  Boolean(mutation)
+                }
+              >
+                {mutation === `support-${supportRole}`
+                  ? "Sending…"
+                  : currentSupportAssignment(supportRole)
+                    ? "Send change request"
+                    : "Send assignment request"}
+              </Button>
+            </div>
+          </form>
+        </Modal>
       )}
 
       {editing && (

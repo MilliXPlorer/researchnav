@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
+  CheckCircle2,
+  ClipboardCheck,
+  Download,
   ExternalLink,
+  Eye,
+  FileText,
   Folder,
   MessageSquareText,
   Pencil,
@@ -19,7 +24,7 @@ import {
   checkTitleQuerySimilarity,
   createCoordinatorSchedule,
   createInstructorSection,
-  createResearchDraft,
+  createFeedback,
   getCoordinatorProgramReport,
   getInstructorProjectTeam,
   getInstitutionalReport,
@@ -49,6 +54,9 @@ import {
   listProvisionedAccounts,
   listRepositoryCatalog,
   listResearchDocuments,
+  listResearchFiles,
+  listResearchFolders,
+  listFeedback,
   listMetadataStandards,
   listRetentionLogs,
   listSectionDocuments,
@@ -94,6 +102,8 @@ import {
   updateInstructorSection,
   updateOfficeUserAccess,
   uploadResearchFile,
+  researchFileDownloadUrl,
+  researchFilePreviewUrl,
   addSectionMembers,
   type AccessStatus,
   type AdminRole,
@@ -101,6 +111,7 @@ import {
   type CoordinatorProgramReport,
   type DefenseScheduleResource,
   type DocumentFileResource,
+  type FeedbackResource,
   type InstructorSectionDocumentItem,
   type InstructorAssignedSubmissionItem,
   type InstructorSectionResource,
@@ -123,9 +134,14 @@ import {
 import { instituteNames, programsByInstitute, roleConfigs } from "./data";
 import { ConfirmDialog, Modal } from "./Modal";
 import ResearchActivity from "./ResearchActivity";
+import ResearchFolderRow from "./ResearchFolderRow";
 import InstructorResearchReview from "./InstructorResearchReview";
 import SimilarityResults from "./SimilarityResults";
+import SharedMonitoring from "./SharedMonitoring";
+import AssignedResearchFolders from "./AssignedResearchFolders";
+import ResearchProgressUpdates from "./ResearchProgressUpdates";
 import PublicResearchMetadataDialog from "./PublicResearchMetadataDialog";
+import ManuscriptFilePicker from "./ManuscriptFilePicker";
 import { classificationLabel, formatSimilarityPercentage } from "./similarity";
 import type { ResearchRecord, Role } from "./types";
 import { useLiveFilters } from "./useLiveFilters";
@@ -207,8 +223,11 @@ export default function RoleSidebarPage({
         case "Dashboard":
           return <EditorDashboard role={role} />;
         case "Assigned Research":
+        case "Research Folders":
+          return <AssignedResearchFolders role={role} />;
         case "Editorial Review":
           return <EditorReview role={role} />;
+        case "Defense Monitoring Forms":
         case "Monitoring":
           return <EditorMonitoring role={role} />;
         case "Review History":
@@ -219,15 +238,30 @@ export default function RoleSidebarPage({
     case "adviser":
       switch (selectedNav) {
         case "Assigned Research":
+        case "Research Folders":
+          return <AssignedResearchFolders role={role} />;
         case "My Advisees":
           return <AdviserAdvisees role={role} navigate={navigate} />;
         case "Pending Reviews":
         case "Title Review":
           return (
-            <AdviserPendingReviews role={role} navigate={navigate} titleOnly />
+            <AdviserPendingReviews
+              role={role}
+              navigate={navigate}
+              stage="title_proposal"
+            />
           );
         case "Manuscript Review":
-          return <AdviserPendingReviews role={role} navigate={navigate} />;
+          return (
+            <AdviserPendingReviews
+              role={role}
+              navigate={navigate}
+              stage="manuscript"
+            />
+          );
+        case "Research Progress Updates":
+          return <ResearchProgressUpdates role={role} />;
+        case "Defense Monitoring Forms":
         case "Monitoring":
           return <AdviserMonitoring role={role} />;
         case "Review History":
@@ -242,7 +276,10 @@ export default function RoleSidebarPage({
     case "instructor":
       switch (selectedNav) {
         case "Title Proposals":
-          return <InstructorAssignedSubmissions role={role} titleOnly />;
+        case "Title Review":
+          return (
+            <InstructorAssignedSubmissions role={role} stage="title_proposal" />
+          );
         case "My Sections":
           return (
             <InstructorSections
@@ -253,10 +290,19 @@ export default function RoleSidebarPage({
             />
           );
         case "Assigned Submissions":
+        case "Manuscript Review":
+          return (
+            <InstructorAssignedSubmissions role={role} stage="manuscript" />
+          );
         case "Assigned Research":
-          return <InstructorAssignedSubmissions role={role} />;
+          return <AssignedResearchFolders role={role} />;
         case "Review Submissions":
-          return <InstructorAssignedSubmissions role={role} titleOnly />;
+          return (
+            <InstructorAssignedSubmissions role={role} stage="manuscript" />
+          );
+        case "Research Progress Updates":
+          return <ResearchProgressUpdates role={role} />;
+        case "Defense Monitoring Forms":
         case "Monitoring":
           return <InstructorMonitoring role={role} />;
         case "Review History":
@@ -272,6 +318,8 @@ export default function RoleSidebarPage({
       }
     case "panel":
       switch (selectedNav) {
+        case "Research Folders":
+          return <AssignedResearchFolders role={role} />;
         case "Assigned Defenses":
         case "Defense Schedule":
           return <PanelDefenseSchedule role={role} />;
@@ -280,7 +328,9 @@ export default function RoleSidebarPage({
           return <PanelEvaluationForm role={role} />;
         case "Availability Calendar":
           return <PanelAvailability role={role} />;
+        case "Defense Monitoring Forms":
         case "Monitoring":
+          return <SharedMonitoring role={role} />;
         case "Evaluation History":
         case "Panel History":
           return <PanelHistory role={role} />;
@@ -290,10 +340,14 @@ export default function RoleSidebarPage({
     case "statistician":
       switch (selectedNav) {
         case "Assigned Research":
+        case "Research Folders":
+          return <AssignedResearchFolders role={role} />;
         case "Statistical Review":
         case "Methodology Checklist":
           return <StatisticianMethodologyChecklist role={role} />;
+        case "Defense Monitoring Forms":
         case "Monitoring":
+          return <SharedMonitoring role={role} />;
         case "Review History":
         case "Sign-offs Issued":
           return <StatisticianSignoffs role={role} />;
@@ -320,8 +374,11 @@ export default function RoleSidebarPage({
         case "Assignment Requests":
           return <LibrarianAssignmentRequests role={role} />;
         case "Assigned Research":
+        case "Research Folders":
+          return <AssignedResearchFolders role={role} />;
         case "Reference Review":
           return <LibrarianReferenceReview role={role} />;
+        case "Defense Monitoring Forms":
         case "Monitoring":
           return <LibrarianMonitoring role={role} />;
         case "Review History":
@@ -337,6 +394,10 @@ export default function RoleSidebarPage({
       }
     case "research-office":
       switch (selectedNav) {
+        case "Research Folders":
+          return <AssignedResearchFolders role={role} />;
+        case "Similarity Check":
+          return <ResearcherSimilarityCheck role={role} showModePicker />;
         case "Upload Manuscript":
           return <ResearchOfficeBulkImport />;
 
@@ -355,9 +416,8 @@ export default function RoleSidebarPage({
         case "My Research":
         case "Feedback & Revisions":
         case "Research Progress":
+        case "Research Progress Updates":
           return <ResearcherSubmissions role={role} navigate={navigate} />;
-        case "Create Research":
-          return <ResearcherNewSubmission role={role} />;
         case "Similarity Check":
           return (
             <ResearcherSimilarityCheck
@@ -555,20 +615,15 @@ function yesNo(value: boolean) {
 function AdviserPendingReviews({
   role,
   navigate,
-  titleOnly = false,
+  stage,
 }: {
   role: Role;
   navigate: (path: string) => void;
-  titleOnly?: boolean;
+  stage: "title_proposal" | "manuscript";
 }) {
   const [attempt, reload] = useAttempt();
-  const state = useLoad(() => listAdviserPendingReviews(), attempt);
-  const rows =
-    state.status === "ready"
-      ? state.data.filter(
-          (item) => !titleOnly || item.research_stage === "title_proposal",
-        )
-      : [];
+  const state = useLoad(() => listAdviserPendingReviews(stage), attempt);
+  const titleOnly = stage === "title_proposal";
   return (
     <div className="workspace-content admin-sidebar-page">
       <RolePageHeader
@@ -585,7 +640,7 @@ function AdviserPendingReviews({
         <Loading label="Loading pending reviews" />
       ) : state.status === "error" ? (
         <InlineError message={state.message} retry={reload} />
-      ) : rows.length === 0 ? (
+      ) : state.data.length === 0 ? (
         <p className="admin-empty">
           No assigned research currently requires this review.
         </p>
@@ -604,7 +659,7 @@ function AdviserPendingReviews({
                 </tr>
               </thead>
               <tbody>
-                {rows.map((item) => (
+                {state.data.map((item) => (
                   <tr key={item.research_document_id}>
                     <td>{item.title}</td>
                     <td>{label(item.research_stage)}</td>
@@ -739,10 +794,12 @@ function AdviserMonitoring({ role }: { role: Role }) {
       });
       setActivity("");
       setRemarks("");
-      setNotice("Adviser monitoring entry saved.");
+      setNotice("Adviser defense monitoring form entry saved.");
       reload();
     } catch (error) {
-      setNotice(friendlyError(error, "Monitoring could not be saved"));
+      setNotice(
+        friendlyError(error, "Defense monitoring form could not be saved"),
+      );
     } finally {
       setBusy(false);
     }
@@ -751,8 +808,8 @@ function AdviserMonitoring({ role }: { role: Role }) {
     <div className="workspace-content admin-sidebar-page">
       <RolePageHeader
         role={role}
-        title="Monitoring"
-        description="Record your Adviser participation before and after proposal defense. Final verification remains with the Research Instructor."
+        title="Defense Monitoring Forms"
+        description="Record your Adviser participation in the official form before and after proposal defense. Final verification remains with the Research Instructor."
       />
       {notice && (
         <p
@@ -786,7 +843,7 @@ function AdviserMonitoring({ role }: { role: Role }) {
               </select>
             </label>
             <label>
-              Monitoring stage
+              Defense monitoring stage
               <select
                 value={stage}
                 onChange={(event) =>
@@ -826,11 +883,13 @@ function AdviserMonitoring({ role }: { role: Role }) {
         </section>
       )}
       {entries.status === "loading" ? (
-        <Loading label="Loading monitoring" />
+        <Loading label="Loading defense monitoring forms" />
       ) : entries.status === "error" ? (
         <InlineError message={entries.message} retry={reload} />
       ) : entries.data.length === 0 ? (
-        <p className="admin-empty">No monitoring entries are available.</p>
+        <p className="admin-empty">
+          No defense monitoring form entries are available.
+        </p>
       ) : (
         <section className="panel-card admin-data-card">
           <div className="admin-table-wrap">
@@ -882,10 +941,6 @@ function AdviserAdvisees({
 }) {
   const [attempt, reload] = useAttempt();
   const state = useLoad(() => listAdviserAdvisees(), attempt);
-  const [activityFor, setActivityFor] = useState<{
-    id: number | string;
-    title: string;
-  } | null>(null);
   return (
     <div className="workspace-content admin-sidebar-page">
       <RolePageHeader
@@ -932,7 +987,7 @@ function AdviserAdvisees({
                       <th>Stage</th>
                       <th>Status</th>
                       <th>Updated</th>
-                      <th>Activity</th>
+                      <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -951,18 +1006,7 @@ function AdviserAdvisees({
                               )
                             }
                           >
-                            Open review
-                          </Button>{" "}
-                          <Button
-                            variant="secondary"
-                            onClick={() =>
-                              setActivityFor({
-                                id: document.research_document_id,
-                                title: document.title ?? "Research record",
-                              })
-                            }
-                          >
-                            Feedback &amp; activity
+                            <Eye aria-hidden="true" /> Open review
                           </Button>
                         </td>
                       </tr>
@@ -973,18 +1017,6 @@ function AdviserAdvisees({
             </section>
           ))}
         </div>
-      )}
-      {activityFor && (
-        <Modal
-          label={`Feedback and activity for ${activityFor.title}`}
-          onClose={() => setActivityFor(null)}
-          size="large"
-        >
-          <ResearchActivity
-            researchDocumentId={activityFor.id}
-            title={activityFor.title}
-          />
-        </Modal>
       )}
     </div>
   );
@@ -1299,23 +1331,25 @@ function ProjectAccountOptions({
 
 function InstructorAssignedSubmissions({
   role,
-  titleOnly = false,
+  stage,
 }: {
   role: Role;
-  titleOnly?: boolean;
+  stage: "title_proposal" | "manuscript";
 }) {
   const [attempt, reload] = useAttempt();
-  const state = useLoad(() => listInstructorAssignedSubmissions(), attempt);
+  const state = useLoad(
+    () => listInstructorAssignedSubmissions(stage),
+    attempt,
+  );
   const [selected, setSelected] =
     useState<InstructorAssignedSubmissionItem | null>(null);
   const [statusFilter, setStatusFilter] = useState("");
   const [reviewBusy, setReviewBusy] = useState(false);
+  const titleOnly = stage === "title_proposal";
   const filteredSubmissions =
     state.status === "ready"
       ? state.data.filter(
-          (item) =>
-            (!titleOnly || item.research_stage === "title_proposal") &&
-            (!statusFilter || item.submission_status === statusFilter),
+          (item) => !statusFilter || item.submission_status === statusFilter,
         )
       : [];
 
@@ -1323,11 +1357,11 @@ function InstructorAssignedSubmissions({
     <div className="workspace-content admin-sidebar-page">
       <RolePageHeader
         role={role}
-        title={titleOnly ? "Title proposals" : "Assigned submissions"}
+        title={titleOnly ? "Title review" : "Manuscript review"}
         description={
           titleOnly
             ? "Review assigned research titles before proposal defense."
-            : "Review assigned titles and documents, similarity evidence, recommendations, revisions, and progress history."
+            : "Review assigned manuscript submissions, record decisions, and request revisions."
         }
         action={
           <Button variant="secondary" onClick={reload}>
@@ -1368,69 +1402,57 @@ function InstructorAssignedSubmissions({
               No assigned submissions match this status.
             </p>
           )}
-          {(titleOnly
-            ? (["before"] as const)
-            : (["before", "after"] as const)
-          ).map((phase) => {
-            const submissions = filteredSubmissions.filter((item) =>
-              phase === "before"
-                ? item.research_stage === "title_proposal"
-                : item.research_stage !== "title_proposal",
-            );
-            if (submissions.length === 0) return null;
-            return (
-              <section className="panel-card admin-data-card" key={phase}>
-                <div className="admin-card-heading">
-                  <div>
-                    <p className="eyebrow">Research progress</p>
-                    <h2>
-                      {phase === "before"
-                        ? "Before proposal defense"
-                        : "After proposal defense"}
-                    </h2>
-                  </div>
-                  <span className="activity-tag">{submissions.length}</span>
+          {filteredSubmissions.length > 0 && (
+            <section className="panel-card admin-data-card">
+              <div className="admin-card-heading">
+                <div>
+                  <p className="eyebrow">Review queue</p>
+                  <h2>
+                    {titleOnly ? "Title proposals" : "Manuscript submissions"}
+                  </h2>
                 </div>
-                <div className="admin-table-wrap">
-                  <table>
-                    <caption className="sr-only">
-                      {phase === "before" ? "Before" : "After"} defense
-                      assignments
-                    </caption>
-                    <thead>
-                      <tr>
-                        <th>Research title</th>
-                        <th>Researcher</th>
-                        <th>Stage</th>
-                        <th>Status</th>
-                        <th>Updated</th>
-                        <th>Review</th>
+                <span className="activity-tag">
+                  {filteredSubmissions.length}
+                </span>
+              </div>
+              <div className="admin-table-wrap">
+                <table>
+                  <caption className="sr-only">
+                    {titleOnly ? "Title" : "Manuscript"} review assignments
+                  </caption>
+                  <thead>
+                    <tr>
+                      <th>Research title</th>
+                      <th>Researcher</th>
+                      <th>Stage</th>
+                      <th>Status</th>
+                      <th>Updated</th>
+                      <th>Review</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredSubmissions.map((item) => (
+                      <tr key={item.research_document_id}>
+                        <td>{item.title}</td>
+                        <td>{item.submitter ?? "—"}</td>
+                        <td>{label(item.research_stage)}</td>
+                        <td>{label(item.submission_status)}</td>
+                        <td>{displayDate(item.updated_at)}</td>
+                        <td>
+                          <Button
+                            variant="secondary"
+                            onClick={() => setSelected(item)}
+                          >
+                            Open review
+                          </Button>
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {submissions.map((item) => (
-                        <tr key={item.research_document_id}>
-                          <td>{item.title}</td>
-                          <td>{item.submitter ?? "—"}</td>
-                          <td>{label(item.research_stage)}</td>
-                          <td>{label(item.submission_status)}</td>
-                          <td>{displayDate(item.updated_at)}</td>
-                          <td>
-                            <Button
-                              variant="secondary"
-                              onClick={() => setSelected(item)}
-                            >
-                              Open review
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            );
-          })}
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
         </div>
       )}
       {selected && (
@@ -1652,10 +1674,12 @@ function InstructorMonitoring({ role }: { role: Role }) {
       });
       setActivity("");
       setRemarks("");
-      setNotice("Monitoring entry saved.");
+      setNotice("Defense monitoring form entry saved.");
       reload();
     } catch (error) {
-      setNotice(friendlyError(error, "Monitoring could not be saved"));
+      setNotice(
+        friendlyError(error, "Defense monitoring form could not be saved"),
+      );
     } finally {
       setBusy(false);
     }
@@ -1666,10 +1690,12 @@ function InstructorMonitoring({ role }: { role: Role }) {
     setNotice("");
     try {
       await verifyInstructorMonitoring(researchId, stage);
-      setNotice("Monitoring verified.");
+      setNotice("Defense monitoring form verified.");
       reload();
     } catch (error) {
-      setNotice(friendlyError(error, "Monitoring could not be verified"));
+      setNotice(
+        friendlyError(error, "Defense monitoring form could not be verified"),
+      );
     } finally {
       setBusy(false);
     }
@@ -1678,8 +1704,8 @@ function InstructorMonitoring({ role }: { role: Role }) {
     <div className="workspace-content admin-sidebar-page">
       <RolePageHeader
         role={role}
-        title="Monitoring"
-        description="Before and after proposal defense monitoring verified by the Research Instructor."
+        title="Defense Monitoring Forms"
+        description="Official before- and after-proposal-defense forms verified by the Research Instructor."
       />
       {notice && (
         <p
@@ -1713,7 +1739,7 @@ function InstructorMonitoring({ role }: { role: Role }) {
               </select>
             </label>
             <label>
-              Monitoring stage
+              Defense monitoring stage
               <select
                 value={stage}
                 onChange={(event) =>
@@ -1754,18 +1780,20 @@ function InstructorMonitoring({ role }: { role: Role }) {
                 disabled={busy || !researchId}
                 onClick={() => void verify()}
               >
-                Verify monitoring
+                Verify defense form
               </Button>
             </div>
           </form>
         </section>
       )}
       {entries.status === "loading" || assignments.status === "loading" ? (
-        <Loading label="Loading monitoring" />
+        <Loading label="Loading defense monitoring forms" />
       ) : entries.status === "error" ? (
         <InlineError message={entries.message} retry={reload} />
       ) : entries.data.length === 0 ? (
-        <p className="admin-empty">No monitoring records are available.</p>
+        <p className="admin-empty">
+          No defense monitoring form records are available.
+        </p>
       ) : (
         <section className="panel-card admin-data-card">
           <div className="admin-table-wrap">
@@ -1909,6 +1937,21 @@ function InstructorSections({
   const [editProjectBusy, setEditProjectBusy] = useState(false);
   const [confirmProjectDelete, setConfirmProjectDelete] = useState(false);
   const [deleteProjectBusy, setDeleteProjectBusy] = useState(false);
+  const [projectTab, setProjectTab] = useState<
+    "overview" | "team" | "documents" | "feedback" | "monitoring"
+  >("overview");
+  const [projectFiles, setProjectFiles] = useState<DocumentFileResource[]>([]);
+  const [projectFolders, setProjectFolders] = useState<string[]>([]);
+  const [activeFolder, setActiveFolder] = useState("");
+  const [projectFeedback, setProjectFeedback] = useState<FeedbackResource[]>(
+    [],
+  );
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [feedbackText, setFeedbackText] = useState("");
+  const [feedbackType, setFeedbackType] =
+    useState<FeedbackResource["feedback_type"]>("comment");
+  const [feedbackFileId, setFeedbackFileId] = useState("");
+  const [feedbackBusy, setFeedbackBusy] = useState(false);
   const studentSearchRef = useRef<Record<number, number>>({});
   const showingProjectPage = openSection !== null && selectedDocument !== null;
   const projectAssignmentEditing =
@@ -1943,6 +1986,8 @@ function InstructorSections({
       (item) => String(item.research_document_id) === String(projectDocumentId),
     );
     if (document) void openDocumentMembers(openSection.id, document);
+    // Route identifiers and loaded documents intentionally drive this one-time open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openSection, projectDocumentId, documentsFor]);
 
   function openSectionDetails(section: InstructorSectionResource) {
@@ -1993,14 +2038,79 @@ function InstructorSections({
     }
   }
 
+  async function loadProjectWorkspace(researchDocumentId: number) {
+    setWorkspaceLoading(true);
+    const [files, folders, feedback] = await Promise.allSettled([
+      listResearchFiles(researchDocumentId),
+      listResearchFolders(researchDocumentId),
+      listFeedback(researchDocumentId),
+    ]);
+
+    if (files.status === "fulfilled") setProjectFiles(files.value);
+    if (feedback.status === "fulfilled") setProjectFeedback(feedback.value);
+    if (folders.status === "fulfilled") {
+      setProjectFolders(folders.value);
+      setActiveFolder((current) =>
+        current && folders.value.includes(current)
+          ? current
+          : (folders.value[0] ?? ""),
+      );
+    }
+
+    const failed = [files, folders, feedback].find(
+      (result) => result.status === "rejected",
+    );
+    if (failed?.status === "rejected") {
+      setDetailsNotice(
+        friendlyError(
+          failed.reason,
+          "Some project workspace data could not be loaded",
+        ),
+      );
+    }
+    setWorkspaceLoading(false);
+  }
+
+  async function submitProjectFeedback(
+    event: React.FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+    if (!selectedDocument || !feedbackText.trim()) return;
+    setFeedbackBusy(true);
+    setDetailsNotice("");
+    try {
+      await createFeedback(selectedDocument.research_document_id, {
+        comment: feedbackText.trim(),
+        feedback_type: feedbackType,
+        document_file_id: feedbackFileId ? Number(feedbackFileId) : null,
+      });
+      setProjectFeedback(
+        await listFeedback(selectedDocument.research_document_id),
+      );
+      setFeedbackText("");
+      setFeedbackFileId("");
+      setDetailsNotice("Feedback added to the research workspace.");
+    } catch (error) {
+      setDetailsNotice(friendlyError(error, "The feedback could not be added"));
+    } finally {
+      setFeedbackBusy(false);
+    }
+  }
+
   async function openDocumentMembers(
     sectionId: number,
     document: InstructorSectionDocumentItem,
   ) {
     const requestId = ++teamRequestRef.current;
+    if (
+      selectedDocument?.research_document_id !== document.research_document_id
+    ) {
+      setProjectTab("overview");
+    }
     setSelectedDocument(document);
     setDocumentMembersLoading(true);
     setTeamLoading(true);
+    void loadProjectWorkspace(document.research_document_id);
     try {
       const [members, team, advisers, officePersonnel, chairs, panelists] =
         await Promise.allSettled([
@@ -2089,6 +2199,11 @@ function InstructorSections({
     setSelectedDocument(null);
     setDocumentMembers([]);
     setProjectTeam(null);
+    setProjectFiles([]);
+    setProjectFolders([]);
+    setProjectFeedback([]);
+    setActiveFolder("");
+    setProjectTab("overview");
     setProjectManageOpen(false);
     resetProjectDisclosures();
     if (openSection) navigate(`/app/instructor/sections/${openSection.id}`);
@@ -2121,7 +2236,11 @@ function InstructorSections({
             research_office_representative_id:
               projectTeam?.research_office_representative?.user_id ?? null,
             chair_id: projectTeam?.chair?.user_id ?? null,
-            panel_member_ids: teamDraft.panel_member_ids,
+            panel_member_ids:
+              role === "panelMembers"
+                ? teamDraft.panel_member_ids
+                : (projectTeam?.panel_members.map((member) => member.user_id) ??
+                  []),
           },
         );
         setProjectTeam(team);
@@ -2349,11 +2468,12 @@ function InstructorSections({
     setEditProjectBusy(true);
     setDetailsNotice("");
     try {
-      await updateSectionProjectTitle(
+      const updated = await updateSectionProjectTitle(
         openSection.id,
         selectedDocument.research_document_id,
         editProjectTitle.trim(),
       );
+      setSelectedDocument(updated);
       await loadDocuments(openSection.id);
       setEditingProject(false);
       setDetailsNotice("Research title updated.");
@@ -2760,37 +2880,23 @@ function InstructorSections({
               ) : (
                 <div className="research-title-folders">
                   {(documentsFor[openSection.id] ?? []).map((document) => (
-                    <button
-                      type="button"
-                      className="research-title-folder"
+                    <ResearchFolderRow
                       key={document.research_document_id}
-                      onClick={() =>
+                      title={document.title}
+                      metadata={
+                        <>
+                          {label(document.research_stage)} ·{" "}
+                          {label(document.submission_status)}
+                        </>
+                      }
+                      detail={`Updated ${displayDate(document.updated_at)}`}
+                      openLabel={`Open research project ${document.title}`}
+                      onOpen={() =>
                         navigate(
                           `/app/instructor/sections/${openSection.id}/projects/${document.research_document_id}`,
                         )
                       }
-                      aria-label={`Open research project ${document.title}`}
-                    >
-                      <span
-                        className="research-title-folder-icon"
-                        aria-hidden="true"
-                      >
-                        <Folder />
-                      </span>
-                      <span className="research-title-folder-copy">
-                        <strong>{document.title}</strong>
-                        <small>
-                          {label(document.research_stage)} ·{" "}
-                          {label(document.submission_status)}
-                        </small>
-                        <small>
-                          Updated {displayDate(document.updated_at)}
-                        </small>
-                      </span>
-                      <span className="research-title-folder-arrow">
-                        <ExternalLink aria-hidden="true" />
-                      </span>
-                    </button>
+                    />
                   ))}
                 </div>
               )}
@@ -3028,88 +3134,719 @@ function InstructorSections({
                 </form>
               </Modal>
             )}
-            <p className="project-page-meta">
-              {label(selectedDocument.research_stage)} ·{" "}
-              {label(selectedDocument.submission_status)}
-            </p>
-            {documentMembersLoading ? (
-              <p className="section-documents-loading">
-                Loading assigned students…
-              </p>
-            ) : documentMembers.length === 0 ? (
-              <p className="admin-empty">
-                No students are assigned to this research title.
-              </p>
-            ) : (
-              <ul className="title-member-list">
-                {documentMembers.map((member) => (
-                  <li key={member.id}>
-                    <span>
-                      <strong>{studentName(member)}</strong>
-                      <small>{member.email}</small>
-                    </span>
-                    <Button
-                      type="button"
-                      variant="quiet"
-                      className="icon-button"
-                      aria-label={`Remove ${studentName(member)}`}
-                      title="Remove student"
-                      disabled={studentBusy[openSection.id]}
-                      onClick={() => setConfirmDocumentRemove(member)}
-                    >
-                      <Trash2 />
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {teamLoading ? (
-              <p className="section-documents-loading">
-                Loading current project assignments…
-              </p>
-            ) : (
-              <dl className="project-assignment-summary">
-                <div>
-                  <dt>Research adviser</dt>
-                  <dd>{projectTeam?.adviser?.name ?? "Unassigned"}</dd>
-                </div>
-                <div>
-                  <dt>Research Office representative</dt>
-                  <dd>
-                    {projectTeam?.research_office_representative?.name ??
-                      "Unassigned"}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Panel chair</dt>
-                  <dd>{projectTeam?.chair?.name ?? "Unassigned"}</dd>
-                </div>
-                <div>
-                  <dt>Panel members</dt>
-                  <dd>
-                    {projectTeam?.panel_members
-                      .map((member) => member.name)
-                      .join(", ") || "Unassigned"}
-                  </dd>
-                </div>
-              </dl>
-            )}
-            <div className="project-manage-action">
-              <Button
-                type="button"
-                variant="secondary"
-                className="icon-button"
-                aria-label="Manage project assignments"
-                title="Manage project assignments"
-                onClick={() => {
-                  resetProjectDisclosures();
-                  setProjectManageOpen(true);
-                  void openDocumentMembers(openSection.id, selectedDocument);
-                }}
-              >
-                <UsersRound />
-              </Button>
+            <div className="project-workspace-context">
+              <span>{openSection.name}</span>
+              <span>{openSection.section_code}</span>
+              <span>
+                {openSection.academic_year ?? "Academic year not set"}
+              </span>
+              <span>{label(selectedDocument.research_stage)}</span>
+              <span>{label(selectedDocument.submission_status)}</span>
             </div>
+
+            <nav
+              className="project-workspace-tabs"
+              aria-label="Research study workspace"
+            >
+              {(
+                [
+                  ["overview", "Overview", FileText],
+                  ["team", "Research actors", UsersRound],
+                  ["documents", "Documents", Folder],
+                  ["feedback", "Feedback", MessageSquareText],
+                  ["monitoring", "Defense Monitoring Forms", ClipboardCheck],
+                ] as const
+              ).map(([tab, tabLabel, Icon]) => (
+                <button
+                  type="button"
+                  key={tab}
+                  className={projectTab === tab ? "is-active" : ""}
+                  aria-current={projectTab === tab ? "page" : undefined}
+                  onClick={() => setProjectTab(tab)}
+                >
+                  <Icon aria-hidden="true" />
+                  <span>{tabLabel}</span>
+                </button>
+              ))}
+            </nav>
+
+            {workspaceLoading && (
+              <p className="section-documents-loading">
+                Loading study workspace…
+              </p>
+            )}
+
+            {projectTab === "overview" && (
+              <div className="project-workspace-section project-overview-grid">
+                <section className="project-overview-card project-overview-card-wide">
+                  <div className="project-card-heading">
+                    <div>
+                      <p className="eyebrow">Study summary</p>
+                      <h4>Research workspace</h4>
+                    </div>
+                    <span className="badge badge-active">Central record</span>
+                  </div>
+                  <dl className="project-overview-stats">
+                    <div>
+                      <dt>Researchers</dt>
+                      <dd>{documentMembers.length}</dd>
+                    </div>
+                    <div>
+                      <dt>Documents</dt>
+                      <dd>{projectFiles.length}</dd>
+                    </div>
+                    <div>
+                      <dt>Feedback</dt>
+                      <dd>{projectFeedback.length}</dd>
+                    </div>
+                    <div>
+                      <dt>Document folders</dt>
+                      <dd>{projectFolders.length}</dd>
+                    </div>
+                  </dl>
+                  <div className="project-readiness-list">
+                    <div>
+                      <CheckCircle2 aria-hidden="true" />
+                      <span>
+                        <strong>Before Proposal Defense</strong>
+                        <small>
+                          {projectTeam?.pre_defense_ready
+                            ? "Required actors are assigned and accepted."
+                            : "Waiting for one or more required actor assignments."}
+                        </small>
+                      </span>
+                    </div>
+                    <div>
+                      <CheckCircle2 aria-hidden="true" />
+                      <span>
+                        <strong>After Proposal Defense</strong>
+                        <small>
+                          {projectTeam?.post_defense_ready
+                            ? "Adviser, editor, librarian, three panels, Research Rep, and Chair are ready."
+                            : "Post-defense actor list is not complete yet."}
+                        </small>
+                      </span>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="project-overview-card">
+                  <div className="project-card-heading">
+                    <div>
+                      <p className="eyebrow">Researchers</p>
+                      <h4>Study members</h4>
+                    </div>
+                    <button
+                      type="button"
+                      className="text-action"
+                      onClick={() => setProjectTab("team")}
+                    >
+                      Manage
+                    </button>
+                  </div>
+                  {documentMembers.length === 0 ? (
+                    <p className="project-empty-copy">
+                      No researchers assigned yet.
+                    </p>
+                  ) : (
+                    <ul className="project-compact-list">
+                      {documentMembers.map((member) => (
+                        <li key={member.id}>
+                          <span
+                            className="project-person-avatar"
+                            aria-hidden="true"
+                          >
+                            {studentName(member).slice(0, 1).toUpperCase()}
+                          </span>
+                          <span>
+                            <strong>{studentName(member)}</strong>
+                            <small>{member.email}</small>
+                          </span>
+                          <button
+                            type="button"
+                            className="icon-button button-quiet"
+                            aria-label={`Remove ${studentName(member)}`}
+                            title="Remove researcher"
+                            onClick={() => setConfirmDocumentRemove(member)}
+                          >
+                            <Trash2 />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+
+                <section className="project-overview-card">
+                  <div className="project-card-heading">
+                    <div>
+                      <p className="eyebrow">Recent files</p>
+                      <h4>Latest documents</h4>
+                    </div>
+                    <button
+                      type="button"
+                      className="text-action"
+                      onClick={() => setProjectTab("documents")}
+                    >
+                      View all
+                    </button>
+                  </div>
+                  {projectFiles.length === 0 ? (
+                    <p className="project-empty-copy">
+                      No manuscript files uploaded yet.
+                    </p>
+                  ) : (
+                    <ul className="project-compact-list project-file-preview-list">
+                      {[...projectFiles]
+                        .sort(
+                          (a, b) =>
+                            new Date(b.uploaded_at ?? 0).getTime() -
+                            new Date(a.uploaded_at ?? 0).getTime(),
+                        )
+                        .slice(0, 4)
+                        .map((file) => (
+                          <li key={file.id}>
+                            <FileText aria-hidden="true" />
+                            <span>
+                              <strong>{file.original_filename}</strong>
+                              <small>
+                                {file.relative_path ?? "Unfiled"} · v
+                                {file.version_number}
+                              </small>
+                            </span>
+                          </li>
+                        ))}
+                    </ul>
+                  )}
+                </section>
+              </div>
+            )}
+
+            {projectTab === "team" && (
+              <div className="project-workspace-section">
+                <div className="project-section-heading">
+                  <div>
+                    <p className="eyebrow">Research actors</p>
+                    <h4>People assigned to this study</h4>
+                    <p>
+                      Instructor-managed roles can be updated here. Editor,
+                      Librarian, and Statistician are requested by the
+                      researchers and remain visible in the same study
+                      workspace.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => {
+                      resetProjectDisclosures();
+                      setProjectManageOpen(true);
+                      void openDocumentMembers(
+                        openSection.id,
+                        selectedDocument,
+                      );
+                    }}
+                  >
+                    <UsersRound /> Manage assignments
+                  </Button>
+                </div>
+
+                <section className="project-team-block">
+                  <div className="project-team-block-heading">
+                    <div>
+                      <h5>Student researchers</h5>
+                      <span>{documentMembers.length} assigned</span>
+                    </div>
+                  </div>
+                  {documentMembersLoading ? (
+                    <p className="section-documents-loading">
+                      Loading assigned students…
+                    </p>
+                  ) : documentMembers.length === 0 ? (
+                    <p className="project-empty-copy">
+                      No students are assigned to this research title.
+                    </p>
+                  ) : (
+                    <ul className="title-member-list project-researcher-list">
+                      {documentMembers.map((member) => (
+                        <li key={member.id}>
+                          <span>
+                            <strong>{studentName(member)}</strong>
+                            <small>{member.email}</small>
+                          </span>
+                          <Button
+                            type="button"
+                            variant="quiet"
+                            className="icon-button"
+                            aria-label={`Remove ${studentName(member)}`}
+                            title="Remove student from this study"
+                            disabled={studentBusy[openSection.id]}
+                            onClick={() => setConfirmDocumentRemove(member)}
+                          >
+                            <Trash2 />
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+
+                {teamLoading ? (
+                  <p className="section-documents-loading">
+                    Loading current actor assignments…
+                  </p>
+                ) : (
+                  <div className="project-stage-columns">
+                    <section className="project-team-block">
+                      <div className="project-team-block-heading">
+                        <div>
+                          <p className="eyebrow">Before Proposal Defense</p>
+                          <h5>Pre-defense actors</h5>
+                        </div>
+                        <span
+                          className={
+                            projectTeam?.pre_defense_ready
+                              ? "status-dot is-ready"
+                              : "status-dot"
+                          }
+                        >
+                          {projectTeam?.pre_defense_ready
+                            ? "Ready"
+                            : "Incomplete"}
+                        </span>
+                      </div>
+                      <div className="project-actor-grid">
+                        {[
+                          [
+                            "Research Instructor",
+                            projectTeam?.instructor?.name,
+                            "Automatically assigned",
+                          ],
+                          [
+                            "Research Adviser",
+                            projectTeam?.adviser?.name,
+                            "Instructor assigned",
+                          ],
+                          [
+                            "Editor",
+                            projectTeam?.support_assignments?.editor?.name,
+                            projectTeam?.support_assignments?.editor?.status ??
+                              "Researcher assigned",
+                          ],
+                          [
+                            "Statistician",
+                            projectTeam?.support_assignments?.statistician
+                              ?.name,
+                            projectTeam?.support_assignments?.statistician
+                              ?.status ?? "Researcher assigned",
+                          ],
+                          [
+                            "Librarian",
+                            projectTeam?.support_assignments?.librarian?.name,
+                            projectTeam?.support_assignments?.librarian
+                              ?.status ?? "Researcher assigned",
+                          ],
+                        ].map(([actorLabel, actorName, note]) => (
+                          <div
+                            className="project-actor-row"
+                            key={`pre-${actorLabel}`}
+                          >
+                            <span>
+                              <strong>{actorLabel}</strong>
+                              <small>{note}</small>
+                            </span>
+                            <span
+                              className={
+                                actorName ? "actor-name" : "actor-name is-empty"
+                              }
+                            >
+                              {actorName || "Unassigned"}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+
+                    <section className="project-team-block">
+                      <div className="project-team-block-heading">
+                        <div>
+                          <p className="eyebrow">After Proposal Defense</p>
+                          <h5>Post-defense actors</h5>
+                        </div>
+                        <span
+                          className={
+                            projectTeam?.post_defense_ready
+                              ? "status-dot is-ready"
+                              : "status-dot"
+                          }
+                        >
+                          {projectTeam?.post_defense_ready
+                            ? "Ready"
+                            : "Incomplete"}
+                        </span>
+                      </div>
+                      <div className="project-actor-grid">
+                        {[
+                          [
+                            "Research Instructor",
+                            projectTeam?.instructor?.name,
+                            "Automatically assigned",
+                          ],
+                          [
+                            "Research Adviser",
+                            projectTeam?.adviser?.name,
+                            "Instructor assigned",
+                          ],
+                          [
+                            "Editor",
+                            projectTeam?.support_assignments?.editor?.name,
+                            projectTeam?.support_assignments?.editor?.status ??
+                              "Researcher assigned",
+                          ],
+                          [
+                            "Librarian",
+                            projectTeam?.support_assignments?.librarian?.name,
+                            projectTeam?.support_assignments?.librarian
+                              ?.status ?? "Researcher assigned",
+                          ],
+                          [
+                            "Panel 1",
+                            projectTeam?.panel_members[0]?.name,
+                            "Instructor assigned",
+                          ],
+                          [
+                            "Panel 2",
+                            projectTeam?.panel_members[1]?.name,
+                            "Instructor assigned",
+                          ],
+                          [
+                            "Panel 3",
+                            projectTeam?.panel_members[2]?.name,
+                            "Instructor assigned",
+                          ],
+                          [
+                            "Research Rep",
+                            projectTeam?.research_office_representative?.name,
+                            "Research Office personnel",
+                          ],
+                          ["Chair", projectTeam?.chair?.name, "Panel chair"],
+                        ].map(([actorLabel, actorName, note]) => (
+                          <div
+                            className="project-actor-row"
+                            key={`post-${actorLabel}`}
+                          >
+                            <span>
+                              <strong>{actorLabel}</strong>
+                              <small>{note}</small>
+                            </span>
+                            <span
+                              className={
+                                actorName ? "actor-name" : "actor-name is-empty"
+                              }
+                            >
+                              {actorName || "Unassigned"}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {projectTab === "documents" && (
+              <div className="project-workspace-section project-documents-layout">
+                <aside
+                  className="project-folder-sidebar"
+                  aria-label="Document folders"
+                >
+                  <div className="project-folder-sidebar-heading">
+                    <div>
+                      <p className="eyebrow">Paper files</p>
+                      <h4>Folders</h4>
+                    </div>
+                  </div>
+                  <div className="project-folder-nav">
+                    {[
+                      ...projectFolders,
+                      ...(projectFiles.some((file) => !file.relative_path)
+                        ? ["Unfiled"]
+                        : []),
+                    ].map((folder) => {
+                      const count = projectFiles.filter((file) =>
+                        folder === "Unfiled"
+                          ? !file.relative_path
+                          : file.relative_path === folder,
+                      ).length;
+                      return (
+                        <button
+                          type="button"
+                          key={folder}
+                          className={activeFolder === folder ? "is-active" : ""}
+                          onClick={() => setActiveFolder(folder)}
+                        >
+                          <Folder aria-hidden="true" />
+                          <span>{folder}</span>
+                          <small>{count}</small>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </aside>
+
+                <section className="project-folder-content">
+                  <div className="project-section-heading project-folder-heading">
+                    <div>
+                      <p className="eyebrow">Document folder</p>
+                      <h4>{activeFolder || "Select a folder"}</h4>
+                      <p>
+                        Previous revisions stay visible so the review history is
+                        never lost.
+                      </p>
+                    </div>
+                  </div>
+
+                  {!activeFolder ? (
+                    <p className="project-empty-copy">
+                      Choose a document folder.
+                    </p>
+                  ) : projectFiles.filter((file) =>
+                      activeFolder === "Unfiled"
+                        ? !file.relative_path
+                        : file.relative_path === activeFolder,
+                    ).length === 0 ? (
+                    <div className="project-empty-folder">
+                      <Folder aria-hidden="true" />
+                      <strong>No documents in this folder yet.</strong>
+                      <span>
+                        Files uploaded by the researchers will appear here with
+                        their revision history.
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="project-document-list">
+                      {projectFiles
+                        .filter((file) =>
+                          activeFolder === "Unfiled"
+                            ? !file.relative_path
+                            : file.relative_path === activeFolder,
+                        )
+                        .sort((a, b) => b.version_number - a.version_number)
+                        .map((file) => (
+                          <article
+                            className="project-document-row"
+                            key={file.id}
+                          >
+                            <div
+                              className="project-document-icon"
+                              aria-hidden="true"
+                            >
+                              <FileText />
+                            </div>
+                            <div className="project-document-copy">
+                              <div>
+                                <strong>{file.original_filename}</strong>
+                                <span
+                                  className={
+                                    file.is_current
+                                      ? "file-version is-current"
+                                      : "file-version"
+                                  }
+                                >
+                                  {file.is_current ? "Current" : "Previous"} · v
+                                  {file.version_number}
+                                </span>
+                              </div>
+                              <small>
+                                {label(file.document_type)} ·{" "}
+                                {file.uploader_name ?? "Researcher"} ·{" "}
+                                {displayDate(file.uploaded_at)}
+                              </small>
+                            </div>
+                            <div className="project-document-actions">
+                              {file.mime_type === "application/pdf" && (
+                                <a
+                                  className="icon-link-button"
+                                  href={researchFilePreviewUrl(
+                                    selectedDocument.research_document_id,
+                                    file.id,
+                                  )}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  aria-label={`Preview ${file.original_filename}`}
+                                  title="Preview PDF"
+                                >
+                                  <Eye />
+                                </a>
+                              )}
+                              <a
+                                className="icon-link-button"
+                                href={researchFileDownloadUrl(
+                                  selectedDocument.research_document_id,
+                                  file.id,
+                                )}
+                                aria-label={`Download ${file.original_filename}`}
+                                title="Download file"
+                              >
+                                <Download />
+                              </a>
+                            </div>
+                          </article>
+                        ))}
+                    </div>
+                  )}
+                </section>
+              </div>
+            )}
+
+            {projectTab === "feedback" && (
+              <div className="project-workspace-section project-feedback-layout">
+                <section className="project-feedback-thread">
+                  <div className="project-section-heading">
+                    <div>
+                      <p className="eyebrow">Review conversation</p>
+                      <h4>Feedback and comments</h4>
+                      <p>
+                        Comments stay attached to this study and can optionally
+                        reference a specific file.
+                      </p>
+                    </div>
+                    <span>
+                      {projectFeedback.length} comment
+                      {projectFeedback.length === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                  {projectFeedback.length === 0 ? (
+                    <div className="project-empty-folder">
+                      <MessageSquareText aria-hidden="true" />
+                      <strong>No feedback yet.</strong>
+                      <span>
+                        Review comments from assigned research actors will
+                        appear here.
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="project-comment-list">
+                      {projectFeedback.map((feedback) => {
+                        const linkedFile = projectFiles.find(
+                          (file) => file.id === feedback.document_file_id,
+                        );
+                        return (
+                          <article
+                            className="project-comment"
+                            key={feedback.id}
+                          >
+                            <span
+                              className="project-person-avatar"
+                              aria-hidden="true"
+                            >
+                              {(feedback.reviewer_name ?? "R")
+                                .slice(0, 1)
+                                .toUpperCase()}
+                            </span>
+                            <div className="project-comment-body">
+                              <div className="project-comment-meta">
+                                <span>
+                                  <strong>
+                                    {feedback.reviewer_name ??
+                                      "Assigned reviewer"}
+                                  </strong>
+                                  <small>
+                                    {feedback.reviewer_role ?? "Research actor"}
+                                  </small>
+                                </span>
+                                <time>{displayDate(feedback.created_at)}</time>
+                              </div>
+                              <p>{feedback.comment}</p>
+                              <div className="project-comment-footer">
+                                <span>{label(feedback.feedback_type)}</span>
+                                <span>{label(feedback.feedback_status)}</span>
+                                {linkedFile && (
+                                  <span>{linkedFile.original_filename}</span>
+                                )}
+                              </div>
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+
+                <aside className="project-feedback-composer">
+                  <form onSubmit={submitProjectFeedback}>
+                    <div>
+                      <p className="eyebrow">Add review note</p>
+                      <h4>New feedback</h4>
+                    </div>
+                    <label>
+                      Feedback type
+                      <select
+                        value={feedbackType}
+                        onChange={(event) =>
+                          setFeedbackType(
+                            event.target
+                              .value as FeedbackResource["feedback_type"],
+                          )
+                        }
+                      >
+                        <option value="comment">Comment</option>
+                        <option value="suggestion">Suggestion</option>
+                        <option value="revision_request">
+                          Revision request
+                        </option>
+                        <option value="approval_remark">Approval remark</option>
+                        <option value="general_feedback">
+                          General feedback
+                        </option>
+                      </select>
+                    </label>
+                    <label>
+                      Related document
+                      <select
+                        value={feedbackFileId}
+                        onChange={(event) =>
+                          setFeedbackFileId(event.target.value)
+                        }
+                      >
+                        <option value="">Whole study / no specific file</option>
+                        {projectFiles.map((file) => (
+                          <option key={file.id} value={file.id}>
+                            {file.relative_path ?? "Unfiled"} —{" "}
+                            {file.original_filename} (v{file.version_number})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Comment
+                      <textarea
+                        required
+                        value={feedbackText}
+                        onChange={(event) =>
+                          setFeedbackText(event.target.value)
+                        }
+                        placeholder="Write a clear review note for the researchers…"
+                      />
+                    </label>
+                    <Button disabled={feedbackBusy || !feedbackText.trim()}>
+                      <Send /> {feedbackBusy ? "Posting…" : "Post feedback"}
+                    </Button>
+                  </form>
+                </aside>
+              </div>
+            )}
+
+            {projectTab === "monitoring" && (
+              <div className="project-workspace-section">
+                <SharedMonitoring
+                  role={role}
+                  researchDocumentId={selectedDocument.research_document_id}
+                  embedded
+                />
+              </div>
+            )}
             {projectManageOpen && (
               <Modal
                 label="Manage project assignments"
@@ -3168,22 +3905,37 @@ function InstructorSections({
                         <input
                           value={studentQueries[openSection.id] ?? ""}
                           onChange={(event) =>
-                            changeStudentQuery(
-                              openSection.id,
-                              event.target.value,
-                            )
+                            setStudentQueries((current) => ({
+                              ...current,
+                              [openSection.id]: event.target.value,
+                            }))
                           }
-                          placeholder="Search name, email, or student ID"
+                          placeholder="Search this section roster"
                         />
                       </label>
+                      <p className="project-picker-note">
+                        Only students already enrolled in this section can be
+                        assigned to the study.
+                      </p>
                       <ul className="student-candidates">
-                        {(candidatesFor[openSection.id] ?? [])
+                        {(studentsFor[openSection.id] ?? [])
                           .filter(
                             (candidate) =>
                               !documentMembers.some(
                                 (member) => member.id === candidate.id,
                               ),
                           )
+                          .filter((candidate) => {
+                            const query = (studentQueries[openSection.id] ?? "")
+                              .trim()
+                              .toLocaleLowerCase();
+                            return (
+                              query === "" ||
+                              `${studentName(candidate)} ${candidate.email} ${candidate.student_employee_id ?? ""}`
+                                .toLocaleLowerCase()
+                                .includes(query)
+                            );
+                          })
                           .map((candidate) => (
                             <li key={candidate.id}>
                               <span>
@@ -3506,24 +4258,37 @@ function InstructorSections({
                               }
                               disabledLabel="Panel chair"
                               onToggle={(person, selected) =>
-                                setTeamDraft((current) => ({
-                                  ...current,
-                                  panel_member_ids: selected
-                                    ? [
-                                        ...current.panel_member_ids,
-                                        person.user_id,
-                                      ]
-                                    : current.panel_member_ids.filter(
-                                        (id) => id !== person.user_id,
-                                      ),
-                                }))
+                                setTeamDraft((current) => {
+                                  if (
+                                    selected &&
+                                    current.panel_member_ids.length >= 3 &&
+                                    !current.panel_member_ids.includes(
+                                      person.user_id,
+                                    )
+                                  ) {
+                                    return current;
+                                  }
+                                  return {
+                                    ...current,
+                                    panel_member_ids: selected
+                                      ? Array.from(
+                                          new Set([
+                                            ...current.panel_member_ids,
+                                            person.user_id,
+                                          ]),
+                                        ).slice(0, 3)
+                                      : current.panel_member_ids.filter(
+                                          (id) => id !== person.user_id,
+                                        ),
+                                  };
+                                })
                               }
                             />
                           )}
                         </fieldset>
                         <div className="project-role-actions">
                           <span>
-                            {teamDraft.panel_member_ids.length} selected
+                            {teamDraft.panel_member_ids.length} / 3 selected
                           </span>
                           <Button
                             type="button"
@@ -5114,8 +5879,8 @@ function EditorMonitoring({ role }: { role: Role }) {
     <div className="workspace-content admin-sidebar-page">
       <RolePageHeader
         role={role}
-        title="Monitoring"
-        description="Record and sign Editor activity before or after proposal defense."
+        title="Defense Monitoring Forms"
+        description="Record and sign Editor activity in the official defense monitoring form."
       />
       {assigned.status === "ready" && assigned.data.length > 0 && (
         <section className="panel-card">
@@ -5175,11 +5940,13 @@ function EditorMonitoring({ role }: { role: Role }) {
         </section>
       )}
       {records.status === "loading" ? (
-        <Loading label="Loading monitoring" />
+        <Loading label="Loading defense monitoring forms" />
       ) : records.status === "error" ? (
         <InlineError message={records.message} retry={reload} />
       ) : records.data.length === 0 ? (
-        <p className="admin-empty">No Editor monitoring entries.</p>
+        <p className="admin-empty">
+          No Editor defense monitoring form entries.
+        </p>
       ) : (
         <section className="panel-card admin-data-card">
           {records.data.map((item) => (
@@ -5463,8 +6230,8 @@ function LibrarianMonitoring({ role }: { role: Role }) {
     <div className="workspace-content admin-sidebar-page">
       <RolePageHeader
         role={role}
-        title="Monitoring"
-        description="Record and sign your Pre-Defense and Post-Defense reference-review activity."
+        title="Defense Monitoring Forms"
+        description="Record and sign your Pre-Defense and Post-Defense reference-review activity in the official form."
       />
       {assigned.status === "ready" && assigned.data.length > 0 && (
         <section className="panel-card">
@@ -5519,11 +6286,13 @@ function LibrarianMonitoring({ role }: { role: Role }) {
         </section>
       )}
       {entries.status === "loading" ? (
-        <Loading label="Loading monitoring" />
+        <Loading label="Loading defense monitoring forms" />
       ) : entries.status === "error" ? (
         <InlineError message={entries.message} retry={reload} />
       ) : entries.data.length === 0 ? (
-        <p className="admin-empty">No Librarian monitoring records.</p>
+        <p className="admin-empty">
+          No Librarian defense monitoring form records.
+        </p>
       ) : (
         <section className="panel-card admin-data-card">
           <div className="admin-table-wrap">
@@ -6482,6 +7251,68 @@ function OfficeReports({ role }: { role: Role }) {
 
 /* ---------------------------------- Researcher ---------------------------------- */
 
+function ResearcherWorkflowGuide() {
+  return (
+    <section
+      className="researcher-workflow-guide"
+      aria-labelledby="researcher-workflow-title"
+    >
+      <div className="researcher-workflow-intro">
+        <p className="eyebrow">How My Research works</p>
+        <h2 id="researcher-workflow-title">One folder, two kinds of updates</h2>
+        <p>
+          Use the research folder for the manuscript workflow. Research Progress
+          Updates are separate informal updates inside that same folder and do
+          not submit your manuscript for review or complete an official defense
+          form.
+        </p>
+      </div>
+      <ol className="researcher-workflow-steps">
+        <li>
+          <span>1</span>
+          <div>
+            <strong>Open your assigned folder</strong>
+            <small>
+              Select Manage folder to view files, revisions, Research Progress
+              Updates, and feedback.
+            </small>
+          </div>
+        </li>
+        <li>
+          <span>2</span>
+          <div>
+            <strong>Prepare and submit research</strong>
+            <small>
+              Edit the details, upload the manuscript, then submit the draft for
+              review.
+            </small>
+          </div>
+        </li>
+        <li>
+          <span>3</span>
+          <div>
+            <strong>Report Research Progress Updates</strong>
+            <small>
+              Use Research Progress Updates inside the folder to report
+              accomplishments or blockers without changing submission status.
+            </small>
+          </div>
+        </li>
+        <li>
+          <span>4</span>
+          <div>
+            <strong>Respond to review</strong>
+            <small>
+              When revision is required, update the record and upload the
+              revised manuscript.
+            </small>
+          </div>
+        </li>
+      </ol>
+    </section>
+  );
+}
+
 function ResearcherSubmissions({
   role,
   navigate,
@@ -6500,8 +7331,6 @@ function ResearcherSubmissions({
   const [submitting, setSubmitting] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [createDirty, setCreateDirty] = useState(false);
   const [editing, setEditing] =
     useState<ResearchDocumentSummaryResource | null>(null);
   const [activityFor, setActivityFor] =
@@ -6513,7 +7342,6 @@ function ResearcherSubmissions({
 
   function beginLoad() {
     setLoading(true);
-    setCreating(false);
     setEditing(null);
     setActivityFor(null);
   }
@@ -6543,7 +7371,6 @@ function ResearcherSubmissions({
         setError(
           friendlyError(requestError, "Your submissions are unavailable"),
         );
-        setCreating(false);
         setEditing(null);
         setActivityFor(null);
         setLoading(false);
@@ -6573,25 +7400,15 @@ function ResearcherSubmissions({
     <div className="workspace-content admin-sidebar-page">
       <RolePageHeader
         role={role}
-        title="My submissions"
-        description="Your research records and their current workflow status."
+        title="My research"
+        description="Research folders assigned to you by your Research Instructor."
         action={
-          <div className="submission-page-actions">
-            <Button variant="secondary" onClick={refresh}>
-              <RefreshCw /> Refresh
-            </Button>
-            <Button
-              onClick={() => {
-                setCreateDirty(false);
-                setCreating(true);
-              }}
-              disabled={loading || source === "mock"}
-            >
-              <Plus /> New submission
-            </Button>
-          </div>
+          <Button variant="secondary" onClick={refresh}>
+            <RefreshCw /> Refresh
+          </Button>
         }
       />
+      <ResearcherWorkflowGuide />
       {notice && (
         <p
           role="status"
@@ -6654,104 +7471,86 @@ function ResearcherSubmissions({
       ) : result.data.length === 0 ? (
         <section className="panel-card submissions-empty-state">
           <p className="eyebrow">Research workspace</p>
-          <h2>No submissions yet</h2>
-          <p>Create your first research draft to begin the review workflow.</p>
-          <Button
-            onClick={() => {
-              setCreateDirty(false);
-              setCreating(true);
-            }}
-            disabled={source === "mock"}
-          >
-            <Plus /> Create submission
-          </Button>
+          <h2>No assigned research folders</h2>
+          <p>
+            Your Research Instructor must create a class research folder and
+            assign you before you can upload or submit research.
+          </p>
         </section>
       ) : (
-        <section className="panel-card admin-data-card">
-          <div className="admin-table-wrap">
-            <table>
-              <caption className="sr-only">My submissions</caption>
-              <thead>
-                <tr>
-                  <th>Title</th>
-                  <th>Stage</th>
-                  <th>Status</th>
-                  <th>Archive</th>
-                  <th>Submitted</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {result.data.map((document) => (
-                  <tr key={document.id}>
-                    <td>{document.title}</td>
-                    <td>{label(document.research_stage)}</td>
-                    <td>{label(document.submission_status)}</td>
-                    <td>{label(document.archive_status)}</td>
-                    <td>{displayDate(document.submitted_at)}</td>
-                    <td>
-                      <span className="row-actions">
-                        {source === "live" && !loading && (
-                          <button
-                            className="icon-button"
-                            aria-label="Feedback & activity"
-                            title="Feedback & activity"
-                            onClick={() => setActivityFor(document)}
+        <section className="panel-card research-folder-collection">
+          <div className="research-title-folders">
+            {result.data.map((document) => (
+              <ResearchFolderRow
+                key={document.id}
+                title={document.title}
+                metadata={
+                  <>
+                    {label(document.research_stage)} ·{" "}
+                    {label(document.submission_status)} ·{" "}
+                    {label(document.archive_status)}
+                  </>
+                }
+                detail={
+                  document.submitted_at
+                    ? `Submitted ${displayDate(document.submitted_at)}`
+                    : "Not submitted yet"
+                }
+                onOpen={() => navigate(`/research/${document.id}`)}
+                actions={
+                  <span className="row-actions">
+                    {source === "live" && !loading && (
+                      <button
+                        className="icon-button"
+                        aria-label="Feedback & activity"
+                        title="Feedback & activity"
+                        onClick={() => setActivityFor(document)}
+                      >
+                        <MessageSquareText size={17} aria-hidden="true" />
+                      </button>
+                    )}
+                    {source === "live" && !loading && (
+                      <Button
+                        variant="secondary"
+                        onClick={() => navigate(`/research/${document.id}`)}
+                      >
+                        <ExternalLink size={16} aria-hidden="true" /> Manage
+                        folder
+                      </Button>
+                    )}
+                    {source === "live" &&
+                      !loading &&
+                      ["draft", "revision_required"].includes(
+                        document.submission_status,
+                      ) && (
+                        <>
+                          <Button
+                            variant="secondary"
+                            onClick={() => {
+                              setEditDirty(false);
+                              setEditing(document);
+                            }}
+                            disabled={submitting === String(document.id)}
                           >
-                            <MessageSquareText size={17} aria-hidden="true" />
-                          </button>
-                        )}
-                        {source === "live" && !loading && (
-                          <button
-                            className="icon-button"
-                            aria-label="Open record"
-                            title="Open record"
-                            onClick={() => navigate(`/research/${document.id}`)}
-                          >
-                            <ExternalLink size={17} aria-hidden="true" />
-                          </button>
-                        )}
-                        {source === "live" &&
-                          !loading &&
-                          ["draft", "revision_required"].includes(
-                            document.submission_status,
-                          ) && (
-                            <>
-                              <button
-                                className="icon-button"
-                                aria-label="Edit"
-                                title="Edit"
-                                onClick={() => {
-                                  setEditDirty(false);
-                                  setEditing(document);
-                                }}
-                                disabled={submitting === String(document.id)}
-                              >
-                                <Pencil size={17} aria-hidden="true" />
-                              </button>
-                              {document.submission_status === "draft" && (
-                                <button
-                                  className="icon-button"
-                                  aria-label={
-                                    submitting === String(document.id)
-                                      ? "Submitting…"
-                                      : "Submit"
-                                  }
-                                  title="Submit"
-                                  onClick={() => void submit(document)}
-                                  disabled={submitting === String(document.id)}
-                                >
-                                  <Send size={17} aria-hidden="true" />
-                                </button>
-                              )}
-                            </>
+                            <Pencil size={16} aria-hidden="true" /> Edit
+                          </Button>
+                          {document.submission_status === "draft" && (
+                            <Button
+                              onClick={() => void submit(document)}
+                              disabled={submitting === String(document.id)}
+                            >
+                              <Send size={16} aria-hidden="true" />
+                              {submitting === String(document.id)
+                                ? "Submitting…"
+                                : "Submit"}
+                            </Button>
                           )}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                        </>
+                      )}
+                  </span>
+                }
+              />
+            ))}
           </div>
           <Pagination
             meta={result.meta}
@@ -6772,34 +7571,6 @@ function ResearcherSubmissions({
             researchDocumentId={activityFor.id}
             title={activityFor.title}
             researcherActions
-          />
-        </Modal>
-      )}
-      {creating && source === "live" && !loading && (
-        <Modal
-          label="Create a new submission"
-          onClose={() => setCreating(false)}
-          dirty={createDirty}
-          size="large"
-        >
-          <ResearcherNewSubmission
-            role={role}
-            embedded
-            onDirtyChange={setCreateDirty}
-            onCancel={() => setCreating(false)}
-            onSaved={(document, submitted) => {
-              setNotice(
-                submitted
-                  ? `"${document.title}" has been submitted.`
-                  : `Draft "${document.title}" has been created.`,
-              );
-              setCreating(false);
-              if (page === 1) refresh();
-              else {
-                beginLoad();
-                setPage(1);
-              }
-            }}
           />
         </Modal>
       )}
@@ -6860,7 +7631,7 @@ export function ResearcherNewSubmission({
   onDirtyChange,
 }: {
   role: Role;
-  draft?: ResearchDocumentSummaryResource;
+  draft: ResearchDocumentSummaryResource;
   embedded?: boolean;
   onSaved?: (
     document: ResearchDocumentSummaryResource,
@@ -6870,14 +7641,14 @@ export function ResearcherNewSubmission({
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const isRevisionRequired = draft?.submission_status === "revision_required";
-  const initialAuthors = draft?.authors.length
+  const initialAuthors = draft.authors.length
     ? draft.authors.map((author) => ({
         author_name: author.author_name,
         user_id: author.user_id ?? "",
         is_corresponding_author: author.is_corresponding_author,
       }))
     : [{ author_name: "", user_id: "", is_corresponding_author: false }];
-  const [title, setTitle] = useState(draft?.title ?? "");
+  const [title, setTitle] = useState(draft.title);
   const [abstract, setAbstract] = useState(draft?.abstract ?? "");
   const [keywords, setKeywords] = useState(draft?.keywords ?? "");
   const [publicationYear, setPublicationYear] = useState(
@@ -7035,9 +7806,8 @@ export function ResearcherNewSubmission({
           is_corresponding_author: author.is_corresponding_author,
         })),
       };
-      saved = saved
-        ? await updateResearchDraft(saved.id, input)
-        : await createResearchDraft(input);
+      if (!saved) throw new Error("An assigned research folder is required.");
+      saved = await updateResearchDraft(saved.id, input);
       metadataSaved = true;
       setCreatedDraft(saved);
 
@@ -7229,28 +7999,6 @@ export function ResearcherNewSubmission({
                     maxLength={255}
                   />
                 </label>
-                <label>
-                  User ID (optional)
-                  <input
-                    value={author.user_id}
-                    onChange={(event) =>
-                      changeAuthor(index, { user_id: event.target.value })
-                    }
-                    maxLength={36}
-                  />
-                </label>
-                <label className="checklist-toggle">
-                  <input
-                    type="checkbox"
-                    checked={author.is_corresponding_author}
-                    onChange={(event) =>
-                      changeAuthor(index, {
-                        is_corresponding_author: event.target.checked,
-                      })
-                    }
-                  />
-                  Corresponding
-                </label>
                 {authors.length > 1 && (
                   <Button
                     variant="secondary"
@@ -7295,17 +8043,16 @@ export function ResearcherNewSubmission({
                   ))}
                 </select>
               </label>
-              <label>
-                PDF or DOCX (maximum 25 MB)
-                <input
-                  ref={fileInput}
-                  type="file"
-                  accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                  onChange={(event) =>
-                    setManuscript(event.target.files?.[0] ?? null)
-                  }
-                />
-              </label>
+              <ManuscriptFilePicker
+                label="PDF or DOCX (maximum 25 MB)"
+                help="PDF or DOCX, maximum 25 MB"
+                inputRef={fileInput}
+                accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                file={manuscript}
+                onChange={(event) =>
+                  setManuscript(event.target.files?.[0] ?? null)
+                }
+              />
             </div>
           </fieldset>
           <div className="modal-actions submission-actions">
@@ -7375,11 +8122,13 @@ const MAX_SIMILARITY_QUERY_LENGTH = 200;
 function ResearcherSimilarityCheck({
   role,
   initialMode = "title",
+  showModePicker = false,
 }: {
   role: Role;
   initialMode?: "title" | "content";
+  showModePicker?: boolean;
 }) {
-  const mode = initialMode;
+  const [mode, setMode] = useState(initialMode);
   const [draft, setDraft] = useState("");
   const [submitted, setSubmitted] = useState("");
   const [state, setState] = useState<
@@ -7443,6 +8192,29 @@ function ResearcherSimilarityCheck({
             : "Search your keywords only against cached archived manuscript content."
         }
       />
+
+      {showModePicker && (
+        <div className="similarity-mode-picker" aria-label="Similarity mode">
+          <Button
+            variant={mode === "title" ? "primary" : "secondary"}
+            onClick={() => {
+              setMode("title");
+              setState({ status: "idle" });
+            }}
+          >
+            Title checker
+          </Button>
+          <Button
+            variant={mode === "content" ? "primary" : "secondary"}
+            onClick={() => {
+              setMode("content");
+              setState({ status: "idle" });
+            }}
+          >
+            Content checker
+          </Button>
+        </div>
+      )}
 
       <section className="panel-card admin-provision-card">
         <form

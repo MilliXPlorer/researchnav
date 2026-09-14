@@ -23,10 +23,12 @@ export default function SimilarityResults({
   researchDocumentId,
   fetchPersistedResults = listPersistedSimilarityResults,
   checkTitleSimilarity = runTitleSimilarityCheck,
+  eyebrow = "Manuscript review",
 }: {
   researchDocumentId?: string | number;
   fetchPersistedResults?: SimilarityFetcher;
   checkTitleSimilarity?: SimilarityChecker;
+  eyebrow?: string;
 }) {
   const hasSelectedResearch =
     researchDocumentId !== undefined && researchDocumentId !== null;
@@ -143,7 +145,7 @@ export default function SimilarityResults({
     >
       <div className="similarity-results-header">
         <div>
-          <p className="eyebrow">Manuscript review</p>
+          <p className="eyebrow">{eyebrow}</p>
           <h2 id="similarity-title">Similarity results</h2>
           <p>
             Ranked results combine title and extracted manuscript text using

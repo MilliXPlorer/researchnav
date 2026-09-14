@@ -49,22 +49,24 @@ export default function AccessRequestPanel() {
 
   useEffect(() => {
     let cancelled = false;
+    const load = () =>
+      void getMyAccessRequest()
+        .then((request) => {
+          if (cancelled) return;
+          setState(
+            request ? { status: "existing", request } : { status: "form" },
+          );
+        })
+        .catch(() => {
+          if (!cancelled) setState({ status: "form" });
+        });
 
-    void getMyAccessRequest()
-      .then((request) => {
-        if (cancelled) return;
-        setState(
-          request && request.status === "pending"
-            ? { status: "existing", request }
-            : { status: "form" },
-        );
-      })
-      .catch(() => {
-        if (!cancelled) setState({ status: "form" });
-      });
+    load();
+    const interval = window.setInterval(load, 15_000);
 
     return () => {
       cancelled = true;
+      window.clearInterval(interval);
     };
   }, []);
 
@@ -78,6 +80,32 @@ export default function AccessRequestPanel() {
 
   if (state.status === "existing" || state.status === "submitted") {
     const { request } = state;
+    if (request.status !== "pending") {
+      const approved = request.status === "approved";
+      return (
+        <div className="access-request-pending" role="status">
+          <span className="access-request-icon">
+            <ClipboardCheck />
+          </span>
+          <strong>
+            {approved
+              ? "Your access request was approved."
+              : "Your access request was not approved."}
+          </strong>
+          <p>
+            {approved
+              ? `You were granted the ${roleLabelFor(request.requested_role)} workspace. Refresh this page to open it.`
+              : request.decision_remarks ||
+                "An administrator reviewed and rejected this request."}
+          </p>
+          {approved && (
+            <button type="button" onClick={() => window.location.reload()}>
+              Refresh access
+            </button>
+          )}
+        </div>
+      );
+    }
     return (
       <div className="access-request-pending" role="status">
         <span className="access-request-icon">

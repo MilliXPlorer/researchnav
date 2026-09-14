@@ -78,6 +78,37 @@ describe("AccessRequestPanel", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("shows a rejected decision and its administrator remarks", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              data: {
+                ...pendingRequest,
+                status: "rejected",
+                decision_remarks: "Enrollment could not be verified.",
+                decided_at: "2026-05-03T00:00:00.000Z",
+              },
+            }),
+          ),
+      ),
+    );
+
+    render(<AccessRequestPanel />);
+
+    expect(
+      await screen.findByText("Your access request was not approved."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Enrollment could not be verified."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Send request/ }),
+    ).not.toBeInTheDocument();
+  });
+
   it("reports a duplicate request without claiming success", async () => {
     vi.stubGlobal(
       "fetch",

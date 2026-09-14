@@ -6,6 +6,7 @@ use App\Models\ResearchDocument;
 use App\Models\ReviewAssignment;
 use App\Models\User;
 use App\Models\UserRole;
+use Illuminate\Support\Facades\DB;
 
 class DomainAuthorization
 {
@@ -70,8 +71,12 @@ class DomainAuthorization
     public static function isResearcherParticipant(User $user, ResearchDocument $research): bool
     {
         return self::isResearcher($user)
-            && ($research->submitted_by === $user->id
-                || $research->authors()->where('user_id', $user->id)->exists());
+            && $research->section_id !== null
+            && DB::table('class_section_members')
+                ->where('class_section_id', $research->section_id)
+                ->where('research_document_id', $research->id)
+                ->where('user_id', $user->id)
+                ->exists();
     }
 
     public static function isOffice(User $user): bool
@@ -83,8 +88,21 @@ class DomainAuthorization
             || ($user->role === 'research-office' && self::hasAnyRole($user, [UserRole::RESEARCH_OFFICE]));
     }
 
+    public static function isSectionInstructor(User $user, ResearchDocument $research): bool
+    {
+        if (! self::hasAnyRole($user, ['instructor', UserRole::RESEARCH_INSTRUCTOR]) || $research->section_id === null) {
+            return false;
+        }
+
+        return $research->section()->where('instructor_id', $user->id)->exists();
+    }
+
     public static function isAssignedReviewer(User $user, ResearchDocument $research): bool
     {
+        if (self::isSectionInstructor($user, $research)) {
+            return true;
+        }
+
         return ReviewAssignment::identityCompatible()
             && self::isReviewer($user)
             && $research->reviewAssignments()
@@ -99,16 +117,26 @@ class DomainAuthorization
         return self::isOffice($user) || self::isAssignedReviewer($user, $research);
     }
 
-    /** Assigned panelists and statisticians may read a record but cannot use reviewer mutations. */
+    /**
+     * Every accepted actor assigned to a study can read its shared record. Core
+     * reviewer mutations remain protected by canReview()/isAssignedReviewer().
+     */
     public static function isAssignedRecordReader(User $user, ResearchDocument $research): bool
     {
-        return ReviewAssignment::identityCompatible()
-            && (self::isAssignedReviewer($user, $research)
-            || (self::hasAnyRole($user, ['panel', 'statistician', UserRole::RESEARCH_PANELIST, UserRole::STATISTICIAN])
-                && $research->reviewAssignments()
-                    ->where(ReviewAssignment::column('reviewer_id'), $user->id)
-                    ->where(ReviewAssignment::column('review_role'), $user->role)
-                    ->where(ReviewAssignment::column('is_active'), ReviewAssignment::column('is_active') === 'status' ? 'active' : true)
-                    ->exists()));
+        if (self::isSectionInstructor($user, $research) || self::isAssignedReviewer($user, $research)) {
+            return true;
+        }
+        if (! ReviewAssignment::identityCompatible() || ! self::isActiveAccount($user)) {
+            return false;
+        }
+
+        $query = $research->reviewAssignments()
+            ->where(ReviewAssignment::column('reviewer_id'), $user->id)
+            ->where(ReviewAssignment::column('review_role'), $user->role);
+        if (ReviewAssignment::column('is_active') === 'status') {
+            return $query->whereIn('status', ['accepted', 'confirmed', 'active'])->exists();
+        }
+
+        return $query->where('is_active', true)->exists();
     }
 }

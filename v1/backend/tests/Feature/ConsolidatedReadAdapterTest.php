@@ -213,6 +213,7 @@ class ConsolidatedReadAdapterTest extends TestCase
         config()->set('researchnav.consolidation.read_shadow', true);
         $owner = User::factory()->create();
         $research = ResearchDocument::factory()->create(['submitted_by' => $owner->id]);
+        $this->assignResearcherToDocument($owner, $research);
         $monitoring = MonitoringLog::query()->create([
             'research_document_id' => $research->id,
             'performed_by' => $owner->id,

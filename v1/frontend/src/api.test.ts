@@ -16,6 +16,9 @@ import {
   listAdminUsers,
   listFeedback,
   listMonitoringLogs,
+  listAdviserPendingReviews,
+  listInstructorAssignedSubmissions,
+  listResearchProgressUpdates,
   listPersistedSimilarityResults,
   listPublicResearch,
   listResearchRevisions,
@@ -102,6 +105,52 @@ const resource = (id: number, authorName: string, authorOrder = 1) => ({
 });
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe("review queues and progress updates API", () => {
+  it("uses the server stage filter for each mutually exclusive review queue", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      void input;
+      return Promise.resolve(new Response(JSON.stringify({ data: [] })));
+    });
+
+    await listAdviserPendingReviews("title_proposal", fetchMock);
+    await listAdviserPendingReviews("manuscript", fetchMock);
+    await listInstructorAssignedSubmissions("title_proposal", fetchMock);
+    await listInstructorAssignedSubmissions("manuscript", fetchMock);
+
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
+      "/api/adviser/pending-reviews?stage=title_proposal",
+      "/api/adviser/pending-reviews?stage=manuscript",
+      "/api/instructor/submissions?stage=title_proposal",
+      "/api/instructor/submissions?stage=manuscript",
+    ]);
+  });
+
+  it("loads server-grouped research progress updates", async () => {
+    const folders = [
+      {
+        research_document_id: 7,
+        title: "Assigned folder",
+        research_stage: "ongoing",
+        progress_updates: [],
+      },
+    ];
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      void input;
+      return Promise.resolve(
+        new Response(JSON.stringify({ data: folders, schema_version: 1 })),
+      );
+    });
+
+    await expect(listResearchProgressUpdates(fetchMock)).resolves.toEqual(
+      folders,
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/monitoring/progress-updates",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+});
 
 describe("public repository API", () => {
   it("uses exact Laravel author fields and sorts by author_order", () => {

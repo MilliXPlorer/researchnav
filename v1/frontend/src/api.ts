@@ -34,6 +34,12 @@ export interface NotificationResource {
   submission_reference: string | null;
   action_url: string | null;
   research_document_id: number | null;
+  access_request_id?: number | null;
+  applicant_email?: string | null;
+  requested_role?: string | null;
+  full_name?: string | null;
+  program?: string | null;
+  justification?: string | null;
   read_at: string | null;
   created_at: string | null;
 }
@@ -339,11 +345,15 @@ export interface DocumentFileResource {
     | "final_manuscript"
     | "attachment";
   version_number: number;
+  uploaded_by?: string | null;
+  uploader_name?: string | null;
   original_filename: string;
   file_extension: string;
   mime_type: string;
   file_size: number;
   is_current: boolean;
+  relative_path?: string | null;
+  file_order?: number | null;
   uploaded_at: string | null;
 }
 
@@ -371,6 +381,7 @@ export interface FeedbackResource {
     | "general_feedback";
   feedback_status: "open" | "acknowledged" | "resolved";
   reviewer_name?: string | null;
+  reviewer_role?: string | null;
   researcher_acknowledged_at?: string | null;
   researcher_addressed_at?: string | null;
   researcher_action_remarks?: string | null;
@@ -394,6 +405,8 @@ export interface MonitoringLogResource {
   new_status: string | null;
   monitoring_status: string;
   activity_date: string | null;
+  saved_at?: string | null;
+  reviewer_name?: string | null;
 }
 
 export async function apiRequest<T>(
@@ -786,6 +799,19 @@ export async function listResearchFiles(
   ).data;
 }
 
+export async function listResearchFolders(
+  researchDocumentId: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<string[]> {
+  return (
+    await apiRequest<{ data: string[] }>(
+      `${researchPath(researchDocumentId)}/folders`,
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
 export function researchFileDownloadUrl(
   researchDocumentId: string | number,
   fileId: string | number,
@@ -808,16 +834,24 @@ export async function uploadResearchFile(
   researchDocumentId: string | number,
   file: File,
   documentType: DocumentFileResource["document_type"],
+  relativePathOrFetcher?: string | null | ApiFetch,
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<DocumentFileResource> {
+  const relativePath =
+    typeof relativePathOrFetcher === "string" ? relativePathOrFetcher : null;
+  const actualFetcher =
+    typeof relativePathOrFetcher === "function"
+      ? relativePathOrFetcher
+      : fetcher;
   const body = new FormData();
   body.append("file", file);
   body.append("document_type", documentType);
+  if (relativePath?.trim()) body.append("relative_path", relativePath.trim());
   return (
     await apiRequest<{ data: DocumentFileResource }>(
       `${researchPath(researchDocumentId)}/files`,
       { method: "POST", body },
-      fetcher,
+      actualFetcher,
     )
   ).data;
 }
@@ -1501,6 +1535,7 @@ export interface ResearchDocumentSummaryResource {
   submission_reference?: string | null;
   submitted_by: string | null;
   category_id: number | null;
+  section_id?: number | null;
   title: string;
   normalized_title: string | null;
   abstract: string | null;
@@ -1561,6 +1596,9 @@ export interface AdviserPendingReviewItem {
   updated_at: string | null;
 }
 
+/** Server-recognized, mutually exclusive review queues. */
+export type ReviewQueueStage = "title_proposal" | "manuscript";
+
 export interface AdviserSimilarityAlert {
   id: number;
   research_document_id: number;
@@ -1597,11 +1635,12 @@ export async function listAdviserAdvisees(
 }
 
 export async function listAdviserPendingReviews(
+  stage: ReviewQueueStage,
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<AdviserPendingReviewItem[]> {
   return (
     await apiRequest<{ data: AdviserPendingReviewItem[] }>(
-      "/api/adviser/pending-reviews",
+      `/api/adviser/pending-reviews?stage=${encodeURIComponent(stage)}`,
       undefined,
       fetcher,
     )
@@ -1768,6 +1807,7 @@ export interface InstructorMonitoringEntry {
   signature_status: string;
   verified_by: string | null;
   verified_at: string | null;
+  is_owned?: boolean;
   reviewer_email: string | null;
   verifier_email: string | null;
 }
@@ -1785,11 +1825,12 @@ export async function listInstructorSections(
 }
 
 export async function listInstructorAssignedSubmissions(
+  stage?: ReviewQueueStage,
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<InstructorAssignedSubmissionItem[]> {
   return (
     await apiRequest<{ data: InstructorAssignedSubmissionItem[] }>(
-      "/api/instructor/submissions",
+      `/api/instructor/submissions${stage ? `?stage=${encodeURIComponent(stage)}` : ""}`,
       undefined,
       fetcher,
     )
@@ -1847,7 +1888,11 @@ export interface InstructorStudentResource {
 }
 
 export type ProjectTeamRole =
-  "adviser" | "research_office_representative" | "chair" | "panel_member";
+  | "instructor"
+  | "adviser"
+  | "research_office_representative"
+  | "chair"
+  | "panel_member";
 
 export interface ProjectTeamPerson {
   user_id: string;
@@ -1856,13 +1901,29 @@ export interface ProjectTeamPerson {
   team_role: ProjectTeamRole;
 }
 
+export interface ProjectSupportActor {
+  user_id: string;
+  name: string;
+  email: string | null;
+  assignment_role: "statistician" | "librarian" | "research_editor";
+  status: string;
+}
+
 export interface InstructorProjectTeam {
   section_id: number;
   research_document_id: number;
+  instructor: ProjectTeamPerson | null;
   adviser: ProjectTeamPerson | null;
   research_office_representative: ProjectTeamPerson | null;
   chair: ProjectTeamPerson | null;
   panel_members: ProjectTeamPerson[];
+  support_assignments: {
+    editor: ProjectSupportActor | null;
+    statistician: ProjectSupportActor | null;
+    librarian: ProjectSupportActor | null;
+  };
+  pre_defense_ready: boolean;
+  post_defense_ready: boolean;
   complete: boolean;
 }
 
@@ -1934,6 +1995,46 @@ export async function replaceInstructorProjectTeamRole(
         method: "PUT",
         body: JSON.stringify({ team_role: teamRole, user_id: userId }),
       },
+      fetcher,
+    )
+  ).data;
+}
+
+export async function getOfficeProjectTeam(
+  researchDocumentId: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<InstructorProjectTeam> {
+  return (
+    await apiRequest<{ data: InstructorProjectTeam }>(
+      `/api/office/research/${encodeURIComponent(String(researchDocumentId))}/team`,
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export async function listOfficeRepresentativeCandidates(
+  researchDocumentId: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<ProjectTeamPerson[]> {
+  return (
+    await apiRequest<{ data: ProjectTeamPerson[] }>(
+      `/api/office/research/${encodeURIComponent(String(researchDocumentId))}/representative-candidates`,
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export async function assignOfficeRepresentative(
+  researchDocumentId: string | number,
+  userId: string | null,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<InstructorProjectTeam> {
+  return (
+    await apiRequest<{ data: InstructorProjectTeam }>(
+      `/api/office/research/${encodeURIComponent(String(researchDocumentId))}/representative`,
+      { method: "PUT", body: JSON.stringify({ user_id: userId }) },
       fetcher,
     )
   ).data;
@@ -2479,6 +2580,7 @@ export async function requestResearchSupport(
   researchId: string | number,
   userId: string,
   assignmentRole: SupportAssignmentResource["assignment_role"],
+  replaceCurrent = false,
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<SupportAssignmentResource> {
   return (
@@ -2489,6 +2591,7 @@ export async function requestResearchSupport(
         body: JSON.stringify({
           user_id: userId,
           assignment_role: assignmentRole,
+          replace_current: replaceCurrent,
         }),
       },
       fetcher,
@@ -2652,17 +2755,22 @@ export interface SharedMonitoringResearch {
   id: number;
   title: string;
   research_stage: string;
+  institute?: string | null;
   researchers: string[];
 }
 export interface SharedMonitoringEntry {
   id: number;
   activity_date: string | null;
+  saved_at?: string | null;
+  reviewer_name?: string | null;
   activity: string | null;
   remarks: string | null;
   status: string;
   signature_status: string;
+  signature_url: string | null;
   verified_by: string | null;
   verified_at: string | null;
+  is_owned?: boolean;
 }
 export interface SharedMonitoringData {
   research_document_id: number;
@@ -2673,13 +2781,45 @@ export interface SharedMonitoringData {
     {
       sections: Array<{
         designation: string;
+        assigned_actor_name?: string | null;
         entry: SharedMonitoringEntry | null;
+        entries?: SharedMonitoringEntry[];
       }>;
       verified_by: string | null;
       verified_at: string | null;
     }
   >;
 }
+
+export interface ResearchProgressUpdate {
+  id: number;
+  activity_type: "RESEARCHER_PROGRESS_REPORTED" | string;
+  performer_name: string | null;
+  status: string | null;
+  remarks: string | null;
+  activity_date: string | null;
+}
+
+/** Progress updates grouped by the assigned research folder. */
+export interface ResearchProgressFolder {
+  research_document_id: number;
+  title: string;
+  research_stage: string;
+  progress_updates: ResearchProgressUpdate[];
+}
+
+export async function listResearchProgressUpdates(
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<ResearchProgressFolder[]> {
+  return (
+    await apiRequest<{ data: ResearchProgressFolder[] }>(
+      "/api/monitoring/progress-updates",
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
 export async function listSharedMonitoringResearch(
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<SharedMonitoringResearch[]> {
@@ -2706,8 +2846,9 @@ export async function getSharedMonitoring(
 export async function saveSharedMonitoring(
   id: string | number,
   input: {
+    entry_id?: number;
+    signature_entry_id?: number;
     monitoring_stage: string;
-    activity_date: string;
     activity: string;
     remarks: string | null;
     status: string;
@@ -2723,6 +2864,30 @@ export async function saveSharedMonitoring(
     )
   ).data;
 }
+
+export async function uploadSharedMonitoringSignature(
+  id: string | number,
+  monitoringStage: string,
+  signature: File | Blob,
+  entryId?: number,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<SharedMonitoringData> {
+  const body = new FormData();
+  body.append("monitoring_stage", monitoringStage);
+  if (entryId !== undefined) body.append("entry_id", String(entryId));
+  body.append(
+    "signature",
+    signature,
+    signature instanceof File ? signature.name : "signature.png",
+  );
+  return (
+    await apiRequest<{ data: SharedMonitoringData }>(
+      `/api/research/${id}/shared-monitoring/signature`,
+      { method: "POST", body },
+      fetcher,
+    )
+  ).data;
+}
 export async function verifySharedMonitoring(
   id: string | number,
   monitoring_stage: string,
@@ -2732,6 +2897,20 @@ export async function verifySharedMonitoring(
     await apiRequest<{ data: SharedMonitoringData }>(
       `/api/research/${id}/shared-monitoring/verify`,
       { method: "POST", body: JSON.stringify({ monitoring_stage }) },
+      fetcher,
+    )
+  ).data;
+}
+
+export async function deleteSharedMonitoringEntry(
+  id: string | number,
+  entryId: number,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<SharedMonitoringData> {
+  return (
+    await apiRequest<{ data: SharedMonitoringData }>(
+      `/api/research/${id}/shared-monitoring`,
+      { method: "DELETE", body: JSON.stringify({ entry_id: entryId }) },
       fetcher,
     )
   ).data;

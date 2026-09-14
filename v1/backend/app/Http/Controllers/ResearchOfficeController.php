@@ -8,6 +8,7 @@ use App\Models\ResearchDocument;
 use App\Models\User;
 use App\Services\ComplianceService;
 use App\Services\ReportingService;
+use App\Services\ResearchProjectTeamService;
 use App\Services\SupabaseStorageException;
 use App\Services\SupabaseStorageService;
 use Illuminate\Database\Eloquent\Builder;
@@ -112,6 +113,41 @@ class ResearchOfficeController extends DomainController
     {
         return response()
             ->json(['data' => $reports->officeInstitutional()])
+            ->header('Cache-Control', 'private, no-store');
+    }
+
+    public function projectTeam(ResearchDocument $researchDocument, ResearchProjectTeamService $teams): JsonResponse
+    {
+        $section = $researchDocument->section()->firstOrFail();
+
+        return response()->json(['data' => $teams->get($section, $researchDocument)])
+            ->header('Cache-Control', 'private, no-store');
+    }
+
+    public function representativeCandidates(ResearchDocument $researchDocument, ResearchProjectTeamService $teams): JsonResponse
+    {
+        $section = $researchDocument->section()->firstOrFail();
+
+        return response()->json(['data' => $teams->candidates($section, $researchDocument, 'research_office_representative', null)])
+            ->header('Cache-Control', 'private, no-store');
+    }
+
+    public function assignRepresentative(Request $request, ResearchDocument $researchDocument, ResearchProjectTeamService $teams): JsonResponse
+    {
+        $input = $this->validated($request, [
+            'user_id' => ['nullable', 'string', 'exists:users,id'],
+        ]);
+        $section = $researchDocument->section()->firstOrFail();
+        $team = $teams->replaceRole(
+            $this->actor($request),
+            $section,
+            $researchDocument,
+            'research_office_representative',
+            $input['user_id'] ?? null,
+            $request,
+        );
+
+        return response()->json(['data' => $team])
             ->header('Cache-Control', 'private, no-store');
     }
 

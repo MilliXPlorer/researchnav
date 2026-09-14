@@ -74,7 +74,9 @@ class LibrarianController extends DomainController
 
     private function assignedQuery(string $userId)
     {
-        return ResearchDocument::query()->whereHas('reviewAssignments', fn ($query) => $query->where(ReviewAssignment::column('reviewer_id'), $userId)->where(ReviewAssignment::column('review_role'), 'librarian')->whereIn(ReviewAssignment::column('is_active'), ['accepted', 'confirmed', 'active']));
+        $active = ReviewAssignment::column('is_active');
+
+        return ResearchDocument::query()->whereHas('reviewAssignments', fn ($query) => $query->where(ReviewAssignment::column('reviewer_id'), $userId)->where(ReviewAssignment::column('review_role'), 'librarian')->when($active === 'status', fn ($q) => $q->whereIn($active, ['accepted', 'confirmed', 'active']), fn ($q) => $q->where($active, true)));
     }
 
     private function ensureAssigned(string $userId, ResearchDocument $research): void

@@ -1,9 +1,4 @@
-import {
-  ArrowRight,
-  ExternalLink,
-  LibraryBig,
-  ShieldCheck,
-} from "lucide-react";
+import { ExternalLink, LibraryBig, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { Button } from "./components";
 import { Modal } from "./Modal";
@@ -214,17 +209,6 @@ function ResearcherWorkspace({
         eyebrow={config.eyebrow}
         title={config.title}
         description={config.description}
-        action={
-          <Button
-            onClick={() => selectNav("Create Research")}
-            disabled={
-              dashboardState.status === "ready" &&
-              dashboardState.source === "mock"
-            }
-          >
-            New submission <ArrowRight />
-          </Button>
-        }
       />
       <DashboardSections
         role="researcher"
@@ -402,6 +386,7 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
       assigned_manuscripts: {
         title: "Assigned manuscripts",
         description: "Manuscripts authorized for panel review.",
+        internalRecord: true,
       },
       defense_schedule: {
         title: "Defense schedule",
@@ -495,6 +480,12 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
     title: "Institutional research dashboard.",
     description: "Analytics, institutional totals, and compliance queues.",
     sections: {
+      assigned_research: {
+        title: "Assigned research",
+        description:
+          "Research where you are the assigned Research Office representative.",
+        internalRecord: true,
+      },
       submission_queue: {
         title: "Submission queue",
         description: "Submitted research awaiting institutional review.",
@@ -1321,19 +1312,19 @@ function DashboardSection({
                     <ExternalLink size={17} aria-hidden="true" />
                   </button>
                 )}
-                {(["admin", "adviser", "research-office"] as Role[]).includes(
-                  role,
-                ) &&
+                {(
+                  ["admin", "adviser", "panel", "research-office"] as Role[]
+                ).includes(role) &&
                   config.internalRecord && (
                     <button
                       className="icon-button dashboard-record-icon-action"
                       aria-label={
-                        role === "adviser"
+                        role === "adviser" || role === "panel"
                           ? "Open review"
                           : "Open internal record"
                       }
                       title={
-                        role === "adviser"
+                        role === "adviser" || role === "panel"
                           ? "Open review"
                           : "Open internal record"
                       }

@@ -25,6 +25,7 @@ class AccessRequestTest extends TestCase
     public function test_a_blocked_account_can_submit_one_request_and_read_it_back(): void
     {
         $applicant = $this->user('researcher', 'blocked');
+        $administrator = $this->admin();
 
         $this->submit($applicant, [
             'requested_role' => 'researcher',
@@ -47,6 +48,11 @@ class AccessRequestTest extends TestCase
             ->assertExactJson(['error' => 'REQUEST_ALREADY_PENDING']);
 
         $this->assertSame(1, AccessRequest::query()->count());
+        $this->assertSame(1, $administrator->notifications()->count());
+        $notification = $administrator->notifications()->firstOrFail();
+        $this->assertSame('ACCESS_REQUEST_SUBMITTED', $notification->data['event']);
+        $this->assertSame($applicant->email, $notification->data['applicant_email']);
+        $this->assertSame(1, $notification->data['access_request_id']);
     }
 
     public function test_an_active_account_has_nothing_to_request(): void
@@ -190,6 +196,23 @@ class AccessRequestTest extends TestCase
             ->getJson('/api/admin/access-requests?status=rejected')
             ->assertOk();
         $this->assertSame(['rejected'], array_column($filtered->json('data'), 'status'));
+    }
+
+    public function test_loading_admin_notifications_backfills_missing_pending_request_alerts_once(): void
+    {
+        $applicant = $this->user('researcher', 'blocked');
+        $request = $this->pendingRequest($applicant, 'panel');
+        $admin = $this->admin();
+
+        $this->withSession(['user_id' => $admin->id])
+            ->getJson('/api/notifications')
+            ->assertOk()
+            ->assertJsonPath('data.0.event', 'ACCESS_REQUEST_SUBMITTED')
+            ->assertJsonPath('data.0.access_request_id', $request->id);
+
+        $this->withSession(['user_id' => $admin->id])->getJson('/api/notifications')->assertOk();
+
+        $this->assertSame(1, $admin->notifications()->count());
     }
 
     private function submit(User $applicant, array $payload)

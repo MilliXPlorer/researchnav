@@ -8,11 +8,11 @@ use Illuminate\Support\Facades\Schema;
 
 class ReviewAssignment extends Model
 {
-    public const ROLES = ['adviser', 'instructor', 'panel', 'statistician'];
+    public const ROLES = ['adviser', 'instructor', 'panel', 'research-office', 'statistician', 'librarian', 'research_editor'];
 
     protected $table = 'research_review_assignments';
 
-    protected $fillable = ['research_document_id', 'reviewer_id', 'assigned_by', 'review_role', 'is_active', 'designation'];
+    protected $fillable = ['research_document_id', 'reviewer_id', 'assigned_by', 'review_role', 'is_active', 'status', 'designation'];
 
     protected function casts(): array
     {
@@ -50,6 +50,9 @@ class ReviewAssignment extends Model
 
     public function getAttribute($key): mixed
     {
+        if ($key === 'status' && ! Schema::hasColumn($this->getTable(), 'status')) {
+            return $this->getAttributeFromArray('is_active') ? 'active' : 'requested';
+        }
         if ($this->getTable() === 'research_assignments') {
             if ($key === 'is_active') {
                 return $this->getAttributeFromArray('status') === 'active';
@@ -62,6 +65,12 @@ class ReviewAssignment extends Model
 
     public function setAttribute($key, $value): static
     {
+        if ($key === 'status' && ! Schema::hasColumn($this->getTable(), 'status')) {
+            return parent::setAttribute('is_active', in_array($value, ['accepted', 'confirmed', 'active'], true));
+        }
+        if ($key === 'designation' && ! Schema::hasColumn($this->getTable(), 'designation')) {
+            return $this;
+        }
         if ($this->getTable() === 'research_assignments') {
             if ($key === 'is_active') {
                 return parent::setAttribute('status', $value ? 'active' : 'inactive');

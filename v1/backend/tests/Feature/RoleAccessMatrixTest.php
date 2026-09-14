@@ -208,7 +208,7 @@ class RoleAccessMatrixTest extends TestCase
         $owner = $this->user(['role' => 'researcher']);
         $category = Category::query()->create(['name' => 'Category '.Str::random(8), 'slug' => 'category-'.Str::random(8)]);
 
-        return [$owner, ResearchDocument::query()->create([
+        $research = ResearchDocument::query()->create([
             'submitted_by' => $owner->id,
             'category_id' => $category->id,
             'title' => 'Research '.Str::random(10),
@@ -216,6 +216,9 @@ class RoleAccessMatrixTest extends TestCase
             'keywords' => 'research',
             'publication_year' => 2025,
             'research_stage' => 'title_proposal',
-        ])];
+        ]);
+        $this->assignResearcherToDocument($owner, $research);
+
+        return [$owner, $research];
     }
 }

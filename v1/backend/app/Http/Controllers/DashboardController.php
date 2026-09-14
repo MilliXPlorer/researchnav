@@ -43,7 +43,7 @@ class DashboardController extends DomainController
             'statistician' => $this->statisticianSections($actor),
             'coordinator' => $this->coordinatorSections(),
             'librarian' => $this->librarianSections(),
-            'research-office' => $this->researchOfficeSections(),
+            'research-office' => $this->researchOfficeSections($actor),
             'research_editor' => [],
             default => null,
         };
@@ -143,10 +143,7 @@ class DashboardController extends DomainController
         ];
     }
 
-    /**
-     * A researcher only ever sees the records they submitted, plus the archived
-     * catalog everyone may reference. Every query is scoped by `submitted_by`.
-     */
+    /** A researcher sees projects explicitly assigned by their instructor. */
     private function researcherSections(User $actor): array
     {
         $own = fn (): Builder => $this->researcherDocuments($actor);
@@ -164,9 +161,11 @@ class DashboardController extends DomainController
 
     private function researcherDocuments(User $actor): Builder
     {
-        return ResearchDocument::query()->where(function (Builder $query) use ($actor): void {
-            $query->where('submitted_by', $actor->id)
-                ->orWhereHas('authors', fn (Builder $authors) => $authors->where('user_id', $actor->id));
+        return ResearchDocument::query()->whereIn('id', function ($memberships) use ($actor): void {
+            $memberships->select('research_document_id')
+                ->from('class_section_members')
+                ->whereNotNull('research_document_id')
+                ->where('user_id', $actor->id);
         });
     }
 
@@ -192,7 +191,10 @@ class DashboardController extends DomainController
     {
         return [
             $this->researchSection('assigned_manuscripts', $this->assignedDocuments($actor, 'panel')),
-            $this->countSection('defense_schedule', DefenseSchedule::query()->where('status', 'scheduled')->whereHas('researchDocument', fn (Builder $documents) => $documents->whereHas('reviewAssignments', fn (Builder $assignments) => $assignments->where('reviewer_id', $actor->id)->where('review_role', 'panel')->where('is_active', true)))),
+            $this->countSection('defense_schedule', DefenseSchedule::query()->where('status', 'scheduled')->whereHas('researchDocument', fn (Builder $documents) => $documents->whereHas('reviewAssignments', fn (Builder $assignments) => $assignments
+                ->where(ReviewAssignment::column('reviewer_id'), $actor->id)
+                ->where(ReviewAssignment::column('review_role'), 'panel')
+                ->where(ReviewAssignment::column('is_active'), ReviewAssignment::column('is_active') === 'status' ? 'active' : true)))),
             $this->researchSection('repository_references', $this->repositoryDocuments()),
         ];
     }
@@ -226,9 +228,10 @@ class DashboardController extends DomainController
         ];
     }
 
-    private function researchOfficeSections(): array
+    private function researchOfficeSections(User $actor): array
     {
         return [
+            $this->researchSection('assigned_research', $this->assignedDocuments($actor, 'research-office')),
             $this->researchSection('submission_queue', ResearchDocument::query()->whereIn('submission_status', ['submitted', 'under_review'])),
             $this->researchSection('revision_requests', ResearchDocument::query()->where('submission_status', 'revision_required')),
             $this->researchSection('pending_archiving', ResearchDocument::query()->where('archive_status', 'pending_archiving')),

@@ -27,6 +27,28 @@ class AccessRequestService
         'statistician', 'coordinator', 'librarian', 'research-office', 'research_editor',
     ];
 
+    public function syncPendingNotificationsFor(User $administrator): void
+    {
+        if (! DomainAuthorization::isActiveAdministrator($administrator->loadMissing('roleDefinition'))) {
+            return;
+        }
+
+        $notifiedRequestIds = $administrator->notifications()
+            ->get(['data'])
+            ->pluck('data')
+            ->map(fn (array $data) => $data['access_request_id'] ?? null)
+            ->filter()
+            ->map(fn (mixed $id) => (int) $id)
+            ->all();
+
+        AccessRequest::query()
+            ->with('user:id,email')
+            ->where('status', 'pending')
+            ->whereNotIn('id', $notifiedRequestIds)
+            ->oldest('requested_at')
+            ->each(fn (AccessRequest $accessRequest) => $this->notifyAdministrator($administrator, $accessRequest));
+    }
+
     /**
      * @param  array{requested_role: string, full_name?: string|null, program?: string|null, justification?: string|null}  $data
      */
@@ -71,6 +93,15 @@ class AccessRequestService
                 "Requested the {$accessRequest->requested_role} workspace role.",
                 $request,
             );
+
+            User::query()
+                ->with('roleDefinition')
+                ->where('role', 'admin')
+                ->where('is_admin', true)
+                ->where('access_status', 'active')
+                ->get()
+                ->filter(fn (User $administrator) => DomainAuthorization::isActiveAdministrator($administrator))
+                ->each(fn (User $administrator) => $this->notifyAdministrator($administrator, $accessRequest));
 
             return $accessRequest;
         }, 3);
@@ -174,5 +205,27 @@ class AccessRequestService
 
             return $accessRequest->fresh(['user', 'decidedBy']);
         }, 3);
+    }
+
+    private function notifyAdministrator(User $administrator, AccessRequest $accessRequest): void
+    {
+        $email = $accessRequest->relationLoaded('user')
+            ? $accessRequest->user?->email
+            : User::query()->whereKey($accessRequest->user_id)->value('email');
+
+        $administrator->notify(new AccessRequestNotification(
+            'ACCESS_REQUEST_SUBMITTED',
+            'New workspace access request',
+            "{$email} requested the {$accessRequest->requested_role} workspace.",
+            [
+                'action_url' => '/app',
+                'access_request_id' => $accessRequest->id,
+                'applicant_email' => $email,
+                'requested_role' => $accessRequest->requested_role,
+                'full_name' => $accessRequest->full_name,
+                'program' => $accessRequest->program,
+                'justification' => $accessRequest->justification,
+            ],
+        ));
     }
 }

@@ -159,7 +159,8 @@ const styles = {
     margin: "0 auto",
     padding: "28px 30px 50px",
     boxSizing: "border-box" as const,
-    color: "#1f2937",
+    color: "#172019",
+    fontFamily: '"Inter", Arial, sans-serif',
   },
 
   pageHeader: {
@@ -172,29 +173,30 @@ const styles = {
     fontWeight: 700,
     textTransform: "uppercase" as const,
     letterSpacing: "0.08em",
-    color: "#667085",
+    color: "#5b6660",
   },
 
   pageTitle: {
     margin: 0,
     fontSize: "27px",
     lineHeight: 1.25,
-    color: "#172033",
+    color: "#10331f",
     fontWeight: 700,
+    fontFamily: '"Source Serif 4", Georgia, serif',
   },
 
   pageDescription: {
     maxWidth: "720px",
     margin: "8px 0 0",
-    color: "#667085",
+    color: "#5b6660",
     fontSize: "14px",
     lineHeight: 1.6,
   },
 
   section: {
     background: "#ffffff",
-    border: "1px solid #e4e7ec",
-    borderRadius: "10px",
+    border: "1px solid #e2ebe5",
+    borderRadius: "11px",
     padding: "24px",
     marginBottom: "22px",
   },
@@ -211,7 +213,7 @@ const styles = {
     height: "28px",
     minWidth: "28px",
     borderRadius: "50%",
-    background: "#263a61",
+    background: "#1f5c3d",
     color: "#ffffff",
     display: "flex",
     alignItems: "center",
@@ -223,21 +225,22 @@ const styles = {
   sectionTitle: {
     margin: "1px 0 3px",
     fontSize: "18px",
-    color: "#172033",
+    color: "#10331f",
+    fontFamily: '"Source Serif 4", Georgia, serif',
   },
 
   sectionDescription: {
     margin: 0,
-    color: "#667085",
+    color: "#5b6660",
     fontSize: "13px",
     lineHeight: 1.5,
   },
 
   uploadArea: {
     minHeight: "200px",
-    border: "1.5px dashed #b8c0cc",
+    border: "1.5px dashed #9dbbaa",
     borderRadius: "8px",
-    background: "#fafbfc",
+    background: "linear-gradient(145deg, #ffffff, #f4f8f5)",
     display: "flex",
     flexDirection: "column" as const,
     justifyContent: "center",
@@ -248,20 +251,20 @@ const styles = {
   },
 
   uploadAreaActive: {
-    border: "1.5px dashed #344b76",
-    background: "#f5f7fa",
+    border: "1.5px dashed #276749",
+    background: "#f0f7f2",
   },
 
   uploadIcon: {
     width: "42px",
     height: "42px",
-    border: "1px solid #d9dee7",
-    background: "#ffffff",
+    border: "1px solid #d2e3d8",
+    background: "#e8f2eb",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     borderRadius: "8px",
-    color: "#344b76",
+    color: "#1f5d42",
     fontSize: "23px",
     marginBottom: "12px",
   },
@@ -269,18 +272,18 @@ const styles = {
   uploadTitle: {
     margin: 0,
     fontSize: "15px",
-    color: "#1f2937",
+    color: "#173f2d",
   },
 
   uploadText: {
     margin: "5px 0 10px",
-    color: "#667085",
+    color: "#5c6f65",
     fontSize: "13px",
   },
 
   uploadHelp: {
     fontSize: "12px",
-    color: "#8a94a3",
+    color: "#6f8077",
   },
 
   selectedFiles: {
@@ -298,12 +301,13 @@ const styles = {
   selectedTitle: {
     margin: 0,
     fontSize: "14px",
-    color: "#344054",
+    color: "#10331f",
+    fontFamily: '"Source Serif 4", Georgia, serif',
   },
 
   selectedDescription: {
     margin: "3px 0 0",
-    color: "#7a8493",
+    color: "#5b6660",
     fontSize: "12px",
   },
 
@@ -317,14 +321,14 @@ const styles = {
   },
 
   fileList: {
-    borderTop: "1px solid #eaecf0",
+    borderTop: "1px solid #e2ebe5",
   },
 
   fileRow: {
     display: "flex",
     alignItems: "center",
     minHeight: "63px",
-    borderBottom: "1px solid #eaecf0",
+    borderBottom: "1px solid #e2ebe5",
     gap: "12px",
   },
 
@@ -332,10 +336,10 @@ const styles = {
     minWidth: "42px",
     height: "32px",
     padding: "0 7px",
-    border: "1px solid #d0d5dd",
+    border: "1px solid #d2e3d8",
     borderRadius: "5px",
-    background: "#f9fafb",
-    color: "#475467",
+    background: "#f3f7f4",
+    color: "#1f5c3d",
     fontSize: "10px",
     fontWeight: 700,
     display: "flex",
@@ -351,7 +355,7 @@ const styles = {
 
   fileName: {
     display: "block",
-    color: "#344054",
+    color: "#172019",
     fontSize: "13px",
     fontWeight: 600,
     wordBreak: "break-word" as const,
@@ -360,7 +364,7 @@ const styles = {
   fileSize: {
     display: "block",
     marginTop: "3px",
-    color: "#98a2b3",
+    color: "#5b6660",
     fontSize: "11px",
   },
 
@@ -369,7 +373,7 @@ const styles = {
     height: "30px",
     border: "none",
     background: "transparent",
-    color: "#667085",
+    color: "#5b6660",
     fontSize: "20px",
     cursor: "pointer",
   },
@@ -387,8 +391,8 @@ const styles = {
     minHeight: "39px",
     padding: "0 16px",
     borderRadius: "6px",
-    border: "1px solid #263a61",
-    background: "#263a61",
+    border: "1px solid #1f5d42",
+    background: "#1f5d42",
     color: "#ffffff",
     fontWeight: 600,
     fontSize: "13px",
@@ -399,8 +403,8 @@ const styles = {
     minHeight: "39px",
     padding: "0 16px",
     borderRadius: "6px",
-    border: "1px solid #aeb6c4",
-    background: "#aeb6c4",
+    border: "1px solid #9dbbaa",
+    background: "#9dbbaa",
     color: "#ffffff",
     fontWeight: 600,
     fontSize: "13px",
@@ -411,19 +415,19 @@ const styles = {
     minHeight: "39px",
     padding: "0 16px",
     borderRadius: "6px",
-    border: "1px solid #d0d5dd",
+    border: "1px solid #bfd2c5",
     background: "#ffffff",
-    color: "#344054",
+    color: "#1f5d42",
     fontWeight: 600,
     fontSize: "13px",
     cursor: "pointer",
   },
 
   summaryBox: {
-    border: "1px solid #e4e7ec",
+    border: "1px solid #e2ebe5",
     borderRadius: "8px",
     padding: "16px 18px",
-    background: "#f9fafb",
+    background: "#f3f7f4",
     marginBottom: "18px",
   },
 
@@ -437,14 +441,15 @@ const styles = {
 
   summaryTitle: {
     display: "block",
-    color: "#344054",
+    color: "#10331f",
+    fontFamily: '"Source Serif 4", Georgia, serif',
     fontSize: "14px",
   },
 
   summaryText: {
     display: "block",
     marginTop: "4px",
-    color: "#667085",
+    color: "#5b6660",
     fontSize: "12px",
   },
 
@@ -473,13 +478,14 @@ const styles = {
   listHeadingTitle: {
     margin: 0,
     fontSize: "14px",
-    color: "#344054",
+    color: "#10331f",
+    fontFamily: '"Source Serif 4", Georgia, serif',
   },
 
   listHeadingText: {
     margin: "3px 0 0",
     fontSize: "11px",
-    color: "#667085",
+    color: "#5b6660",
   },
 
   reviewList: {
@@ -489,7 +495,7 @@ const styles = {
   },
 
   reviewCard: {
-    border: "1px solid #e4e7ec",
+    border: "1px solid #e2ebe5",
     borderRadius: "8px",
     overflow: "hidden",
     background: "#ffffff",
@@ -501,8 +507,8 @@ const styles = {
     alignItems: "center",
     gap: "15px",
     padding: "15px 18px",
-    background: "#fbfcfd",
-    borderBottom: "1px solid #eaecf0",
+    background: "#f3f7f4",
+    borderBottom: "1px solid #e2ebe5",
     flexWrap: "wrap" as const,
   },
 
@@ -516,7 +522,8 @@ const styles = {
 
   cardTitle: {
     margin: 0,
-    color: "#344054",
+    color: "#10331f",
+    fontFamily: '"Source Serif 4", Georgia, serif',
     fontSize: "14px",
     fontWeight: 650,
     wordBreak: "break-word" as const,
@@ -524,7 +531,7 @@ const styles = {
 
   cardMeta: {
     margin: "3px 0 0",
-    color: "#98a2b3",
+    color: "#5b6660",
     fontSize: "11px",
   },
 
@@ -564,8 +571,8 @@ const styles = {
     fontSize: "10px",
     fontWeight: 700,
     textTransform: "uppercase" as const,
-    color: "#344b76",
-    background: "#edf2fb",
+    color: "#1f5c3d",
+    background: "#e6f1ea",
   },
 
   badgeImported: {
@@ -604,7 +611,7 @@ const styles = {
 
   failedNote: {
     margin: "10px 0 0",
-    color: "#667085",
+    color: "#5b6660",
     fontSize: "11px",
   },
 
@@ -669,7 +676,7 @@ const styles = {
   label: {
     display: "block",
     marginBottom: "6px",
-    color: "#344054",
+    color: "#10331f",
     fontSize: "12px",
     fontWeight: 600,
   },
@@ -677,34 +684,34 @@ const styles = {
   hint: {
     display: "block",
     margin: "-3px 0 6px",
-    color: "#98a2b3",
+    color: "#5b6660",
     fontSize: "10px",
   },
 
   input: {
     width: "100%",
     boxSizing: "border-box" as const,
-    border: "1px solid #d0d5dd",
+    border: "1px solid #d2e3d8",
     borderRadius: "5px",
     background: "#ffffff",
     padding: "9px 10px",
     minHeight: "39px",
     fontFamily: "inherit",
     fontSize: "13px",
-    color: "#344054",
+    color: "#172019",
     outline: "none",
   },
 
   textarea: {
     width: "100%",
     boxSizing: "border-box" as const,
-    border: "1px solid #d0d5dd",
+    border: "1px solid #d2e3d8",
     borderRadius: "5px",
     background: "#ffffff",
     padding: "9px 10px",
     fontFamily: "inherit",
     fontSize: "13px",
-    color: "#344054",
+    color: "#172019",
     lineHeight: 1.5,
     resize: "vertical" as const,
     outline: "none",
@@ -719,8 +726,8 @@ const styles = {
   emptyFilter: {
     padding: "30px 20px",
     textAlign: "center" as const,
-    color: "#667085",
-    border: "1px dashed #d0d5dd",
+    color: "#5b6660",
+    border: "1px dashed #bfd2c5",
     borderRadius: "8px",
     background: "#fafbfc",
     fontSize: "13px",
@@ -729,7 +736,7 @@ const styles = {
   reviewFooter: {
     marginTop: "20px",
     paddingTop: "18px",
-    borderTop: "1px solid #eaecf0",
+    borderTop: "1px solid #e2ebe5",
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
@@ -740,12 +747,12 @@ const styles = {
   reviewFooterTitle: {
     margin: 0,
     fontSize: "13px",
-    color: "#344054",
+    color: "#10331f",
   },
 
   reviewFooterText: {
     margin: "4px 0 0",
-    color: "#667085",
+    color: "#5b6660",
     fontSize: "11px",
   },
 };
@@ -1467,7 +1474,7 @@ export default function ResearchOfficeBulkImport({
       result.import_state === "imported"
         ? "#17803d"
         : result.import_state === "importing"
-          ? "#344b76"
+          ? "#1f5c3d"
           : result.import_state === "failed"
             ? "#d92d20"
             : result.status === "ready"
@@ -1488,16 +1495,16 @@ export default function ResearchOfficeBulkImport({
     if (filter === "all") {
       return {
         ...styles.filterBase,
-        border: active ? "1px solid #263a61" : "1px solid #d0d5dd",
-        background: active ? "#263a61" : "#ffffff",
-        color: active ? "#ffffff" : "#344054",
+        border: active ? "1px solid #1f5c3d" : "1px solid #bfd2c5",
+        background: active ? "#1f5c3d" : "#ffffff",
+        color: active ? "#ffffff" : "#10331f",
       };
     }
 
     if (filter === "ready") {
       return {
         ...styles.filterBase,
-        border: active ? "1px solid #16803c" : "1px solid #d0d5dd",
+        border: active ? "1px solid #16803c" : "1px solid #bfd2c5",
         background: active ? "#eaf7ee" : "#ffffff",
         color: "#137333",
       };
@@ -1506,7 +1513,7 @@ export default function ResearchOfficeBulkImport({
     if (filter === "needs_review") {
       return {
         ...styles.filterBase,
-        border: active ? "1px solid #c27a06" : "1px solid #d0d5dd",
+        border: active ? "1px solid #c27a06" : "1px solid #bfd2c5",
         background: active ? "#fff5dd" : "#ffffff",
         color: "#8a5705",
       };
@@ -1514,7 +1521,7 @@ export default function ResearchOfficeBulkImport({
 
     return {
       ...styles.filterBase,
-      border: active ? "1px solid #c4322b" : "1px solid #d0d5dd",
+      border: active ? "1px solid #c4322b" : "1px solid #bfd2c5",
       background: active ? "#fdecea" : "#ffffff",
       color: "#a82019",
     };
@@ -1565,7 +1572,7 @@ export default function ResearchOfficeBulkImport({
               />
               <span
                 style={{
-                  color: "#667085",
+                  color: "#5b6660",
                   fontSize: "12px",
                   fontWeight: 700,
                   letterSpacing: ".08em",
@@ -1576,14 +1583,19 @@ export default function ResearchOfficeBulkImport({
               </span>
             </div>
             <h2
-              style={{ margin: "0 0 6px", color: "#172033", fontSize: "21px" }}
+              style={{
+                margin: "0 0 6px",
+                color: "#10331f",
+                fontFamily: '"Source Serif 4", Georgia, serif',
+                fontSize: "21px",
+              }}
             >
               Processing manuscripts
             </h2>
             <p
               style={{
                 margin: "0 0 22px",
-                color: "#667085",
+                color: "#5b6660",
                 fontSize: "13px",
                 whiteSpace: "nowrap",
                 overflow: "hidden",
@@ -1621,7 +1633,7 @@ export default function ResearchOfficeBulkImport({
                 display: "flex",
                 justifyContent: "space-between",
                 marginTop: "10px",
-                color: "#667085",
+                color: "#5b6660",
                 fontSize: "12px",
               }}
             >
@@ -1668,7 +1680,7 @@ export default function ResearchOfficeBulkImport({
               />
               <span
                 style={{
-                  color: "#667085",
+                  color: "#5b6660",
                   fontSize: "12px",
                   fontWeight: 700,
                   letterSpacing: ".08em",
@@ -1679,14 +1691,19 @@ export default function ResearchOfficeBulkImport({
               </span>
             </div>
             <h2
-              style={{ margin: "0 0 6px", color: "#172033", fontSize: "21px" }}
+              style={{
+                margin: "0 0 6px",
+                color: "#10331f",
+                fontFamily: '"Source Serif 4", Georgia, serif',
+                fontSize: "21px",
+              }}
             >
               Saving to ResearchNAV
             </h2>
             <p
               style={{
                 margin: "0 0 22px",
-                color: "#667085",
+                color: "#5b6660",
                 fontSize: "13px",
                 whiteSpace: "nowrap",
                 overflow: "hidden",
@@ -1724,7 +1741,7 @@ export default function ResearchOfficeBulkImport({
                 display: "flex",
                 justifyContent: "space-between",
                 marginTop: "10px",
-                color: "#667085",
+                color: "#5b6660",
                 fontSize: "12px",
               }}
             >
@@ -1751,14 +1768,19 @@ export default function ResearchOfficeBulkImport({
           <div style={{ padding: "28px 30px", maxWidth: "480px" }}>
             <p style={styles.eyebrow}>Upload complete</p>
             <h2
-              style={{ margin: "0 0 8px", color: "#172033", fontSize: "21px" }}
+              style={{
+                margin: "0 0 8px",
+                color: "#10331f",
+                fontFamily: '"Source Serif 4", Georgia, serif',
+                fontSize: "21px",
+              }}
             >
               {uploadReport.failed.length === 0
                 ? "All manuscripts uploaded"
                 : "Some manuscripts need attention"}
             </h2>
             <p
-              style={{ margin: "0 0 18px", color: "#667085", fontSize: "13px" }}
+              style={{ margin: "0 0 18px", color: "#5b6660", fontSize: "13px" }}
             >
               {uploadReport.uploaded} uploaded · {uploadReport.failed.length}{" "}
               not uploaded
@@ -1987,7 +2009,7 @@ export default function ResearchOfficeBulkImport({
                 margin: "0 0 14px",
                 justifyContent: "space-between",
                 padding: "12px",
-                border: "1px solid #e4e7ec",
+                border: "1px solid #e2ebe5",
                 borderRadius: "8px",
                 background: "rgba(255,255,255,.96)",
                 boxShadow: "0 6px 18px rgba(16,24,40,.07)",
@@ -2030,7 +2052,7 @@ export default function ResearchOfficeBulkImport({
                 return (
                   <div
                     key={indexes.join("-")}
-                    style={{ borderBottom: "1px solid #eaecf0" }}
+                    style={{ borderBottom: "1px solid #e2ebe5" }}
                   >
                     <div style={{ ...styles.fileRow, borderBottom: "none" }}>
                       <div style={styles.fileType}>
@@ -2066,7 +2088,7 @@ export default function ResearchOfficeBulkImport({
                           key={index}
                           style={{
                             padding: "0 16px 10px 68px",
-                            color: "#667085",
+                            color: "#5b6660",
                             fontSize: "12px",
                           }}
                         >

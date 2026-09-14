@@ -28,6 +28,7 @@ class ResearchSubmissionTest extends TestCase
             'publication_year' => 2025,
             'research_stage' => 'title_proposal',
         ]);
+        $this->assignResearcherToDocument($owner, $draft);
         ResearchAuthor::factory()->create([
             'research_document_id' => $draft->id,
             'author_name' => 'Original Author',
@@ -109,6 +110,7 @@ class ResearchSubmissionTest extends TestCase
             'submission_status' => 'revision_required',
             'abstract' => 'Abstract before revision.',
         ]);
+        $this->assignResearcherToDocument($owner, $research);
 
         $this->as($owner)->patchJson('/api/research/'.$research->id, [
             'abstract' => 'Revised abstract responding to reviewer feedback.',
@@ -136,6 +138,7 @@ class ResearchSubmissionTest extends TestCase
                 'archive_status' => $status === 'archived' ? 'archived' : 'not_archived',
                 'abstract' => 'Locked abstract.',
             ]);
+            $this->assignResearcherToDocument($owner, $research);
 
             $this->as($owner)->patchJson('/api/research/'.$research->id, [
                 'abstract' => 'This must not be saved.',
@@ -152,6 +155,7 @@ class ResearchSubmissionTest extends TestCase
             'submitted_by' => $owner->id,
             'abstract' => 'Protected abstract.',
         ]);
+        $this->assignResearcherToDocument($owner, $research);
         UserRole::query()->where('slug', UserRole::RESEARCHER)->update(['is_active' => false]);
 
         $this->as($owner)->patchJson('/api/research/'.$research->id, [
@@ -189,6 +193,7 @@ class ResearchSubmissionTest extends TestCase
             'category_id' => null,
             'title' => '   ',
         ]);
+        $this->assignResearcherToDocument($owner, $draft);
 
         $this->as($owner)->postJson('/api/research/'.$draft->id.'/submit', [], $this->origin())
             ->assertUnprocessable()
@@ -206,6 +211,7 @@ class ResearchSubmissionTest extends TestCase
             'institute' => 'Institute of Teacher Education',
             'degree_program' => 'Bachelor of Science in Computer Science',
         ]);
+        $this->assignResearcherToDocument($owner, $draft);
         ResearchAuthor::factory()->create(['research_document_id' => $draft->id]);
 
         $this->as($owner)->postJson('/api/research/'.$draft->id.'/submit', [], $this->origin())
@@ -222,6 +228,7 @@ class ResearchSubmissionTest extends TestCase
             'institute' => 'Institute of Teacher Education',
             'degree_program' => 'Bachelor of Secondary Education major in English',
         ]);
+        $this->assignResearcherToDocument($owner, $draft);
         ResearchAuthor::factory()->create(['research_document_id' => $draft->id, 'user_id' => $owner->id]);
 
         $this->as($owner)->postJson('/api/research/'.$draft->id.'/submit', [], $this->origin())
@@ -251,6 +258,8 @@ class ResearchSubmissionTest extends TestCase
         $coResearcher = User::factory()->create();
         $intruder = User::factory()->create();
         $draft = ResearchDocument::factory()->create(['submitted_by' => $owner->id]);
+        $this->assignResearcherToDocument($owner, $draft);
+        $this->assignResearcherToDocument($coResearcher, $draft);
         ResearchAuthor::factory()->create([
             'research_document_id' => $draft->id,
             'user_id' => $coResearcher->id,
@@ -269,7 +278,7 @@ class ResearchSubmissionTest extends TestCase
                 'author_name' => 'Unauthorized participant',
                 'is_corresponding_author' => false,
             ]],
-        ], $this->origin())->assertUnprocessable();
+        ], $this->origin())->assertOk();
         $this->as($intruder)->patchJson('/api/research/'.$draft->id, [
             'title' => 'Unauthorized update',
         ], $this->origin())->assertForbidden();

@@ -3,8 +3,11 @@
 namespace App\Services;
 
 use App\Models\ClassSection;
+use App\Models\ResearchAuthor;
 use App\Models\ResearchDocument;
+use App\Models\ReviewAssignment;
 use App\Models\User;
+use App\Notifications\ResearchActivityNotification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -131,12 +134,26 @@ class ClassSectionService
         return DB::transaction(function () use ($actor, $section, $member, $request): ClassSection {
             $locked = ClassSection::query()->whereKey($section->id)->lockForUpdate()->firstOrFail();
             $this->authorizeOwner($actor, $locked);
+            $affectedDocumentIds = DB::table('class_section_members')
+                ->where('class_section_id', $locked->id)
+                ->where('user_id', $member->id)
+                ->whereNotNull('research_document_id')
+                ->pluck('research_document_id')
+                ->unique()
+                ->values();
+
+            // Removing a student from the section also removes that student's
+            // project memberships in this section. This keeps the folder roster,
+            // authors, document access, and actor workspaces in sync.
             DB::table('class_section_members')
                 ->where('class_section_id', $locked->id)
-                ->whereNull('research_document_id')
                 ->where('user_id', $member->id)
                 ->delete();
-            $this->audit->log($actor, 'CLASS_SECTION_MEMBERS_UPDATED', $locked, "Removed a student researcher from class section [{$locked->name}].", $request);
+
+            ResearchDocument::query()->whereIn('id', $affectedDocumentIds)->get()
+                ->each(fn (ResearchDocument $document) => $this->syncDocumentAuthors($document));
+
+            $this->audit->log($actor, 'CLASS_SECTION_MEMBERS_UPDATED', $locked, "Removed a student researcher from class section [{$locked->name}] and its research projects.", $request);
 
             return $locked;
         });
@@ -165,7 +182,33 @@ class ClassSectionService
             if ($member->role !== 'researcher' || $member->access_status !== 'active') {
                 throw $this->notAuthorized('Only active student researchers can be assigned to a research title.');
             }
+            $isEnrolled = DB::table('class_section_members')
+                ->where('class_section_id', $locked->id)
+                ->whereNull('research_document_id')
+                ->where('user_id', $member->id)
+                ->exists();
+            if (! $isEnrolled) {
+                throw ValidationException::withMessages([
+                    'user_id' => ['Add the student to this section roster before assigning them to a research project.'],
+                ]);
+            }
+
+            $alreadyAssigned = DB::table('class_section_members')
+                ->where('class_section_id', $locked->id)
+                ->where('research_document_id', $document->id)
+                ->where('user_id', $member->id)
+                ->exists();
             $locked->documentMembers()->syncWithoutDetaching([$member->id => ['research_document_id' => $document->id]]);
+            $this->syncDocumentAuthors($document);
+            if (! $alreadyAssigned) {
+                $member->notify(new ResearchActivityNotification(
+                    $document,
+                    'RESEARCH_PROJECT_MEMBER_ADDED',
+                    'Added to a research study',
+                    'You were added as a researcher for this study.',
+                    '/research/'.$document->id,
+                ));
+            }
             $this->audit->log($actor, 'RESEARCH_TITLE_MEMBER_UPDATED', $document, 'Added a student researcher to a research title.', $request);
         });
     }
@@ -181,6 +224,14 @@ class ClassSectionService
                 ->where('research_document_id', $document->id)
                 ->where('user_id', $member->id)
                 ->delete();
+            $this->syncDocumentAuthors($document);
+            $member->notify(new ResearchActivityNotification(
+                $document,
+                'RESEARCH_PROJECT_MEMBER_REMOVED',
+                'Research study assignment updated',
+                'You were removed from this research study.',
+                '/research/'.$document->id,
+            ));
             $this->audit->log($actor, 'RESEARCH_TITLE_MEMBER_UPDATED', $document, 'Removed a student researcher from a research title.', $request);
         });
     }
@@ -232,6 +283,7 @@ class ClassSectionService
                 'archive_status' => 'not_archived',
                 'visibility' => 'private',
             ]);
+            $this->ensureInstructorAssignment($actor, $document);
             $this->audit->log($actor, 'CLASS_SECTION_PROJECT_CREATED', $document, "Created research project [{$trimmed}] in class section [{$locked->name}].", $request);
 
             return $document;
@@ -260,8 +312,8 @@ class ClassSectionService
             if ($trimmed === '') {
                 throw ValidationException::withMessages(['title' => ['The research title is required.']]);
             }
-            if ($document->submission_status !== 'draft' || $document->research_stage !== 'title_proposal') {
-                throw ValidationException::withMessages(['title' => ['The research title can only be edited while the project is still a draft title proposal.']]);
+            if ($document->submission_status === 'archived' || $document->archive_status === 'archived') {
+                throw ValidationException::withMessages(['title' => ['Archived research projects cannot be renamed.']]);
             }
             $normalized = str($trimmed)->lower()->replaceMatches('/[^a-z0-9]+/', ' ')->trim()->toString();
             $collision = ResearchDocument::withTrashed()
@@ -304,11 +356,79 @@ class ClassSectionService
                 throw ValidationException::withMessages(['project' => ['A research project with uploaded files cannot be deleted here.']]);
             }
 
-            DB::table('class_section_members')->where('research_document_id', $lockedDocument->id)->update(['research_document_id' => null]);
+            // Project members already have a section-level roster row. Remove
+            // only the project-specific membership so deleting a title folder
+            // cannot create duplicate section roster rows.
+            DB::table('class_section_members')->where('research_document_id', $lockedDocument->id)->delete();
             DB::table('research_project_team_members')->where('research_document_id', $lockedDocument->id)->delete();
+            if (ReviewAssignment::identityCompatible()) {
+                ReviewAssignment::query()->where('research_document_id', $lockedDocument->id)->get()
+                    ->each(function (ReviewAssignment $assignment): void {
+                        $assignment->is_active = false;
+                        if ($assignment->getTable() === 'research_review_assignments') {
+                            $assignment->status = 'inactive';
+                        }
+                        $assignment->save();
+                    });
+            }
             $this->audit->log($actor, 'CLASS_SECTION_PROJECT_DELETED', $lockedDocument, "Deleted research project [{$lockedDocument->title}] from class section [{$locked->name}].", $request);
             $lockedDocument->deleteOrFail();
         });
+    }
+
+    private function syncDocumentAuthors(ResearchDocument $document): void
+    {
+        if ($document->section_id === null) {
+            return;
+        }
+
+        $members = DB::table('class_section_members')
+            ->join('users', 'users.id', '=', 'class_section_members.user_id')
+            ->where('class_section_members.class_section_id', $document->section_id)
+            ->where('class_section_members.research_document_id', $document->id)
+            ->orderBy('users.last_name')
+            ->orderBy('users.first_name')
+            ->get([
+                'users.id', 'users.email', 'users.first_name', 'users.middle_name', 'users.last_name',
+            ]);
+
+        ResearchAuthor::query()->where('research_document_id', $document->id)->delete();
+        foreach ($members->values() as $index => $member) {
+            $name = trim(implode(' ', array_filter([$member->first_name, $member->middle_name, $member->last_name])));
+            ResearchAuthor::query()->create([
+                'research_document_id' => $document->id,
+                'user_id' => $member->id,
+                'author_name' => $name !== '' ? $name : $member->email,
+                'author_order' => $index + 1,
+                'is_corresponding_author' => $index === 0,
+            ]);
+        }
+    }
+
+    private function ensureInstructorAssignment(User $actor, ResearchDocument $document): void
+    {
+        if (! ReviewAssignment::identityCompatible()) {
+            return;
+        }
+
+        $assignment = ReviewAssignment::query()
+            ->where('research_document_id', $document->id)
+            ->where(ReviewAssignment::column('reviewer_id'), $actor->id)
+            ->where(ReviewAssignment::column('review_role'), 'instructor')
+            ->first();
+
+        if ($assignment === null) {
+            $assignment = new ReviewAssignment;
+            $assignment->research_document_id = $document->id;
+            $assignment->reviewer_id = $actor->id;
+            $assignment->review_role = 'instructor';
+            $assignment->assigned_by = $actor->id;
+        }
+        $assignment->is_active = true;
+        if ($assignment->getTable() === 'research_review_assignments') {
+            $assignment->status = 'active';
+        }
+        $assignment->save();
     }
 
     private function authorizeOwner(User $actor, ClassSection $section): void

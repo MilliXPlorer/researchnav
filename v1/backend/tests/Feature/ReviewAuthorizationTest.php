@@ -100,6 +100,7 @@ class ReviewAuthorizationTest extends TestCase
             'publication_year' => 2025,
             'research_stage' => 'title_proposal',
         ], [['user_id' => $owner->id, 'author_name' => 'Owner']]);
+        $this->assignResearcherToDocument($owner, $research);
 
         return [$owner, $research];
     }

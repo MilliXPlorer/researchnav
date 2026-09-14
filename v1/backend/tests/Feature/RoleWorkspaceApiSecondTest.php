@@ -159,6 +159,7 @@ class RoleWorkspaceApiSecondTest extends TestCase
         $other = $this->user(['role' => 'researcher']);
         $own = $this->document('draft', $researcher);
         $this->document('draft', $other);
+        $this->assignResearcherToDocument($researcher, $own);
 
         $response = $this->as($researcher)->getJson('/api/research?mine=1');
         $response->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $own->id);

@@ -15,6 +15,28 @@ class MetadataReview extends ConsolidatedReviewModel
         'review_status' => 'status',
     ];
 
+    public static function column(string $legacyColumn): string
+    {
+        if ((new static)->usesFinalStorage()) {
+            return match ($legacyColumn) {
+                'reviewed_by' => 'reviewer_id', 'review_status' => 'status',
+                default => $legacyColumn,
+            };
+        }
+
+        return parent::column($legacyColumn);
+    }
+
+    public function getAttribute($key): mixed
+    {
+        return parent::getAttribute($this->usesFinalStorage() ? static::column((string) $key) : $key);
+    }
+
+    public function setAttribute($key, $value): static
+    {
+        return parent::setAttribute($this->usesFinalStorage() ? static::column((string) $key) : $key, $value);
+    }
+
     public const STATUSES = ['pending', 'complete', 'needs_correction'];
 
     protected $fillable = [

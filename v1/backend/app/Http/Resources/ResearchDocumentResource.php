@@ -12,7 +12,7 @@ class ResearchDocumentResource extends JsonResource
     public function toArray(Request $request): array
     {
         $actor = $request->attributes->get('current_user');
-        if ($actor !== null && $actor->id !== $this->submitted_by && ! DomainAuthorization::isOffice($actor) && ! DomainAuthorization::isAssignedRecordReader($actor, $this->resource)) {
+        if ($actor !== null && $actor->id !== $this->submitted_by && ! DomainAuthorization::isOffice($actor) && ! DomainAuthorization::isResearcherParticipant($actor, $this->resource) && ! DomainAuthorization::isAssignedRecordReader($actor, $this->resource)) {
             return (new PublicResearchDocumentResource($this->resource))->toArray($request);
         }
 

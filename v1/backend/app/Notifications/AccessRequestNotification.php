@@ -21,6 +21,7 @@ class AccessRequestNotification extends Notification
         private readonly string $event,
         private readonly string $title,
         private readonly string $message,
+        private readonly ?array $context = null,
     ) {}
 
     public function via(object $notifiable): array
@@ -30,13 +31,13 @@ class AccessRequestNotification extends Notification
 
     public function toResearchDatabase(object $notifiable): array
     {
-        return [
+        return array_merge([
             'event' => $this->event,
             'type' => $this->event,
             'title' => $this->title,
             'message' => $this->message,
             'action_url' => '/app',
             'research_document_id' => null,
-        ];
+        ], $this->context ?? []);
     }
 }

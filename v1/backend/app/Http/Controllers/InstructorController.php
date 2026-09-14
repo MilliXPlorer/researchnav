@@ -18,6 +18,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class InstructorController extends DomainController
@@ -25,6 +26,9 @@ class InstructorController extends DomainController
     public function submissions(Request $request): JsonResponse
     {
         $actor = $this->actor($request);
+        $stage = $request->validate([
+            'stage' => ['nullable', Rule::in(['title_proposal', 'manuscript'])],
+        ])['stage'] ?? null;
         if (! ReviewAssignment::identityCompatible()) {
             return response()->json(['data' => [], 'schema_version' => 1])->header('Cache-Control', 'private, no-store');
         }
@@ -33,6 +37,8 @@ class InstructorController extends DomainController
                 ->where(ReviewAssignment::column('reviewer_id'), $actor->id)
                 ->where(ReviewAssignment::column('review_role'), 'instructor')
                 ->where(ReviewAssignment::column('is_active'), ReviewAssignment::column('is_active') === 'status' ? 'active' : true))
+            ->when($stage === 'title_proposal', fn ($query) => $query->where('research_stage', 'title_proposal'))
+            ->when($stage === 'manuscript', fn ($query) => $query->where('research_stage', '!=', 'title_proposal'))
             ->with('submitter:id,first_name,middle_name,last_name,email')
             ->orderByDesc('updated_at')
             ->get(['id', 'title', 'submitted_by', 'research_stage', 'submission_status', 'updated_at'])
@@ -203,11 +209,11 @@ class InstructorController extends DomainController
             'adviser_id' => ['nullable', 'string', 'exists:users,id'],
             'research_office_representative_id' => ['nullable', 'string', 'exists:users,id'],
             'chair_id' => ['nullable', 'string', 'exists:users,id'],
-            'panel_member_ids' => ['nullable', 'array', 'max:20'],
+            'panel_member_ids' => ['nullable', 'array', 'max:3'],
             'panel_member_ids.*' => ['string', 'distinct', 'exists:users,id'],
         ]);
 
-        return response()->json(['data' => $teams->replace($this->actor($request), $classSection, $researchDocument, $input), 'schema_version' => 1])
+        return response()->json(['data' => $teams->replace($this->actor($request), $classSection, $researchDocument, $input, $request), 'schema_version' => 1])
             ->header('Cache-Control', 'private, no-store');
     }
 

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Exceptions\ApiValidationException;
+use App\Models\DefenseSchedule;
 use App\Models\Evaluation;
 use App\Models\ResearchDocument;
 use App\Models\ReviewAssignment;
@@ -42,7 +43,12 @@ class PanelController extends DomainController
                 'submission_status' => $document->submission_status,
                 'authors' => $document->authors->pluck('author_name')->values()->all(),
                 'designation' => $document->reviewAssignments()->where(ReviewAssignment::column('reviewer_id'), $actor->id)->where(ReviewAssignment::column('review_role'), 'panel')->value('designation'),
-                'next_defense' => ($defense = DB::table('defenses')->where('research_document_id', $document->id)->orderByDesc('scheduled_date')->first()) ? ['id' => $defense->id, 'scheduled_at' => $defense->scheduled_date, 'room' => $defense->venue, 'status' => $defense->status, 'defense_type' => $defense->defense_type] : null,
+                'next_defense' => ($defense = DefenseSchedule::query()->where('research_document_id', $document->id)->orderByDesc('scheduled_at')->first()) ? [
+                    'id' => $defense->id,
+                    'scheduled_at' => $defense->scheduled_at?->toISOString(),
+                    'room' => $defense->room,
+                    'status' => $defense->status,
+                ] : null,
                 'updated_at' => $document->updated_at?->toISOString(),
             ])
             ->values()

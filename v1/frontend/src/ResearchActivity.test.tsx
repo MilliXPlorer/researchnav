@@ -27,7 +27,7 @@ function stubEndpoints({
 }
 
 describe("ResearchActivity", () => {
-  it("shows adviser feedback, revision requests, and monitoring history", async () => {
+  it("shows adviser feedback, revision requests, and Workflow Activity", async () => {
     stubEndpoints({
       feedback: [
         {
@@ -88,7 +88,7 @@ describe("ResearchActivity", () => {
       screen.getByText("No revisions have been requested for this record."),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("No monitoring activity has been recorded yet."),
+      screen.getByText("No workflow activity has been recorded yet."),
     ).toBeInTheDocument();
   });
 

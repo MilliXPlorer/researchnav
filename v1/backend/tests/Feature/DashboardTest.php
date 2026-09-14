@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\MetadataReview;
 use App\Models\ResearchDocument;
 use App\Models\ReviewAssignment;
 use App\Models\SimilarityResult;
@@ -11,6 +12,8 @@ use App\Services\SupabaseStorageService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
 class DashboardTest extends TestCase
@@ -40,7 +43,7 @@ class DashboardTest extends TestCase
             ->assertExactJson(['error' => 'ACCOUNT_ACCESS_PENDING']);
     }
 
-    public function test_researchers_only_see_the_records_they_submitted(): void
+    public function test_researchers_only_see_instructor_assigned_records(): void
     {
         $researcher = $this->user('researcher');
         $other = $this->user('researcher');
@@ -48,6 +51,8 @@ class DashboardTest extends TestCase
         $ownDraft = $this->document(['submitted_by' => $researcher->id, 'submission_status' => 'draft']);
         $ownRevision = $this->document(['submitted_by' => $researcher->id, 'submission_status' => 'revision_required']);
         $foreignDraft = $this->document(['submitted_by' => $other->id, 'submission_status' => 'draft']);
+        $this->assignResearcher($ownDraft, $researcher);
+        $this->assignResearcher($ownRevision, $researcher);
 
         $sections = $this->sections($this->dashboard($researcher)->assertOk());
 
@@ -73,7 +78,7 @@ class DashboardTest extends TestCase
             'statistician' => ['methodology_reviews', 'signoffs', 'completed_references'],
             'coordinator' => ['active_instructors', 'invited_instructors', 'blocked_instructors', 'schedules', 'duplicate_flags'],
             'librarian' => ['archiving_queue', 'metadata_validation', 'repository_records'],
-            'research-office' => ['submission_queue', 'revision_requests', 'pending_archiving', 'archived_repository'],
+            'research-office' => ['assigned_research', 'submission_queue', 'revision_requests', 'pending_archiving', 'archived_repository'],
         ];
 
         foreach ($expectedKeys as $role => $keys) {
@@ -90,6 +95,16 @@ class DashboardTest extends TestCase
                 $this->assertArrayHasKey('items', $section);
             }
         }
+    }
+
+    public function test_librarian_dashboard_uses_final_metadata_review_status_column(): void
+    {
+        Schema::dropIfExists('metadata_reviews');
+
+        $sections = $this->sections($this->dashboard($this->user('librarian'))->assertOk());
+
+        $this->assertSame(0, $sections['metadata_validation']['total']);
+        $this->assertSame('status', MetadataReview::column('review_status'));
     }
 
     public function test_adviser_and_instructor_only_see_their_active_matching_assignments(): void
@@ -329,6 +344,9 @@ class DashboardTest extends TestCase
                 'created_at' => '2026-02-01 10:00:00',
                 'archived_at' => '2026-08-05 10:00:00',
             ])->save();
+            foreach ([$march, $july, $archived] as $document) {
+                $this->assignResearcher($document, $researcher);
+            }
 
             $analytics = $this->dashboard($researcher)->assertOk()->json('data.analytics');
 
@@ -362,6 +380,25 @@ class DashboardTest extends TestCase
             'assigned_by' => $this->user('research-office')->id,
             'review_role' => $role,
             'is_active' => $active,
+        ]);
+    }
+
+    private function assignResearcher(ResearchDocument $document, User $researcher): void
+    {
+        $instructor = $this->user('instructor');
+        $sectionId = DB::table('class_sections')->insertGetId([
+            'instructor_id' => $instructor->id,
+            'name' => 'Assigned Research',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $document->update(['section_id' => $sectionId]);
+        DB::table('class_section_members')->insert([
+            'class_section_id' => $sectionId,
+            'research_document_id' => $document->id,
+            'user_id' => $researcher->id,
+            'created_at' => now(),
+            'updated_at' => now(),
         ]);
     }
 

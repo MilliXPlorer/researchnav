@@ -93,6 +93,42 @@ class ResearcherWorkflowGapsTest extends TestCase
             ->assertJsonValidationErrors('validation_status');
     }
 
+    public function test_researcher_can_replace_a_support_actor_without_deleting_assignment_history(): void
+    {
+        $owner = User::factory()->create(['role' => 'researcher']);
+        $editorA = User::factory()->create(['role' => 'research_editor']);
+        $editorB = User::factory()->create(['role' => 'research_editor']);
+        $research = $this->research($owner);
+
+        $first = $this->as($owner)->postJson('/api/research/'.$research->id.'/support-assignments', [
+            'user_id' => $editorA->id,
+            'assignment_role' => 'research_editor',
+        ], $this->origin())->assertCreated()->json('data');
+
+        ReviewAssignment::query()->findOrFail($first['id'])->update(['status' => 'accepted', 'is_active' => true]);
+
+        $this->as($owner)->postJson('/api/research/'.$research->id.'/support-assignments', [
+            'user_id' => $editorB->id,
+            'assignment_role' => 'research_editor',
+            'replace_current' => true,
+        ], $this->origin())->assertCreated()
+            ->assertJsonPath('data.user_id', $editorB->id)
+            ->assertJsonPath('data.status', 'requested');
+
+        $this->assertDatabaseHas('research_review_assignments', [
+            'id' => $first['id'],
+            'reviewer_id' => $editorA->id,
+            'status' => 'replaced',
+            'is_active' => false,
+        ]);
+        $this->assertDatabaseHas('research_review_assignments', [
+            'research_document_id' => $research->id,
+            'reviewer_id' => $editorB->id,
+            'review_role' => 'research_editor',
+            'status' => 'requested',
+        ]);
+    }
+
     public function test_owner_can_preview_an_owned_pdf_but_not_a_docx(): void
     {
         Storage::fake('researchnav_private');
@@ -111,6 +147,7 @@ class ResearcherWorkflowGapsTest extends TestCase
     {
         $category = Category::query()->create(['name' => 'Education '.fake()->unique()->word(), 'slug' => 'education-'.fake()->unique()->numberBetween(1, 999999)]);
         $research = ResearchDocument::factory()->create(array_merge(['submitted_by' => $owner->id, 'category_id' => $category->id], $attributes));
+        $this->assignResearcherToDocument($owner, $research);
         ResearchAuthor::factory()->create(['research_document_id' => $research->id, 'user_id' => $owner->id]);
 
         return $research;

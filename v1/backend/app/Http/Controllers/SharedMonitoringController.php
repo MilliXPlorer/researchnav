@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\MonitoringLog;
 use App\Models\ResearchDocument;
 use App\Models\ReviewAssignment;
 use App\Models\User;
@@ -11,6 +12,7 @@ use App\Services\MonitoringService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -26,34 +28,174 @@ class SharedMonitoringController extends DomainController
         $query = ResearchDocument::query()->with('authors');
         if (DomainAuthorization::isResearcher($actor)) {
             $query->where(fn ($q) => $q->where('submitted_by', $actor->id)->orWhereHas('authors', fn ($a) => $a->where('user_id', $actor->id)));
+        } elseif (DomainAuthorization::isOffice($actor)) {
+            $query->where('research_stage', '!=', 'completed')
+                ->where('submission_status', '!=', 'archived')
+                ->where('archive_status', '!=', 'archived');
         } else {
-            $query->whereHas('reviewAssignments', fn ($a) => $a->where(ReviewAssignment::column('reviewer_id'), $actor->id)->whereIn(ReviewAssignment::column('is_active'), ['accepted', 'confirmed', 'active']));
+            $query->where(function ($documents) use ($actor): void {
+                $active = ReviewAssignment::column('is_active');
+                $documents->whereHas('reviewAssignments', fn ($a) => $a->where(ReviewAssignment::column('reviewer_id'), $actor->id)->when($active === 'status', fn ($q) => $q->whereIn($active, ['accepted', 'confirmed', 'active']), fn ($q) => $q->where($active, true)));
+                if (DomainAuthorization::hasAnyRole($actor, ['instructor', 'research_instructor'])) {
+                    $documents->orWhereHas('section', fn ($section) => $section->where('instructor_id', $actor->id));
+                }
+            });
         }
 
-        return response()->json(['data' => $query->latest()->get()->map(fn ($item) => ['id' => $item->id, 'title' => $item->title, 'research_stage' => $item->research_stage, 'researchers' => $item->authors->pluck('author_name')->all()])]);
+        return response()->json(['data' => $query->latest()->get()->map(fn ($item) => ['id' => $item->id, 'title' => $item->title, 'research_stage' => $item->research_stage, 'institute' => $item->institute, 'researchers' => $item->authors->pluck('author_name')->all()])]);
+    }
+
+    public function progressUpdates(Request $request): JsonResponse
+    {
+        $actor = $this->actor($request);
+        $documents = $this->assignedResearch($actor)
+            ->with(['monitoringLogs' => function ($logs): void {
+                $log = new MonitoringLog;
+                $logs->where(MonitoringLog::column('activity_type'), 'RESEARCHER_PROGRESS_REPORTED')
+                    ->with('performedBy:id,first_name,middle_name,last_name,email')
+                    ->orderByDesc(MonitoringLog::column('activity_date'))
+                    ->orderByDesc($log->getKeyName())
+                    ->limit(10);
+            }])
+            ->latest()
+            ->get(['id', 'title', 'research_stage']);
+
+        return response()->json([
+            'data' => $documents->map(fn (ResearchDocument $document) => [
+                'research_document_id' => $document->id,
+                'title' => $document->title,
+                'research_stage' => $document->research_stage,
+                'progress_updates' => $document->monitoringLogs->map(fn (MonitoringLog $log) => [
+                    'id' => $log->getKey(),
+                    'activity_type' => $log->activity_type,
+                    'performer_name' => $log->performedBy?->displayName(),
+                    'status' => $log->monitoring_status,
+                    'remarks' => $log->remarks,
+                    'activity_date' => $log->activity_date?->toISOString(),
+                ])->values()->all(),
+            ])->values()->all(),
+            'schema_version' => 1,
+        ])->header('Cache-Control', 'private, no-store');
     }
 
     public function show(Request $request, ResearchDocument $researchDocument): JsonResponse
     {
         $actor = $this->actor($request);
         $this->authorizeView($actor, $researchDocument);
-        $entries = DB::table('monitoring_entries')->where('research_document_id', $researchDocument->id)->orderBy('monitoring_stage')->orderBy('designation')->get();
+        $entries = DB::table('monitoring_entries')->leftJoin('users', 'monitoring_entries.reviewer_id', '=', 'users.id')->where('monitoring_entries.research_document_id', $researchDocument->id)->orderBy('monitoring_entries.monitoring_stage')->orderBy('monitoring_entries.designation')->select('monitoring_entries.*', DB::raw("TRIM(CONCAT_WS(' ', users.first_name, users.middle_name, users.last_name)) as reviewer_name"))->get();
+        $assignedActors = $researchDocument->reviewAssignments()->with('reviewer')->get()->filter(fn ($assignment) => $assignment->is_active && $assignment->reviewer !== null)->mapWithKeys(fn ($assignment) => [$this->assignmentDesignation($assignment) => $assignment->reviewer->displayName()]);
+        if ($researchDocument->section?->instructor !== null) {
+            $assignedActors->put('Instructor', $researchDocument->section->instructor->displayName());
+        }
 
-        return response()->json(['data' => ['research_document_id' => $researchDocument->id, 'title' => $researchDocument->title, 'researchers' => $researchDocument->authors()->pluck('author_name'), 'stages' => ['before_proposal_defense' => $this->stage(self::PRE, $entries->where('monitoring_stage', 'before_proposal_defense')), 'after_proposal_defense' => $this->stage(self::POST, $entries->where('monitoring_stage', 'after_proposal_defense'))]]]);
+        return response()->json(['data' => ['research_document_id' => $researchDocument->id, 'title' => $researchDocument->title, 'researchers' => $researchDocument->authors()->pluck('author_name'), 'stages' => ['before_proposal_defense' => $this->stage(self::PRE, $entries->where('monitoring_stage', 'before_proposal_defense'), $actor->id, $assignedActors), 'after_proposal_defense' => $this->stage(self::POST, $entries->where('monitoring_stage', 'after_proposal_defense'), $actor->id, $assignedActors)]]])->header('Cache-Control', 'private, no-store');
     }
 
     public function update(Request $request, ResearchDocument $researchDocument, MonitoringService $activity): JsonResponse
     {
         $actor = $this->actor($request);
         $this->authorizeView($actor, $researchDocument);
-        $input = $request->validate(['monitoring_stage' => ['required', Rule::in(['before_proposal_defense', 'after_proposal_defense'])], 'activity_date' => ['required', 'date'], 'activity' => ['required', 'string', 'max:10000'], 'remarks' => ['nullable', 'string', 'max:10000'], 'status' => ['required', Rule::in(['pending', 'in_progress', 'completed', 'not_applicable'])], 'signature_status' => ['required', Rule::in(['unsigned', 'signed'])]]);
+        $input = $request->validate(['entry_id' => ['nullable', 'integer'], 'signature_entry_id' => ['nullable', 'integer'], 'monitoring_stage' => ['required', Rule::in(['before_proposal_defense', 'after_proposal_defense'])], 'activity' => ['required', 'string', 'max:10000'], 'remarks' => ['nullable', 'string', 'max:10000'], 'status' => ['required', Rule::in(['pending', 'in_progress', 'completed', 'not_applicable'])], 'signature_status' => ['required', Rule::in(['unsigned', 'signed'])]]);
         [$role, $designation] = $this->editableSection($actor, $researchDocument, $input['monitoring_stage']);
-        DB::transaction(function () use ($actor, $researchDocument, $input, $role, $designation, $activity): void {
-            DB::table('monitoring_entries')->updateOrInsert(['research_document_id' => $researchDocument->id, 'reviewer_id' => $actor->id, 'monitoring_stage' => $input['monitoring_stage'], 'designation' => $designation], ['reviewer_role' => $role, 'activity_date' => $input['activity_date'], 'activity' => $input['activity'], 'remarks' => $input['remarks'] ?? null, 'status' => $input['status'], 'signature_status' => $input['signature_status'], 'created_at' => now(), 'updated_at' => now()]);
+        DB::transaction(function () use ($actor, $researchDocument, $input, $role, $designation, $activity): int {
+            $this->preserveLegacySignaturesForRows($researchDocument->id, $input['monitoring_stage'], $actor->id);
+            $savedAt = now();
+            $values = ['reviewer_role' => $role, 'activity_date' => $savedAt->toDateString(), 'activity' => $input['activity'], 'remarks' => $input['remarks'] ?? null, 'status' => $input['status'], 'signature_status' => $input['signature_status'], 'updated_at' => $savedAt];
+            if (isset($input['entry_id'])) {
+                $entry = DB::table('monitoring_entries')->where('id', $input['entry_id'])->where('research_document_id', $researchDocument->id)->where('reviewer_id', $actor->id)->where('monitoring_stage', $input['monitoring_stage'])->where('designation', $designation);
+                abort_unless($entry->exists(), 404);
+                $entry->update($values);
+                $entryId = (int) $input['entry_id'];
+            } else {
+                $capacity = $this->sectionCapacity($input['monitoring_stage'], $designation);
+                $count = DB::table('monitoring_entries')->where('research_document_id', $researchDocument->id)->where('monitoring_stage', $input['monitoring_stage'])->where('designation', $designation)->count();
+                if ($count >= $capacity) {
+                    throw ValidationException::withMessages(['monitoring_stage' => ['No blank rows remain in your monitoring section.']]);
+                }
+                $entryId = (int) DB::table('monitoring_entries')->insertGetId([...$values, 'research_document_id' => $researchDocument->id, 'reviewer_id' => $actor->id, 'monitoring_stage' => $input['monitoring_stage'], 'designation' => $designation, 'created_at' => now()]);
+            }
+            if (isset($input['signature_entry_id'])) {
+                $source = DB::table('monitoring_entries')->where('id', $input['signature_entry_id'])->where('research_document_id', $researchDocument->id)->where('reviewer_id', $actor->id)->where('monitoring_stage', $input['monitoring_stage'])->where('signature_status', 'signed')->first();
+                abort_if($source === null, 404);
+                $this->copyEntrySignature($researchDocument->id, $input['monitoring_stage'], $actor->id, (int) $source->id, $entryId);
+            } elseif (! isset($input['entry_id'])) {
+                $this->preserveSignatureForEntry($researchDocument->id, $input['monitoring_stage'], $actor->id, $entryId);
+            }
             $activity->log($researchDocument, 'SHARED_MONITORING_UPDATED', $actor, $designation.' monitoring section updated.', null, $input['status'], $input['status']);
+
+            return $entryId;
         });
 
         return $this->show($request, $researchDocument);
+    }
+
+    public function storeSignature(Request $request, ResearchDocument $researchDocument): JsonResponse
+    {
+        $actor = $this->actor($request);
+        $this->authorizeView($actor, $researchDocument);
+        $input = $request->validate([
+            'monitoring_stage' => ['required', Rule::in(['before_proposal_defense', 'after_proposal_defense'])],
+            'entry_id' => ['nullable', 'integer'],
+            'signature' => ['required', 'file', 'mimes:png,jpg,jpeg', 'max:2048'],
+        ]);
+        $this->editableSection($actor, $researchDocument, $input['monitoring_stage']);
+        if (isset($input['entry_id'])) {
+            abort_unless(DB::table('monitoring_entries')->where('id', $input['entry_id'])->where('research_document_id', $researchDocument->id)->where('monitoring_stage', $input['monitoring_stage'])->where('reviewer_id', $actor->id)->exists(), 404);
+        } else {
+            $this->preserveLegacySignaturesForRows($researchDocument->id, $input['monitoring_stage'], $actor->id);
+        }
+        $directory = $this->signatureDirectory($researchDocument->id, $input['monitoring_stage']);
+        $disk = Storage::disk('researchnav_private');
+        $signatureName = isset($input['entry_id']) ? (string) $input['entry_id'] : $actor->id;
+        foreach ($disk->files($directory) as $file) {
+            if (pathinfo($file, PATHINFO_FILENAME) === $signatureName) {
+                $disk->delete($file);
+            }
+        }
+        $extension = $input['signature']->guessExtension() === 'jpeg' ? 'jpg' : $input['signature']->guessExtension();
+        $disk->putFileAs($directory, $input['signature'], $signatureName.'.'.$extension);
+
+        return $this->show($request, $researchDocument);
+    }
+
+    public function destroy(Request $request, ResearchDocument $researchDocument, MonitoringService $activity): JsonResponse
+    {
+        $actor = $this->actor($request);
+        $this->authorizeView($actor, $researchDocument);
+        $entryId = $request->validate(['entry_id' => ['required', 'integer']])['entry_id'];
+        $entry = DB::table('monitoring_entries')->where('id', $entryId)->where('research_document_id', $researchDocument->id)->where('reviewer_id', $actor->id)->first();
+        abort_if($entry === null, 404);
+        [, $designation] = $this->editableSection($actor, $researchDocument, $entry->monitoring_stage);
+        abort_unless(strtolower((string) $entry->designation) === strtolower($designation), 403);
+
+        DB::transaction(function () use ($actor, $researchDocument, $entry, $entryId, $activity): void {
+            DB::table('monitoring_entries')->where('id', $entryId)->delete();
+            DB::table('monitoring_entries')->where('research_document_id', $researchDocument->id)->where('monitoring_stage', $entry->monitoring_stage)->update(['verified_by' => null, 'verified_at' => null, 'updated_at' => now()]);
+            $activity->log($researchDocument, 'SHARED_MONITORING_ENTRY_REMOVED', $actor, $entry->designation.' monitoring entry removed.', $entry->status, null, 'removed');
+        });
+
+        $disk = Storage::disk('researchnav_private');
+        foreach ($disk->files($this->signatureDirectory($researchDocument->id, $entry->monitoring_stage)) as $file) {
+            if (pathinfo($file, PATHINFO_FILENAME) === (string) $entryId) {
+                $disk->delete($file);
+            }
+        }
+
+        return $this->show($request, $researchDocument);
+    }
+
+    public function signature(Request $request, ResearchDocument $researchDocument, string $stage, string $reviewer)
+    {
+        $actor = $this->actor($request);
+        $this->authorizeView($actor, $researchDocument);
+        abort_unless(in_array($stage, ['before_proposal_defense', 'after_proposal_defense'], true), 404);
+        $entryId = $request->integer('entry');
+        $entry = DB::table('monitoring_entries')->where('research_document_id', $researchDocument->id)->where('monitoring_stage', $stage)->where('reviewer_id', $reviewer)->when($entryId > 0, fn ($query) => $query->where('id', $entryId))->first();
+        abort_if($entry === null || $entry->signature_status !== 'signed', 404);
+        $path = $this->signaturePath($researchDocument->id, $stage, $reviewer, $entryId > 0 ? $entryId : null, $request->boolean('legacy'));
+        abort_if($path === null, 404);
+
+        return Storage::disk('researchnav_private')->response($path, null, ['Cache-Control' => 'private, no-store']);
     }
 
     public function verify(Request $request, ResearchDocument $researchDocument, MonitoringService $activity): JsonResponse
@@ -79,13 +221,25 @@ class SharedMonitoringController extends DomainController
 
     private function authorizeView(User $actor, ResearchDocument $research): void
     {
-        if (DomainAuthorization::isResearcherParticipant($actor, $research)) {
+        if (DomainAuthorization::isResearcherParticipant($actor, $research)
+            || DomainAuthorization::isAssignedRecordReader($actor, $research)
+            || DomainAuthorization::isOffice($actor)) {
             return;
         }
-        $assigned = $research->reviewAssignments()->where(ReviewAssignment::column('reviewer_id'), $actor->id)->whereIn(ReviewAssignment::column('is_active'), ['accepted', 'confirmed', 'active'])->exists();
-        if (! $assigned) {
-            abort(403);
-        }
+        abort(403);
+    }
+
+    private function assignedResearch(User $actor)
+    {
+        return ResearchDocument::query()->where(function ($documents) use ($actor): void {
+            $active = ReviewAssignment::column('is_active');
+            $documents->whereHas('reviewAssignments', fn ($assignments) => $assignments
+                ->where(ReviewAssignment::column('reviewer_id'), $actor->id)
+                ->when($active === 'status', fn ($query) => $query->whereIn($active, ['accepted', 'confirmed', 'active']), fn ($query) => $query->where($active, true)));
+            if (DomainAuthorization::hasAnyRole($actor, ['instructor', 'research_instructor'])) {
+                $documents->orWhereHas('section', fn ($section) => $section->where('instructor_id', $actor->id));
+            }
+        });
     }
 
     private function editableSection(User $actor, ResearchDocument $research, string $stage): array
@@ -112,13 +266,129 @@ class SharedMonitoringController extends DomainController
         if ($assignment?->designation === 'panel_chair') {
             return 'Chair';
         }
-        $ids = $research->reviewAssignments()->where(ReviewAssignment::column('review_role'), 'panel')->where('designation', 'panel_member')->orderBy('id')->pluck(ReviewAssignment::column('reviewer_id'))->values();
+        if (preg_match('/^panel_([1-3])$/', (string) $assignment?->designation, $matches) === 1) {
+            return 'Panel '.$matches[1];
+        }
+        // Backward compatibility for assignments saved before numbered panel
+        // designations were introduced.
+        $ids = $research->reviewAssignments()->where(ReviewAssignment::column('review_role'), 'panel')
+            ->whereIn('designation', ['panel_member', null])->orderBy('id')
+            ->pluck(ReviewAssignment::column('reviewer_id'))->values();
+        $position = $ids->search($actor->id);
 
-        return 'Panel '.(($ids->search($actor->id) ?: 0) + 1);
+        return 'Panel '.(($position === false ? 0 : $position) + 1);
     }
 
-    private function stage(array $sections, $entries): array
+    private function assignmentDesignation(ReviewAssignment $assignment): string
     {
-        return ['sections' => collect($sections)->map(fn ($name) => ['designation' => $name, 'entry' => $entries->first(fn ($row) => strtolower($row->designation) === strtolower($name))])->values(), 'verified_by' => $entries->pluck('verified_by')->filter()->first(), 'verified_at' => $entries->pluck('verified_at')->filter()->first()];
+        $role = $assignment->review_role;
+
+        return match ($role) {
+            'adviser' => 'Adviser',
+            'instructor' => 'Instructor',
+            'statistician' => 'Statistician',
+            'librarian' => 'Librarian',
+            'research_editor' => 'Editor',
+            'research-office' => 'Research Rep',
+            'panel' => match ($assignment->designation) {
+                'panel_chair' => 'Chair',
+                'panel_1' => 'Panel 1',
+                'panel_2' => 'Panel 2',
+                'panel_3' => 'Panel 3',
+                default => (string) ($assignment->designation ?: 'Panel 1'),
+            },
+            default => ucfirst(str_replace('_', ' ', (string) $role)),
+        };
+    }
+
+    private function stage(array $sections, $entries, string $actorId, $assignedActors): array
+    {
+        return ['sections' => collect($sections)->map(function ($name) use ($entries, $actorId, $assignedActors) {
+            $matchingEntries = $entries->filter(fn ($row) => strtolower($row->designation) === strtolower($name))->sortBy('id')->values();
+            $legacyFallback = $matchingEntries->count() === 1;
+            $sectionEntries = $matchingEntries->map(function ($entry) use ($actorId, $legacyFallback) {
+                $entry->signature_url = $entry->signature_status === 'signed' && $this->signaturePath($entry->research_document_id, $entry->monitoring_stage, $entry->reviewer_id, $entry->id, $legacyFallback)
+                    ? '/api/research/'.$entry->research_document_id.'/shared-monitoring/signature/'.$entry->monitoring_stage.'/'.$entry->reviewer_id.'?entry='.$entry->id.($legacyFallback ? '&legacy=1' : '').'&v='.urlencode((string) $entry->updated_at)
+                    : null;
+                $entry->is_owned = $entry->reviewer_id === $actorId;
+                $entry->saved_at = $entry->updated_at;
+
+                return $entry;
+            })->all();
+
+            return ['designation' => $name, 'assigned_actor_name' => $assignedActors->get($name) ?? ($sectionEntries[0]->reviewer_name ?? null), 'entry' => $sectionEntries === [] ? null : end($sectionEntries), 'entries' => $sectionEntries];
+        })->values(), 'verified_by' => $entries->pluck('verified_by')->filter()->first(), 'verified_at' => $entries->pluck('verified_at')->filter()->first()];
+    }
+
+    private function signatureDirectory(int $researchId, string $stage): string
+    {
+        return 'monitoring-signatures/'.$researchId.'/'.$stage;
+    }
+
+    private function signaturePath(int $researchId, string $stage, string $reviewer, ?int $entryId = null, bool $allowLegacyFallback = false): ?string
+    {
+        $disk = Storage::disk('researchnav_private');
+        $names = $entryId === null ? [$reviewer] : [(string) $entryId];
+        if ($entryId !== null && $allowLegacyFallback) {
+            $names[] = $reviewer;
+        }
+        foreach ($disk->files($this->signatureDirectory($researchId, $stage)) as $file) {
+            if (in_array(pathinfo($file, PATHINFO_FILENAME), $names, true)) {
+                return $file;
+            }
+        }
+
+        return null;
+    }
+
+    private function preserveSignatureForEntry(int $researchId, string $stage, string $reviewer, int $entryId): void
+    {
+        $disk = Storage::disk('researchnav_private');
+        $source = $this->signaturePath($researchId, $stage, $reviewer);
+        if ($source === null) {
+            return;
+        }
+        foreach ($disk->files($this->signatureDirectory($researchId, $stage)) as $file) {
+            if (pathinfo($file, PATHINFO_FILENAME) === (string) $entryId) {
+                $disk->delete($file);
+            }
+        }
+        $disk->copy($source, $this->signatureDirectory($researchId, $stage).'/'.$entryId.'.'.pathinfo($source, PATHINFO_EXTENSION));
+    }
+
+    private function preserveLegacySignaturesForRows(int $researchId, string $stage, string $reviewer): void
+    {
+        $source = $this->signaturePath($researchId, $stage, $reviewer);
+        if ($source === null) {
+            return;
+        }
+        $rows = DB::table('monitoring_entries')->where('research_document_id', $researchId)->where('monitoring_stage', $stage)->where('reviewer_id', $reviewer)->where('signature_status', 'signed')->get();
+        foreach ($rows as $row) {
+            if ($this->signaturePath($researchId, $stage, $reviewer, (int) $row->id) === null) {
+                Storage::disk('researchnav_private')->copy($source, $this->signatureDirectory($researchId, $stage).'/'.$row->id.'.'.pathinfo($source, PATHINFO_EXTENSION));
+            }
+        }
+    }
+
+    private function copyEntrySignature(int $researchId, string $stage, string $reviewer, int $sourceEntryId, int $targetEntryId): void
+    {
+        $disk = Storage::disk('researchnav_private');
+        $source = $this->signaturePath($researchId, $stage, $reviewer, $sourceEntryId);
+        abort_if($source === null, 404);
+        foreach ($disk->files($this->signatureDirectory($researchId, $stage)) as $file) {
+            if (pathinfo($file, PATHINFO_FILENAME) === (string) $targetEntryId) {
+                $disk->delete($file);
+            }
+        }
+        $disk->copy($source, $this->signatureDirectory($researchId, $stage).'/'.$targetEntryId.'.'.pathinfo($source, PATHINFO_EXTENSION));
+    }
+
+    private function sectionCapacity(string $stage, string $designation): int
+    {
+        $capacities = $stage === 'before_proposal_defense'
+            ? ['Adviser' => 7, 'Instructor' => 6, 'Editor' => 6, 'Statistician' => 5, 'Librarian' => 4]
+            : ['Adviser' => 5, 'Instructor' => 3, 'Editor' => 3, 'Librarian' => 3, 'Panel 1' => 3, 'Panel 2' => 3, 'Panel 3' => 3, 'Research Rep' => 3, 'Chair' => 3];
+
+        return $capacities[$designation] ?? 1;
     }
 }

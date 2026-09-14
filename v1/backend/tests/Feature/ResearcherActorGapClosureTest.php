@@ -202,6 +202,27 @@ class ResearcherActorGapClosureTest extends TestCase
         $this->assertDatabaseHas('audit_logs', ['entity_id' => (string) $current->id, 'action' => 'DOCUMENT_DELETED']);
     }
 
+    public function test_current_versions_are_isolated_per_document_folder(): void
+    {
+        Storage::fake('researchnav_private');
+        $researcher = User::factory()->create(['role' => 'researcher']);
+        $research = $this->research($researcher, 'draft');
+        $service = app(DocumentService::class);
+
+        $chapterOneV1 = $service->upload($researcher, $research, $this->pdf('chapter-one-v1.pdf'), 'chapter', 'Chapter 1');
+        $chapterTwo = $service->upload($researcher, $research, $this->pdf('chapter-two.pdf'), 'chapter', 'Chapter 2');
+        $chapterOneV2 = $service->upload($researcher, $research, $this->pdf('chapter-one-v2.pdf'), 'chapter', 'Chapter 1');
+
+        $this->assertDatabaseHas('document_files', ['id' => $chapterOneV1->id, 'relative_path' => 'Chapter 1', 'is_current' => false]);
+        $this->assertDatabaseHas('document_files', ['id' => $chapterOneV2->id, 'relative_path' => 'Chapter 1', 'is_current' => true]);
+        $this->assertDatabaseHas('document_files', ['id' => $chapterTwo->id, 'relative_path' => 'Chapter 2', 'is_current' => true]);
+
+        $service->delete($researcher, $chapterOneV2);
+
+        $this->assertDatabaseHas('document_files', ['id' => $chapterOneV1->id, 'relative_path' => 'Chapter 1', 'is_current' => true]);
+        $this->assertDatabaseHas('document_files', ['id' => $chapterTwo->id, 'relative_path' => 'Chapter 2', 'is_current' => true]);
+    }
+
     public function test_attachment_management_matches_upload_policy_for_an_owner_and_active_admin(): void
     {
         Storage::fake('researchnav_private');
@@ -327,10 +348,13 @@ class ResearcherActorGapClosureTest extends TestCase
 
     private function research(User $owner, string $status = 'draft'): ResearchDocument
     {
-        return ResearchDocument::factory()->create([
+        $research = ResearchDocument::factory()->create([
             'submitted_by' => $owner->id,
             'submission_status' => $status,
         ]);
+        $this->assignResearcherToDocument($owner, $research);
+
+        return $research;
     }
 
     private function archivedResearch(): ResearchDocument

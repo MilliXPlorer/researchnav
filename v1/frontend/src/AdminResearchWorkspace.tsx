@@ -38,6 +38,7 @@ import {
   type SimilarityResultResource,
   type TitleValidationResource,
 } from "./api";
+import ManuscriptFilePicker from "./ManuscriptFilePicker";
 import { PublicationYearInput } from "./dateControls";
 import { Button } from "./components";
 import { instituteNames } from "./data";
@@ -1085,17 +1086,16 @@ export default function AdminResearchWorkspace({
         </ul>
         {canUpload && (
           <div className="admin-inline-form">
-            <label>
-              File
-              <input
-                type="file"
-                accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                disabled={isMutating}
-                onChange={(event) =>
-                  setUploadFile(event.target.files?.[0] ?? null)
-                }
-              />
-            </label>
+            <ManuscriptFilePicker
+              label="File"
+              help="PDF, DOC, or DOCX"
+              accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              file={uploadFile}
+              disabled={isMutating}
+              onChange={(event) =>
+                setUploadFile(event.target.files?.[0] ?? null)
+              }
+            />
             <label>
               Document type
               <select
@@ -1229,7 +1229,7 @@ export default function AdminResearchWorkspace({
         aria-labelledby="monitoring-title"
       >
         <p className="eyebrow">Research context</p>
-        <h2 id="monitoring-title">Monitoring</h2>
+        <h2 id="monitoring-title">Workflow Activity</h2>
         <ul className="admin-context-list">
           {monitoring.length ? (
             monitoring.map((item) => (

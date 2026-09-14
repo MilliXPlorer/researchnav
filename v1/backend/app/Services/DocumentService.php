@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\DocumentFile;
 use App\Models\PendingPrivateFileDeletion;
 use App\Models\ResearchDocument;
+use App\Models\ReviewAssignment;
 use App\Models\User;
 use App\Notifications\ResearchActivityNotification;
 use App\Policies\DocumentFilePolicy;
@@ -26,12 +27,12 @@ class DocumentService
         private readonly SupabaseStorageService $supabase,
     ) {}
 
-    public function upload(User $actor, ResearchDocument $research, UploadedFile $upload, string $documentType, ?Request $request = null): DocumentFile
+    public function upload(User $actor, ResearchDocument $research, UploadedFile $upload, string $documentType, ?string $relativePath = null, ?Request $request = null): DocumentFile
     {
         $path = null;
 
         try {
-            return DB::transaction(function () use ($actor, $research, $upload, $documentType, &$path, $request): DocumentFile {
+            return DB::transaction(function () use ($actor, $research, $upload, $documentType, $relativePath, &$path, $request): DocumentFile {
                 // Lock the parent before calculating a version so concurrent uploads serialize.
                 $locked = ResearchDocument::query()->whereKey($research->id)->lockForUpdate()->firstOrFail();
                 $actor = $this->currentActor($actor);
@@ -50,12 +51,21 @@ class DocumentService
                 if (Storage::disk('researchnav_private')->putFileAs('research/'.$locked->id, $upload, $filename) === false) {
                     throw new \RuntimeException('Unable to store the uploaded document.');
                 }
+                $folder = $this->normalizeFolder($relativePath);
                 $version = ((int) DocumentFile::query()->where('research_document_id', $locked->id)->where('document_type', $documentType)->lockForUpdate()->max('version_number')) + 1;
-                DocumentFile::query()->where('research_document_id', $locked->id)->where('document_type', $documentType)->where('is_current', true)->update(['is_current' => false]);
+                $currentFiles = DocumentFile::query()
+                    ->where('research_document_id', $locked->id)
+                    ->where('document_type', $documentType)
+                    ->where('is_current', true);
+                $folder === null ? $currentFiles->whereNull('relative_path') : $currentFiles->where('relative_path', $folder);
+                $currentFiles->update(['is_current' => false]);
+                $fileOrderQuery = DocumentFile::query()->where('research_document_id', $locked->id);
+                $folder === null ? $fileOrderQuery->whereNull('relative_path') : $fileOrderQuery->where('relative_path', $folder);
+                $fileOrder = ((int) $fileOrderQuery->max('file_order')) + 1;
                 $file = DocumentFile::query()->create([
                     'research_document_id' => $locked->id, 'uploaded_by' => $actor->id, 'document_type' => $documentType,
-                    'version_number' => $version, 'original_filename' => $this->safeOriginalFilename($upload->getClientOriginalName()), 'stored_filename' => $filename,
-                    'file_path' => $path, 'file_extension' => $extension, 'mime_type' => $upload->getMimeType(),
+                    'version_number' => $version, 'original_filename' => $this->safeOriginalFilename($upload->getClientOriginalName()), 'relative_path' => $folder,
+                    'file_order' => $fileOrder, 'stored_filename' => $filename, 'file_path' => $path, 'file_extension' => $extension, 'mime_type' => $upload->getMimeType(),
                     'file_size' => $upload->getSize(), 'is_current' => true, 'uploaded_at' => now(),
                 ]);
                 if ($documentType === 'final_manuscript') {
@@ -64,11 +74,23 @@ class DocumentService
                 }
                 $this->monitoring->log($locked, 'DOCUMENT_UPLOADED', $actor, "Uploaded {$documentType} version {$version}.", null, null, 'open');
                 $this->audit->log($actor, 'DOCUMENT_UPLOADED', $file, 'Uploaded a private research document.', $request);
-                if ($documentType === 'revised_manuscript') {
-                    $locked->reviewAssignments()->where('is_active', true)->with('reviewer')->get()
-                        ->pluck('reviewer')->filter()->unique('id')
-                        ->each(fn (User $reviewer) => $reviewer->notify(new ResearchActivityNotification($locked, 'REVISED_MANUSCRIPT_UPLOADED', 'Revised manuscript uploaded', 'A revised manuscript was uploaded and is ready to review.', '/research/'.$locked->id)));
+                $activeColumn = ReviewAssignment::column('is_active');
+                $assignmentQuery = $locked->reviewAssignments()->with('reviewer');
+                if ($activeColumn === 'status') {
+                    $assignmentQuery->whereIn($activeColumn, ['accepted', 'confirmed', 'active']);
+                } else {
+                    $assignmentQuery->where($activeColumn, true);
                 }
+                $folderLabel = $folder === null ? 'General documents' : $folder;
+                $assignmentQuery->get()->pluck('reviewer')->filter()->unique('id')
+                    ->reject(fn (User $reviewer) => $reviewer->id === $actor->id)
+                    ->each(fn (User $reviewer) => $reviewer->notify(new ResearchActivityNotification(
+                        $locked,
+                        'DOCUMENT_UPLOADED',
+                        'New research document',
+                        $actor->displayName().' uploaded '.$file->original_filename.' in '.$folderLabel.'.',
+                        '/research/'.$locked->id,
+                    )));
 
                 return $file;
             });
@@ -109,11 +131,14 @@ class DocumentService
             app(ManuscriptSimilarityTextCache::class)->forget($file);
 
             if ($file->is_current) {
-                $replacement = DocumentFile::query()
+                $replacementQuery = DocumentFile::query()
                     ->where('research_document_id', $research->id)
                     ->where('document_type', $file->document_type)
-                    ->whereKeyNot($file->id)
-                    ->lockForUpdate()
+                    ->whereKeyNot($file->id);
+                $file->relative_path === null
+                    ? $replacementQuery->whereNull('relative_path')
+                    : $replacementQuery->where('relative_path', $file->relative_path);
+                $replacement = $replacementQuery->lockForUpdate()
                     ->orderByDesc('version_number')
                     ->orderByDesc('id')
                     ->first();
@@ -122,10 +147,13 @@ class DocumentService
             $file->deleteOrFail();
 
             if (isset($replacement)) {
-                DocumentFile::query()
+                $currentQuery = DocumentFile::query()
                     ->where('research_document_id', $research->id)
-                    ->where('document_type', $file->document_type)
-                    ->update(['is_current' => false]);
+                    ->where('document_type', $file->document_type);
+                $file->relative_path === null
+                    ? $currentQuery->whereNull('relative_path')
+                    : $currentQuery->where('relative_path', $file->relative_path);
+                $currentQuery->update(['is_current' => false]);
                 $replacement->update(['is_current' => true]);
             }
 
@@ -176,6 +204,21 @@ class DocumentService
             'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
             default => null,
         };
+    }
+
+    private function normalizeFolder(?string $folder): ?string
+    {
+        if ($folder === null) {
+            return null;
+        }
+        $folder = trim(str_replace(['\\', '\0'], ['/', ''], $folder));
+        $folder = preg_replace('#/+#', '/', $folder) ?? '';
+        $folder = trim($folder, " /\t\r\n");
+        if ($folder === '' || str_contains($folder, '..')) {
+            return null;
+        }
+
+        return Str::limit($folder, 1000, '');
     }
 
     private function safeOriginalFilename(string $filename): string

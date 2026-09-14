@@ -18,11 +18,15 @@ class UploadDocumentRequest extends FormRequest
 
     public function rules(): array
     {
-        return ['file' => ['required', 'file', 'max:25600', 'mimetypes:application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document'], 'document_type' => ['required', Rule::in(DocumentFile::TYPES)]];
+        return [
+            'file' => ['required', 'file', 'max:25600', 'mimetypes:application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+            'document_type' => ['required', Rule::in(DocumentFile::TYPES)],
+            'relative_path' => ['nullable', 'string', 'max:1000'],
+        ];
     }
 
     public function withValidator(Validator $validator): void
     {
-        $validator->after(fn () => $this->rejectUnknownFields($validator, ['file', 'document_type']));
+        $validator->after(fn () => $this->rejectUnknownFields($validator, ['file', 'document_type', 'relative_path']));
     }
 }

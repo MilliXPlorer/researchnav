@@ -542,7 +542,9 @@ describe("role workspaces", () => {
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: "My Research" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Open record" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Manage folder" }),
+    );
 
     expect(await screen.findByText("Open without refresh")).toBeInTheDocument();
   });
@@ -597,6 +599,8 @@ describe("role workspaces", () => {
     )?.nav;
     expect(officeNav).toEqual([
       "Dashboard",
+      "Research Folders",
+      "Similarity Check",
       "Upload Manuscript",
       "User & Role Management",
       "Reports & Exports",
@@ -1079,8 +1083,9 @@ describe("role workspaces", () => {
     expect(container.querySelectorAll(".analytics-line polyline")).toHaveLength(
       2,
     );
-    fireEvent.click(screen.getByRole("button", { name: /New submission/ }));
-    expect(selectNav).toHaveBeenCalledWith("Create Research");
+    expect(
+      screen.queryByRole("button", { name: /New submission/ }),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -1219,6 +1224,104 @@ describe("authenticated notifications", () => {
       ).not.toBeInTheDocument(),
     );
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("lets an administrator approve an access request from its notification", async () => {
+    const administrator = {
+      ...activeSession,
+      email: "admin@example.test",
+      role: "admin" as const,
+      isAdmin: true,
+    };
+    const accessNotification = {
+      ...notification,
+      event: "ACCESS_REQUEST_SUBMITTED",
+      title: "New workspace access request",
+      message: "applicant@example.test requested the researcher workspace.",
+      details: "applicant@example.test requested the researcher workspace.",
+      action_url: "/app",
+      research_document_id: null,
+      access_request_id: 17,
+      applicant_email: "applicant@example.test",
+      requested_role: "researcher",
+      full_name: "Applicant Name",
+      program: "BS Computer Science",
+      justification: "Capstone access",
+    };
+    const fetchMock = vi.fn(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const path = String(input);
+        if (path === "/api/notifications")
+          return new Response(
+            JSON.stringify({
+              data: [accessNotification],
+              links: { next: null },
+            }),
+          );
+        if (path.endsWith("/read"))
+          return new Response(
+            JSON.stringify({
+              data: { ...accessNotification, read_at: "2026-08-10T12:01:00Z" },
+            }),
+          );
+        if (
+          path === "/api/admin/access-requests/17" &&
+          init?.method === "PATCH"
+        )
+          return new Response(
+            JSON.stringify({
+              data: {
+                id: 17,
+                status: "approved",
+                requested_role: "researcher",
+              },
+            }),
+          );
+        if (path === "/api/dashboard")
+          return new Response(
+            JSON.stringify({
+              data: { schema_version: 1, role: "admin", sections: [] },
+            }),
+          );
+        return new Response(JSON.stringify({ error: "NOT_FOUND" }), {
+          status: 404,
+        });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<Dashboard session={administrator} navigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open notifications" }));
+    fireEvent.click(await screen.findByText("New workspace access request"));
+    expect(
+      await screen.findByRole("dialog", { name: "Review access request" }),
+    ).toHaveTextContent("Applicant Name");
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/notifications/${accessNotification.id}/read`,
+        expect.objectContaining({ method: "PATCH" }),
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/admin/access-requests/17",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({
+            decision: "approve",
+            granted_role: "researcher",
+          }),
+        }),
+      ),
+    );
+    expect(
+      screen.queryByRole("dialog", { name: "Review access request" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "System access overview." }),
+    ).toBeInTheDocument();
   });
 
   it("distinguishes expired sessions from retryable dashboard server failures", async () => {

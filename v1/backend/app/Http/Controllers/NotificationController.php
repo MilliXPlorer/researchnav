@@ -3,13 +3,17 @@
 namespace App\Http\Controllers;
 
 use App\Http\Resources\NotificationResource;
+use App\Services\AccessRequestService;
 use Illuminate\Http\Request;
 
 class NotificationController extends DomainController
 {
-    public function index(Request $request)
+    public function index(Request $request, AccessRequestService $accessRequests)
     {
-        return NotificationResource::collection($this->actor($request)->notifications()->latest()->paginate());
+        $actor = $this->actor($request);
+        $accessRequests->syncPendingNotificationsFor($actor);
+
+        return NotificationResource::collection($actor->notifications()->latest()->paginate());
     }
 
     public function read(Request $request, string $notification)

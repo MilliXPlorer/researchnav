@@ -54,7 +54,7 @@ class ResearcherReleaseFindingsTest extends TestCase
         }
 
         $events = $reviewer->notifications()->get()->map(fn ($notification) => $notification->data['event'])->all();
-        $this->assertContains('REVISED_MANUSCRIPT_UPLOADED', $events);
+        $this->assertContains('DOCUMENT_UPLOADED', $events);
         $this->assertContains('REVISION_RESUBMITTED', $events);
         $notification = $reviewer->notifications()->latest()->firstOrFail()->data;
         $this->assertSame($research->title, $notification['research_title']);
@@ -217,6 +217,7 @@ class ResearcherReleaseFindingsTest extends TestCase
         }
         $category = Category::query()->create(['name' => 'Category '.fake()->unique()->word(), 'slug' => 'category-'.fake()->unique()->numberBetween(1, 999999)]);
         $research = ResearchDocument::factory()->create(array_merge(['submitted_by' => $owner->id, 'category_id' => $category->id], $attributes));
+        $this->assignResearcherToDocument($owner, $research);
         ResearchAuthor::factory()->create(['research_document_id' => $research->id, 'user_id' => $owner->id]);
 
         return [$owner, $research];

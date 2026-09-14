@@ -120,7 +120,7 @@ class DomainServicesTest extends TestCase
         $payload = (new DocumentFileResource($second))->resolve();
         $this->assertArrayNotHasKey('file_path', $payload);
         $this->assertArrayNotHasKey('stored_filename', $payload);
-        $this->assertArrayNotHasKey('uploaded_by', $payload);
+        $this->assertSame($actor->id, $payload['uploaded_by']);
     }
 
     public function test_weighted_component_scores_flag_at_point_seven_but_do_not_change_submission_status(): void
@@ -499,6 +499,7 @@ class DomainServicesTest extends TestCase
     {
         $actor = User::factory()->create();
         $research = app(ResearchService::class)->createDraft($actor, array_merge($this->metadata($this->category()), $overrides), [['user_id' => $actor->id, 'author_name' => 'Author '.$actor->id]]);
+        $this->assignResearcherToDocument($actor, $research);
 
         return [$actor, $research];
     }

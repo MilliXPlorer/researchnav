@@ -66,7 +66,9 @@ class EditorController extends DomainController
 
     private function assignedQuery(string $id)
     {
-        return ResearchDocument::query()->whereHas('reviewAssignments', fn ($query) => $query->where(ReviewAssignment::column('reviewer_id'), $id)->where(ReviewAssignment::column('review_role'), 'research_editor')->whereIn(ReviewAssignment::column('is_active'), ['accepted', 'confirmed', 'active']));
+        $active = ReviewAssignment::column('is_active');
+
+        return ResearchDocument::query()->whereHas('reviewAssignments', fn ($query) => $query->where(ReviewAssignment::column('reviewer_id'), $id)->where(ReviewAssignment::column('review_role'), 'research_editor')->when($active === 'status', fn ($q) => $q->whereIn($active, ['accepted', 'confirmed', 'active']), fn ($q) => $q->where($active, true)));
     }
 
     private function ensureAssigned(string $id, ResearchDocument $research): void

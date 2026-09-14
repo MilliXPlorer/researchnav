@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\ClassSection;
+use App\Models\ResearchAuthor;
 use App\Models\ResearchDocument;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -132,6 +133,11 @@ class InstructorSectionMembersTest extends TestCase
         $student = $this->user(['role' => 'researcher']);
         $document = ResearchDocument::factory()->create(['section_id' => $section->id]);
 
+        ResearchAuthor::factory()->create([
+            'research_document_id' => $document->id,
+            'user_id' => $student->id,
+        ]);
+
         DB::table('class_section_members')->insert([
             [
                 'class_section_id' => $section->id,
@@ -173,8 +179,12 @@ class InstructorSectionMembersTest extends TestCase
 
         $this->as($instructor)->deleteJson('/api/instructor/sections/'.$section->id.'/members/'.$student->id, [], $this->origin())
             ->assertOk();
-        $this->assertDatabaseHas('class_section_members', [
+        $this->assertDatabaseMissing('class_section_members', [
             'class_section_id' => $section->id,
+            'research_document_id' => $document->id,
+            'user_id' => $student->id,
+        ]);
+        $this->assertDatabaseMissing('research_authors', [
             'research_document_id' => $document->id,
             'user_id' => $student->id,
         ]);

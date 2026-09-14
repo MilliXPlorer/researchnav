@@ -95,6 +95,28 @@ class RoleWorkspaceApiTest extends TestCase
         $response->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.research_document_id', $assigned->id);
     }
 
+    public function test_panel_assignments_include_the_latest_canonical_defense_schedule(): void
+    {
+        $panelist = $this->user(['role' => 'panel']);
+        $office = $this->user(['role' => 'research-office']);
+        $research = $this->document('submitted');
+        $this->assign($office, $research, $panelist, 'panel');
+        DefenseSchedule::query()->create([
+            'research_document_id' => $research->id,
+            'created_by' => $office->id,
+            'scheduled_at' => now()->addDays(2),
+            'room' => 'Defense Room',
+            'status' => 'scheduled',
+        ]);
+
+        $this->as($panelist)->getJson('/api/panel/assignments')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.research_document_id', $research->id)
+            ->assertJsonPath('data.0.next_defense.room', 'Defense Room')
+            ->assertJsonPath('data.0.next_defense.status', 'scheduled');
+    }
+
     public function test_panel_evaluations_are_submit_once_and_rated(): void
     {
         $panelist = $this->user(['role' => 'panel']);
@@ -277,13 +299,15 @@ class RoleWorkspaceApiTest extends TestCase
             ->assertJsonCount(1, 'data');
         $this->as($instructor)->getJson('/api/instructor/title-proposals')
             ->assertOk()
-            ->assertJsonCount(1, 'data');
+            ->assertJsonCount(2, 'data');
         $this->as($instructor)->getJson('/api/instructor/submissions')
             ->assertOk()
             ->assertHeader('Cache-Control', 'no-store, private')
-            ->assertJsonCount(1, 'data')
-            ->assertJsonPath('data.0.research_document_id', $proposal->id)
-            ->assertJsonPath('data.0.research_stage', $proposal->research_stage);
+            ->assertJsonCount(2, 'data')
+            ->assertJsonFragment([
+                'research_document_id' => $proposal->id,
+                'research_stage' => $proposal->research_stage,
+            ]);
 
         $this->as($instructor)->postJson('/api/research/'.$proposal->id.'/recommendation', [
             'validation_status' => 'approved',

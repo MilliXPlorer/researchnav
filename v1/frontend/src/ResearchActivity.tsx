@@ -77,7 +77,7 @@ function activitySection<T>(
 }
 
 /**
- * Adviser feedback, revision requests, and monitoring history for one research
+ * Adviser feedback, revision requests, and Workflow Activity for one research
  * record. The server authorizes the owning researcher and every assigned
  * reviewer, so the same panel serves researchers, advisers, and instructors.
  */
@@ -199,7 +199,7 @@ export default function ResearchActivity({
   if (displayedState.status === "loading") {
     return (
       <p className="admin-empty" aria-busy="true">
-        Loading feedback, revisions, and monitoring history…
+        Loading feedback, revisions, and workflow activity…
       </p>
     );
   }
@@ -387,10 +387,10 @@ export default function ResearchActivity({
       </section>
 
       <section className="activity-block">
-        <h3>Monitoring and activity history</h3>
+        <h3>Workflow Activity</h3>
         {monitoring.length === 0 ? (
           <p className="admin-empty">
-            No monitoring activity has been recorded yet.
+            No workflow activity has been recorded yet.
           </p>
         ) : (
           <ol className="activity-timeline">

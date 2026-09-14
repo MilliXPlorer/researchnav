@@ -15,6 +15,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
 
 class AdviserController extends DomainController
 {
@@ -57,12 +58,17 @@ class AdviserController extends DomainController
     public function pendingReviews(Request $request): JsonResponse
     {
         $actor = $this->actor($request);
+        $stage = $request->validate([
+            'stage' => ['nullable', Rule::in(['title_proposal', 'manuscript'])],
+        ])['stage'] ?? null;
         $documents = ResearchDocument::query()
             ->whereHas('reviewAssignments', fn ($assignments) => $assignments
                 ->where(ReviewAssignment::column('reviewer_id'), $actor->id)
                 ->where(ReviewAssignment::column('review_role'), 'adviser')
                 ->where(ReviewAssignment::column('is_active'), ReviewAssignment::column('is_active') === 'status' ? 'active' : true))
             ->whereIn('submission_status', ['submitted', 'under_review'])
+            ->when($stage === 'title_proposal', fn ($query) => $query->where('research_stage', 'title_proposal'))
+            ->when($stage === 'manuscript', fn ($query) => $query->where('research_stage', '!=', 'title_proposal'))
             ->withCount(['revisions' => fn ($revisions) => $revisions->whereIn(Revision::column('revision_status'), ['requested', 'in_progress']), 'titleValidations' => fn ($validations) => $validations->where(TitleValidation::column('validation_status'), 'pending')])
             ->orderByDesc('updated_at')
             ->get(['id', 'title', 'research_stage', 'submission_status', 'updated_at']);

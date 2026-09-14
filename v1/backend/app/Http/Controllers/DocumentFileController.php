@@ -22,7 +22,7 @@ class DocumentFileController extends DomainController
     {
         $this->allowed((new ResearchDocumentPolicy)->view($this->actor($request), $researchDocument));
 
-        $files = $researchDocument->files()->latest('uploaded_at');
+        $files = $researchDocument->files()->with('uploader')->orderBy('relative_path')->orderBy('file_order')->orderByDesc('uploaded_at');
         $actor = $this->actor($request);
         if (! (new ResearchDocumentPolicy)->viewInternal($actor, $researchDocument) && $researchDocument->submission_status === 'archived') {
             $files->current();
@@ -40,7 +40,14 @@ class DocumentFileController extends DomainController
         $data = $request->validated();
         $this->allowed((new DocumentFilePolicy)->upload($this->actor($request), $researchDocument, $data['document_type']));
 
-        return (new DocumentFileResource($service->upload($this->actor($request), $researchDocument, $data['file'], $data['document_type'], $request)))->response()->setStatusCode(201);
+        return (new DocumentFileResource($service->upload($this->actor($request), $researchDocument, $data['file'], $data['document_type'], $data['relative_path'] ?? null, $request)->load('uploader')))->response()->setStatusCode(201);
+    }
+
+    public function folders(Request $request, ResearchDocument $researchDocument)
+    {
+        $this->allowed((new ResearchDocumentPolicy)->view($this->actor($request), $researchDocument));
+
+        return response()->json(['data' => $this->folderNames($researchDocument)]);
     }
 
     public function download(Request $request, ResearchDocument $researchDocument, DocumentFile $documentFile, PrivateDocumentFileResolver $files, SupabaseStorageService $supabase)
@@ -117,5 +124,18 @@ class DocumentFileController extends DomainController
         $service->delete($actor, $documentFile, $request);
 
         return response()->noContent();
+    }
+
+    /** @return list<string> */
+    private function folderNames(ResearchDocument $researchDocument): array
+    {
+        $fromFiles = $researchDocument->files()->whereNotNull('relative_path')->pluck('relative_path');
+        $folders = collect(['Chapter 1', 'Chapter 2', 'Chapter 3', 'Full Manuscript'])->merge($fromFiles)
+            ->filter(fn ($item) => is_string($item) && trim($item) !== '')
+            ->map(fn ($item) => trim($item))
+            ->unique(fn ($item) => mb_strtolower($item))
+            ->values();
+
+        return $folders->all();
     }
 }

@@ -699,6 +699,8 @@ class SimilarityCheckTest extends TestCase
         [$actor, $firstSource] = $this->source();
         $secondSource = $this->document(['submitted_by' => $actor->id, 'title' => 'Second Source Research']);
         $thirdSource = $this->document(['submitted_by' => $actor->id, 'title' => 'Third Source Research']);
+        $this->assignResearcherToDocument($actor, $secondSource);
+        $this->assignResearcherToDocument($actor, $thirdSource);
         $this->app->instance(SimilarityProcessRunner::class, new class extends SimilarityProcessRunner
         {
             public function run(ResearchDocument $source, Collection $candidates): array
@@ -718,8 +720,10 @@ class SimilarityCheckTest extends TestCase
     private function source(): array
     {
         $actor = User::factory()->create();
+        $source = $this->document(['submitted_by' => $actor->id, 'title' => 'Source Research']);
+        $this->assignResearcherToDocument($actor, $source);
 
-        return [$actor, $this->document(['submitted_by' => $actor->id, 'title' => 'Source Research'])];
+        return [$actor, $source];
     }
 
     /** @param array<string, mixed> $attributes */

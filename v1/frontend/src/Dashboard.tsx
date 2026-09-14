@@ -41,14 +41,17 @@ import { canEnterDashboard } from "./access";
 import AccessRequestPanel from "./AccessRequestPanel";
 import {
   ApiError,
+  decideAccessRequest,
   getRoleDashboard,
   listNotifications,
   markNotificationRead,
   type NotificationResource,
+  type RequestableRole,
 } from "./api";
 import AdminSidebarPage from "./AdminSidebarPages";
-import { Logo } from "./components";
+import { Button, Logo } from "./components";
 import { roleConfigs } from "./data";
+import { Modal } from "./Modal";
 import ProfileDialog, { ProfileAvatar } from "./ProfileDialog";
 import RoleSidebarPage from "./RoleSidebarPages";
 import RoleWorkspace, { type RoleDashboardLoadState } from "./RoleWorkspaces";
@@ -79,7 +82,8 @@ const navIcons: Record<string, LucideIcon> = {
   "Assigned Research": BookOpen,
   "Title Review": FileSearch,
   "Manuscript Review": BookOpenCheck,
-  Monitoring: Activity,
+  "Defense Monitoring Forms": Activity,
+  "Research Progress Updates": Activity,
   "Review History": FileClock,
   "Review Submissions": ClipboardCheck,
   "Assigned Defenses": Presentation,
@@ -97,6 +101,7 @@ const navIcons: Record<string, LucideIcon> = {
   "Assignment Requests": ClipboardCheck,
   "Reference Review": BookOpenCheck,
   "User & Role Management": UserCog,
+  "Access Requests": ClipboardCheck,
   "Reports & Exports": FileCheck2,
   Search,
   "My Library": LibraryBig,
@@ -160,6 +165,10 @@ export default function Dashboard({
     source: "live" as "live" | "mock",
   });
   const [notificationAttempt, setNotificationAttempt] = useState(0);
+  const [accessRequestNotification, setAccessRequestNotification] =
+    useState<NotificationResource | null>(null);
+  const [accessDecisionBusy, setAccessDecisionBusy] = useState(false);
+  const [accessDecisionError, setAccessDecisionError] = useState("");
   const [dashboardState, setDashboardState] = useState<RoleDashboardLoadState>({
     scope: dashboardScope,
     status: "loading",
@@ -190,6 +199,14 @@ export default function Dashboard({
 
   function selectNavigation(item: string) {
     setActiveNav({ scope: dashboardScope, role, item });
+    if (role === "researcher") {
+      if (item === "My Research") {
+        navigate("/app/researcher/submissions");
+      } else if (showingRecordWorkspace) {
+        navigate("/app");
+      }
+      return;
+    }
     if (role !== "instructor") return;
     if (item === "My Sections") {
       navigate("/app/instructor/sections");
@@ -264,6 +281,15 @@ export default function Dashboard({
 
   useEffect(() => {
     if (session.accessStatus !== "active") return;
+    const interval = window.setInterval(
+      () => setNotificationAttempt((attempt) => attempt + 1),
+      30_000,
+    );
+    return () => window.clearInterval(interval);
+  }, [dashboardScope, session.accessStatus]);
+
+  useEffect(() => {
+    if (session.accessStatus !== "active") return;
 
     const controller = new AbortController();
     void getRoleDashboard(role, globalThis.fetch, controller.signal)
@@ -292,6 +318,34 @@ export default function Dashboard({
 
     return () => controller.abort();
   }, [dashboardAttempt, dashboardScope, role, session.accessStatus]);
+
+  async function recordAccessDecision(decision: "approve" | "reject") {
+    const notification = accessRequestNotification;
+    if (!notification?.access_request_id) return;
+
+    setAccessDecisionBusy(true);
+    setAccessDecisionError("");
+    try {
+      await decideAccessRequest(notification.access_request_id, {
+        decision,
+        granted_role:
+          decision === "approve"
+            ? ((notification.requested_role ?? "researcher") as RequestableRole)
+            : undefined,
+      });
+      setAccessRequestNotification(null);
+      setNotificationAttempt((attempt) => attempt + 1);
+      setDashboardAttempt((attempt) => attempt + 1);
+    } catch (error) {
+      setAccessDecisionError(
+        error instanceof ApiError
+          ? `The request could not be ${decision === "approve" ? "approved" : "rejected"} (${error.code}).`
+          : "The access decision could not be recorded.",
+      );
+    } finally {
+      setAccessDecisionBusy(false);
+    }
+  }
 
   if (!canEnterDashboard(session)) {
     return (
@@ -667,12 +721,87 @@ export default function Dashboard({
               }
             }
             if (dashboardScopeRef.current !== requestScope) return;
+            if (
+              role === "admin" &&
+              item.event === "ACCESS_REQUEST_SUBMITTED" &&
+              item.access_request_id
+            ) {
+              setAccessDecisionError("");
+              setAccessRequestNotification(item);
+              setDrawer({ scope: requestScope, open: false });
+              return;
+            }
             if (isAllowedNotificationPath(item.action_url))
               navigate(item.action_url);
             setDrawer({ scope: requestScope, open: false });
           }}
           onClose={() => setDrawer({ scope: dashboardScope, open: false })}
         />
+      )}
+      {accessRequestNotification?.access_request_id && (
+        <Modal
+          label="Review access request"
+          busy={accessDecisionBusy}
+          onClose={() => setAccessRequestNotification(null)}
+        >
+          <div className="modal-heading">
+            <p className="eyebrow">Workspace access</p>
+            <h2>Review access request</h2>
+            <p>
+              Approving activates this account with the requested role.
+              Rejecting leaves the account blocked.
+            </p>
+          </div>
+          <dl className="project-assignment-summary">
+            <div>
+              <dt>Applicant</dt>
+              <dd>
+                {accessRequestNotification.full_name ||
+                  accessRequestNotification.applicant_email ||
+                  "Unknown account"}
+              </dd>
+            </div>
+            <div>
+              <dt>Email</dt>
+              <dd>
+                {accessRequestNotification.applicant_email || "Not provided"}
+              </dd>
+            </div>
+            <div>
+              <dt>Requested role</dt>
+              <dd>
+                {accessRequestNotification.requested_role || "researcher"}
+              </dd>
+            </div>
+            <div>
+              <dt>Program</dt>
+              <dd>{accessRequestNotification.program || "Not provided"}</dd>
+            </div>
+          </dl>
+          {accessRequestNotification.justification && (
+            <p>{accessRequestNotification.justification}</p>
+          )}
+          {accessDecisionError && (
+            <p className="admin-error" role="alert">
+              {accessDecisionError}
+            </p>
+          )}
+          <div className="row-actions">
+            <Button
+              disabled={accessDecisionBusy}
+              onClick={() => void recordAccessDecision("approve")}
+            >
+              Approve
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={accessDecisionBusy}
+              onClick={() => void recordAccessDecision("reject")}
+            >
+              Reject
+            </Button>
+          </div>
+        </Modal>
       )}
       {accountOpen && (
         <ProfileDialog

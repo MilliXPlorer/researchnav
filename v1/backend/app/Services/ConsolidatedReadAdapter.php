@@ -134,27 +134,30 @@ class ConsolidatedReadAdapter
     /** @return Collection<int, Revision> */
     public function revisionsForDocument(int $documentId): Collection
     {
-        return $this->reviewsForDocument($documentId, 'revision')
-            ->map(function (object $row): Revision {
-                $revision = new Revision;
-                $revision->forceFill([
-                    'id' => $row->source_id,
-                    'research_document_id' => $row->research_document_id,
-                    'requested_by' => $row->actor_id,
-                    'document_file_id' => $row->file_id,
-                    'revision_number' => $row->sequence_number,
-                    'revision_remarks' => $row->remarks,
-                    'revision_status' => $row->status,
-                    'requested_at' => $row->requested_at,
-                    'submitted_at' => $row->submitted_at,
-                    'resolved_at' => $row->resolved_at,
-                    'created_at' => $row->created_at,
-                    'updated_at' => $row->updated_at,
-                ]);
-                $revision->exists = true;
+        $rows = $this->reviewsForDocument($documentId, 'revision');
+        $requesters = User::query()->whereIn('id', $rows->pluck('actor_id')->filter()->unique())->get()->keyBy('id');
 
-                return $revision;
-            });
+        return $rows->map(function (object $row) use ($requesters): Revision {
+            $revision = new Revision;
+            $revision->forceFill([
+                'id' => $row->source_id,
+                'research_document_id' => $row->research_document_id,
+                'requested_by' => $row->actor_id,
+                'document_file_id' => $row->file_id,
+                'revision_number' => $row->sequence_number,
+                'revision_remarks' => $row->remarks,
+                'revision_status' => $row->status,
+                'requested_at' => $row->requested_at,
+                'submitted_at' => $row->submitted_at,
+                'resolved_at' => $row->resolved_at,
+                'created_at' => $row->created_at,
+                'updated_at' => $row->updated_at,
+            ]);
+            $revision->exists = true;
+            $revision->setRelation('requester', $row->actor_id === null ? null : $requesters->get($row->actor_id));
+
+            return $revision;
+        });
     }
 
     /** @return Collection<int, AuditLog> */

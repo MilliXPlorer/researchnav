@@ -188,6 +188,9 @@ Route::prefix('api')
             Route::get('users', [ResearchOfficeController::class, 'users']);
             Route::patch('users/{user}', [ResearchOfficeController::class, 'updateUser'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('reports', [ResearchOfficeController::class, 'reports']);
+            Route::get('research/{researchDocument}/team', [ResearchOfficeController::class, 'projectTeam']);
+            Route::get('research/{researchDocument}/representative-candidates', [ResearchOfficeController::class, 'representativeCandidates']);
+            Route::put('research/{researchDocument}/representative', [ResearchOfficeController::class, 'assignRepresentative'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('institutes/{institute}/studies', [ResearchOfficeController::class, 'instituteStudies']);
             Route::get('institutes/{institute}/studies/{year}/{title}/open', [ResearchOfficeController::class, 'openInstituteStudy'])->name('office.institute-study.open');
             Route::get('institutes/{institute}/studies/{year}/{title}/download', [ResearchOfficeController::class, 'downloadInstituteStudy'])->name('office.institute-study.download');
@@ -207,8 +210,12 @@ Route::prefix('api')
 
         Route::middleware(['current.user', 'account.active'])->group(function (): void {
             Route::get('monitoring/research', [SharedMonitoringController::class, 'research']);
+            Route::get('monitoring/progress-updates', [SharedMonitoringController::class, 'progressUpdates'])->middleware('role:adviser,instructor');
             Route::get('research/{researchDocument}/shared-monitoring', [SharedMonitoringController::class, 'show']);
             Route::put('research/{researchDocument}/shared-monitoring', [SharedMonitoringController::class, 'update'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
+            Route::delete('research/{researchDocument}/shared-monitoring', [SharedMonitoringController::class, 'destroy'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
+            Route::post('research/{researchDocument}/shared-monitoring/signature', [SharedMonitoringController::class, 'storeSignature'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
+            Route::get('research/{researchDocument}/shared-monitoring/signature/{stage}/{reviewer}', [SharedMonitoringController::class, 'signature']);
             Route::post('research/{researchDocument}/shared-monitoring/verify', [SharedMonitoringController::class, 'verify'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('support-assignments/eligible', [SupportAssignmentController::class, 'eligible']);
             Route::get('support-assignments/inbox', [SupportAssignmentController::class, 'inbox']);
@@ -232,6 +239,7 @@ Route::prefix('api')
             Route::put('research/{researchDocument}/reviewers', [ReviewAssignmentController::class, 'update'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
 
             Route::get('research/{researchDocument}/files', [DocumentFileController::class, 'index']);
+            Route::get('research/{researchDocument}/folders', [DocumentFileController::class, 'folders']);
             Route::post('research/{researchDocument}/files', [DocumentFileController::class, 'store'])->middleware(['origin.allowed', 'throttle:research-upload']);
             Route::get('research/{researchDocument}/files/{documentFile}/download', [DocumentFileController::class, 'download'])->middleware('throttle:research-file-access');
             Route::get('research/{researchDocument}/files/{documentFile}/preview', [DocumentFileController::class, 'preview'])->middleware('throttle:research-file-access');

@@ -68,8 +68,8 @@ class ResearchService
             $locked->fill($importedArchive ? $metadata : array_merge($metadata, ['visibility' => 'private']));
             $locked->save();
             if ($authors !== null) {
-                if (! $importedArchive && ! DomainAuthorization::isResearcherOwner($actor, $locked) && ! DomainAuthorization::isActiveAdministrator($actor)) {
-                    throw $this->notAuthorized('Only the primary researcher can change research authors.');
+                if (! $importedArchive && ! DomainAuthorization::isResearcherParticipant($actor, $locked) && ! DomainAuthorization::isActiveAdministrator($actor)) {
+                    throw $this->notAuthorized('Only a researcher assigned to this research folder can change research authors.');
                 }
                 $this->replaceAuthors($locked, $authors);
             }

@@ -142,7 +142,7 @@ function roleRoutes(): Array<[RegExp, Handler]> {
       emptyData,
     ],
     [
-      /\/api\/instructor\/(sections|submissions|similarity-overview|class-reports)$/,
+      /\/api\/instructor\/(sections|submissions|similarity-overview|class-reports)(\?|$)/,
       emptyData,
     ],
     [/\/api\/panel\/(schedule|assignments|history)$/, emptyData],
@@ -168,6 +168,44 @@ function roleRoutes(): Array<[RegExp, Handler]> {
 }
 
 describe("role workspace pages", () => {
+  it("separates the Instructor research workspace from the review queue", async () => {
+    const fetchMock = stubFetch([
+      [/\/api\/monitoring\/research$/, () => listData([])],
+      [/\/api\/instructor\/submissions\?stage=manuscript$/, () => listData([])],
+    ]);
+
+    const { rerender } = render(
+      <RoleSidebarPage
+        role="instructor"
+        selectedNav="Assigned Research"
+        navigate={vi.fn()}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Research folders" }),
+    ).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/monitoring/research",
+      expect.objectContaining({ credentials: "include" }),
+    );
+
+    rerender(
+      <RoleSidebarPage
+        role="instructor"
+        selectedNav="Manuscript Review"
+        navigate={vi.fn()}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Manuscript review" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/review assigned manuscript submissions/i),
+    ).toBeInTheDocument();
+  });
+
   it("opens Editor dashboard sections from the summary cards", async () => {
     stubFetch([
       [
@@ -282,7 +320,7 @@ describe("role workspace pages", () => {
       role: "instructor",
       destinations: [
         ["My Sections", "My sections"],
-        ["Assigned Submissions", "Assigned submissions"],
+        ["Manuscript Review", "Manuscript review"],
         ["Similarity Overview", "Similarity overview"],
         ["Class Reports", "Class reports"],
       ],
@@ -323,6 +361,7 @@ describe("role workspace pages", () => {
     {
       role: "research-office",
       destinations: [
+        ["Similarity Check", "Title checker"],
         ["Upload Manuscript", "Upload Manuscript"],
         ["User & Role Management", "User & role management"],
         ["Reports & Exports", "Reports & exports"],
@@ -331,7 +370,7 @@ describe("role workspace pages", () => {
     {
       role: "researcher",
       destinations: [
-        ["My Research", "My submissions"],
+        ["My Research", "My research"],
         ["Similarity Check", "Title checker"],
         ["Related Studies", "Related studies"],
       ],
@@ -359,25 +398,25 @@ describe("role workspace pages", () => {
     },
   );
 
-  it("filters assigned instructor submissions by workflow status", async () => {
+  it("uses the manuscript queue and filters its returned submissions by status", async () => {
     stubFetch([
       [
-        /\/api\/instructor\/submissions$/,
+        /\/api\/instructor\/submissions\?stage=manuscript$/,
         () =>
           new Response(
             JSON.stringify({
               data: [
                 {
                   research_document_id: 1,
-                  title: "Submitted title",
-                  research_stage: "title_proposal",
+                  title: "Submitted manuscript",
+                  research_stage: "ongoing",
                   submission_status: "submitted",
                   submitter: "Student One",
                   updated_at: null,
                 },
                 {
                   research_document_id: 2,
-                  title: "Reviewing title",
+                  title: "Reviewing manuscript",
                   research_stage: "ongoing",
                   submission_status: "under_review",
                   submitter: "Student Two",
@@ -391,83 +430,22 @@ describe("role workspace pages", () => {
     render(
       <RoleSidebarPage
         role="instructor"
-        selectedNav="Assigned Submissions"
+        selectedNav="Manuscript Review"
         navigate={vi.fn()}
       />,
     );
 
-    expect(await screen.findByText("Submitted title")).toBeInTheDocument();
-    expect(screen.getByText("Reviewing title")).toBeInTheDocument();
+    expect(await screen.findByText("Submitted manuscript")).toBeInTheDocument();
+    expect(screen.getByText("Reviewing manuscript")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Submission status"), {
       target: { value: "under_review" },
     });
-    expect(screen.queryByText("Submitted title")).not.toBeInTheDocument();
-    expect(screen.getByText("Reviewing title")).toBeInTheDocument();
+    expect(screen.queryByText("Submitted manuscript")).not.toBeInTheDocument();
+    expect(screen.getByText("Reviewing manuscript")).toBeInTheDocument();
   });
 
-  it("creates a research draft through the researcher endpoint", async () => {
-    const draft = {
-      id: 7,
-      submitted_by: "member@example.test",
-      category_id: 2,
-      title: "My study title",
-      normalized_title: null,
-      abstract: "A study about learning.",
-      keywords: "learning, education",
-      publication_year: 2026,
-      institution_name: null,
-      institution_location: null,
-      institute: null,
-      degree_program: null,
-      manuscript_date_label: null,
-      abstract_provenance: null,
-      research_stage: "title_proposal",
-      submission_status: "draft",
-      archive_status: "not_archived",
-      visibility: "private",
-      submitted_at: null,
-      approved_at: null,
-      archived_at: null,
-      authors: [
-        {
-          id: 1,
-          user_id: null,
-          author_name: "Ada Lovelace",
-          author_order: 1,
-          is_corresponding_author: true,
-        },
-      ],
-      category: {
-        id: 2,
-        name: "Education",
-        slug: "education",
-        description: null,
-        is_active: true,
-      },
-    };
-    const fetchMock = stubFetch([
-      [/\/api\/research\?/, emptyPage],
-      [
-        /\/api\/categories$/,
-        () =>
-          listData([
-            {
-              id: 2,
-              name: "Education",
-              slug: "education",
-              description: null,
-              is_active: true,
-            },
-          ]),
-      ],
-      [
-        /^\/api\/research$/,
-        (_input, init) =>
-          init?.method === "POST"
-            ? new Response(JSON.stringify({ data: draft }), { status: 201 })
-            : emptyPage(),
-      ],
-    ]);
+  it("shows only instructor-assigned research folders without creation controls", async () => {
+    const fetchMock = stubFetch([[/\/api\/research\?/, emptyPage]]);
     render(
       <RoleSidebarPage
         role="researcher"
@@ -475,83 +453,44 @@ describe("role workspace pages", () => {
         navigate={vi.fn()}
       />,
     );
-    await screen.findByRole("heading", { name: "My submissions" });
+
+    await screen.findByRole("heading", { name: "My research" });
+    expect(
+      screen.getByRole("heading", { name: "One folder, two kinds of updates" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/do not submit your manuscript for review/i),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Refresh" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "New submission" }));
     expect(
-      await screen.findByRole("heading", { name: "New submission" }),
+      screen.getByRole("heading", { name: "No assigned research folders" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("form", { name: "Research submission" }),
-    ).toHaveClass("submission-form");
-    fireEvent.change(screen.getByLabelText("Title"), {
-      target: { value: "My study title" },
-    });
-    fireEvent.change(screen.getByLabelText("Abstract"), {
-      target: { value: "A study about learning." },
-    });
-    fireEvent.change(screen.getByLabelText("Keywords"), {
-      target: { value: "learning, education" },
-    });
-    fireEvent.change(screen.getByLabelText("Publication year"), {
-      target: { value: "2026" },
-    });
-    fireEvent.change(screen.getByLabelText("Institute"), {
-      target: { value: "Institute of Teacher Education" },
-    });
-    fireEvent.change(screen.getByLabelText("Program"), {
-      target: { value: "Bachelor of Secondary Education major in English" },
-    });
-    fireEvent.change(screen.getByLabelText("Author name"), {
-      target: { value: "Ada Lovelace" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
-    expect(
-      await screen.findByText('Draft "My study title" has been created.'),
-    ).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith(
+      screen.queryByRole("button", { name: /new|create submission/i }),
+    ).not.toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith(
       "/api/research",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          institute: "Institute of Teacher Education",
-          degree_program: "Bachelor of Secondary Education major in English",
-          title: "My study title",
-          abstract: "A study about learning.",
-          keywords: "learning, education",
-          publication_year: 2026,
-          research_stage: "title_proposal",
-          authors: [
-            {
-              author_name: "Ada Lovelace",
-              user_id: null,
-              is_corresponding_author: false,
-            },
-          ],
-        }),
-      }),
-    );
-    await waitFor(() =>
-      expect(
-        screen.queryByRole("heading", { name: "New submission" }),
-      ).not.toBeInTheDocument(),
+      expect.objectContaining({ method: "POST" }),
     );
   });
 
-  it("creates a draft, uploads its manuscript, and submits it in order", async () => {
+  it("updates an assigned draft, uploads its manuscript, and submits it in order", async () => {
     const draft = draftResource();
     const submitted = draftResource({
       submission_status: "submitted",
       submitted_at: "2026-08-18T10:00:00.000000Z",
     });
     const fetchMock = stubFetch([
-      [/\/api\/research\?/, emptyPage],
+      [
+        /\/api\/research\?/,
+        () => new Response(JSON.stringify(pageResponse([draft]))),
+      ],
       [/\/api\/categories$/, () => listData([draft.category])],
       [
-        /^\/api\/research$/,
+        /^\/api\/research\/7$/,
         (_input, init) =>
-          init?.method === "POST"
-            ? new Response(JSON.stringify({ data: draft }), { status: 201 })
+          init?.method === "PATCH"
+            ? new Response(JSON.stringify({ data: draft }))
             : emptyPage(),
       ],
       [
@@ -598,9 +537,17 @@ describe("role workspace pages", () => {
         navigate={vi.fn()}
       />,
     );
-    await screen.findByRole("heading", { name: "My submissions" });
-    fireEvent.click(screen.getByRole("button", { name: "New submission" }));
-    await screen.findByRole("heading", { name: "New submission" });
+
+    await screen.findByText("My study title");
+    expect(
+      screen.getByRole("button", { name: "Manage folder" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Submit" })).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    await screen.findByRole("heading", { name: "Edit submission" });
+    expect(screen.queryByLabelText(/User ID/)).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Title"), {
       target: { value: "My study title" },
     });
@@ -632,7 +579,7 @@ describe("role workspace pages", () => {
             path !== "/api/categories" && !path.includes("/api/research?"),
         ),
     ).toEqual([
-      "/api/research",
+      "/api/research/7",
       "/api/research/7/files",
       "/api/research/7/submit",
     ]);
@@ -677,6 +624,7 @@ describe("role workspace pages", () => {
     expect(
       await screen.findByRole("heading", { name: "Edit submission" }),
     ).toBeInTheDocument();
+    expect(screen.queryByText("Corresponding")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Title"), {
       target: { value: "Updated study title" },
     });
@@ -698,11 +646,14 @@ describe("role workspace pages", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("rejects unsupported manuscript files before creating a draft", async () => {
+  it("rejects unsupported manuscript files before updating an assigned draft", async () => {
+    const draft = draftResource();
     const fetchMock = stubFetch([
-      [/\/api\/research\?/, emptyPage],
-      [/\/api\/categories$/, () => listData([])],
-      [/^\/api\/research$/, () => new Response(JSON.stringify({ data: {} }))],
+      [
+        /\/api\/research\?/,
+        () => new Response(JSON.stringify(pageResponse([draft]))),
+      ],
+      [/\/api\/categories$/, () => listData([draft.category])],
     ]);
     render(
       <RoleSidebarPage
@@ -711,9 +662,8 @@ describe("role workspace pages", () => {
         navigate={vi.fn()}
       />,
     );
-    await screen.findByRole("heading", { name: "My submissions" });
-    fireEvent.click(screen.getByRole("button", { name: "New submission" }));
-    await screen.findByRole("heading", { name: "New submission" });
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    await screen.findByRole("heading", { name: "Edit submission" });
     fireEvent.change(screen.getByLabelText("Title"), {
       target: { value: "Unsafe upload" },
     });
@@ -723,14 +673,15 @@ describe("role workspace pages", () => {
     fireEvent.change(screen.getByLabelText("PDF or DOCX (maximum 25 MB)"), {
       target: { files: [new File(["bad"], "payload.exe")] },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    fireEvent.click(screen.getByRole("button", { name: "Update draft" }));
 
     expect(
       await screen.findByText("The manuscript must be a PDF or DOCX file."),
     ).toBeInTheDocument();
     expect(
       fetchMock.mock.calls.filter(
-        ([input]) => String(input) === "/api/research",
+        ([input, init]) =>
+          String(input) === "/api/research/7" && init?.method === "PATCH",
       ),
     ).toHaveLength(0);
   });
@@ -792,7 +743,7 @@ describe("role workspace pages", () => {
       />,
     );
     expect(
-      await screen.findByRole("heading", { name: "My submissions" }),
+      await screen.findByRole("heading", { name: "My research" }),
     ).toBeInTheDocument();
     const submitButton = await screen.findByRole("button", { name: "Submit" });
     fireEvent.click(submitButton);
@@ -807,7 +758,7 @@ describe("role workspace pages", () => {
     expect(
       screen.queryByRole("button", { name: "Submit" }),
     ).not.toBeInTheDocument();
-    expect(screen.getAllByText("Submitted")).toHaveLength(3);
+    expect(screen.getAllByText("Submitted")).toHaveLength(1);
   });
 
   it("opens and edits a revision-required submission without offering the draft submit action", async () => {
@@ -828,7 +779,9 @@ describe("role workspace pages", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "Open record" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Manage folder" }),
+    );
     expect(navigate).toHaveBeenCalledWith("/research/7");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     expect(
@@ -845,8 +798,15 @@ describe("role workspace pages", () => {
     );
   });
 
-  it("limits programs to the selected institute and clears incompatible selections", async () => {
-    const fetchMock = stubFetch([[/\/api\/research\?/, emptyPage]]);
+  it("limits programs while editing an assigned research folder", async () => {
+    const draft = draftResource({ institute: null, degree_program: null });
+    const fetchMock = stubFetch([
+      [
+        /\/api\/research\?/,
+        () => new Response(JSON.stringify(pageResponse([draft]))),
+      ],
+      [/\/api\/categories$/, () => listData([draft.category])],
+    ]);
     render(
       <RoleSidebarPage
         role="researcher"
@@ -855,9 +815,7 @@ describe("role workspace pages", () => {
       />,
     );
 
-    fireEvent.click(
-      await screen.findByRole("button", { name: "New submission" }),
-    );
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
     const institute = await screen.findByLabelText("Institute");
     const program = screen.getByLabelText("Program");
     expect(program).toBeDisabled();
@@ -975,8 +933,8 @@ describe("role workspace pages", () => {
       screen.queryByRole("button", { name: "Open record" }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "New submission" }),
-    ).toBeEnabled();
+      screen.queryByRole("button", { name: "New submission" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Submit" }),
     ).not.toBeInTheDocument();
@@ -1472,9 +1430,8 @@ describe("role workspace pages", () => {
       screen.getByRole("button", { name: "Remove student" }),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    fireEvent.click(
-      screen.getByRole("button", { name: "Manage project assignments" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Research actors" }));
+    fireEvent.click(screen.getByRole("button", { name: "Manage assignments" }));
     expect(
       screen.getByRole("dialog", { name: "Manage project assignments" }),
     ).toBeInTheDocument();
@@ -1489,9 +1446,7 @@ describe("role workspace pages", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Close Manage project assignments" }),
     );
-    fireEvent.click(
-      screen.getByRole("button", { name: "Manage project assignments" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Manage assignments" }));
     await waitFor(() =>
       expect(
         screen.queryByText("Loading current project assignments…"),

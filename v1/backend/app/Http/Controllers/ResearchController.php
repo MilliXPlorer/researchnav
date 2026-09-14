@@ -26,8 +26,12 @@ class ResearchController extends DomainController
         if (! DomainAuthorization::isOffice($actor)) {
             $query->where(function ($query) use ($actor): void {
                 if (DomainAuthorization::isResearcher($actor)) {
-                    $query->where('submitted_by', $actor->id)
-                        ->orWhereHas('authors', fn ($authors) => $authors->where('user_id', $actor->id));
+                    $query->whereIn('id', function ($memberships) use ($actor): void {
+                        $memberships->select('research_document_id')
+                            ->from('class_section_members')
+                            ->whereNotNull('research_document_id')
+                            ->where('user_id', $actor->id);
+                    });
                 }
                 $query->orWhereHas('reviewAssignments', fn ($assignments) => $assignments
                     ->where(ReviewAssignment::column('reviewer_id'), $actor->id)
@@ -40,9 +44,11 @@ class ResearchController extends DomainController
         }
         if ($request->boolean('mine')) {
             $this->allowed(DomainAuthorization::isResearcher($actor));
-            $query->where(function ($owned) use ($actor): void {
-                $owned->where('submitted_by', $actor->id)
-                    ->orWhereHas('authors', fn ($authors) => $authors->where('user_id', $actor->id));
+            $query->whereIn('id', function ($memberships) use ($actor): void {
+                $memberships->select('research_document_id')
+                    ->from('class_section_members')
+                    ->whereNotNull('research_document_id')
+                    ->where('user_id', $actor->id);
             })->whereNull('import_source_sha256');
         }
         if ($request->filled('submission_status')) {
@@ -56,7 +62,7 @@ class ResearchController extends DomainController
     public function store(StoreResearchRequest $request, ResearchService $service)
     {
         $actor = $this->actor($request);
-        $this->allowed(DomainAuthorization::isResearcher($actor) || DomainAuthorization::isActiveAdministrator($actor));
+        $this->allowed(DomainAuthorization::isActiveAdministrator($actor));
         $data = $request->validated();
 
         return (new ResearchDocumentResource($service->createDraft($actor, $data, $data['authors'], $request)))->response()->setStatusCode(201);
