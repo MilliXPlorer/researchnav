@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\User;
+use App\Models\UserRole;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -72,6 +73,16 @@ class AccountService
         return User::query()->where('role', $role)->latest('created_at')->get()->all();
     }
 
+    /** @return list<User> */
+    public function listProvisionedAccounts(): array
+    {
+        return User::query()
+            ->whereNotNull('invitation_sent_at')
+            ->latest('created_at')
+            ->get()
+            ->all();
+    }
+
     public function provisionUser(string $emailInput, string $role, string $invitedBy): User
     {
         $email = $this->normalizeEmail($emailInput);
@@ -81,8 +92,11 @@ class AccountService
                 $existing = User::query()->where('email', $email)->lockForUpdate()->first();
 
                 if ($existing !== null) {
+                    $existingRole = $existing->roleDefinition?->slug === UserRole::RESEARCH_EDITOR
+                        ? UserRole::RESEARCH_EDITOR
+                        : $existing->role;
                     if (! ProvisioningPolicy::canProvisionExistingRole(
-                        $existing->role,
+                        $existingRole,
                         $existing->access_status,
                         $role,
                         $existing->is_admin,
@@ -99,10 +113,17 @@ class AccountService
                         'invitation_sent_at' => now(),
                     ])->save();
 
+                    if ($role === UserRole::RESEARCH_EDITOR) {
+                        $existing->forceFill([
+                            'role_id' => UserRole::query()->where('slug', UserRole::RESEARCH_EDITOR)->firstOrFail()->getKey(),
+                            'is_admin' => false,
+                        ])->save();
+                    }
+
                     return $existing->fresh();
                 }
 
-                return User::query()->create([
+                $user = User::query()->create([
                     'id' => (string) Str::uuid(),
                     'email' => $email,
                     'role' => $role,
@@ -111,6 +132,8 @@ class AccountService
                     'invited_by' => $invitedBy,
                     'invitation_sent_at' => now(),
                 ]);
+
+                return $user->fresh();
             }, 3);
         });
     }

@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import CatalogPage from "./CatalogPage";
 import Dashboard from "./Dashboard";
 import GoogleSignInDialog from "./GoogleSignInDialog";
 import LandingPage from "./LandingPage";
 import { getCurrentSession, listPublicResearch, logout } from "./api";
+import { isProtectedRoute } from "./paths";
 import { createBrowserInitialState, type InitialState } from "./ssr";
 import type { ResearchRecord, UserSession } from "./types";
 
@@ -28,6 +29,24 @@ export default function App({ initialState }: { initialState?: InitialState }) {
     seed.repository.status === "error" ? seed.repository.message : null,
   );
   const path = location.pathname;
+  const selectedResearchDocumentId = path.match(/^\/research\/(\d+)$/)?.[1];
+  const researcherSection = path.match(
+    /^\/app\/researcher\/(submissions|similarity|related-studies)(?:\/(title|content))?$/,
+  )?.[1];
+  const researcherSimilarityMode = path.match(
+    /^\/app\/researcher\/similarity\/(title|content)$/,
+  )?.[1] as "title" | "content" | undefined;
+  const instructorSectionRoute = path.match(
+    /^\/app\/instructor\/sections\/(\d+)(?:\/projects\/(\d+))?$/,
+  );
+  const isDashboardRoute = isProtectedRoute(path);
+
+  /** Auth middleware: any sign-out or expired session lands on the landing page. */
+  const clearSessionToLanding = useCallback(() => {
+    setSession(null);
+    window.history.replaceState({}, "", "/");
+    setLocation({ pathname: "/", search: "" });
+  }, []);
 
   useEffect(() => {
     const handlePopState = () =>
@@ -65,15 +84,24 @@ export default function App({ initialState }: { initialState?: InitialState }) {
     let active = true;
     getCurrentSession()
       .then((currentSession) => {
-        if (active) setSession(currentSession);
+        if (!active) return;
+        if (currentSession) {
+          setSession(currentSession);
+          return;
+        }
+        if (isProtectedRoute(window.location.pathname)) {
+          clearSessionToLanding();
+          return;
+        }
+        setSession(null);
       })
       .catch(() => {
-        if (active) setSession(null);
+        if (active) clearSessionToLanding();
       });
     return () => {
       active = false;
     };
-  }, [seed.session.status]);
+  }, [seed.session.status, clearSessionToLanding]);
 
   const navigate = (nextPath: string) => {
     window.history.pushState({}, "", nextPath);
@@ -83,8 +111,16 @@ export default function App({ initialState }: { initialState?: InitialState }) {
   };
 
   const signIn = () => setLoginOpen(true);
+  const signOut = async () => {
+    try {
+      await logout();
+    } catch {
+      // The session may already be expired; sign out locally anyway.
+    }
+    clearSessionToLanding();
+  };
 
-  if (path === "/app" && session === undefined) {
+  if (isDashboardRoute && session === undefined) {
     return <div className="session-loading">Loading ResearchNAV...</div>;
   }
 
@@ -93,25 +129,45 @@ export default function App({ initialState }: { initialState?: InitialState }) {
       {path === "/catalog" ? (
         <CatalogPage
           onSignIn={signIn}
+          session={session}
+          onSessionChange={setSession}
+          onLogout={signOut}
           navigate={navigate}
           records={records}
           loading={repositoryLoading}
           error={repositoryError}
           initialSearch={location.search}
         />
-      ) : path === "/app" && session ? (
+      ) : isDashboardRoute && session ? (
         <Dashboard
           session={session}
+          onSessionChange={setSession}
           navigate={navigate}
-          onLogout={async () => {
-            await logout();
-            setSession(null);
-            navigate("/");
-          }}
+          researchDocumentId={selectedResearchDocumentId}
+          instructorSectionsRoute={
+            instructorSectionRoute !== null ||
+            path === "/app/instructor/sections"
+          }
+          instructorSectionId={instructorSectionRoute?.[1]}
+          instructorProjectDocumentId={instructorSectionRoute?.[2]}
+          initialNav={
+            researcherSection === "submissions"
+              ? "My Research"
+              : researcherSection === "similarity"
+                ? "Similarity Check"
+                : instructorSectionRoute || path === "/app/instructor/sections"
+                  ? "My Sections"
+                  : undefined
+          }
+          initialSimilarityMode={researcherSimilarityMode}
+          onLogout={signOut}
         />
       ) : (
         <LandingPage
           onSignIn={signIn}
+          session={session}
+          onSessionChange={setSession}
+          onLogout={signOut}
           navigate={navigate}
           records={records}
           loading={repositoryLoading}

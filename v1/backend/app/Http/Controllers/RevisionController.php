@@ -9,17 +9,22 @@ use App\Models\ResearchDocument;
 use App\Models\Revision;
 use App\Policies\ResearchDocumentPolicy;
 use App\Policies\RevisionPolicy;
+use App\Services\ConsolidatedReadAdapter;
 use App\Services\RevisionService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 
 class RevisionController extends DomainController
 {
-    public function index(Request $request, ResearchDocument $researchDocument)
+    public function index(Request $request, ResearchDocument $researchDocument, ConsolidatedReadAdapter $shadow)
     {
         $this->allowed((new ResearchDocumentPolicy)->viewInternal($this->actor($request), $researchDocument));
 
-        return RevisionResource::collection($researchDocument->revisions()->orderByDesc('revision_number')->get());
+        $revisions = $shadow->enabled()
+            ? $shadow->revisionsForDocument($researchDocument->id)
+            : $researchDocument->revisions()->with(['requester', 'documentFile'])->orderByDesc(Revision::column('revision_number'))->get();
+
+        return RevisionResource::collection($revisions);
     }
 
     public function store(StoreRevisionRequest $request, ResearchDocument $researchDocument, RevisionService $service)

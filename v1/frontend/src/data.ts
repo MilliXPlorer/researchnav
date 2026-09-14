@@ -1,11 +1,58 @@
 import type { RoleConfig, UserSession } from "./types";
 
+export const instituteNames = [
+  "Institute of Computer Studies",
+  "Institute of Health Sciences",
+  "Institute of Business and Financial Management",
+  "Institute of Arts and Sciences",
+  "Institute of Criminal Justice Education",
+  "Institute of Teacher Education",
+] as const;
+
+export const programsByInstitute: Record<
+  (typeof instituteNames)[number],
+  readonly string[]
+> = {
+  "Institute of Computer Studies": [
+    "Bachelor of Science in Computer Science",
+    "Bachelor of Science in Information Technology",
+  ],
+  "Institute of Health Sciences": ["Bachelor of Science in Midwifery"],
+  "Institute of Business and Financial Management": [
+    "Bachelor of Science in Business Administration major in Human Resource Management",
+    "Bachelor of Science in Business Administration major in Marketing Management",
+  ],
+  "Institute of Arts and Sciences": [
+    "Bachelor of Arts in Communication",
+    "Bachelor of Arts in English Language",
+    "Bachelor of Arts in Political Science",
+  ],
+  "Institute of Criminal Justice Education": [
+    "Bachelor of Science in Criminology",
+    "Bachelor of Science in Industrial Security Management",
+  ],
+  "Institute of Teacher Education": [
+    "Bachelor of Elementary Education",
+    "Bachelor of Secondary Education major in English",
+    "Bachelor of Secondary Education major in Filipino",
+    "Bachelor of Secondary Education major in Mathematics",
+    "Bachelor of Secondary Education major in Science",
+    "Bachelor of Secondary Education major in Social Studies",
+  ],
+};
+
 // New Google-authenticated accounts stay blocked until a coordinator activates an assignment.
 export const defaultUserSession: UserSession = {
   email: "researcher@gmail.com",
   role: "researcher",
   accessStatus: "blocked",
   isAdmin: false,
+  firstName: null,
+  middleName: null,
+  lastName: null,
+  studentEmployeeId: null,
+  displayName: "researcher@gmail.com",
+  profilePhotoUrl: null,
 };
 
 export const roleConfigs: RoleConfig[] = [
@@ -13,14 +60,14 @@ export const roleConfigs: RoleConfig[] = [
     id: "admin",
     label: "System Administrator",
     shortLabel: "Administrator",
-    description: "Provision coordinators and manage system-wide access.",
+    description: "Provision accounts and manage system-wide access.",
     nav: [
-      "System Overview",
-      "Coordinator Accounts",
-      "All Users",
+      "Dashboard",
+      "Access Requests",
+      "User & Role Management",
       "Audit Logs",
+      "Upload Manuscript",
       "System Settings",
-      "Notifications",
     ],
   },
   {
@@ -28,14 +75,7 @@ export const roleConfigs: RoleConfig[] = [
     label: "Researcher",
     shortLabel: "Student researcher",
     description: "Track submissions, revisions, and related studies.",
-    nav: [
-      "My Dashboard",
-      "My Submissions",
-      "New Submission",
-      "Similarity Check",
-      "Related Studies",
-      "Notifications",
-    ],
+    nav: ["Dashboard", "My Research", "Similarity Check"],
   },
   {
     id: "adviser",
@@ -43,11 +83,13 @@ export const roleConfigs: RoleConfig[] = [
     shortLabel: "Adviser",
     description: "Review advisee drafts and similarity alerts.",
     nav: [
-      "My Advisees",
-      "Pending Reviews",
-      "Similarity Alerts",
-      "Feedback History",
-      "Notifications",
+      "Dashboard",
+      "Assigned Research",
+      "Title Review",
+      "Manuscript Review",
+      "Research Progress Updates",
+      "Defense Monitoring Forms",
+      "Review History",
     ],
   },
   {
@@ -56,11 +98,14 @@ export const roleConfigs: RoleConfig[] = [
     shortLabel: "Instructor",
     description: "Oversee class proposals and similarity trends.",
     nav: [
+      "Dashboard",
       "My Sections",
-      "Title Proposals",
-      "Similarity Overview",
-      "Class Reports",
-      "Notifications",
+      "Assigned Research",
+      "Title Review",
+      "Manuscript Review",
+      "Research Progress Updates",
+      "Defense Monitoring Forms",
+      "Review History",
     ],
   },
   {
@@ -69,10 +114,13 @@ export const roleConfigs: RoleConfig[] = [
     shortLabel: "Panel member",
     description: "Read manuscripts and submit evaluations.",
     nav: [
-      "Defense Schedule",
-      "Assigned Manuscripts",
-      "Evaluation Form",
-      "Panel History",
+      "Dashboard",
+      "Research Folders",
+      "Assigned Defenses",
+      "Defense Evaluation",
+      "Availability Calendar",
+      "Defense Monitoring Forms",
+      "Evaluation History",
     ],
   },
   {
@@ -81,10 +129,25 @@ export const roleConfigs: RoleConfig[] = [
     shortLabel: "Statistician",
     description: "Review methodology and issue sign-offs.",
     nav: [
-      "Review Queue",
-      "Methodology Checklist",
-      "Sign-offs Issued",
-      "Notifications",
+      "Dashboard",
+      "Assigned Research",
+      "Statistical Review",
+      "Defense Monitoring Forms",
+      "Review History",
+    ],
+  },
+  {
+    id: "research_editor",
+    label: "Research Editor",
+    shortLabel: "Editor",
+    description:
+      "Review manuscript language, clarity, organization, and formatting.",
+    nav: [
+      "Dashboard",
+      "Assigned Research",
+      "Editorial Review",
+      "Defense Monitoring Forms",
+      "Review History",
     ],
   },
   {
@@ -99,41 +162,39 @@ export const roleConfigs: RoleConfig[] = [
       "Adviser Load",
       "Account Roles",
       "Reports",
-      "Notifications",
     ],
   },
   {
     id: "librarian",
     label: "Librarian",
     shortLabel: "Librarian",
-    description: "Catalog and validate repository metadata.",
+    description:
+      "Review references, citations, links, and source documentation.",
     nav: [
-      "Archiving Queue",
-      "Repository Catalog",
-      "Metadata Standards",
-      "Retention & Compliance",
-      "Notifications",
+      "Dashboard",
+      "Assignment Requests",
+      "Assigned Research",
+      "Reference Review",
+      "Defense Monitoring Forms",
+      "Review History",
     ],
   },
   {
     id: "research-office",
+
     label: "Research Office",
-    shortLabel: "CAES administrator",
-    description: "Manage compliance, reports, roles, and privacy.",
+
+    shortLabel: "Research Office personnel",
+
+    description: "Manage compliance, reports, and roles.",
+
     nav: [
-      "Institutional Overview",
-      "Compliance Review",
+      "Dashboard",
+      "Research Folders",
+      "Similarity Check",
+      "Upload Manuscript",
       "User & Role Management",
       "Reports & Exports",
-      "Data Privacy Log",
-      "Notifications",
     ],
-  },
-  {
-    id: "academics",
-    label: "Academics",
-    shortLabel: "Faculty member",
-    description: "Search, save, and cross-reference studies.",
-    nav: ["Search", "My Library", "Browse by Category", "Notifications"],
   },
 ];

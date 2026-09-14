@@ -10,8 +10,18 @@ class EnsureRequestBodySize
 {
     private const MAX_BYTES = 32 * 1024;
 
+    private const MAX_PROFILE_PHOTO_REQUEST_BYTES = 3 * 1024 * 1024;
+
     public function handle(Request $request, Closure $next): Response
     {
+        if ($request->isMethod('POST') && $request->is('api/profile/photo')) {
+            if ((int) $request->header('Content-Length', 0) > self::MAX_PROFILE_PHOTO_REQUEST_BYTES) {
+                return response()->json(['error' => 'PAYLOAD_TOO_LARGE'], 413);
+            }
+
+            return $next($request);
+        }
+
         // UploadDocumentRequest owns multipart limits.  Applying the small JSON
         // request limit to multipart bodies would reject legitimate documents.
         if (! $request->isJson()) {

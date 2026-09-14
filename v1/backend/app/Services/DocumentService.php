@@ -3,8 +3,12 @@
 namespace App\Services;
 
 use App\Models\DocumentFile;
+use App\Models\PendingPrivateFileDeletion;
 use App\Models\ResearchDocument;
+use App\Models\ReviewAssignment;
 use App\Models\User;
+use App\Notifications\ResearchActivityNotification;
+use App\Policies\DocumentFilePolicy;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -14,19 +18,29 @@ use Illuminate\Validation\ValidationException;
 
 class DocumentService
 {
-    public function __construct(private readonly AuditService $audit, private readonly MonitoringService $monitoring) {}
+    private const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
-    public function upload(User $actor, ResearchDocument $research, UploadedFile $upload, string $documentType, ?Request $request = null): DocumentFile
+    public function __construct(
+        private readonly AuditService $audit,
+        private readonly MonitoringService $monitoring,
+        private readonly ManuscriptSearchProjectionService $manuscriptSearch,
+        private readonly SupabaseStorageService $supabase,
+    ) {}
+
+    public function upload(User $actor, ResearchDocument $research, UploadedFile $upload, string $documentType, ?string $relativePath = null, ?Request $request = null): DocumentFile
     {
         $path = null;
 
         try {
-            return DB::transaction(function () use ($actor, $research, $upload, $documentType, &$path, $request): DocumentFile {
+            return DB::transaction(function () use ($actor, $research, $upload, $documentType, $relativePath, &$path, $request): DocumentFile {
                 // Lock the parent before calculating a version so concurrent uploads serialize.
                 $locked = ResearchDocument::query()->whereKey($research->id)->lockForUpdate()->firstOrFail();
                 $actor = $this->currentActor($actor);
-                if (! $this->canUpload($actor, $locked, $documentType)) {
+                if (! (new DocumentFilePolicy)->upload($actor, $locked, $documentType)) {
                     throw ValidationException::withMessages(['authorization' => ['The actor cannot upload this document in the current research status.']]);
+                }
+                if (($upload->getSize() ?? 0) < 1 || $upload->getSize() > self::MAX_UPLOAD_BYTES) {
+                    throw ValidationException::withMessages(['file' => ['The uploaded file must be between 1 byte and 25 MB.']]);
                 }
                 $extension = $this->extensionForMime((string) $upload->getMimeType());
                 if ($extension === null) {
@@ -34,36 +48,177 @@ class DocumentService
                 }
                 $filename = Str::uuid()->toString().'.'.$extension;
                 $path = 'research/'.$locked->id.'/'.$filename;
-                Storage::disk('researchnav_private')->putFileAs('research/'.$locked->id, $upload, $filename);
+                if (Storage::disk('researchnav_private')->putFileAs('research/'.$locked->id, $upload, $filename) === false) {
+                    throw new \RuntimeException('Unable to store the uploaded document.');
+                }
+                $folder = $this->normalizeFolder($relativePath);
                 $version = ((int) DocumentFile::query()->where('research_document_id', $locked->id)->where('document_type', $documentType)->lockForUpdate()->max('version_number')) + 1;
-                DocumentFile::query()->where('research_document_id', $locked->id)->where('document_type', $documentType)->where('is_current', true)->update(['is_current' => false]);
+                $currentFiles = DocumentFile::query()
+                    ->where('research_document_id', $locked->id)
+                    ->where('document_type', $documentType)
+                    ->where('is_current', true);
+                $folder === null ? $currentFiles->whereNull('relative_path') : $currentFiles->where('relative_path', $folder);
+                $currentFiles->update(['is_current' => false]);
+                $fileOrderQuery = DocumentFile::query()->where('research_document_id', $locked->id);
+                $folder === null ? $fileOrderQuery->whereNull('relative_path') : $fileOrderQuery->where('relative_path', $folder);
+                $fileOrder = ((int) $fileOrderQuery->max('file_order')) + 1;
                 $file = DocumentFile::query()->create([
                     'research_document_id' => $locked->id, 'uploaded_by' => $actor->id, 'document_type' => $documentType,
-                    'version_number' => $version, 'original_filename' => $this->safeOriginalFilename($upload->getClientOriginalName()), 'stored_filename' => $filename,
-                    'file_path' => $path, 'file_extension' => $extension, 'mime_type' => $upload->getMimeType(),
+                    'version_number' => $version, 'original_filename' => $this->safeOriginalFilename($upload->getClientOriginalName()), 'relative_path' => $folder,
+                    'file_order' => $fileOrder, 'stored_filename' => $filename, 'file_path' => $path, 'file_extension' => $extension, 'mime_type' => $upload->getMimeType(),
                     'file_size' => $upload->getSize(), 'is_current' => true, 'uploaded_at' => now(),
                 ]);
+                if ($documentType === 'final_manuscript') {
+                    // Never synchronously parse during an upload; clear any prior body.
+                    $this->manuscriptSearch->invalidate((int) $locked->id);
+                }
                 $this->monitoring->log($locked, 'DOCUMENT_UPLOADED', $actor, "Uploaded {$documentType} version {$version}.", null, null, 'open');
                 $this->audit->log($actor, 'DOCUMENT_UPLOADED', $file, 'Uploaded a private research document.', $request);
+                $activeColumn = ReviewAssignment::column('is_active');
+                $assignmentQuery = $locked->reviewAssignments()->with('reviewer');
+                if ($activeColumn === 'status') {
+                    $assignmentQuery->whereIn($activeColumn, ['accepted', 'confirmed', 'active']);
+                } else {
+                    $assignmentQuery->where($activeColumn, true);
+                }
+                $folderLabel = $folder === null ? 'General documents' : $folder;
+                $assignmentQuery->get()->pluck('reviewer')->filter()->unique('id')
+                    ->reject(fn (User $reviewer) => $reviewer->id === $actor->id)
+                    ->each(fn (User $reviewer) => $reviewer->notify(new ResearchActivityNotification(
+                        $locked,
+                        'DOCUMENT_UPLOADED',
+                        'New research document',
+                        $actor->displayName().' uploaded '.$file->original_filename.' in '.$folderLabel.'.',
+                        '/research/'.$locked->id,
+                    )));
 
                 return $file;
             });
         } catch (\Throwable $exception) {
             if ($path !== null) {
-                Storage::disk('researchnav_private')->delete($path);
+                try {
+                    Storage::disk('researchnav_private')->delete($path);
+                } catch (\Throwable) {
+                    // Cleanup must not obscure the original write or transaction failure.
+                }
             }
             throw $exception;
         }
+    }
+
+    public function rename(User $actor, DocumentFile $file, string $filename, ?Request $request = null): DocumentFile
+    {
+        return DB::transaction(function () use ($actor, $file, $filename, $request): DocumentFile {
+            [$research, $file] = $this->lockFileWithParent($file);
+            $actor = $this->currentActor($actor);
+            $this->authorizeManagement($actor, $research, $file);
+
+            $file->original_filename = $this->safeOriginalFilename($filename);
+            $file->saveOrFail();
+            $this->audit->log($actor, 'DOCUMENT_RENAMED', $file, 'Renamed a private research document.', $request);
+
+            return $file->refresh();
+        });
+    }
+
+    public function delete(User $actor, DocumentFile $file, ?Request $request = null): void
+    {
+        $pending = DB::transaction(function () use ($actor, $file, $request): PendingPrivateFileDeletion {
+            [$research, $file] = $this->lockFileWithParent($file);
+            $actor = $this->currentActor($actor);
+            $this->authorizeManagement($actor, $research, $file);
+            $path = $this->privateFilePath($research, $file);
+            app(ManuscriptSimilarityTextCache::class)->forget($file);
+
+            if ($file->is_current) {
+                $replacementQuery = DocumentFile::query()
+                    ->where('research_document_id', $research->id)
+                    ->where('document_type', $file->document_type)
+                    ->whereKeyNot($file->id);
+                $file->relative_path === null
+                    ? $replacementQuery->whereNull('relative_path')
+                    : $replacementQuery->where('relative_path', $file->relative_path);
+                $replacement = $replacementQuery->lockForUpdate()
+                    ->orderByDesc('version_number')
+                    ->orderByDesc('id')
+                    ->first();
+            }
+
+            $file->deleteOrFail();
+
+            if (isset($replacement)) {
+                $currentQuery = DocumentFile::query()
+                    ->where('research_document_id', $research->id)
+                    ->where('document_type', $file->document_type);
+                $file->relative_path === null
+                    ? $currentQuery->whereNull('relative_path')
+                    : $currentQuery->where('relative_path', $file->relative_path);
+                $currentQuery->update(['is_current' => false]);
+                $replacement->update(['is_current' => true]);
+            }
+
+            $pending = PendingPrivateFileDeletion::query()->create([
+                'research_document_id' => $research->id,
+                'storage_path' => $path,
+            ]);
+
+            $this->audit->log($actor, 'DOCUMENT_DELETED', $file, 'Deleted a private research document.', $request);
+            $this->monitoring->log($research, 'DOCUMENT_DELETED', $actor, "Deleted document file {$file->id}.", null, null, 'open');
+
+            return $pending;
+        });
+
+        $this->retryPendingDeletion($pending);
+    }
+
+    /** Attempt one durable private-storage deletion without exposing its path. */
+    public function retryPendingDeletion(PendingPrivateFileDeletion $pending): bool
+    {
+        $deleted = false;
+        try {
+            $deleted = $this->supabase->isSupabasePath($pending->storage_path)
+                ? $this->deleteSupabaseObject($pending->storage_path)
+                : Storage::disk('researchnav_private')->delete($pending->storage_path);
+        } catch (\Throwable) {
+            $deleted = false;
+        }
+
+        if ($deleted) {
+            PendingPrivateFileDeletion::query()->whereKey($pending->id)->delete();
+
+            return true;
+        }
+
+        PendingPrivateFileDeletion::query()->whereKey($pending->id)->update([
+            'attempts' => DB::raw('attempts + 1'),
+            'last_attempted_at' => now(),
+        ]);
+
+        return false;
     }
 
     private function extensionForMime(string $mime): ?string
     {
         return match ($mime) {
             'application/pdf' => 'pdf',
-            'application/msword' => 'doc',
             'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
             default => null,
         };
+    }
+
+    private function normalizeFolder(?string $folder): ?string
+    {
+        if ($folder === null) {
+            return null;
+        }
+        $folder = trim(str_replace(['\\', '\0'], ['/', ''], $folder));
+        $folder = preg_replace('#/+#', '/', $folder) ?? '';
+        $folder = trim($folder, " /\t\r\n");
+        if ($folder === '' || str_contains($folder, '..')) {
+            return null;
+        }
+
+        return Str::limit($folder, 1000, '');
     }
 
     private function safeOriginalFilename(string $filename): string
@@ -74,16 +229,52 @@ class DocumentService
         return Str::limit($name !== '' ? $name : 'document', 500, '');
     }
 
-    private function canUpload(User $actor, ResearchDocument $research, string $documentType): bool
+    /** @return array{ResearchDocument, DocumentFile} */
+    private function lockFileWithParent(DocumentFile $file): array
     {
-        return ($research->submitted_by === $actor->id && in_array($research->submission_status, ['draft', 'revision_required'], true))
-            || (DomainAuthorization::isOffice($actor) && $research->submission_status === 'approved' && in_array($documentType, ['final_manuscript', 'attachment'], true));
+        $researchId = DocumentFile::query()->whereKey($file->id)->firstOrFail(['research_document_id'])->research_document_id;
+        // File mutations lock their parent first so uploads and version promotion serialize together.
+        $research = ResearchDocument::query()->whereKey($researchId)->lockForUpdate()->firstOrFail();
+        $file = DocumentFile::query()->whereKey($file->id)->lockForUpdate()->firstOrFail();
+        if ((string) $file->research_document_id !== (string) $research->id) {
+            throw ValidationException::withMessages(['document_file_id' => ['The file no longer belongs to this research.']]);
+        }
+
+        return [$research, $file->setRelation('researchDocument', $research)];
+    }
+
+    private function authorizeManagement(User $actor, ResearchDocument $research, DocumentFile $file): void
+    {
+        if (! (new DocumentFilePolicy)->manage($actor, $file->setRelation('researchDocument', $research))) {
+            throw ValidationException::withMessages(['authorization' => ['The actor cannot manage this document in the current research status.']]);
+        }
+    }
+
+    private function privateFilePath(ResearchDocument $research, DocumentFile $file): string
+    {
+        if ($this->supabase->isSupabasePath($file->file_path)) {
+            return $file->file_path;
+        }
+
+        $path = 'research/'.$research->id.'/'.$file->stored_filename;
+        if ($file->file_path !== $path) {
+            throw ValidationException::withMessages(['document_file_id' => ['The document file has an invalid private storage path.']]);
+        }
+
+        return $path;
+    }
+
+    private function deleteSupabaseObject(string $path): bool
+    {
+        $this->supabase->delete($path);
+
+        return true;
     }
 
     private function currentActor(User $actor): User
     {
-        $current = User::query()->find($actor->id);
-        if ($current === null) {
+        $current = User::query()->lockForUpdate()->find($actor->id);
+        if ($current === null || ! DomainAuthorization::isActiveAccount($current)) {
             throw ValidationException::withMessages(['authorization' => ['The actor is not authorized to upload documents.']]);
         }
 

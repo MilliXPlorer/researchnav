@@ -17,12 +17,33 @@ class ReviewAuthorizationTest extends TestCase
 
     public function test_legacy_compatibility_roles_do_not_gain_office_privileges(): void
     {
-        foreach (['panel', 'statistician', 'coordinator', 'librarian', 'academics'] as $role) {
+        foreach (['panel', 'statistician', 'coordinator', 'librarian'] as $role) {
             $this->assertFalse(DomainAuthorization::isOffice(User::factory()->create(['role' => $role])));
         }
 
         $this->assertTrue(DomainAuthorization::isOffice(User::factory()->create(['role' => 'research-office'])));
         $this->assertTrue(DomainAuthorization::isOffice(User::factory()->create(['role' => 'admin', 'is_admin' => true])));
+    }
+
+    public function test_office_routes_deny_compatibility_roles_despite_canonical_mapping(): void
+    {
+        foreach (['coordinator'] as $role) {
+            $user = User::factory()->create(['role' => $role, 'access_status' => 'active']);
+            $this->withSession(['user_id' => $user->id])
+                ->getJson('/api/office/users')
+                ->assertForbidden()
+                ->assertExactJson(['error' => 'ROLE_NOT_AUTHORIZED']);
+        }
+
+        $office = User::factory()->create(['role' => 'research-office', 'access_status' => 'active']);
+        $this->withSession(['user_id' => $office->id])
+            ->getJson('/api/office/users')
+            ->assertOk();
+
+        $admin = User::factory()->create(['role' => 'admin', 'is_admin' => true, 'access_status' => 'active']);
+        $this->withSession(['user_id' => $admin->id])
+            ->getJson('/api/office/users')
+            ->assertOk();
     }
 
     public function test_unassigned_reviewer_cannot_generic_archive_or_access_another_document(): void
@@ -46,7 +67,7 @@ class ReviewAuthorizationTest extends TestCase
             ->assertUnprocessable();
         $this->withSession(['user_id' => $reviewer->id])
             ->patchJson('/api/research/'.$first->id, ['visibility' => 'public'], ['Origin' => 'http://localhost:5173'])
-            ->assertUnprocessable();
+            ->assertForbidden();
         $this->withSession(['user_id' => $reviewer->id])
             ->postJson('/api/research/'.$first->id.'/similarity/results', [], ['Origin' => 'http://localhost:5173'])
             ->assertNotFound();
@@ -79,6 +100,7 @@ class ReviewAuthorizationTest extends TestCase
             'publication_year' => 2025,
             'research_stage' => 'title_proposal',
         ], [['user_id' => $owner->id, 'author_name' => 'Owner']]);
+        $this->assignResearcherToDocument($owner, $research);
 
         return [$owner, $research];
     }

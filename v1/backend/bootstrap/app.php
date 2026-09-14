@@ -3,13 +3,17 @@
 use App\Exceptions\ApiValidationException;
 use App\Http\Middleware\DiscardUnauthenticatedSession;
 use App\Http\Middleware\EnsureActiveAccount;
+use App\Http\Middleware\EnsureActiveAdministrator;
 use App\Http\Middleware\EnsureAllowedOrigin;
+use App\Http\Middleware\EnsureOfficeAuthority;
 use App\Http\Middleware\EnsureRequestBodySize;
 use App\Http\Middleware\EnsureRole;
 use App\Http\Middleware\ResolveCurrentUser;
+use App\Http\Middleware\ResolveOptionalCurrentUser;
 use App\Http\Middleware\StartResearchNavSession;
 use App\Http\Middleware\TrustConfiguredProxies;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -17,6 +21,7 @@ use Illuminate\Http\Middleware\HandleCors;
 use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Http\Request;
 use Illuminate\Session\Middleware\StartSession;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
@@ -32,8 +37,11 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'origin.allowed' => EnsureAllowedOrigin::class,
             'current.user' => ResolveCurrentUser::class,
+            'optional.current.user' => ResolveOptionalCurrentUser::class,
             'account.active' => EnsureActiveAccount::class,
+            'active.admin' => EnsureActiveAdministrator::class,
             'role' => EnsureRole::class,
+            'office.authority' => EnsureOfficeAuthority::class,
             'api.bodylimit' => EnsureRequestBodySize::class,
         ]);
         $middleware->validateCsrfTokens(except: ['api/*']);
@@ -72,6 +80,19 @@ return Application::configure(basePath: dirname(__DIR__))
 
             return response()->json(['error' => 'NOT_FOUND'], 404);
         });
+        $exceptions->render(function (QueryException $exception, Request $request): ?Response {
+            if (! $request->is('api/*')) {
+                return null;
+            }
+
+            report($exception);
+            $sqlState = (string) ($exception->errorInfo[0] ?? $exception->getCode());
+            $connectionFailure = str_starts_with($sqlState, '08') || in_array((int) ($exception->errorInfo[1] ?? 0), [2002, 2003, 2006, 2013], true);
+
+            return response()->json([
+                'error' => $connectionFailure ? 'DATABASE_UNAVAILABLE' : 'DATABASE_OPERATION_FAILED',
+            ], 503);
+        });
         $exceptions->render(function (Throwable $exception, Request $request): ?Response {
             if (! $request->is('api/*')) {
                 return null;
@@ -88,8 +109,9 @@ return Application::configure(basePath: dirname(__DIR__))
                 ], $exception->getStatusCode());
             }
 
-            report($exception);
+            $requestId = (string) Str::uuid();
+            report(new RuntimeException("API request {$requestId} failed.", 0, $exception));
 
-            return response()->json(['error' => 'INTERNAL_SERVER_ERROR'], 500);
+            return response()->json(['error' => 'INTERNAL_SERVER_ERROR', 'request_id' => $requestId], 500);
         });
     })->create();

@@ -1,10 +1,19 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { within } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import CatalogPage from "./CatalogPage";
 import Dashboard from "./Dashboard";
 import RoleWorkspace from "./RoleWorkspaces";
-import { defaultUserSession } from "./data";
+import { ApiError, type RoleDashboard } from "./api";
+import { defaultUserSession, roleConfigs } from "./data";
+import { type InitialState } from "./ssr";
 import type { ResearchRecord, Role } from "./types";
 
 const reviewedRecord: ResearchRecord = {
@@ -14,7 +23,6 @@ const reviewedRecord: ResearchRecord = {
   year: 2026,
   institutionName: "API College",
   institutionLocation: "Tangub City",
-  academicUnit: "API Academic Unit",
   degreeProgram: "API Program",
   institute: "API Academic Unit",
   program: "API Program",
@@ -44,7 +52,7 @@ const repositoryResource = {
   publication_year: 2026,
   institution_name: "API College",
   institution_location: "Tangub City",
-  academic_unit: "API Academic Unit",
+  institute: "API Academic Unit",
   degree_program: "API Program",
   category: { name: "API Category" },
   abstract: "A public repository response.",
@@ -69,7 +77,7 @@ beforeEach(() => {
           { status: 401, headers: { "Content-Type": "application/json" } },
         );
       }
-      if (String(input) === "/api/repository?per_page=50") {
+      if (String(input) === "/api/repository?per_page=1000") {
         return new Response(
           JSON.stringify({ data: [repositoryResource], links: { next: null } }),
           { headers: { "Content-Type": "application/json" } },
@@ -83,6 +91,101 @@ beforeEach(() => {
 });
 
 describe("public catalog", () => {
+  it("shows the authenticated profile instead of sign-in on the landing page", async () => {
+    const user = {
+      email: "ada@example.test",
+      role: "researcher" as const,
+      accessStatus: "active" as const,
+      isAdmin: false,
+      firstName: "Ada",
+      middleName: null,
+      lastName: "Lovelace",
+      studentEmployeeId: "2026-001",
+      displayName: "Ada Lovelace",
+      profilePhotoUrl: null,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        if (String(input) === "/api/profile") {
+          return new Response(JSON.stringify({ user }));
+        }
+        return new Response(JSON.stringify({ error: "NOT_FOUND" }), {
+          status: 404,
+        });
+      }),
+    );
+
+    const { container } = render(
+      <App
+        initialState={{
+          version: 1,
+          url: { pathname: "/", search: "" },
+          session: { status: "authenticated", user },
+          repository: { status: "ready", records: [reviewedRecord] },
+        }}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Sign in" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Workspace" })).toHaveAttribute(
+      "href",
+      "/app",
+    );
+    expect(
+      screen.queryByText("or continue to your workspace"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Open your workspace" }),
+    ).not.toBeInTheDocument();
+    expect(container.querySelector(".hero")).toHaveClass("hero-authenticated");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open profile for Ada Lovelace" }),
+    );
+    expect(
+      await screen.findByRole("dialog", { name: "Edit profile" }),
+    ).toBeInTheDocument();
+  });
+
+  it("provides the profile menu from the workspace sidebar", async () => {
+    const user = {
+      email: "ada@example.test",
+      role: "researcher" as const,
+      accessStatus: "active" as const,
+      isAdmin: false,
+      firstName: "Ada",
+      middleName: null,
+      lastName: "Lovelace",
+      studentEmployeeId: "2026-001",
+      displayName: "Ada Lovelace",
+      profilePhotoUrl: null,
+    };
+    render(
+      <App
+        initialState={{
+          version: 1,
+          url: { pathname: "/app", search: "" },
+          session: { status: "authenticated", user },
+          repository: { status: "ready", records: [] },
+        }}
+      />,
+    );
+
+    const sidebar = document.querySelector(".shelf-rail");
+    expect(sidebar).not.toBeNull();
+    expect(
+      within(sidebar as HTMLElement).getByText("Ada Lovelace"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: "Edit profile" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: "Log out" }),
+    ).toBeInTheDocument();
+  });
+
   it("displays API metadata using the Laravel author resource shape", async () => {
     window.history.replaceState({}, "", "/catalog");
     render(<App />);
@@ -93,9 +196,13 @@ describe("public catalog", () => {
     expect(
       screen.getByText("First API Author, Second API Author"),
     ).toBeInTheDocument();
-    expect(screen.getByText("Research stage")).toBeInTheDocument();
-    expect(screen.getByText("Completed")).toBeInTheDocument();
-    expect(screen.getByText("Imported public metadata.")).toBeInTheDocument();
+    expect(screen.getByText("Final binding date")).toBeInTheDocument();
+    expect(screen.getByText("June 2026")).toBeInTheDocument();
+    expect(screen.getAllByText("Search to calculate")).toHaveLength(2);
+    expect(screen.queryByText("Research stage")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Imported public metadata."),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText(/source file/i)).not.toBeInTheDocument();
   });
 
@@ -158,34 +265,827 @@ describe("public catalog", () => {
 });
 
 describe("role workspaces", () => {
-  const cases: Array<[Role, RegExp]> = [
-    ["admin", /System access overview/],
-    ["researcher", /Welcome back/],
-    ["adviser", /Pending reviews/],
-    ["instructor", /Title proposals/],
-    ["panel", /Proposal defense brief/],
-    ["statistician", /Methodology review/],
-    ["coordinator", /Research program at a glance/],
-    ["librarian", /Archiving queue/],
-    ["research-office", /Institutional research oversight/],
-    ["academics", /Your research reading room/],
+  const cases: Array<[Exclude<Role, "researcher">, RegExp, string, string]> = [
+    ["admin", /System access overview/, "recent_research", "Recent research"],
+    ["adviser", /Pending reviews/, "assigned_reviews", "Assigned reviews"],
+    ["instructor", /Title proposals/, "title_proposals", "Title proposals"],
+    [
+      "panel",
+      /Proposal defense brief/,
+      "repository_references",
+      "Repository references",
+    ],
+    [
+      "statistician",
+      /Methodology review/,
+      "completed_references",
+      "Completed references",
+    ],
+    [
+      "coordinator",
+      /Research program at a glance/,
+      "active_instructors",
+      "Active instructors",
+    ],
+    [
+      "librarian",
+      /Archiving queue/,
+      "repository_records",
+      "Repository records",
+    ],
+    [
+      "research-office",
+      /Institutional research dashboard/,
+      "submission_queue",
+      "Submission queue",
+    ],
   ];
 
+  const unavailableKey: Record<Exclude<Role, "researcher">, string> = {
+    admin: "audit_events",
+    adviser: "revision_requests",
+    instructor: "pending_reviews",
+    panel: "assigned_manuscripts",
+    statistician: "methodology_reviews",
+    coordinator: "schedules",
+    librarian: "archiving_queue",
+    "research-office": "pending_archiving",
+    research_editor: "assigned_reviews",
+  };
+
+  const dashboardFor = (
+    role: Exclude<Role, "researcher">,
+    readyKey: string,
+  ): RoleDashboard => ({
+    schema_version: 1,
+    role,
+    sections: [
+      {
+        key: readyKey,
+        state: "ready",
+        total: 7,
+        reason: null,
+        items: [
+          {
+            research_document_id: 77,
+            title: `${role} API RECORD`,
+            research_stage: "title_proposal",
+            submission_status: "under_review",
+            archive_status: "pending_archiving",
+            visibility: "private",
+            publication_year: 2026,
+            updated_at: "2026-08-18T12:00:00.000000Z",
+          },
+        ],
+      },
+      {
+        key: unavailableKey[role],
+        state: "unavailable",
+        total: null,
+        reason: "not_modeled",
+        items: [],
+      },
+    ],
+  });
+
+  const dashboardScopeFor = (role: Role) => `${role}:fixture@example.test`;
+
+  it("exposes every role destination through the workspace menu", async () => {
+    const activeSession = {
+      email: "researcher@example.test",
+      role: "researcher" as const,
+      accessStatus: "active" as const,
+      isAdmin: false,
+      firstName: "Research",
+      middleName: null,
+      lastName: "Student",
+      studentEmployeeId: null,
+      displayName: "Research Student",
+      profilePhotoUrl: null,
+    };
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      if (String(input) === "/api/notifications") {
+        return new Response(
+          JSON.stringify({ data: [], links: { next: null } }),
+        );
+      }
+
+      return new Response(
+        JSON.stringify({
+          data: { schema_version: 1, role: "researcher", sections: [] },
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<Dashboard session={activeSession} navigate={vi.fn()} />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open workspace navigation" }),
+    );
+
+    const menu = screen.getByRole("navigation", {
+      name: "Researcher workspace navigation",
+    });
+    expect(menu).toHaveTextContent("My Research");
+    expect(menu).not.toHaveTextContent("Create Research");
+    expect(menu).toHaveTextContent("Similarity Check");
+    expect(menu).not.toHaveTextContent("Feedback & Revisions");
+    expect(menu).not.toHaveTextContent("Research Progress");
+    expect(menu).not.toHaveTextContent("Notifications");
+    expect(menu).not.toHaveTextContent("Profile");
+    fireEvent.click(
+      within(menu).getByRole("button", { name: "Similarity Check" }),
+    );
+    expect(
+      within(menu).getByRole("button", { name: "Title Checker" }),
+    ).toBeInTheDocument();
+    expect(
+      within(menu).getByRole("button", { name: "Content Checker" }),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      within(menu).getByRole("button", { name: "Title Checker" }),
+    );
+    expect(menu).not.toBeInTheDocument();
+  });
+
+  it("leaves instructor section routes when another sidebar page is selected", async () => {
+    const session = {
+      email: "instructor@example.test",
+      role: "instructor" as const,
+      accessStatus: "active" as const,
+      isAdmin: false,
+      firstName: "Research",
+      middleName: null,
+      lastName: "Instructor",
+      studentEmployeeId: null,
+      displayName: "Research Instructor",
+      profilePhotoUrl: null,
+    };
+    const navigate = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        if (String(input) === "/api/notifications") {
+          return new Response(
+            JSON.stringify({ data: [], links: { next: null } }),
+          );
+        }
+        if (String(input) === "/api/instructor/sections") {
+          return new Response(JSON.stringify({ data: [] }));
+        }
+        return new Response(
+          JSON.stringify({
+            data: { schema_version: 1, role: "instructor", sections: [] },
+          }),
+        );
+      }),
+    );
+
+    render(
+      <Dashboard
+        session={session}
+        navigate={navigate}
+        initialNav="My Sections"
+        instructorSectionsRoute
+        instructorSectionId="7"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Assigned Research" }));
+    expect(navigate).toHaveBeenCalledWith("/app");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open workspace navigation" }),
+    );
+    const menu = screen.getByRole("navigation", {
+      name: "Research Instructor workspace navigation",
+    });
+    fireEvent.click(within(menu).getByRole("button", { name: "My Sections" }));
+    expect(navigate).toHaveBeenCalledWith("/app/instructor/sections");
+  });
+
+  it("opens a researcher record from My Submissions without a refresh", async () => {
+    const session = {
+      email: "researcher@example.test",
+      role: "researcher" as const,
+      accessStatus: "active" as const,
+      isAdmin: false,
+      firstName: "Research",
+      middleName: null,
+      lastName: "Student",
+      studentEmployeeId: null,
+      displayName: "Research Student",
+      profilePhotoUrl: null,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        if (url === "/api/notifications")
+          return new Response(JSON.stringify({ data: [] }));
+        if (url === "/api/dashboard?role=researcher")
+          return new Response(
+            JSON.stringify({
+              data: { schema_version: 1, role: "researcher", sections: [] },
+            }),
+          );
+        if (url.startsWith("/api/research?") && url.includes("mine=1"))
+          return new Response(
+            JSON.stringify({
+              data: [
+                {
+                  id: 77,
+                  title: "Open without refresh",
+                  submission_status: "draft",
+                  archive_status: "not_archived",
+                  research_stage: "ongoing",
+                  submitted_at: null,
+                },
+              ],
+              meta: { current_page: 1, last_page: 1, total: 1 },
+            }),
+          );
+        if (url === "/api/research/77")
+          return new Response(
+            JSON.stringify({
+              data: {
+                id: 77,
+                title: "Open without refresh",
+                submission_status: "draft",
+                archive_status: "not_archived",
+                research_stage: "ongoing",
+                abstract: null,
+                keywords: null,
+                publication_year: null,
+                category: null,
+                authors: [],
+                submitted_at: null,
+              },
+            }),
+          );
+        if (url.includes("/api/research/77/"))
+          return new Response(JSON.stringify({ data: [] }));
+        return new Response(JSON.stringify({ error: "NOT_FOUND" }), {
+          status: 404,
+        });
+      }),
+    );
+
+    render(
+      <App
+        initialState={{
+          version: 1,
+          url: { pathname: "/app", search: "" },
+          session: { status: "authenticated", user: session },
+          repository: { status: "ready", records: [] },
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "My Research" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Manage folder" }),
+    );
+
+    expect(await screen.findByText("Open without refresh")).toBeInTheDocument();
+  });
+
+  const readyProps = (role: Exclude<Role, "researcher">, key: string) => ({
+    role,
+    selectNav: vi.fn(),
+    navigate: vi.fn(),
+    dashboardScope: dashboardScopeFor(role),
+    dashboardState: {
+      scope: dashboardScopeFor(role),
+      status: "ready" as const,
+      dashboard: dashboardFor(role, key),
+    },
+    onRetry: vi.fn(),
+  });
+
   it.each(cases)(
-    "renders the %s primary workspace without catalog assignments",
-    (role, heading) => {
-      render(<RoleWorkspace role={role} notify={vi.fn()} />);
+    "opens live %s workspace records from its statistic card",
+    (role, heading, readyKey, sectionHeading) => {
+      render(<RoleWorkspace {...readyProps(role, readyKey)} />);
       expect(
-        screen.getByRole("heading", { name: heading }),
+        screen.getByRole("heading", { level: 1, name: heading }),
       ).toBeInTheDocument();
-      expect(screen.queryByText("API ARCHIVED STUDY")).not.toBeInTheDocument();
+      const sectionButton = screen.getByRole("button", {
+        name: `View ${sectionHeading}`,
+      });
+      expect(sectionButton).toBeInTheDocument();
+      expect(
+        screen.queryByRole("heading", { level: 2, name: sectionHeading }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { level: 2, name: "Statistics" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { level: 3, name: "Current workload" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("meter", { name: sectionHeading }),
+      ).toHaveAttribute("aria-valuenow", "7");
+      expect(screen.getByText("7")).toBeInTheDocument();
+      fireEvent.click(sectionButton);
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      expect(screen.getByText(`${role} API RECORD`)).toBeInTheDocument();
+      expect(screen.queryByText("Unavailable")).not.toBeInTheDocument();
     },
   );
 
-  it("updates the unattached methodology checklist", () => {
-    render(<RoleWorkspace role="statistician" notify={vi.fn()} />);
-    fireEvent.click(screen.getByLabelText("Instrument validity is documented"));
-    expect(screen.getByText("3 of 4 checks complete")).toBeInTheDocument();
+  it("merges the research office navigation and shows institute totals below analytics", async () => {
+    const officeNav = roleConfigs.find(
+      (config) => config.id === "research-office",
+    )?.nav;
+    expect(officeNav).toEqual([
+      "Dashboard",
+      "Research Folders",
+      "Similarity Check",
+      "Upload Manuscript",
+      "User & Role Management",
+      "Reports & Exports",
+    ]);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const path = String(input);
+        if (path === "/api/office/institutes/IHS/studies") {
+          return new Response(
+            JSON.stringify({
+              data: [{ year: "2026", title: "Community Health Study" }],
+            }),
+          );
+        }
+        if (
+          path ===
+          "/api/office/institutes/IHS/studies/2026/Community%20Health%20Study/files"
+        ) {
+          return new Response(
+            JSON.stringify({
+              data: [
+                {
+                  name: "manuscript.pdf",
+                  path: "Institute of Health Sciences/2026/Community Health Study/manuscript.pdf",
+                  extension: "pdf",
+                },
+              ],
+            }),
+          );
+        }
+        return new Response(JSON.stringify({ error: "NOT_FOUND" }), {
+          status: 404,
+        });
+      }),
+    );
+
+    render(
+      <RoleWorkspace
+        {...readyProps("research-office", "submission_queue")}
+        dashboardState={{
+          scope: dashboardScopeFor("research-office"),
+          status: "ready",
+          dashboard: {
+            ...dashboardFor("research-office", "submission_queue"),
+            analytics: {
+              title: "Research activity",
+              period: "Last six months",
+              series: [],
+            },
+            institutional_overview: [
+              { institute: "Institute of Health Sciences", total: 4 },
+            ],
+          },
+        }}
+      />,
+    );
+
+    const analytics = screen.getByText("Supabase analytics");
+    const overview = await screen.findByRole("heading", {
+      name: "Institutional Overview",
+    });
+    expect(
+      analytics.compareDocumentPosition(overview) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      screen.getByLabelText("Institute of Health Sciences: 4 research records"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText(
+        "Institute of Business and Financial Management: 0 research records",
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByLabelText("Institute of Health Sciences: 4 research records"),
+    );
+    const studyLink = await screen.findByRole("link", {
+      name: /Community Health Study/,
+    });
+    expect(studyLink).toHaveAttribute("target", "_blank");
+    expect(studyLink).toHaveAttribute(
+      "href",
+      expect.stringContaining(
+        "/api/office/institutes/IHS/studies/2026/Community%20Health%20Study/open",
+      ),
+    );
+  });
+
+  it("renders every administrator dashboard section and opens internal records", () => {
+    const navigate = vi.fn();
+    const adminSections = [
+      ["pending_accounts", "Pending accounts"],
+      ["draft_research", "Draft research"],
+      ["submission_queue", "Submission queue"],
+      ["revision_required", "Revision required"],
+      ["pending_title_validations", "Pending title validations"],
+      ["flagged_similarity", "Flagged similarity"],
+      ["approved_for_archiving", "Approved for archiving"],
+      ["archived_repository", "Archived repository"],
+      ["recent_research", "Recent research"],
+    ];
+    render(
+      <RoleWorkspace
+        {...readyProps("admin", "recent_research")}
+        navigate={navigate}
+        dashboardState={{
+          scope: dashboardScopeFor("admin"),
+          status: "ready",
+          dashboard: {
+            schema_version: 1,
+            role: "admin",
+            sections: adminSections.map(([key], index) => ({
+              key,
+              state: "ready" as const,
+              total: 1,
+              reason: null,
+              items: [
+                {
+                  research_document_id: index + 1,
+                  title: `ADMIN RECORD ${index + 1}`,
+                  research_stage: "ongoing",
+                  submission_status: "submitted",
+                  archive_status: "not_archived",
+                  visibility: "private",
+                  publication_year: null,
+                  updated_at: null,
+                },
+              ],
+            })),
+          },
+        }}
+      />,
+    );
+
+    adminSections.forEach(([, label]) => {
+      expect(
+        screen.getByRole("button", { name: `View ${label}` }),
+      ).toBeInTheDocument();
+    });
+    expect(screen.getAllByText("1")).toHaveLength(adminSections.length);
+    expect(screen.queryByText("ADMIN RECORD 4")).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "View Draft research" }),
+    );
+    expect(screen.getByText("ADMIN RECORD 2")).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open internal record" }),
+    );
+    expect(navigate).toHaveBeenCalledWith("/research/2");
+  });
+
+  it("shows totals and a details action for count-only dashboard cards", () => {
+    const selectNav = vi.fn();
+    render(
+      <RoleWorkspace
+        {...readyProps("admin", "pending_accounts")}
+        selectNav={selectNav}
+        dashboardState={{
+          scope: dashboardScopeFor("admin"),
+          status: "ready",
+          dashboard: {
+            schema_version: 1,
+            role: "admin",
+            sections: [
+              {
+                key: "pending_accounts",
+                state: "ready",
+                total: 3,
+                reason: null,
+                items: [],
+              },
+            ],
+          },
+        }}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "View Pending accounts" }),
+    );
+    expect(
+      screen.getByText("3 matching records are available."),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open details" }));
+    expect(selectNav).toHaveBeenCalledWith("User & Role Management");
+  });
+
+  it("uses loading and retry states without a statistician checklist", () => {
+    const retry = vi.fn();
+    render(
+      <RoleWorkspace
+        role="statistician"
+        selectNav={vi.fn()}
+        navigate={vi.fn()}
+        dashboardScope={dashboardScopeFor("statistician")}
+        dashboardState={{
+          scope: dashboardScopeFor("statistician"),
+          status: "loading",
+        }}
+        onRetry={retry}
+      />,
+    );
+    expect(screen.getByRole("region", { busy: true })).toBeInTheDocument();
+    expect(screen.queryByText("Methodology checklist")).not.toBeInTheDocument();
+    expect(screen.queryByText("Issue sign-off")).not.toBeInTheDocument();
+
+    render(
+      <RoleWorkspace
+        role="statistician"
+        selectNav={vi.fn()}
+        navigate={vi.fn()}
+        dashboardScope={dashboardScopeFor("statistician")}
+        dashboardState={{
+          scope: dashboardScopeFor("statistician"),
+          status: "error",
+          error: new ApiError(500, "DASHBOARD_UNAVAILABLE"),
+        }}
+        onRetry={retry}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(retry).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a ready zero count as an empty workspace", () => {
+    render(
+      <RoleWorkspace
+        {...readyProps("adviser", "assigned_reviews")}
+        dashboardState={{
+          scope: dashboardScopeFor("adviser"),
+          status: "ready",
+          dashboard: {
+            schema_version: 1,
+            role: "adviser",
+            sections: [
+              {
+                key: "assigned_reviews",
+                state: "ready",
+                total: 0,
+                reason: null,
+                items: [],
+              },
+            ],
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText("0")).toBeInTheDocument();
+    expect(
+      screen.queryByText("No records are currently available."),
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "View Assigned reviews" }),
+    );
+    expect(
+      screen.getByText("No records are currently available."),
+    ).toBeInTheDocument();
+  });
+
+  it("links public repository previews to a catalog title search", () => {
+    const navigate = vi.fn();
+    render(
+      <RoleWorkspace
+        {...readyProps("panel", "repository_references")}
+        navigate={navigate}
+        dashboardState={{
+          scope: dashboardScopeFor("panel"),
+          status: "ready",
+          dashboard: {
+            ...dashboardFor("panel", "repository_references"),
+            sections: [
+              {
+                ...dashboardFor("panel", "repository_references").sections[0],
+                items: [
+                  {
+                    ...dashboardFor("panel", "repository_references")
+                      .sections[0].items[0],
+                    title: "Public research & testing",
+                    visibility: "public",
+                  },
+                ],
+              },
+            ],
+          },
+        }}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "View Repository references" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open public catalog" }),
+    );
+    expect(navigate).toHaveBeenCalledWith(
+      "/catalog?q=Public%20research%20%26%20testing",
+    );
+    expect(screen.getByText("Public catalog")).toBeInTheDocument();
+  });
+
+  it("bounds Unicode catalog queries to 200 code points", () => {
+    const navigate = vi.fn();
+    const longTitle = "🧪".repeat(250);
+    render(
+      <RoleWorkspace
+        {...readyProps("panel", "repository_references")}
+        navigate={navigate}
+        dashboardState={{
+          scope: dashboardScopeFor("panel"),
+          status: "ready",
+          dashboard: {
+            ...dashboardFor("panel", "repository_references"),
+            sections: [
+              {
+                ...dashboardFor("panel", "repository_references").sections[0],
+                items: [
+                  {
+                    ...dashboardFor("panel", "repository_references")
+                      .sections[0].items[0],
+                    title: longTitle,
+                    visibility: "public",
+                  },
+                ],
+              },
+            ],
+          },
+        }}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "View Repository references" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open public catalog" }),
+    );
+
+    const query = new URL(
+      navigate.mock.calls[0][0],
+      "https://researchnav.test",
+    ).searchParams.get("q");
+    expect(query).toBe(Array.from(longTitle).slice(0, 200).join(""));
+    expect(Array.from(query ?? "")).toHaveLength(200);
+  });
+
+  it("does not link registered repository or internal queue previews", () => {
+    const { unmount } = render(
+      <RoleWorkspace
+        {...readyProps("panel", "repository_references")}
+        dashboardState={{
+          scope: dashboardScopeFor("panel"),
+          status: "ready",
+          dashboard: dashboardFor("panel", "repository_references"),
+        }}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "View Repository references" }),
+    );
+    expect(screen.getByText("Registered workspace")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Open public catalog" }),
+    ).not.toBeInTheDocument();
+    unmount();
+
+    render(<RoleWorkspace {...readyProps("adviser", "assigned_reviews")} />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "View Assigned reviews" }),
+    );
+    expect(screen.getByText("Internal workspace")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Open (record|public catalog)/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("routes the librarian catalog action to the public catalog", () => {
+    const librarianNavigate = vi.fn();
+    render(
+      <RoleWorkspace
+        {...readyProps("librarian", "repository_records")}
+        navigate={librarianNavigate}
+      />,
+    );
+    fireEvent.click(screen.getAllByRole("button", { name: "Open catalog" })[0]);
+    expect(librarianNavigate).toHaveBeenCalledWith("/catalog");
+  });
+
+  it("renders live researcher sections from dashboard data", () => {
+    const selectNav = vi.fn();
+    const { container } = render(
+      <RoleWorkspace
+        role="researcher"
+        selectNav={selectNav}
+        navigate={vi.fn()}
+        dashboardScope={dashboardScopeFor("researcher")}
+        dashboardState={{
+          scope: dashboardScopeFor("researcher"),
+          status: "ready",
+          dashboard: {
+            schema_version: 1,
+            role: "researcher",
+            sections: [
+              {
+                key: "my_revision_required",
+                state: "ready",
+                total: 1,
+                reason: null,
+                items: [
+                  {
+                    research_document_id: 12,
+                    title: "Returned study",
+                    research_stage: "ongoing",
+                    submission_status: "revision_required",
+                    archive_status: "not_archived",
+                    visibility: "registered_only",
+                    publication_year: 2026,
+                    updated_at: "2026-05-02T00:00:00.000Z",
+                  },
+                ],
+              },
+            ],
+            analytics: {
+              title: "Research activity",
+              period: "Last 6 months",
+              series: [
+                {
+                  key: "created",
+                  label: "Created",
+                  points: [
+                    { key: "2026-03", label: "Mar", value: 0 },
+                    { key: "2026-04", label: "Apr", value: 1 },
+                    { key: "2026-05", label: "May", value: 2 },
+                    { key: "2026-06", label: "Jun", value: 1 },
+                    { key: "2026-07", label: "Jul", value: 3 },
+                    { key: "2026-08", label: "Aug", value: 2 },
+                  ],
+                },
+                {
+                  key: "archived",
+                  label: "Archived",
+                  points: [
+                    { key: "2026-03", label: "Mar", value: 0 },
+                    { key: "2026-04", label: "Apr", value: 0 },
+                    { key: "2026-05", label: "May", value: 1 },
+                    { key: "2026-06", label: "Jun", value: 0 },
+                    { key: "2026-07", label: "Jul", value: 1 },
+                    { key: "2026-08", label: "Aug", value: 1 },
+                  ],
+                },
+              ],
+            },
+          },
+        }}
+        onRetry={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByRole("heading", { name: /My research/ }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Returned study")).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "View Revision required" }),
+    );
+    expect(
+      screen.getByRole("dialog", { name: "Revision required" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Returned study")).toBeInTheDocument();
+    expect(
+      screen.getByRole("img", {
+        name: "Research activity, Last 6 months",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("table", {
+        name: "Research activity, Last 6 months",
+      }),
+    ).toBeInTheDocument();
+    expect(container.querySelectorAll(".analytics-line polyline")).toHaveLength(
+      2,
+    );
+    expect(
+      screen.queryByRole("button", { name: /New submission/ }),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -206,6 +1106,12 @@ describe("authenticated notifications", () => {
     role: "researcher" as const,
     accessStatus: "active" as const,
     isAdmin: false,
+    firstName: "Research",
+    middleName: null,
+    lastName: "Student",
+    studentEmployeeId: null,
+    displayName: "Research Student",
+    profilePhotoUrl: null,
   };
   const notification = {
     id: "f2bc7d6b-28d5-4ebc-8ac3-6d5e7c0b2fc0",
@@ -213,11 +1119,304 @@ describe("authenticated notifications", () => {
     event: "RESEARCH_SUBMITTED",
     title: "Research activity",
     message: "Research was submitted for review.",
+    details: "Research was submitted for review. · Safe research title",
+    research_title: "Safe research title",
+    submission_reference: "RN-2026-ABCD1234",
     action_url: "/research/42",
     research_document_id: 42,
     read_at: null,
     created_at: "2026-08-10T12:00:00.000000Z",
   };
+  const adviserDashboardResponse = (title: string, id: number) =>
+    new Response(
+      JSON.stringify({
+        data: {
+          schema_version: 1,
+          role: "adviser",
+          sections: [
+            {
+              key: "assigned_reviews",
+              state: "ready",
+              total: 1,
+              reason: null,
+              items: [
+                {
+                  research_document_id: id,
+                  title,
+                  research_stage: "title_proposal",
+                  submission_status: "under_review",
+                  archive_status: "pending_archiving",
+                  visibility: "private",
+                  publication_year: null,
+                  updated_at: null,
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+
+  it("keeps the selected workspace when notifications open, retries loading, and blocks external actions", async () => {
+    let notificationAttempts = 0;
+    const externalNotification = {
+      ...notification,
+      action_url: "https://outside.example.test/redirect",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        if (String(input) === "/api/notifications") {
+          notificationAttempts += 1;
+          return notificationAttempts === 1
+            ? new Response(JSON.stringify({ error: "NOTIFICATIONS_DOWN" }), {
+                status: 500,
+              })
+            : new Response(
+                JSON.stringify({
+                  data: [externalNotification],
+                  links: { next: null },
+                }),
+              );
+        }
+        if (String(input).endsWith("/read")) {
+          return new Response(
+            JSON.stringify({
+              data: {
+                ...externalNotification,
+                read_at: "2026-08-10T12:01:00.000000Z",
+              },
+            }),
+          );
+        }
+        if (String(input) === "/api/dashboard") {
+          return new Response(
+            JSON.stringify({
+              data: { schema_version: 1, role: "researcher", sections: [] },
+            }),
+          );
+        }
+        return new Response(JSON.stringify({ error: "NOT_FOUND" }), {
+          status: 404,
+        });
+      }),
+    );
+    const navigate = vi.fn();
+    render(<Dashboard session={activeSession} navigate={navigate} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open notifications" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Notifications are unavailable",
+    );
+    expect(
+      screen.getByRole("button", { name: "Open notifications" }),
+    ).not.toHaveTextContent("1");
+    expect(
+      screen.queryByText("This shelf is being cataloged."),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(
+      await screen.findByText(externalNotification.title),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByText(externalNotification.title));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Notifications" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("lets an administrator approve an access request from its notification", async () => {
+    const administrator = {
+      ...activeSession,
+      email: "admin@example.test",
+      role: "admin" as const,
+      isAdmin: true,
+    };
+    const accessNotification = {
+      ...notification,
+      event: "ACCESS_REQUEST_SUBMITTED",
+      title: "New workspace access request",
+      message: "applicant@example.test requested the researcher workspace.",
+      details: "applicant@example.test requested the researcher workspace.",
+      action_url: "/app",
+      research_document_id: null,
+      access_request_id: 17,
+      applicant_email: "applicant@example.test",
+      requested_role: "researcher",
+      full_name: "Applicant Name",
+      program: "BS Computer Science",
+      justification: "Capstone access",
+    };
+    const fetchMock = vi.fn(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const path = String(input);
+        if (path === "/api/notifications")
+          return new Response(
+            JSON.stringify({
+              data: [accessNotification],
+              links: { next: null },
+            }),
+          );
+        if (path.endsWith("/read"))
+          return new Response(
+            JSON.stringify({
+              data: { ...accessNotification, read_at: "2026-08-10T12:01:00Z" },
+            }),
+          );
+        if (
+          path === "/api/admin/access-requests/17" &&
+          init?.method === "PATCH"
+        )
+          return new Response(
+            JSON.stringify({
+              data: {
+                id: 17,
+                status: "approved",
+                requested_role: "researcher",
+              },
+            }),
+          );
+        if (path === "/api/dashboard")
+          return new Response(
+            JSON.stringify({
+              data: { schema_version: 1, role: "admin", sections: [] },
+            }),
+          );
+        return new Response(JSON.stringify({ error: "NOT_FOUND" }), {
+          status: 404,
+        });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<Dashboard session={administrator} navigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open notifications" }));
+    fireEvent.click(await screen.findByText("New workspace access request"));
+    expect(
+      await screen.findByRole("dialog", { name: "Review access request" }),
+    ).toHaveTextContent("Applicant Name");
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/notifications/${accessNotification.id}/read`,
+        expect.objectContaining({ method: "PATCH" }),
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/admin/access-requests/17",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({
+            decision: "approve",
+            granted_role: "researcher",
+          }),
+        }),
+      ),
+    );
+    expect(
+      screen.queryByRole("dialog", { name: "Review access request" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "System access overview." }),
+    ).toBeInTheDocument();
+  });
+
+  it("distinguishes expired sessions from retryable dashboard server failures", async () => {
+    const adviser = { ...activeSession, role: "adviser" as const };
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      if (String(input) === "/api/notifications")
+        return new Response(
+          JSON.stringify({ data: [], links: { next: null } }),
+        );
+      return new Response(
+        JSON.stringify({ error: "AUTHENTICATION_REQUIRED" }),
+        {
+          status: 401,
+        },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { rerender } = render(
+      <Dashboard session={adviser} navigate={vi.fn()} />,
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Session expired. Sign out and sign in again.",
+    );
+    expect(
+      screen.queryByRole("button", { name: "Retry" }),
+    ).not.toBeInTheDocument();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) =>
+        String(input) === "/api/notifications"
+          ? new Response(JSON.stringify({ data: [], links: { next: null } }))
+          : new Response(JSON.stringify({ error: "DASHBOARD_UNAVAILABLE" }), {
+              status: 500,
+            }),
+      ),
+    );
+    rerender(
+      <Dashboard
+        session={{ ...adviser, email: "new@example.test" }}
+        navigate={vi.fn()}
+      />,
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Role workspace data is unavailable (DASHBOARD_UNAVAILABLE).",
+    );
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
+  it("applies successful mark-all responses while reporting partial failures", async () => {
+    const second = {
+      ...notification,
+      id: "34b52180-1b2a-4a06-9f9f-b4c6678ed72c",
+      title: "Second activity",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        if (String(input) === "/api/notifications")
+          return new Response(
+            JSON.stringify({
+              data: [notification, second],
+              links: { next: null },
+            }),
+          );
+        if (String(input).includes(notification.id))
+          return new Response(
+            JSON.stringify({
+              data: {
+                ...notification,
+                read_at: "2026-08-10T12:01:00.000000Z",
+              },
+            }),
+          );
+        if (String(input) === "/api/dashboard")
+          return new Response(
+            JSON.stringify({
+              data: { schema_version: 1, role: "researcher", sections: [] },
+            }),
+          );
+        return new Response(JSON.stringify({ error: "MARK_FAILED" }), {
+          status: 500,
+        });
+      }),
+    );
+    render(<Dashboard session={activeSession} navigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open notifications" }));
+    expect(await screen.findByText(second.title)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Mark all as read" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "1 notification could not be marked as read.",
+    );
+    expect(
+      screen.getByRole("button", { name: "Open notifications" }),
+    ).toHaveTextContent("1");
+  });
 
   it("shows an active user no fabricated alerts when the API collection is empty", async () => {
     vi.stubGlobal(
@@ -249,6 +1448,647 @@ describe("authenticated notifications", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("requests a role dashboard for a researcher", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      if (String(input) === "/api/notifications") {
+        return new Response(
+          JSON.stringify({ data: [], links: { next: null } }),
+        );
+      }
+      if (String(input) === "/api/dashboard") {
+        return new Response(
+          JSON.stringify({
+            data: {
+              schema_version: 1,
+              role: "researcher",
+              sections: [
+                {
+                  key: "my_drafts",
+                  state: "ready",
+                  total: 0,
+                  reason: null,
+                  items: [],
+                },
+              ],
+            },
+          }),
+        );
+      }
+      return new Response(JSON.stringify({ error: "NOT_FOUND" }), {
+        status: 404,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<Dashboard session={activeSession} navigate={vi.fn()} />);
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/notifications",
+        expect.anything(),
+      );
+    });
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([input]) => String(input) === "/api/dashboard",
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it("shows a retryable error instead of mock Researcher data after a server failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        if (String(input) === "/api/notifications") {
+          return new Response(
+            JSON.stringify({ data: [], links: { next: null } }),
+          );
+        }
+        return new Response(
+          JSON.stringify({ error: "RESEARCH_TABLE_UNAVAILABLE" }),
+          { status: 500 },
+        );
+      }),
+    );
+
+    render(<Dashboard session={activeSession} navigate={vi.fn()} />);
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        /Campus Service Announcement and Deadline Management System/,
+      ),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
+  it("loads notifications independently while a staff dashboard is loading", async () => {
+    const staffSession = { ...activeSession, role: "adviser" as const };
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      if (String(input) === "/api/notifications") {
+        return new Response(
+          JSON.stringify({ data: [notification], links: { next: null } }),
+        );
+      }
+      if (String(input) === "/api/dashboard") {
+        return new Response(
+          JSON.stringify({
+            data: {
+              schema_version: 1,
+              role: "adviser",
+              sections: [],
+            },
+          }),
+        );
+      }
+      return new Response(JSON.stringify({ error: "NOT_FOUND" }), {
+        status: 404,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<Dashboard session={staffSession} navigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open notifications" }));
+
+    expect(await screen.findByText(notification.title)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/dashboard",
+      expect.objectContaining({ credentials: "include" }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/notifications",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
+  it("fails closed for notifications when the active account changes", async () => {
+    const adviserA = {
+      ...activeSession,
+      email: "adviser.a@example.test",
+      role: "adviser" as const,
+    };
+    const adviserB = {
+      ...activeSession,
+      email: "adviser.b@example.test",
+      role: "adviser" as const,
+    };
+    const sensitiveNotification = {
+      ...notification,
+      title: "ADVISER A SENSITIVE NOTIFICATION",
+      message: "Only adviser A may view this message.",
+      details: "Only adviser A may view this message.",
+    };
+    let notificationRequests = 0;
+    let resolveAdviserBNotifications!: (response: Response) => void;
+    const adviserBNotifications = new Promise<Response>((resolve) => {
+      resolveAdviserBNotifications = resolve;
+    });
+    const fetchMock = vi.fn((input: string | URL | Request) => {
+      if (String(input) === "/api/notifications") {
+        notificationRequests += 1;
+        return notificationRequests === 1
+          ? Promise.resolve(
+              new Response(
+                JSON.stringify({
+                  data: [sensitiveNotification],
+                  links: { next: null },
+                }),
+              ),
+            )
+          : adviserBNotifications;
+      }
+      if (String(input) === "/api/dashboard") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              data: { schema_version: 1, role: "adviser", sections: [] },
+            }),
+          ),
+        );
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ error: "NOT_FOUND" }), { status: 404 }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { rerender } = render(
+      <Dashboard session={adviserA} navigate={vi.fn()} />,
+    );
+    const notificationButton = screen.getByRole("button", {
+      name: "Open notifications",
+    });
+    await waitFor(() => expect(notificationButton).toHaveTextContent("1"));
+    fireEvent.click(notificationButton);
+    expect(
+      await screen.findByText(sensitiveNotification.title),
+    ).toBeInTheDocument();
+    expect(screen.getByText(sensitiveNotification.message)).toBeInTheDocument();
+
+    rerender(<Dashboard session={adviserB} navigate={vi.fn()} />);
+
+    expect(
+      screen.queryByText(sensitiveNotification.title),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(sensitiveNotification.message),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("dialog", { name: "Notifications" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Open notifications" }),
+    ).not.toHaveTextContent("1");
+
+    await waitFor(() => expect(notificationRequests).toBe(2));
+    resolveAdviserBNotifications(
+      new Response(JSON.stringify({ data: [], links: { next: null } })),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Open notifications" }),
+      ).not.toHaveTextContent("1"),
+    );
+    expect(
+      screen.queryByText(sensitiveNotification.title),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(sensitiveNotification.message),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("dialog", { name: "Notifications" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not apply a stale mark-read response to the next account", async () => {
+    const adviserA = {
+      ...activeSession,
+      email: "adviser.a@example.test",
+      role: "adviser" as const,
+    };
+    const adviserB = {
+      ...activeSession,
+      email: "adviser.b@example.test",
+      role: "adviser" as const,
+    };
+    const adviserANotification = {
+      ...notification,
+      title: "ADVISER A NOTIFICATION",
+      message: "Adviser A message",
+    };
+    const adviserBNotification = {
+      ...notification,
+      title: "ADVISER B NOTIFICATION",
+      message: "Adviser B message",
+    };
+    let notificationRequests = 0;
+    let resolveMarked!: (response: Response) => void;
+    const marked = new Promise<Response>((resolve) => {
+      resolveMarked = resolve;
+    });
+    const fetchMock = vi.fn((input: string | URL | Request) => {
+      if (String(input) === "/api/notifications") {
+        notificationRequests += 1;
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              data:
+                notificationRequests === 1
+                  ? [adviserANotification]
+                  : [adviserBNotification],
+              links: { next: null },
+            }),
+          ),
+        );
+      }
+      if (String(input) === `/api/notifications/${notification.id}/read`) {
+        return marked;
+      }
+      if (String(input) === "/api/dashboard") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              data: { schema_version: 1, role: "adviser", sections: [] },
+            }),
+          ),
+        );
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ error: "NOT_FOUND" }), { status: 404 }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const navigate = vi.fn();
+    const { rerender } = render(
+      <Dashboard session={adviserA} navigate={navigate} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open notifications" }));
+    expect(
+      await screen.findByText(adviserANotification.title),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByText(adviserANotification.title));
+
+    rerender(<Dashboard session={adviserB} navigate={vi.fn()} />);
+    await waitFor(() => expect(notificationRequests).toBe(2));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Open notifications" }),
+      ).toHaveTextContent("1"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open notifications" }));
+    expect(
+      await screen.findByText(adviserBNotification.title),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      resolveMarked(
+        new Response(
+          JSON.stringify({
+            data: {
+              ...adviserANotification,
+              read_at: "2026-08-10T12:01:00Z",
+            },
+          }),
+        ),
+      );
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+    });
+    expect(
+      screen.getByRole("button", { name: "Open notifications" }),
+    ).toHaveTextContent("1");
+    expect(navigate).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("dialog", { name: "Notifications" }),
+    ).toBeInTheDocument();
+  });
+
+  it("fails closed while loading a dashboard for a changed role", async () => {
+    const adviserSession = { ...activeSession, role: "adviser" as const };
+    const instructorSession = {
+      ...activeSession,
+      role: "instructor" as const,
+    };
+    let dashboardRequests = 0;
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      if (String(input) === "/api/notifications") {
+        return new Promise<Response>(() => undefined);
+      }
+      if (String(input) === "/api/dashboard") {
+        dashboardRequests += 1;
+        if (dashboardRequests === 1) {
+          return new Response(
+            JSON.stringify({
+              data: {
+                schema_version: 1,
+                role: "adviser",
+                sections: [
+                  {
+                    key: "assigned_reviews",
+                    state: "ready",
+                    total: 1,
+                    reason: null,
+                    items: [
+                      {
+                        research_document_id: 77,
+                        title: "ADVISER ASSIGNMENT",
+                        research_stage: "title_proposal",
+                        submission_status: "under_review",
+                        archive_status: "pending_archiving",
+                        visibility: "private",
+                        publication_year: null,
+                        updated_at: null,
+                      },
+                    ],
+                  },
+                ],
+              },
+            }),
+          );
+        }
+        return new Promise<Response>(() => undefined);
+      }
+      return new Response(JSON.stringify({ error: "NOT_FOUND" }), {
+        status: 404,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { rerender } = render(
+      <Dashboard session={adviserSession} navigate={vi.fn()} />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "View Assigned reviews" }),
+    );
+    expect(await screen.findByText("ADVISER ASSIGNMENT")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Assigned Research" }));
+
+    rerender(<Dashboard session={instructorSession} navigate={vi.fn()} />);
+
+    expect(screen.queryByText("ADVISER ASSIGNMENT")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("region", {
+        name: "Loading role workspace",
+        busy: true,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Assigned Research" }),
+    ).toBeInTheDocument();
+  });
+
+  it("ignores stale dashboard responses after role changes", async () => {
+    const adviserSession = { ...activeSession, role: "adviser" as const };
+    const instructorSession = {
+      ...activeSession,
+      role: "instructor" as const,
+    };
+    let resolveAdviserDashboard!: (response: Response) => void;
+    let resolveInstructorDashboard!: (response: Response) => void;
+    const adviserDashboard = new Promise<Response>((resolve) => {
+      resolveAdviserDashboard = resolve;
+    });
+    const instructorDashboard = new Promise<Response>((resolve) => {
+      resolveInstructorDashboard = resolve;
+    });
+    let dashboardRequests = 0;
+    const fetchMock = vi.fn((input: string | URL | Request) => {
+      if (String(input) === "/api/notifications") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ data: [], links: { next: null } })),
+        );
+      }
+      if (String(input) === "/api/dashboard") {
+        dashboardRequests += 1;
+        return dashboardRequests === 1 ? adviserDashboard : instructorDashboard;
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ error: "NOT_FOUND" }), { status: 404 }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { rerender } = render(
+      <Dashboard session={adviserSession} navigate={vi.fn()} />,
+    );
+    await waitFor(() => expect(dashboardRequests).toBe(1));
+
+    rerender(<Dashboard session={instructorSession} navigate={vi.fn()} />);
+    await waitFor(() => expect(dashboardRequests).toBe(2));
+
+    resolveAdviserDashboard(
+      new Response(
+        JSON.stringify({
+          data: {
+            schema_version: 1,
+            role: "adviser",
+            sections: [
+              {
+                key: "assigned_reviews",
+                state: "ready",
+                total: 1,
+                reason: null,
+                items: [
+                  {
+                    research_document_id: 77,
+                    title: "STALE ADVISER ASSIGNMENT",
+                    research_stage: "title_proposal",
+                    submission_status: "under_review",
+                    archive_status: "pending_archiving",
+                    visibility: "private",
+                    publication_year: null,
+                    updated_at: null,
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      ),
+    );
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+    await waitFor(() =>
+      expect(
+        screen.queryByText("STALE ADVISER ASSIGNMENT"),
+      ).not.toBeInTheDocument(),
+    );
+
+    resolveInstructorDashboard(
+      new Response(
+        JSON.stringify({
+          data: {
+            schema_version: 1,
+            role: "instructor",
+            sections: [
+              {
+                key: "title_proposals",
+                state: "ready",
+                total: 1,
+                reason: null,
+                items: [
+                  {
+                    research_document_id: 88,
+                    title: "CURRENT INSTRUCTOR PROPOSAL",
+                    research_stage: "title_proposal",
+                    submission_status: "under_review",
+                    archive_status: "pending_archiving",
+                    visibility: "private",
+                    publication_year: null,
+                    updated_at: null,
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      ),
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "View Title proposals" }),
+    );
+    expect(
+      await screen.findByText("CURRENT INSTRUCTOR PROPOSAL"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("STALE ADVISER ASSIGNMENT"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("fails closed while loading a dashboard for a different account in the same role", async () => {
+    const adviserA = {
+      ...activeSession,
+      email: " Adviser.A@Example.Test ",
+      role: "adviser" as const,
+    };
+    const adviserB = {
+      ...activeSession,
+      email: "adviser.b@example.test",
+      role: "adviser" as const,
+    };
+    let dashboardRequests = 0;
+    let resolveAdviserB!: (response: Response) => void;
+    const adviserBDashboard = new Promise<Response>((resolve) => {
+      resolveAdviserB = resolve;
+    });
+    const fetchMock = vi.fn((input: string | URL | Request) => {
+      if (String(input) === "/api/notifications") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ data: [], links: { next: null } })),
+        );
+      }
+      if (String(input) === "/api/dashboard") {
+        dashboardRequests += 1;
+        return dashboardRequests === 1
+          ? Promise.resolve(
+              adviserDashboardResponse("ADVISER A ASSIGNMENT", 77),
+            )
+          : adviserBDashboard;
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ error: "NOT_FOUND" }), { status: 404 }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { rerender } = render(
+      <Dashboard session={adviserA} navigate={vi.fn()} />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "View Assigned reviews" }),
+    );
+    expect(await screen.findByText("ADVISER A ASSIGNMENT")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Assigned Research" }));
+
+    rerender(<Dashboard session={adviserB} navigate={vi.fn()} />);
+
+    expect(screen.queryByText("ADVISER A ASSIGNMENT")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("region", {
+        name: "Loading role workspace",
+        busy: true,
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Dashboard" })).toHaveClass(
+      "active",
+    );
+    await waitFor(() => expect(dashboardRequests).toBe(2));
+
+    resolveAdviserB(adviserDashboardResponse("ADVISER B ASSIGNMENT", 88));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "View Assigned reviews" }),
+    );
+    expect(await screen.findByText("ADVISER B ASSIGNMENT")).toBeInTheDocument();
+    expect(screen.queryByText("ADVISER A ASSIGNMENT")).not.toBeInTheDocument();
+  });
+
+  it("ignores a stale same-role dashboard response after the account changes", async () => {
+    const adviserA = {
+      ...activeSession,
+      email: "adviser.a@example.test",
+      role: "adviser" as const,
+    };
+    const adviserB = {
+      ...activeSession,
+      email: "adviser.b@example.test",
+      role: "adviser" as const,
+    };
+    let resolveAdviserA!: (response: Response) => void;
+    let resolveAdviserB!: (response: Response) => void;
+    const adviserADashboard = new Promise<Response>((resolve) => {
+      resolveAdviserA = resolve;
+    });
+    const adviserBDashboard = new Promise<Response>((resolve) => {
+      resolveAdviserB = resolve;
+    });
+    let dashboardRequests = 0;
+    const fetchMock = vi.fn((input: string | URL | Request) => {
+      if (String(input) === "/api/notifications") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ data: [], links: { next: null } })),
+        );
+      }
+      if (String(input) === "/api/dashboard") {
+        dashboardRequests += 1;
+        return dashboardRequests === 1 ? adviserADashboard : adviserBDashboard;
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ error: "NOT_FOUND" }), { status: 404 }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { rerender } = render(
+      <Dashboard session={adviserA} navigate={vi.fn()} />,
+    );
+    await waitFor(() => expect(dashboardRequests).toBe(1));
+
+    rerender(<Dashboard session={adviserB} navigate={vi.fn()} />);
+    await waitFor(() => expect(dashboardRequests).toBe(2));
+
+    resolveAdviserA(adviserDashboardResponse("STALE ADVISER A ASSIGNMENT", 77));
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+    expect(
+      screen.queryByText("STALE ADVISER A ASSIGNMENT"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("region", {
+        name: "Loading role workspace",
+        busy: true,
+      }),
+    ).toBeInTheDocument();
+
+    resolveAdviserB(adviserDashboardResponse("ADVISER B ASSIGNMENT", 88));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "View Assigned reviews" }),
+    );
+    expect(await screen.findByText("ADVISER B ASSIGNMENT")).toBeInTheDocument();
+    expect(
+      screen.queryByText("STALE ADVISER A ASSIGNMENT"),
+    ).not.toBeInTheDocument();
+  });
+
   it("renders and reads the exact Laravel notification fields", async () => {
     const readNotification = {
       ...notification,
@@ -261,7 +2101,7 @@ describe("authenticated notifications", () => {
         );
       }
       if (String(input) === `/api/notifications/${notification.id}/read`) {
-        return new Response(JSON.stringify(readNotification));
+        return new Response(JSON.stringify({ data: readNotification }));
       }
       return new Response(JSON.stringify({ error: "NOT_FOUND" }), {
         status: 404,
@@ -274,20 +2114,201 @@ describe("authenticated notifications", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open notifications" }));
 
     expect(await screen.findByText(notification.title)).toBeInTheDocument();
-    expect(screen.getByText(notification.message)).toBeInTheDocument();
-    expect(screen.getByText(notification.created_at)).toBeInTheDocument();
-    expect(screen.getByText(notification.action_url)).toBeInTheDocument();
+    expect(screen.getByText(notification.details)).toBeInTheDocument();
+    expect(screen.getByText(notification.research_title)).toBeInTheDocument();
     expect(
-      screen.getByText(String(notification.research_document_id)),
+      screen.getByText(notification.submission_reference),
     ).toBeInTheDocument();
+    expect(screen.getByText(notification.created_at)).toBeInTheDocument();
+    expect(screen.queryByText(notification.action_url)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(String(notification.research_document_id)),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Open notifications" }),
+    ).toHaveTextContent("1");
 
     fireEvent.click(screen.getByText(notification.title));
     await waitFor(() => {
       expect(navigate).toHaveBeenCalledWith(notification.action_url);
     });
+    expect(
+      screen.getByRole("button", { name: "Open notifications" }),
+    ).not.toHaveTextContent("1");
     expect(fetchMock).toHaveBeenCalledWith(
       `/api/notifications/${notification.id}/read`,
       expect.objectContaining({ method: "PATCH" }),
     );
+  });
+
+  it.each([
+    ["adviser", false],
+    ["instructor", false],
+    ["panel", true],
+    ["statistician", true],
+  ] as const)(
+    "opens a notified %s assignment at an authorized %s workspace",
+    async (role, readOnly) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: string | URL | Request) => {
+          const path = String(input);
+          if (path === "/api/notifications")
+            return new Response(
+              JSON.stringify({ data: [], links: { next: null } }),
+            );
+          if (path === "/api/dashboard")
+            return new Response(
+              JSON.stringify({
+                data: { schema_version: 1, role, sections: [] },
+              }),
+            );
+          if (path === "/api/research/42")
+            return new Response(
+              JSON.stringify({
+                data: {
+                  id: 42,
+                  title: "Deep-linked assigned record",
+                  abstract: "Assigned review evidence.",
+                  keywords: null,
+                  publication_year: null,
+                  research_stage: "title_proposal",
+                  submission_status: "under_review",
+                  archive_status: "not_archived",
+                  visibility: "private",
+                },
+              }),
+            );
+          if (path.startsWith("/api/research/42/"))
+            return new Response(JSON.stringify({ data: [] }));
+          return new Response(JSON.stringify({ error: "NOT_FOUND" }), {
+            status: 404,
+          });
+        }),
+      );
+
+      render(
+        <Dashboard
+          session={{ ...activeSession, role }}
+          navigate={vi.fn()}
+          researchDocumentId={42}
+        />,
+      );
+
+      expect(
+        await screen.findByRole("heading", {
+          level: 2,
+          name: "Deep-linked assigned record",
+        }),
+      ).toBeInTheDocument();
+      if (readOnly) {
+        expect(
+          screen.getByText("Read-only assigned record."),
+        ).toBeInTheDocument();
+        expect(
+          screen.queryByRole("button", { name: "Add remark" }),
+        ).not.toBeInTheDocument();
+        expect(
+          screen.queryByRole("button", { name: "Request revision" }),
+        ).not.toBeInTheDocument();
+      } else {
+        expect(
+          screen.getByRole("button", { name: "Add remark" }),
+        ).toBeInTheDocument();
+      }
+    },
+  );
+});
+
+describe("sign out middleware", () => {
+  const authenticatedAppState: InitialState = {
+    version: 1,
+    url: { pathname: "/app", search: "" },
+    session: {
+      status: "authenticated",
+      user: {
+        email: "researcher@example.test",
+        role: "researcher",
+        accessStatus: "active",
+        isAdmin: false,
+        firstName: "Research",
+        middleName: null,
+        lastName: "Student",
+        studentEmployeeId: null,
+        displayName: "Research Student",
+        profilePhotoUrl: null,
+      },
+    },
+    repository: { status: "unresolved", records: [] },
+  };
+  const signOutFetchMock = (logoutStatus: number) =>
+    vi.fn(async (input: string | URL | Request) => {
+      const path = String(input);
+      if (path === "/api/auth/session") {
+        return new Response(
+          JSON.stringify({ error: "AUTHENTICATION_REQUIRED" }),
+          { status: 401 },
+        );
+      }
+      if (path === "/api/auth/logout") {
+        return logoutStatus === 204
+          ? new Response(null, { status: 204 })
+          : new Response(JSON.stringify({ error: "SESSION_EXPIRED" }), {
+              status: logoutStatus,
+            });
+      }
+      if (path === "/api/repository?per_page=1000") {
+        return new Response(
+          JSON.stringify({ data: [], links: { next: null } }),
+        );
+      }
+      return new Response(JSON.stringify({ error: "NOT_FOUND" }), {
+        status: 404,
+      });
+    });
+
+  it("signs out to the landing page", async () => {
+    window.history.replaceState({}, "", "/app");
+    vi.stubGlobal("fetch", signOutFetchMock(204));
+    render(<App initialState={authenticatedAppState} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open account details" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+
+    await waitFor(() => expect(window.location.pathname).toBe("/"));
+    expect(
+      screen.getByRole("heading", { name: /Find the study/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Open account details" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("signs out to the landing page even when the logout request fails", async () => {
+    window.history.replaceState({}, "", "/app");
+    vi.stubGlobal("fetch", signOutFetchMock(401));
+    render(<App initialState={authenticatedAppState} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open account details" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+
+    await waitFor(() => expect(window.location.pathname).toBe("/"));
+    expect(
+      screen.getByRole("heading", { name: /Find the study/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("redirects to the landing page when the session is gone on a protected route", async () => {
+    window.history.replaceState({}, "", "/research/900");
+    render(<App />);
+
+    await waitFor(() => expect(window.location.pathname).toBe("/"));
+    expect(
+      screen.getByRole("heading", { name: /Find the study/ }),
+    ).toBeInTheDocument();
   });
 });

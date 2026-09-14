@@ -2,6 +2,7 @@ import React from "react";
 import { renderToString } from "react-dom/server";
 import App from "./App";
 import { getCurrentSession, listPublicResearch, type ApiFetch } from "./api";
+import { isProtectedRoute } from "./paths";
 import { serializeInitialState, type InitialState } from "./ssr";
 
 interface RenderOptions {
@@ -15,6 +16,7 @@ export interface RenderResult {
   appHtml: string;
   serializedState: string;
   statusCode: number;
+  redirectTo: string | null;
   setCookies: string[];
 }
 
@@ -75,21 +77,35 @@ export async function render(
         }) as InitialState["repository"],
     );
 
-  const session: InitialState["session"] =
-    url.pathname === "/app"
-      ? await getCurrentSession(fetcher).then((user) =>
-          user
-            ? ({ status: "authenticated", user } as const)
-            : ({ status: "anonymous" } as const),
-        )
-      : { status: "unresolved" };
-  const repository = await repositoryPromise;
+  const sessionPromise = getCurrentSession(fetcher)
+    .then((user) =>
+      user
+        ? ({ status: "authenticated", user } as const)
+        : ({ status: "anonymous" } as const),
+    )
+    .catch((error) => {
+      if (isProtectedRoute(url.pathname)) throw error;
+      return { status: "unresolved" } as const;
+    });
+  const [session, repository] = await Promise.all([
+    sessionPromise,
+    repositoryPromise,
+  ]);
   const state: InitialState = {
     version: 1,
     url: { pathname: url.pathname, search: url.search },
     session,
     repository,
   };
+  if (isProtectedRoute(url.pathname) && session.status === "anonymous") {
+    return {
+      appHtml: "",
+      serializedState: serializeInitialState(state),
+      statusCode: 302,
+      redirectTo: "/",
+      setCookies,
+    };
+  }
   const statusCode =
     repository.status === "error" && session.status !== "authenticated"
       ? 503
@@ -99,6 +115,7 @@ export async function render(
     appHtml: renderToString(<App initialState={state} />),
     serializedState: serializeInitialState(state),
     statusCode,
+    redirectTo: null,
     setCookies,
   };
 }

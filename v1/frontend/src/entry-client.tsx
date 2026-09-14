@@ -9,7 +9,6 @@ import "@fontsource/source-serif-4/700.css";
 import "@fontsource/ibm-plex-mono/500.css";
 import App from "./App";
 import { parseInitialState } from "./ssr";
-import "./styles.css";
 
 const stateElement = document.getElementById("__RESEARCHNAV_STATE__");
 if (!stateElement?.textContent) throw new Error("SSR state is unavailable.");

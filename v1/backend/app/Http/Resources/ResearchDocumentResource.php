@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Policies\ResearchDocumentPolicy;
 use App\Services\DomainAuthorization;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -11,10 +12,10 @@ class ResearchDocumentResource extends JsonResource
     public function toArray(Request $request): array
     {
         $actor = $request->attributes->get('current_user');
-        if ($actor !== null && $actor->id !== $this->submitted_by && ! DomainAuthorization::isOffice($actor) && ! $this->reviewAssignments()->where('reviewer_id', $actor->id)->where('is_active', true)->exists()) {
+        if ($actor !== null && $actor->id !== $this->submitted_by && ! DomainAuthorization::isOffice($actor) && ! DomainAuthorization::isResearcherParticipant($actor, $this->resource) && ! DomainAuthorization::isAssignedRecordReader($actor, $this->resource)) {
             return (new PublicResearchDocumentResource($this->resource))->toArray($request);
         }
 
-        return ['id' => $this->id, 'submitted_by' => $this->submitted_by, 'category_id' => $this->category_id, 'title' => $this->title, 'normalized_title' => $this->normalized_title, 'abstract' => $this->abstract, 'keywords' => $this->keywords, 'publication_year' => $this->publication_year, 'institution_name' => $this->institution_name, 'institution_location' => $this->institution_location, 'academic_unit' => $this->academic_unit, 'degree_program' => $this->degree_program, 'manuscript_date_label' => $this->manuscript_date_label, 'abstract_provenance' => $this->abstract_provenance, 'research_stage' => $this->research_stage, 'submission_status' => $this->submission_status, 'archive_status' => $this->archive_status, 'visibility' => $this->visibility, 'submitted_at' => $this->submitted_at?->toISOString(), 'approved_at' => $this->approved_at?->toISOString(), 'archived_at' => $this->archived_at?->toISOString(), 'authors' => ResearchAuthorResource::collection($this->whenLoaded('authors')), 'category' => new CategoryResource($this->whenLoaded('category'))];
+        return ['id' => $this->id, 'submission_reference' => $this->submission_reference, 'submitted_by' => $actor !== null && DomainAuthorization::isResearcherOwner($actor, $this->resource) ? null : $this->submitted_by, 'category_id' => $this->category_id, 'section_id' => $this->section_id, 'title' => $this->title, 'normalized_title' => $this->normalized_title, 'abstract' => $this->abstract, 'keywords' => $this->keywords, 'publication_year' => $this->publication_year, 'institution_name' => $this->institution_name, 'institution_location' => $this->institution_location, 'institute' => $this->institute, 'degree_program' => $this->degree_program, 'manuscript_date_label' => $this->manuscript_date_label, 'abstract_provenance' => $this->abstract_provenance, 'research_stage' => $this->research_stage, 'submission_status' => $this->submission_status, 'archive_status' => $this->archive_status, 'visibility' => $this->visibility, 'is_imported' => $this->import_source_sha256 !== null, 'can_update_metadata' => $actor !== null && (new ResearchDocumentPolicy)->update($actor, $this->resource), 'submitted_at' => $this->submitted_at?->toISOString(), 'approved_at' => $this->approved_at?->toISOString(), 'archived_at' => $this->archived_at?->toISOString(), 'authors' => ResearchAuthorResource::collection($this->whenLoaded('authors')), 'category' => new CategoryResource($this->whenLoaded('category'))];
     }
 }

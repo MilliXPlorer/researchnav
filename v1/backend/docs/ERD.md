@@ -49,7 +49,7 @@ erDiagram
         string title
         string normalized_title
         string institution_name
-        string academic_unit
+        string institute
         string degree_program
         string manuscript_date_label
         string abstract_provenance

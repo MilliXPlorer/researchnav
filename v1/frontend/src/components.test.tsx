@@ -1,19 +1,33 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { SimilarityRing, StatusChip } from "./components";
+import { SimilarityBadge, SimilarityRing, StatusChip } from "./components";
 
 describe("SimilarityRing", () => {
-  it.each([
-    [39, "low"],
-    [40, "moderate"],
-    [69, "moderate"],
-    [70, "flagged"],
-  ])("announces %i percent as %s", (score, band) => {
-    render(<SimilarityRing score={score} />);
+  it.each(["low", "moderate", "high"] as const)(
+    "announces the API-provided %s classification",
+    (classification) => {
+      render(
+        <SimilarityRing percentage="25.17%" classification={classification} />,
+      );
+      expect(screen.getByRole("img")).toHaveAccessibleName(
+        `Similarity: 25.17%, classification ${classification.toUpperCase()}`,
+      );
+      expect(screen.getByText("25.17%")).toBeInTheDocument();
+    },
+  );
+
+  it("renders classification as accessible text rather than color alone", () => {
+    render(<SimilarityBadge classification="high" />);
+    expect(screen.getByText("Classification: HIGH")).toBeInTheDocument();
+  });
+
+  it("supports a labeled neutral ring when no classification applies", () => {
+    render(<SimilarityRing percentage="61.93%" label="Content similarity" />);
+
     expect(screen.getByRole("img")).toHaveAccessibleName(
-      `Similarity: ${score} percent, ${band}`,
+      "Content similarity: 61.93%",
     );
-    expect(screen.getByText(`${score}%`)).toBeInTheDocument();
+    expect(screen.getByRole("img")).toHaveClass("similarity-ring-neutral");
   });
 });
 

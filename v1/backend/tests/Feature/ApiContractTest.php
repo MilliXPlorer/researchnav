@@ -15,12 +15,18 @@ class ApiContractTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_session_cookie_name_is_php_sapi_safe(): void
+    {
+        $this->assertSame('researchnav_sid', config('session.cookie'));
+        $this->assertMatchesRegularExpression('/^[A-Za-z0-9_-]+$/', (string) config('session.cookie'));
+    }
+
     public function test_health_is_public_and_does_not_start_a_session(): void
     {
         $this->getJson('/api/health')
             ->assertOk()
             ->assertExactJson(['status' => 'ok'])
-            ->assertCookieMissing('researchnav.sid');
+            ->assertCookieMissing('researchnav_sid');
     }
 
     public function test_session_requires_authentication_and_google_input_has_contract_validation_error(): void
@@ -30,7 +36,7 @@ class ApiContractTest extends TestCase
         $this->getJson('/api/auth/session')
             ->assertUnauthorized()
             ->assertExactJson(['error' => 'AUTHENTICATION_REQUIRED'])
-            ->assertCookieMissing('researchnav.sid')
+            ->assertCookieMissing('researchnav_sid')
             ->assertHeaderMissing('Access-Control-Allow-Origin');
 
         $this->assertDatabaseCount('sessions', 0);
@@ -59,8 +65,15 @@ class ApiContractTest extends TestCase
                 'role' => 'researcher',
                 'accessStatus' => 'blocked',
                 'isAdmin' => false,
+                'firstName' => null,
+                'middleName' => null,
+                'lastName' => null,
+                'studentEmployeeId' => null,
+                'displayName' => 'researcher@example.edu',
+                'profilePhotoUrl' => null,
             ]])
-            ->assertCookie('researchnav.sid');
+            ->assertCookie('researchnav_sid')
+            ->assertCookieExpired('researchnav.sid');
 
         $this->assertDatabaseHas('users', [
             'email' => 'researcher@example.edu',
@@ -119,6 +132,15 @@ class ApiContractTest extends TestCase
         $this->withSession(['user_id' => $admin->id])->getJson('/api/admin/coordinators')
             ->assertOk()
             ->assertExactJson(['users' => []]);
+
+        $this->withSession(['user_id' => $admin->id])->getJson('/api/coordinator/instructors')
+            ->assertOk()
+            ->assertExactJson(['users' => []]);
+
+        $researchOffice = $this->user(['role' => 'research-office', 'access_status' => 'active']);
+        $this->withSession(['user_id' => $researchOffice->id])->getJson('/api/coordinator/instructors')
+            ->assertForbidden()
+            ->assertExactJson(['error' => 'ROLE_NOT_AUTHORIZED']);
     }
 
     public function test_provisioning_returns_the_session_shape_and_logout_invalidates_the_session(): void
@@ -134,11 +156,26 @@ class ApiContractTest extends TestCase
                 'role' => 'coordinator',
                 'accessStatus' => 'invited',
                 'isAdmin' => false,
+                'firstName' => null,
+                'middleName' => null,
+                'lastName' => null,
+                'studentEmployeeId' => null,
+                'displayName' => 'coordinator@example.edu',
+                'profilePhotoUrl' => null,
             ]]);
 
         $this->withSession(['user_id' => $admin->id])
             ->postJson('/api/auth/logout', [], ['Origin' => 'http://localhost:5173'])
             ->assertNoContent()
+            ->assertCookieExpired('researchnav_sid')
+            ->assertCookieExpired('researchnav.sid');
+    }
+
+    public function test_logout_succeeds_when_the_session_is_already_missing(): void
+    {
+        $this->postJson('/api/auth/logout', [], ['Origin' => 'http://localhost:5173'])
+            ->assertNoContent()
+            ->assertCookieExpired('researchnav_sid')
             ->assertCookieExpired('researchnav.sid');
     }
 

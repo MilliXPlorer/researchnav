@@ -1,5 +1,9 @@
 import type { CSSProperties, ReactNode } from "react";
 import { ArrowRight, Search, X } from "lucide-react";
+import {
+  classificationLabel,
+  type SimilarityClassification,
+} from "./similarity";
 import type { Status } from "./types";
 
 export function Logo({ compact = false }: { compact?: boolean }) {
@@ -44,26 +48,70 @@ export function StatusChip({ status }: { status: Status }) {
   );
 }
 
-export function SimilarityRing({
-  score,
-  size = "regular",
+/** API-provided classification, always rendered as text as well as color. */
+export function SimilarityBadge({
+  classification,
 }: {
-  score: number;
-  size?: "small" | "regular" | "large";
+  classification: SimilarityClassification;
 }) {
-  const band = score < 40 ? "Low" : score < 70 ? "Moderate" : "Flagged";
-  const color =
-    score < 40 ? "var(--fern)" : score < 70 ? "var(--moss)" : "var(--amber)";
-  const style = { "--score": score, "--ring-color": color } as CSSProperties;
+  const label = classificationLabel(classification);
+  return (
+    <span className={`similarity-band similarity-band-${classification}`}>
+      Classification: {label}
+    </span>
+  );
+}
+
+/** Explains the service-provided categories without duplicating policy thresholds. */
+export function SimilarityLegend() {
+  return (
+    <ul className="similarity-legend" aria-label="Similarity score bands">
+      <li>
+        <span className="similarity-legend-dot similarity-band-low" />
+        Low classification
+      </li>
+      <li>
+        <span className="similarity-legend-dot similarity-band-moderate" />
+        Moderate classification
+      </li>
+      <li>
+        <span className="similarity-legend-dot similarity-band-high" />
+        High classification · review status is provided by the service
+      </li>
+    </ul>
+  );
+}
+
+export function SimilarityRing({
+  percentage,
+  classification,
+  size = "regular",
+  label = "Similarity",
+}: {
+  percentage: string;
+  classification?: SimilarityClassification | null;
+  size?: "small" | "regular" | "large";
+  label?: string;
+}) {
+  const colors: Record<SimilarityClassification, string> = {
+    low: "var(--fern)",
+    moderate: "var(--amber)",
+    high: "var(--rust)",
+  };
+  const style = {
+    "--score": percentage.replace("%", ""),
+    "--ring-color": classification ? colors[classification] : "var(--moss)",
+  } as CSSProperties;
+  const classificationName = classificationLabel(classification);
 
   return (
     <div
-      className={`similarity-ring ring-${size} ${score >= 70 ? "ring-high" : ""}`}
+      className={`similarity-ring ring-${size}${classification ? ` similarity-ring-${classification}` : " similarity-ring-neutral"}`}
       style={style}
       role="img"
-      aria-label={`Similarity: ${score} percent, ${band.toLowerCase()}`}
+      aria-label={`${label}: ${percentage}${classificationName ? `, classification ${classificationName}` : ""}`}
     >
-      <span>{score}%</span>
+      <span>{percentage}</span>
     </div>
   );
 }

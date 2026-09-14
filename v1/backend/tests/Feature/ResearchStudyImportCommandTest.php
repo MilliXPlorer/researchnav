@@ -340,7 +340,7 @@ class ResearchStudyImportCommandTest extends TestCase
         $document = ResearchDocument::factory()->create([
             'institution_name' => 'Tangub City Global College',
             'institution_location' => 'Tangub City',
-            'academic_unit' => 'Institute of Computer Studies',
+            'institute' => 'Institute of Computer Studies',
             'degree_program' => 'Bachelor of Science in Computer Science',
             'manuscript_date_label' => 'May 2026',
             'abstract_provenance' => 'Synthesized from source manuscript.',
@@ -352,7 +352,7 @@ class ResearchStudyImportCommandTest extends TestCase
         foreach ([$public, $internal] as $resource) {
             $this->assertSame('Tangub City Global College', $resource['institution_name']);
             $this->assertSame('Tangub City', $resource['institution_location']);
-            $this->assertSame('Institute of Computer Studies', $resource['academic_unit']);
+            $this->assertSame('Institute of Computer Studies', $resource['institute']);
             $this->assertSame('Bachelor of Science in Computer Science', $resource['degree_program']);
             $this->assertSame('May 2026', $resource['manuscript_date_label']);
             $this->assertSame('Synthesized from source manuscript.', $resource['abstract_provenance']);
@@ -377,7 +377,7 @@ class ResearchStudyImportCommandTest extends TestCase
                 'authors' => ["Author {$number}A", "Author {$number}B"],
                 'institution_name' => 'Tangub City Global College',
                 'institution_location' => 'Tangub City',
-                'academic_unit' => 'Institute of Computer Studies',
+                'institute' => 'Institute of Computer Studies',
                 'degree_program' => 'Bachelor of Science in Computer Science',
                 'manuscript_date_label' => 'May 2026',
                 'publication_year' => 2026,

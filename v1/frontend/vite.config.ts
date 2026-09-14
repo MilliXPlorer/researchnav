@@ -54,6 +54,9 @@ export default defineConfig(({ mode }) => {
       host: "0.0.0.0",
       port: 5173,
       strictPort: true,
+      // The custom SSR server owns the page lifecycle. Disable Vite's HMR
+      // socket so stale parallel dev-server processes cannot hijack hydration.
+      hmr: false,
       cors: false,
       allowedHosts,
       fs: {

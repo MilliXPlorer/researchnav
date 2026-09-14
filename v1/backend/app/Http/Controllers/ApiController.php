@@ -6,6 +6,7 @@ use App\Contracts\GoogleIdTokenVerifier;
 use App\Exceptions\ApiValidationException;
 use App\Models\User;
 use App\Services\AccountService;
+use App\Services\AuditService;
 use App\Services\InvitationMailer;
 use App\Services\UserSessionMapper;
 use Illuminate\Http\Request;
@@ -16,6 +17,8 @@ use Symfony\Component\HttpFoundation\Response;
 
 class ApiController extends Controller
 {
+    private const LEGACY_SESSION_COOKIE = 'researchnav.sid';
+
     public function health(): Response
     {
         return response()->json(['status' => 'ok']);
@@ -35,13 +38,18 @@ class ApiController extends Controller
         Auth::guard()->login($user);
         $request->session()->put('user_id', $user->id);
         $request->session()->save();
+        Cookie::queue(Cookie::forget(self::LEGACY_SESSION_COOKIE));
 
-        return response()->json(['user' => UserSessionMapper::map($user)]);
+        return response()->json(['user' => UserSessionMapper::map($user)])
+            ->header('Cache-Control', 'private, no-store')
+            ->header('Vary', 'Cookie');
     }
 
     public function session(Request $request): Response
     {
-        return response()->json(['user' => UserSessionMapper::map($this->currentUser($request))]);
+        return response()->json(['user' => UserSessionMapper::map($this->currentUser($request))])
+            ->header('Cache-Control', 'private, no-store')
+            ->header('Vary', 'Cookie');
     }
 
     public function logout(Request $request): Response
@@ -50,13 +58,16 @@ class ApiController extends Controller
         $request->session()->invalidate();
         $request->session()->regenerateToken();
         Cookie::queue(Cookie::forget(config('session.cookie')));
+        Cookie::queue(Cookie::forget(self::LEGACY_SESSION_COOKIE));
 
         return response()->noContent();
     }
 
     public function coordinators(Request $request, AccountService $accounts): Response
     {
-        return response()->json(['users' => array_map(UserSessionMapper::map(...), $accounts->listProvisionedUsers('coordinator'))]);
+        return response()
+            ->json(['users' => array_map(UserSessionMapper::map(...), $accounts->listProvisionedUsers('coordinator'))])
+            ->header('Cache-Control', 'private, no-store');
     }
 
     public function provisionCoordinator(Request $request, AccountService $accounts, InvitationMailer $mailer): Response
@@ -64,9 +75,35 @@ class ApiController extends Controller
         return $this->provision($request, $accounts, $mailer, 'coordinator', 'Research Coordinator');
     }
 
+    public function accounts(AccountService $accounts): Response
+    {
+        return response()
+            ->json(['users' => array_map(UserSessionMapper::map(...), $accounts->listProvisionedAccounts())])
+            ->header('Cache-Control', 'private, no-store');
+    }
+
+    public function provisionAccount(Request $request, AccountService $accounts, InvitationMailer $mailer): Response
+    {
+        $roles = array_values(array_diff(User::LEGACY_ROLES, ['admin']));
+        $input = $this->validated($request, [
+            'email' => ['required', 'string', 'email', 'max:254'],
+            'role' => ['required', 'string', 'in:'.implode(',', $roles)],
+        ]);
+
+        return $this->provision(
+            $request,
+            $accounts,
+            $mailer,
+            $input['role'],
+            ucwords(str_replace('-', ' ', $input['role'])),
+        );
+    }
+
     public function instructors(Request $request, AccountService $accounts): Response
     {
-        return response()->json(['users' => array_map(UserSessionMapper::map(...), $accounts->listProvisionedUsers('instructor'))]);
+        return response()
+            ->json(['users' => array_map(UserSessionMapper::map(...), $accounts->listProvisionedUsers('instructor'))])
+            ->header('Cache-Control', 'private, no-store');
     }
 
     public function provisionInstructor(Request $request, AccountService $accounts, InvitationMailer $mailer): Response
@@ -77,7 +114,18 @@ class ApiController extends Controller
     private function provision(Request $request, AccountService $accounts, InvitationMailer $mailer, string $role, string $roleLabel): Response
     {
         $input = $this->validated($request, ['email' => ['required', 'string', 'email', 'max:254']]);
-        $user = $accounts->provisionUser($input['email'], $role, $this->currentUser($request)->id);
+        try {
+            $user = $accounts->provisionUser($input['email'], $role, $this->currentUser($request)->id);
+        } catch (\RuntimeException) {
+            return response()->json(['error' => 'ACCOUNT_ROLE_CONFLICT'], 409);
+        }
+        app(AuditService::class)->log(
+            $this->currentUser($request),
+            strtoupper($role).'_PROVISIONED',
+            $user,
+            'Provisioned '.str_replace('-', ' ', $role).'.',
+            $request,
+        );
         $mailer->send($user->email, $roleLabel, $user->access_status === 'active');
 
         return response()->json(['user' => UserSessionMapper::map($user)], 201);

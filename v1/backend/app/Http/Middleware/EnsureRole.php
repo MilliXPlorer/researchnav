@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Models\User;
+use App\Services\DomainAuthorization;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -17,7 +18,7 @@ class EnsureRole
             return response()->json(['error' => 'AUTHENTICATION_REQUIRED'], 401);
         }
 
-        if (! $user->is_admin && ! in_array($user->role, $roles, true)) {
+        if (! DomainAuthorization::hasAnyRole($user, $roles)) {
             return response()->json(['error' => 'ROLE_NOT_AUTHORIZED'], 403);
         }
 

@@ -154,9 +154,14 @@ export async function createApp(options = {}) {
       }
       const contentLength = Number(contentLengthHeader ?? 0);
       const jsonLimit = 32 * 1024;
-      const requestLimit = request.is("application/json")
-        ? jsonLimit
-        : maxBodyBytes;
+      const profilePhotoLimit = 3 * 1024 * 1024;
+      const normalizedPathname = pathname.replace(/\/+$/, "");
+      const requestLimit =
+        request.method === "POST" && normalizedPathname === "/api/profile/photo"
+          ? profilePhotoLimit
+          : request.is("application/json")
+            ? jsonLimit
+            : maxBodyBytes;
       if (
         !Number.isSafeInteger(contentLength) ||
         contentLength < 0 ||
@@ -208,14 +213,23 @@ export async function createApp(options = {}) {
         cookie: request.headers.cookie,
         timeoutMs: apiTimeoutMs,
       });
+
+      for (const cookie of result.setCookies)
+        response.append("Set-Cookie", cookie);
+      if (result.redirectTo) {
+        // SSR HTML is always dynamic; stale cached pages break hydration.
+        response.set("Cache-Control", "no-store");
+        if (production) response.set(securityHeaders(nonce));
+        response.redirect(result.redirectTo);
+        return;
+      }
       const html = requestTemplate
         .replace("__INITIAL_STATE__", result.serializedState)
         .replace("__CSP_NONCE__", nonce)
         .replace("<!--app-html-->", result.appHtml);
 
+      response.set("Cache-Control", "no-store");
       if (production) response.set(securityHeaders(nonce));
-      for (const cookie of result.setCookies)
-        response.append("Set-Cookie", cookie);
       response.status(result.statusCode).type("html").send(html);
     } catch (error) {
       vite?.ssrFixStacktrace(error);
@@ -223,6 +237,7 @@ export async function createApp(options = {}) {
         "SSR request failed",
         error instanceof Error ? error.message : error,
       );
+      response.set("Cache-Control", "no-store");
       if (production) response.set(securityHeaders(nonce));
       response
         .status(request.path === "/app" ? 503 : 500)

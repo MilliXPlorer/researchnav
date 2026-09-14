@@ -3,10 +3,12 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 class StoreTitleValidationRequest extends FormRequest
 {
+    use Concerns\RejectsUnknownFields;
+
     public function authorize(): bool
     {
         return true;
@@ -14,6 +16,11 @@ class StoreTitleValidationRequest extends FormRequest
 
     public function rules(): array
     {
-        return ['validated_by' => ['required', 'uuid', Rule::exists('users', 'id')->whereNull('deleted_at')]];
+        return [];
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(fn () => $this->rejectUnknownFields($validator, []));
     }
 }

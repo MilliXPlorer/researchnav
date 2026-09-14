@@ -20,7 +20,6 @@ describe("SSR hydration", () => {
             authors: "Hydration Author",
             year: 2026,
             institutionName: "Example College",
-            academicUnit: "Institute of Computing",
             degreeProgram: "Computer Science",
             institute: "Institute of Computing",
             program: "Computer Science",

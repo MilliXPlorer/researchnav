@@ -12,6 +12,7 @@ class ReviewAssignmentResource extends JsonResource
         return [
             'id' => $this->id,
             'reviewer_id' => $this->reviewer_id,
+            'reviewer_name' => $this->whenLoaded('reviewer', fn () => $this->reviewer?->profileName() ?? 'Assigned reviewer'),
             'review_role' => $this->review_role,
             'is_active' => $this->is_active,
             'assigned_by' => $this->assigned_by,

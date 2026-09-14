@@ -3,6 +3,7 @@
 namespace Tests\Unit;
 
 use App\Models\User;
+use App\Models\UserRole;
 use App\Services\AccountService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
@@ -57,6 +58,25 @@ class AccountServiceTest extends TestCase
 
         $this->expectException(RuntimeException::class);
         app(AccountService::class)->provisionUser($result->email, 'instructor', $researcher->id);
+    }
+
+    public function test_provisioning_binds_research_editors_to_the_canonical_editor_role(): void
+    {
+        $inviter = $this->user();
+        UserRole::query()->firstOrCreate(
+            ['slug' => UserRole::RESEARCH_EDITOR],
+            ['name' => 'Research Editor', 'description' => 'Editorial reviewer.', 'is_active' => true],
+        );
+
+        $editor = app(AccountService::class)->provisionUser(
+            'editor@example.edu',
+            UserRole::RESEARCH_EDITOR,
+            $inviter->id,
+        );
+
+        $this->assertSame('research_editor', $editor->role);
+        $this->assertSame(UserRole::RESEARCH_EDITOR, $editor->roleDefinition->slug);
+        $this->assertSame('invited', $editor->access_status);
     }
 
     private function user(array $attributes = []): User
