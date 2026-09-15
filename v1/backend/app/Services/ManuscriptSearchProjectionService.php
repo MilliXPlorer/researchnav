@@ -7,7 +7,6 @@ use App\Models\ManuscriptSearchDocument;
 use App\Models\ResearchDocument;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
 
 class ManuscriptSearchProjectionService
 {
@@ -17,7 +16,6 @@ class ManuscriptSearchProjectionService
 
     public function __construct(
         private readonly ManuscriptTextExtractor $extractor,
-        private readonly SupabaseStorageService $storage,
     ) {}
 
     /** @return 'indexed'|'skipped'|'failed'|'no_source'|'unsupported'|'ineligible' */
@@ -201,30 +199,12 @@ class ManuscriptSearchProjectionService
     private function verifiedSource(ResearchDocument $document, DocumentFile $file, string $kind): ?array
     {
         $extension = strtolower((string) $file->file_extension);
-        $isSupabase = $this->storage->isSupabasePath($file->file_path);
         if (! in_array($extension, ManuscriptSearchDocument::SOURCE_EXTENSIONS, true)
             || ! $this->matchesMime($extension, $file->mime_type)
             || $file->file_size === null
-            || ($kind === 'final_manuscript' && ! $isSupabase && ! str_starts_with($file->file_path, 'research/'.$document->id.'/'))
+            || ! str_starts_with($file->file_path, 'research/'.$document->id.'/')
             || basename($file->file_path) !== $file->stored_filename) {
             return null;
-        }
-        if ($isSupabase) {
-            if ((int) $file->file_size < 1 || ($file->content_sha256 !== null
-                && (! is_string($file->content_sha256) || preg_match('/\A[a-f0-9]{64}\z/', $file->content_sha256) !== 1))) {
-                return null;
-            }
-
-            return [
-                'kind' => $kind,
-                'file_id' => (int) $file->id,
-                'path' => $file->file_path,
-                'extension' => $extension,
-                'sha256' => $file->content_sha256 ?? '',
-                'size' => (int) $file->file_size,
-                'updated_at' => $file->updated_at?->format('Y-m-d H:i:s.u'),
-                'remote' => true,
-            ];
         }
         $path = $this->privatePath($file->file_path);
         if ($path === null) {
@@ -251,31 +231,7 @@ class ManuscriptSearchProjectionService
     /** @return array{string, array} */
     private function extractSource(array $source): array
     {
-        if (! ($source['remote'] ?? false)) {
-            return [$this->extractor->extract($source['path']), $source];
-        }
-
-        $temporaryPath = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR)
-            .DIRECTORY_SEPARATOR.'researchnav-projection-'.Str::uuid().'.'.$source['extension'];
-        try {
-            $this->storage->downloadTo($source['path'], $temporaryPath);
-            $size = filesize($temporaryPath);
-            $hash = hash_file('sha256', $temporaryPath);
-            if ($size === false || $hash === false || $size !== $source['size']
-                || ($source['sha256'] !== '' && ! hash_equals($source['sha256'], $hash))) {
-                throw new ManuscriptTextExtractionException('Downloaded manuscript identity does not match its stored metadata.');
-            }
-            if ($source['sha256'] === '') {
-                DocumentFile::query()->whereKey($source['file_id'])->whereNull('content_sha256')->update(['content_sha256' => $hash]);
-                $source['sha256'] = $hash;
-            }
-
-            return [$this->extractor->extract($temporaryPath), $source];
-        } finally {
-            if (is_file($temporaryPath)) {
-                @unlink($temporaryPath);
-            }
-        }
+        return [$this->extractor->extract($source['path']), $source];
     }
 
     private function privatePath(string $relativePath): ?string

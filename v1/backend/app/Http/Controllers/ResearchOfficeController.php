@@ -4,14 +4,15 @@ namespace App\Http\Controllers;
 
 use App\Exceptions\ApiValidationException;
 use App\Models\ComplianceReview;
+use App\Models\DocumentFile;
 use App\Models\ResearchDocument;
 use App\Models\User;
 use App\Services\ComplianceService;
+use App\Services\PrivateDocumentFileResolver;
 use App\Services\ReportingService;
 use App\Services\ResearchProjectTeamService;
-use App\Services\SupabaseStorageException;
-use App\Services\SupabaseStorageService;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -151,36 +152,66 @@ class ResearchOfficeController extends DomainController
             ->header('Cache-Control', 'private, no-store');
     }
 
-    public function instituteStudies(string $institute, SupabaseStorageService $storage): JsonResponse
+    private const INSTITUTE_CODES = [
+        'IHS' => 'Institute of Health Sciences',
+        'ICS' => 'Institute of Computer Studies',
+        'IBFS' => 'Institute of Business and Financial Management',
+        'ICJE' => 'Institute of Criminal Justice Education',
+        'ITE' => 'Institute of Teacher Education',
+        'IAS' => 'Institute of Arts and Sciences',
+    ];
+
+    public function instituteStudies(string $institute): JsonResponse
     {
-        try {
-            return response()->json(['data' => $storage->studiesForInstitute($institute)])
-                ->header('Cache-Control', 'private, no-store');
-        } catch (SupabaseStorageException) {
-            return response()->json(['error' => 'INSTITUTE_STUDIES_UNAVAILABLE'], 503);
-        }
+        $fullName = self::INSTITUTE_CODES[strtoupper($institute)] ?? $institute;
+
+        $documents = ResearchDocument::query()
+            ->where('submission_status', 'approved')
+            ->where('archive_status', 'archived')
+            ->where(fn (Builder $q) => $q->where('institute', $fullName)->orWhere('academic_unit', $fullName))
+            ->orderByDesc('publication_year')
+            ->orderByDesc('title')
+            ->get(['id', 'title', 'publication_year']);
+
+        $studies = $documents->map(fn (ResearchDocument $d) => [
+            'year' => (string) $d->publication_year,
+            'title' => $d->title,
+            'id' => $d->id,
+        ])->all();
+
+        return response()->json(['data' => $studies])
+            ->header('Cache-Control', 'private, no-store');
     }
 
-    public function openInstituteStudy(Request $request, string $institute, string $year, string $title, SupabaseStorageService $storage)
+    public function openInstituteStudy(Request $request, string $institute, string $year, string $title)
     {
-        try {
-            $files = $storage->filesForStudy($institute, $year, $title);
-            if ($files === []) {
-                return response()->json(['error' => 'MANUSCRIPT_NOT_FOUND'], 404);
-            }
-            $selected = $request->query('file');
-            if ($selected === null) {
-                return $this->studyFileChooser($institute, $year, $title, $files);
-            }
-            $file = collect($files)->firstWhere('name', $selected);
-            if ($file === null) {
-                return response()->json(['error' => 'MANUSCRIPT_NOT_FOUND'], 404);
-            }
-            $contents = $storage->download($file['path']);
-        } catch (SupabaseStorageException) {
-            return response()->json(['error' => 'MANUSCRIPT_UNAVAILABLE'], 503);
+        $research = ResearchDocument::query()
+            ->where('id', $request->query('id'))
+            ->first();
+
+        if ($research === null) {
+            return response()->json(['error' => 'MANUSCRIPT_NOT_FOUND'], 404);
         }
-        $filename = preg_replace('/[^A-Za-z0-9._ -]/', '_', $file['name']) ?: 'manuscript';
+
+        $groupedFiles = $research->files()->current()->where('document_type', 'final_manuscript')->orderBy('file_order')->get();
+        if ($groupedFiles->isEmpty()) {
+            return response()->json(['error' => 'MANUSCRIPT_NOT_FOUND'], 404);
+        }
+
+        $selected = $request->query('file');
+        if ($selected === null) {
+            return $this->studyFileChooser($research, $groupedFiles);
+        }
+
+        $file = $groupedFiles->firstWhere('original_filename', $selected);
+        if ($file === null) {
+            return response()->json(['error' => 'MANUSCRIPT_NOT_FOUND'], 404);
+        }
+
+        $files = app(PrivateDocumentFileResolver::class);
+        $resolved = $files->resolve($research, $file);
+        $contents = file_get_contents($files->resolve($research, $file)['absolute_path']);
+        $filename = preg_replace('/[^A-Za-z0-9._ -]/', '_', $file->original_filename) ?: 'manuscript';
         $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
         $mimeType = match ($extension) {
             'pdf' => 'application/pdf',
@@ -197,28 +228,36 @@ class ResearchOfficeController extends DomainController
         ]);
     }
 
-    public function downloadInstituteStudy(string $institute, string $year, string $title, SupabaseStorageService $storage)
+    public function downloadInstituteStudy(string $institute, string $year, string $title, Request $request)
     {
         $zipPath = false;
         try {
-            $files = $storage->filesForStudy($institute, $year, $title);
-            if ($files === []) {
+            $research = ResearchDocument::query()->where('id', $request->query('id'))->first();
+            if ($research === null) {
                 return response()->json(['error' => 'MANUSCRIPT_NOT_FOUND'], 404);
             }
+
+            $groupedFiles = $research->files()->current()->where('document_type', 'final_manuscript')->orderBy('file_order')->get();
+            if ($groupedFiles->isEmpty()) {
+                return response()->json(['error' => 'MANUSCRIPT_NOT_FOUND'], 404);
+            }
+
             $zipPath = tempnam(sys_get_temp_dir(), 'researchnav-study-');
             $zip = new ZipArchive;
             if ($zipPath === false || $zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
-                throw new SupabaseStorageException('The manuscript archive could not be created.');
+                throw new \RuntimeException('The manuscript archive could not be created.');
             }
+            $files = app(PrivateDocumentFileResolver::class);
             $folder = $this->safeDownloadName($title, 'Study');
-            foreach ($files as $file) {
-                if (! $zip->addFromString($folder.'/'.$this->safeDownloadName($file['name'], 'manuscript'), $storage->download($file['path']))) {
+            foreach ($groupedFiles as $groupedFile) {
+                $resolved = $files->resolve($research, $groupedFile);
+                if (! $zip->addFromString($folder.'/'.$this->safeDownloadName($groupedFile->original_filename, 'manuscript'), file_get_contents($resolved['absolute_path']))) {
                     $zip->close();
-                    throw new SupabaseStorageException('The manuscript archive could not be created.');
+                    throw new \RuntimeException('The manuscript archive could not be created.');
                 }
             }
             if (! $zip->close()) {
-                throw new SupabaseStorageException('The manuscript archive could not be created.');
+                throw new \RuntimeException('The manuscript archive could not be created.');
             }
 
             return response()->download($zipPath, $folder.'.zip', [
@@ -235,15 +274,15 @@ class ResearchOfficeController extends DomainController
         }
     }
 
-    /** @param list<array{name:string,path:string,extension:string}> $files */
-    private function studyFileChooser(string $institute, string $year, string $title, array $files)
+    /** @param Collection<int, DocumentFile> $files */
+    private function studyFileChooser(ResearchDocument $research, $files)
     {
-        $heading = htmlspecialchars($title, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-        $openUrl = route('office.institute-study.open', compact('institute', 'year', 'title'));
-        $downloadUrl = htmlspecialchars(route('office.institute-study.download', compact('institute', 'year', 'title')), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-        $links = collect($files)->map(function (array $file) use ($openUrl): string {
-            $url = htmlspecialchars($openUrl.'?'.http_build_query(['file' => $file['name']]), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-            $name = htmlspecialchars($file['name'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $heading = htmlspecialchars($research->title, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $openUrl = route('office.institute-study.open', ['institute' => $research->institute ?? $research->academic_unit, 'year' => $research->publication_year, 'title' => $research->title, 'id' => $research->id]);
+        $downloadUrl = htmlspecialchars(route('office.institute-study.download', ['institute' => $research->institute ?? $research->academic_unit, 'year' => $research->publication_year, 'title' => $research->title, 'id' => $research->id]), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $links = $files->map(function (DocumentFile $file) use ($openUrl): string {
+            $url = htmlspecialchars($openUrl.'&'.http_build_query(['file' => $file->original_filename]), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+            $name = htmlspecialchars($file->original_filename, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 
             return '<li><a href="'.$url.'">'.$name.'</a></li>';
         })->implode('');

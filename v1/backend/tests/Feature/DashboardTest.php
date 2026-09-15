@@ -8,10 +8,8 @@ use App\Models\ReviewAssignment;
 use App\Models\SimilarityResult;
 use App\Models\TitleValidation;
 use App\Models\User;
-use App\Services\SupabaseStorageService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
@@ -21,15 +19,6 @@ class DashboardTest extends TestCase
     use RefreshDatabase;
 
     protected $seed = true;
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-        Cache::forget('research-office:supabase-institute-counts');
-        $storage = $this->createStub(SupabaseStorageService::class);
-        $storage->method('manuscriptCountsByInstitute')->willReturn([]);
-        $this->app->instance(SupabaseStorageService::class, $storage);
-    }
 
     public function test_authentication_and_active_account_middleware_protect_the_dashboard(): void
     {
@@ -181,16 +170,6 @@ class DashboardTest extends TestCase
 
     public function test_research_office_queues_use_the_required_statuses(): void
     {
-        Cache::forget('research-office:supabase-institute-counts');
-        $storage = $this->createMock(SupabaseStorageService::class);
-        $storage->expects($this->once())
-            ->method('manuscriptCountsByInstitute')
-            ->willReturn([
-                ['institute' => 'Institute of Health Sciences', 'total' => 4],
-                ['institute' => 'Institute of Computer Studies', 'total' => 7],
-            ]);
-        $this->app->instance(SupabaseStorageService::class, $storage);
-
         $this->document(['submission_status' => 'submitted', 'institute' => 'Institute of Health Sciences']);
         $this->document(['submission_status' => 'under_review', 'institute' => 'Institute of Health Sciences']);
         $this->document(['submission_status' => 'draft', 'institute' => 'Institute of Computer Studies']);
@@ -203,10 +182,6 @@ class DashboardTest extends TestCase
         $this->assertSame(2, $sections['submission_queue']['total']);
         $this->assertSame(1, $sections['revision_requests']['total']);
         $this->assertSame(1, $sections['pending_archiving']['total']);
-        $this->assertEqualsCanonicalizing([
-            ['institute' => 'Institute of Health Sciences', 'total' => 4],
-            ['institute' => 'Institute of Computer Studies', 'total' => 7],
-        ], $response->json('data.institutional_overview'));
     }
 
     public function test_admin_aggregates_are_exact_and_unavailable_sections_remain_null(): void

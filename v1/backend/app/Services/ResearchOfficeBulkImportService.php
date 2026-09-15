@@ -11,13 +11,15 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use RuntimeException;
 
 class ResearchOfficeBulkImportService
 {
+    private const DISK = 'researchnav_private';
+
     public function __construct(
-        private readonly SupabaseStorageService $storage,
         private readonly AuditService $audit,
         private readonly MonitoringService $monitoring,
         private readonly ?ManuscriptSearchProjectionService $manuscriptSearch = null,
@@ -62,10 +64,10 @@ class ResearchOfficeBulkImportService
             foreach ($items as &$item) {
                 $item['mime'] = strtolower($item['file']->getClientOriginalExtension()) === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
                 $item['path'] = $this->objectPath($metadata['institute'], (int) $metadata['year'], $metadata['title'], $item['name']);
-                if ($this->storage->exists($item['path'])) {
+                if (Storage::disk(self::DISK)->exists($item['path'])) {
                     $item['path'] = $this->withHashSuffix($item['path'], substr($item['hash'], 0, 12));
                 }
-                $this->storage->upload($item['path'], $item['contents'], $item['mime']);
+                Storage::disk(self::DISK)->put($item['path'], $item['contents']);
                 $uploadedPaths[] = $item['path'];
             }
             unset($item);
@@ -114,9 +116,9 @@ class ResearchOfficeBulkImportService
         } catch (\Throwable $exception) {
             foreach ($uploadedPaths as $path) {
                 try {
-                    $this->storage->delete($path);
+                    Storage::disk(self::DISK)->delete($path);
                 } catch (\Throwable) {
-                    Log::critical('Supabase manuscript cleanup failed after import failure.', ['object_hash' => hash('sha256', $path)]);
+                    Log::critical('Local manuscript cleanup failed after import failure.', ['object_hash' => hash('sha256', $path)]);
                 }
             }
             throw $exception;

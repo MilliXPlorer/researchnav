@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Services\ManuscriptMetadataExtractor;
 use App\Services\ResearchOfficeBulkImportService;
-use App\Services\SupabaseStorageException;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -328,8 +327,6 @@ class ResearchOfficeBulkImportController extends Controller
                     'visibility' => $document->visibility,
                 ],
             ], 201);
-        } catch (SupabaseStorageException) {
-            return response()->json(['message' => 'Manuscript storage is temporarily unavailable. Please try again.'], 503);
         } catch (QueryException) {
             return response()->json(['message' => 'The manuscript could not be saved to the database.'], 500);
         } catch (\RuntimeException $exception) {

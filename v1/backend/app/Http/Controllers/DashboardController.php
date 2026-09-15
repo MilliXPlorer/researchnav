@@ -11,12 +11,9 @@ use App\Models\SimilarityResult;
 use App\Models\TitleValidation;
 use App\Models\User;
 use App\Services\DomainAuthorization;
-use App\Services\SupabaseStorageException;
-use App\Services\SupabaseStorageService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
 
 class DashboardController extends DomainController
 {
@@ -31,7 +28,7 @@ class DashboardController extends DomainController
         'updated_at',
     ];
 
-    public function index(Request $request, SupabaseStorageService $storage): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         $actor = $this->actor($request);
         $effectiveRole = $actor->roleDefinition?->slug === 'research_editor' ? 'research_editor' : $actor->role;
@@ -58,17 +55,6 @@ class DashboardController extends DomainController
             'sections' => $sections,
             'analytics' => $this->analytics($actor),
         ];
-        if ($effectiveRole === 'research-office') {
-            try {
-                $data['institutional_overview'] = Cache::remember(
-                    'research-office:supabase-institute-counts',
-                    now()->addMinutes(5),
-                    fn (): array => $storage->manuscriptCountsByInstitute(),
-                );
-            } catch (SupabaseStorageException) {
-                $data['institutional_overview'] = null;
-            }
-        }
 
         return response()
             ->json(['data' => $data])

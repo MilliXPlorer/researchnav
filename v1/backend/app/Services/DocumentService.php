@@ -24,7 +24,6 @@ class DocumentService
         private readonly AuditService $audit,
         private readonly MonitoringService $monitoring,
         private readonly ManuscriptSearchProjectionService $manuscriptSearch,
-        private readonly SupabaseStorageService $supabase,
     ) {}
 
     public function upload(User $actor, ResearchDocument $research, UploadedFile $upload, string $documentType, ?string $relativePath = null, ?Request $request = null): DocumentFile
@@ -176,9 +175,7 @@ class DocumentService
     {
         $deleted = false;
         try {
-            $deleted = $this->supabase->isSupabasePath($pending->storage_path)
-                ? $this->deleteSupabaseObject($pending->storage_path)
-                : Storage::disk('researchnav_private')->delete($pending->storage_path);
+            $deleted = Storage::disk('researchnav_private')->delete($pending->storage_path);
         } catch (\Throwable) {
             $deleted = false;
         }
@@ -252,23 +249,13 @@ class DocumentService
 
     private function privateFilePath(ResearchDocument $research, DocumentFile $file): string
     {
-        if ($this->supabase->isSupabasePath($file->file_path)) {
-            return $file->file_path;
-        }
-
-        $path = 'research/'.$research->id.'/'.$file->stored_filename;
-        if ($file->file_path !== $path) {
+        if ($file->file_path === null || $file->file_path === '' || str_contains($file->file_path, "\0")
+            || str_starts_with($file->file_path, '/') || str_contains($file->file_path, '\\')
+            || preg_match('#(?:^|/)\.\.(?:/|$)#', $file->file_path) === 1) {
             throw ValidationException::withMessages(['document_file_id' => ['The document file has an invalid private storage path.']]);
         }
 
-        return $path;
-    }
-
-    private function deleteSupabaseObject(string $path): bool
-    {
-        $this->supabase->delete($path);
-
-        return true;
+        return $file->file_path;
     }
 
     private function currentActor(User $actor): User

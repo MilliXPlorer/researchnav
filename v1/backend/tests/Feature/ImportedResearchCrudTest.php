@@ -7,7 +7,6 @@ use App\Models\ResearchDocument;
 use App\Models\User;
 use App\Policies\ResearchDocumentPolicy;
 use App\Services\ResearchService;
-use App\Services\SupabaseStorageService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -40,11 +39,6 @@ class ImportedResearchCrudTest extends TestCase
             'is_current' => true,
             'uploaded_at' => now(),
         ]);
-
-        $storage = $this->createMock(SupabaseStorageService::class);
-        $storage->method('isSupabasePath')->willReturn(true);
-        $storage->expects($this->once())->method('delete');
-        $this->app->instance(SupabaseStorageService::class, $storage);
 
         $service = $this->app->make(ResearchService::class);
         $updated = $service->update($office, $document, [

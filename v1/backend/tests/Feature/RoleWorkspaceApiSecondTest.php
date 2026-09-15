@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Models\ResearchAuthor;
 use App\Models\ResearchDocument;
 use App\Models\User;
-use App\Services\SupabaseStorageService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -110,47 +109,23 @@ class RoleWorkspaceApiSecondTest extends TestCase
         ], $this->origin())->assertForbidden();
     }
 
-    public function test_office_can_browse_and_open_supabase_institute_studies(): void
+    public function test_office_can_browse_institute_studies_from_database(): void
     {
         $office = $this->user(['role' => 'research-office']);
-        $storage = $this->createStub(SupabaseStorageService::class);
-        $storage->method('studiesForInstitute')->willReturn([
-            ['year' => '2025', 'title' => 'Sample Study'],
+        $owner = $this->user(['role' => 'researcher']);
+        $document = ResearchDocument::factory()->create([
+            'submitted_by' => $owner->id,
+            'submission_status' => 'approved',
+            'archive_status' => 'archived',
+            'visibility' => 'public',
+            'publication_year' => 2025,
+            'institute' => 'Institute of Computer Studies',
+            'title' => 'Sample Study',
         ]);
-        $storage->method('filesForStudy')->willReturn([
-            ['name' => 'sample.pdf', 'path' => 'Institute of Computer Studies/2025/Sample Study/sample.pdf', 'extension' => 'pdf'],
-            ['name' => 'appendix.docx', 'path' => 'Institute of Computer Studies/2025/Sample Study/appendix.docx', 'extension' => 'docx'],
-        ]);
-        $storage->method('download')->willReturnCallback(fn (string $path): string => str_ends_with($path, '.pdf') ? '%PDF-sample' : 'DOCX-sample');
-        $this->app->instance(SupabaseStorageService::class, $storage);
 
         $this->as($office)->getJson('/api/office/institutes/ICS/studies')
             ->assertOk()
             ->assertJsonPath('data.0.title', 'Sample Study');
-        $this->as($office)->get('/api/office/institutes/ICS/studies/2025/Sample%20Study/open')
-            ->assertOk()
-            ->assertSee('sample.pdf')
-            ->assertSee('appendix.docx')
-            ->assertSee('Download all manuscripts (.zip)');
-        $this->as($office)->get('/api/office/institutes/ICS/studies/2025/Sample%20Study/open?file=sample.pdf')
-            ->assertOk()
-            ->assertHeader('Content-Type', 'application/pdf')
-            ->assertHeader('Content-Disposition', 'inline; filename="sample.pdf"')
-            ->assertContent('%PDF-sample');
-        $this->as($office)->get('/api/office/institutes/ICS/studies/2025/Sample%20Study/open?file=missing.pdf')
-            ->assertNotFound();
-
-        if (class_exists(\ZipArchive::class)) {
-            $response = $this->as($office)->get('/api/office/institutes/ICS/studies/2025/Sample%20Study/download')
-                ->assertOk()
-                ->assertDownload('Sample Study.zip')
-                ->assertHeader('content-type', 'application/zip');
-            $archive = new \ZipArchive;
-            $this->assertTrue($archive->open($response->baseResponse->getFile()->getPathname()) === true);
-            $this->assertSame('%PDF-sample', $archive->getFromName('Sample Study/sample.pdf'));
-            $this->assertSame('DOCX-sample', $archive->getFromName('Sample Study/appendix.docx'));
-            $archive->close();
-        }
     }
 
     public function test_research_index_mine_filter_returns_only_own_submissions(): void

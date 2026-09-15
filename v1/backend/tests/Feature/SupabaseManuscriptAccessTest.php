@@ -6,27 +6,17 @@ use App\Models\DocumentFile;
 use App\Models\ResearchDocument;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class SupabaseManuscriptAccessTest extends TestCase
 {
     use RefreshDatabase;
 
-    protected function setUp(): void
+    public function test_authorized_catalog_download_serves_from_local_storage(): void
     {
-        parent::setUp();
-        config()->set('supabase', [
-            'url' => 'https://project.supabase.co',
-            'secret_key' => 'sb_secret_test',
-            'storage_bucket' => 'research-manuscripts',
-        ]);
-    }
-
-    public function test_authorized_catalog_download_is_proxied_without_exposing_supabase(): void
-    {
-        Http::fake(['*' => Http::response('%PDF-private', 200)]);
-        [$document] = $this->publicManuscript();
+        [$document] = $this->localManuscript();
         $viewer = User::factory()->create(['access_status' => 'active']);
 
         $this->withSession(['user_id' => $viewer->id])
@@ -35,34 +25,22 @@ class SupabaseManuscriptAccessTest extends TestCase
             ->assertSee('manuscript.pdf')
             ->assertSee('Download all manuscripts (.zip)')
             ->assertHeaderMissing('Location');
-
-        $this->withSession(['user_id' => $viewer->id])
-            ->get('/api/repository/'.$document->id.'/download?file='.$document->files()->first()->id)
-            ->assertOk()
-            ->assertHeader('content-disposition', 'inline; filename="manuscript.pdf"');
-
-        Http::assertSentCount(1);
-        Http::assertSent(fn ($request) => $request->method() === 'GET'
-            && ! str_contains($request->url(), '/object/sign/'));
     }
 
-    public function test_unauthorized_user_never_receives_a_signed_url(): void
+    public function test_unauthorized_user_cannot_download(): void
     {
-        Http::fake(['*' => Http::response(['signedURL' => '/object/sign/research-manuscripts/file?token=test'], 200)]);
-        [$document, $file] = $this->publicManuscript(['visibility' => 'private']);
+        [$document, $file] = $this->localManuscript(['visibility' => 'private']);
         $viewer = User::factory()->create(['access_status' => 'active']);
 
         $this->withSession(['user_id' => $viewer->id])
             ->get('/api/research/'.$document->id.'/files/'.$file->id.'/download')
             ->assertForbidden();
-
-        Http::assertNothingSent();
     }
 
     public function test_grouped_catalog_download_is_a_zip_named_for_the_folder(): void
     {
-        Http::fake(['*' => Http::response('%PDF-private', 200)]);
-        [$document, $file] = $this->publicManuscript(['import_group_name' => 'Study A']);
+        [$document, $file] = $this->localManuscript(['import_group_name' => 'Study A']);
+        $secondStoredFilename = Str::uuid()->toString().'.pdf';
         DocumentFile::query()->create([
             'research_document_id' => $document->id,
             'uploaded_by' => $file->uploaded_by,
@@ -70,14 +48,18 @@ class SupabaseManuscriptAccessTest extends TestCase
             'version_number' => 2,
             'file_order' => 2,
             'original_filename' => 'Manuscript.pdf',
-            'stored_filename' => 'Manuscript.pdf',
-            'file_path' => 'Institute of Computer Studies/2026/Research Title/Manuscript.pdf',
+            'stored_filename' => $secondStoredFilename,
+            'file_path' => 'research/'.$document->id.'/'.$secondStoredFilename,
             'file_extension' => 'pdf',
             'mime_type' => 'application/pdf',
             'file_size' => 12,
             'is_current' => true,
             'uploaded_at' => now(),
         ]);
+
+        $disk = Storage::disk('researchnav_private');
+        $disk->put('research/'.$document->id.'/'.$secondStoredFilename, '%PDF-1.4 second');
+
         $viewer = User::factory()->create(['access_status' => 'active']);
 
         $this->withSession(['user_id' => $viewer->id])
@@ -85,11 +67,10 @@ class SupabaseManuscriptAccessTest extends TestCase
             ->assertOk()
             ->assertDownload('Study A.zip')
             ->assertHeader('content-type', 'application/zip');
-        Http::assertSentCount(2);
     }
 
     /** @return array{ResearchDocument, DocumentFile} */
-    private function publicManuscript(array $overrides = []): array
+    private function localManuscript(array $overrides = []): array
     {
         $owner = User::factory()->create(['access_status' => 'active']);
         $document = ResearchDocument::factory()->create(array_merge([
@@ -99,20 +80,24 @@ class SupabaseManuscriptAccessTest extends TestCase
             'visibility' => 'public',
             'import_source_sha256' => str_repeat('a', 64),
         ], $overrides));
+        $storedFilename = Str::uuid()->toString().'.pdf';
         $file = DocumentFile::query()->create([
             'research_document_id' => $document->id,
             'uploaded_by' => $owner->id,
             'document_type' => 'final_manuscript',
             'version_number' => 1,
             'original_filename' => 'manuscript.pdf',
-            'stored_filename' => 'manuscript.pdf',
-            'file_path' => 'Institute of Computer Studies/2026/Research Title/manuscript.pdf',
+            'stored_filename' => $storedFilename,
+            'file_path' => 'research/'.$document->id.'/'.$storedFilename,
             'file_extension' => 'pdf',
             'mime_type' => 'application/pdf',
             'file_size' => 100,
             'is_current' => true,
             'uploaded_at' => now(),
         ]);
+
+        $disk = Storage::disk('researchnav_private');
+        $disk->put('research/'.$document->id.'/'.$storedFilename, '%PDF-1.4 test content here');
 
         return [$document, $file];
     }

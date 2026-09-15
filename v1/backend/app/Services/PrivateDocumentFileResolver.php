@@ -75,8 +75,12 @@ class PrivateDocumentFileResolver
         if (! is_string($filename) || $filename === '' || $filename !== basename($filename) || str_contains($filename, "\0") || str_contains($filename, '/') || str_contains($filename, '\\')) {
             throw new NotFoundHttpException;
         }
-        $path = 'research/'.$research->id.'/'.$filename;
-        if ($file->research_document_id !== $research->id || $file->file_path !== $path) {
+        if ($file->research_document_id !== $research->id) {
+            throw new NotFoundHttpException;
+        }
+
+        $path = $file->file_path;
+        if (! is_string($path) || $path === '' || str_contains($path, "\0") || str_starts_with($path, '/') || str_contains($path, '\\') || str_contains($path, '..')) {
             throw new NotFoundHttpException;
         }
 
