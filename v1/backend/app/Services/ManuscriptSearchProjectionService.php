@@ -202,7 +202,8 @@ class ManuscriptSearchProjectionService
         if (! in_array($extension, ManuscriptSearchDocument::SOURCE_EXTENSIONS, true)
             || ! $this->matchesMime($extension, $file->mime_type)
             || $file->file_size === null
-            || ! str_starts_with($file->file_path, 'research/'.$document->id.'/')
+            || ! is_string($file->file_path)
+            || $file->file_path === ''
             || basename($file->file_path) !== $file->stored_filename) {
             return null;
         }
