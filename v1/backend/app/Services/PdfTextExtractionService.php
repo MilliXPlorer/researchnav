@@ -119,36 +119,19 @@ class PdfTextExtractionService
 
     private function getPythonCommand(): string
     {
-        /*
-         * Try the normal Windows/Python command first.
-         */
-        $output = [];
-        $exitCode = 0;
+        foreach (['python3', 'python', 'py'] as $command) {
+            $output = [];
+            $exitCode = 0;
 
-        exec(
-            'python --version 2>&1',
-            $output,
-            $exitCode
-        );
+            exec(
+                $command.' --version 2>&1',
+                $output,
+                $exitCode
+            );
 
-        if ($exitCode === 0) {
-            return 'python';
-        }
-
-        /*
-         * Some Windows installations use "py".
-         */
-        $output = [];
-        $exitCode = 0;
-
-        exec(
-            'py --version 2>&1',
-            $output,
-            $exitCode
-        );
-
-        if ($exitCode === 0) {
-            return 'py';
+            if ($exitCode === 0) {
+                return $command;
+            }
         }
 
         throw new \RuntimeException(
