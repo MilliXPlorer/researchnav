@@ -38,7 +38,13 @@ function label(value: string) {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-export default function AssignedResearchFolders({ role }: { role: Role }) {
+export default function AssignedResearchFolders({
+  role,
+  actorKey,
+}: {
+  role: Role;
+  actorKey?: string;
+}) {
   const [folders, setFolders] = useState<SharedMonitoringResearch[]>([]);
   const [selected, setSelected] = useState("");
   const [research, setResearch] =
@@ -63,6 +69,17 @@ export default function AssignedResearchFolders({ role }: { role: Role }) {
 
   useEffect(() => {
     let cancelled = false;
+
+    setFolders([]);
+    setSelected("");
+    setResearch(null);
+    setFiles([]);
+    setPeople(null);
+    setTeam(null);
+    setRepresentatives([]);
+    setRepresentativeId("");
+    setLoadedId("");
+    setLoading(true);
     void listSharedMonitoringResearch()
       .then((items) => {
         if (cancelled) return;
@@ -81,7 +98,7 @@ export default function AssignedResearchFolders({ role }: { role: Role }) {
     return () => {
       cancelled = true;
     };
-  }, [attempt]);
+  }, [attempt, actorKey]);
 
   useEffect(() => {
     if (!selected) return;

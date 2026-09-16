@@ -209,6 +209,7 @@ export default function RoleSidebarPage({
   similarityMode,
   instructorSectionId,
   instructorProjectDocumentId,
+  actorKey,
 }: {
   role: Role;
   selectedNav: string;
@@ -216,6 +217,7 @@ export default function RoleSidebarPage({
   similarityMode?: "title" | "content";
   instructorSectionId?: string | number;
   instructorProjectDocumentId?: string | number;
+  actorKey?: string;
 }) {
   switch (role) {
     case "research_editor":
@@ -224,7 +226,7 @@ export default function RoleSidebarPage({
           return <EditorDashboard role={role} />;
         case "Assigned Research":
         case "Research Folders":
-          return <AssignedResearchFolders role={role} />;
+          return <AssignedResearchFolders role={role} actorKey={actorKey} />;
         case "Editorial Review":
           return <EditorReview role={role} />;
         case "Defense Monitoring Forms":
@@ -239,7 +241,7 @@ export default function RoleSidebarPage({
       switch (selectedNav) {
         case "Assigned Research":
         case "Research Folders":
-          return <AssignedResearchFolders role={role} />;
+          return <AssignedResearchFolders role={role} actorKey={actorKey} />;
         case "My Advisees":
           return <AdviserAdvisees role={role} navigate={navigate} />;
         case "Pending Reviews":
@@ -295,7 +297,7 @@ export default function RoleSidebarPage({
             <InstructorAssignedSubmissions role={role} stage="manuscript" />
           );
         case "Assigned Research":
-          return <AssignedResearchFolders role={role} />;
+          return <AssignedResearchFolders role={role} actorKey={actorKey} />;
         case "Review Submissions":
           return (
             <InstructorAssignedSubmissions role={role} stage="manuscript" />
@@ -319,7 +321,7 @@ export default function RoleSidebarPage({
     case "panel":
       switch (selectedNav) {
         case "Research Folders":
-          return <AssignedResearchFolders role={role} />;
+          return <AssignedResearchFolders role={role} actorKey={actorKey} />;
         case "Assigned Defenses":
         case "Defense Schedule":
           return <PanelDefenseSchedule role={role} />;
@@ -341,7 +343,7 @@ export default function RoleSidebarPage({
       switch (selectedNav) {
         case "Assigned Research":
         case "Research Folders":
-          return <AssignedResearchFolders role={role} />;
+          return <AssignedResearchFolders role={role} actorKey={actorKey} />;
         case "Statistical Review":
         case "Methodology Checklist":
           return <StatisticianMethodologyChecklist role={role} />;
@@ -375,7 +377,7 @@ export default function RoleSidebarPage({
           return <LibrarianAssignmentRequests role={role} />;
         case "Assigned Research":
         case "Research Folders":
-          return <AssignedResearchFolders role={role} />;
+          return <AssignedResearchFolders role={role} actorKey={actorKey} />;
         case "Reference Review":
           return <LibrarianReferenceReview role={role} />;
         case "Defense Monitoring Forms":
@@ -395,7 +397,7 @@ export default function RoleSidebarPage({
     case "research-office":
       switch (selectedNav) {
         case "Research Folders":
-          return <AssignedResearchFolders role={role} />;
+          return <AssignedResearchFolders role={role} actorKey={actorKey} />;
         case "Similarity Check":
           return <ResearcherSimilarityCheck role={role} showModePicker />;
         case "Upload Manuscript":

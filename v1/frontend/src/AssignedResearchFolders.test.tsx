@@ -127,4 +127,73 @@ describe("AssignedResearchFolders", () => {
     expect(screen.getByText("Prof. Mara Lim")).toBeInTheDocument();
     expect(screen.getByText("Noel Reyes")).toBeInTheDocument();
   });
+
+  it("reloads assigned folders when the active account changes", async () => {
+    let requestCount = 0;
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      expect(String(input)).toBe("/api/monitoring/research");
+
+      requestCount += 1;
+
+      return new Response(
+        JSON.stringify({
+          data:
+            requestCount === 1
+              ? [
+                  {
+                    id: 101,
+                    title: "Adviser A Study",
+                    institute: "Institute of Computing",
+                    researchers: ["Researcher A"],
+                  },
+                ]
+              : [
+                  {
+                    id: 202,
+                    title: "Adviser B Study",
+                    institute: "Institute of Computing",
+                    researchers: ["Researcher B"],
+                  },
+                ],
+        }),
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { rerender } = render(
+      <AssignedResearchFolders
+        role="adviser"
+        actorKey="adviser-a@example.test"
+      />,
+    );
+
+    expect(
+      await screen.findByRole("button", {
+        name: "Open research folder Adviser A Study",
+      }),
+    ).toBeInTheDocument();
+
+    rerender(
+      <AssignedResearchFolders
+        role="adviser"
+        actorKey="adviser-b@example.test"
+      />,
+    );
+
+    expect(
+      await screen.findByRole("button", {
+        name: "Open research folder Adviser B Study",
+      }),
+    ).toBeInTheDocument();
+
+    expect(
+      screen.queryByRole("button", {
+        name: "Open research folder Adviser A Study",
+      }),
+    ).not.toBeInTheDocument();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });

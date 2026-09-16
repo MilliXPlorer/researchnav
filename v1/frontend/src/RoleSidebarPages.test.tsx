@@ -206,6 +206,85 @@ describe("role workspace pages", () => {
     ).toBeInTheDocument();
   });
 
+  it("reloads Assigned Research when the active account changes", async () => {
+    let monitoringRequests = 0;
+
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+
+      if (url === "/api/monitoring/research") {
+        monitoringRequests += 1;
+
+        return new Response(
+          JSON.stringify({
+            data:
+              monitoringRequests === 1
+                ? [
+                    {
+                      id: 101,
+                      title: "Adviser A Folder",
+                      institute: "Institute of Computing",
+                      researchers: ["Researcher A"],
+                    },
+                  ]
+                : [
+                    {
+                      id: 202,
+                      title: "Adviser B Folder",
+                      institute: "Institute of Computing",
+                      researchers: ["Researcher B"],
+                    },
+                  ],
+          }),
+        );
+      }
+
+      return new Response(JSON.stringify({ error: "NOT_FOUND" }), {
+        status: 404,
+      });
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { rerender } = render(
+      <RoleSidebarPage
+        role="adviser"
+        selectedNav="Assigned Research"
+        navigate={vi.fn()}
+        actorKey="adviser-a@example.test"
+      />,
+    );
+
+    expect(
+      await screen.findByRole("button", {
+        name: "Open research folder Adviser A Folder",
+      }),
+    ).toBeInTheDocument();
+
+    rerender(
+      <RoleSidebarPage
+        role="adviser"
+        selectedNav="Assigned Research"
+        navigate={vi.fn()}
+        actorKey="adviser-b@example.test"
+      />,
+    );
+
+    expect(
+      await screen.findByRole("button", {
+        name: "Open research folder Adviser B Folder",
+      }),
+    ).toBeInTheDocument();
+
+    expect(
+      screen.queryByRole("button", {
+        name: "Open research folder Adviser A Folder",
+      }),
+    ).not.toBeInTheDocument();
+
+    expect(monitoringRequests).toBe(2);
+  });
+
   it("opens Editor dashboard sections from the summary cards", async () => {
     stubFetch([
       [

@@ -511,6 +511,7 @@ export default function Dashboard({
             role={role}
             selectedNav="My Sections"
             navigate={navigate}
+            actorKey={session.email.trim().toLowerCase()}
             instructorSectionId={instructorSectionId}
             instructorProjectDocumentId={instructorProjectDocumentId}
           />
@@ -519,6 +520,7 @@ export default function Dashboard({
             role={role}
             selectedNav="Dashboard"
             navigate={navigate}
+            actorKey={session.email.trim().toLowerCase()}
           />
         ) : showingRecordWorkspace || selectedNav === primaryNav[role] ? (
           <RoleWorkspace
@@ -541,6 +543,7 @@ export default function Dashboard({
             selectedNav={selectedNav}
             navigate={navigate}
             similarityMode={similarityMode}
+            actorKey={session.email.trim().toLowerCase()}
           />
         )}
       </main>
