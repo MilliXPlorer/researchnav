@@ -9895,15 +9895,32 @@ td strong {
     width: 8.5in;
     max-width: none;
   }
+  .official-monitoring-title,
+  .official-monitoring-researchers {
+    font-size: 10pt;
+    line-height: 1.1;
+  }
+
+  .official-monitoring-entry > span {
+    font-size: 8.5pt;
+    line-height: 1.15;
+  }
+
+  .official-monitoring-entry > .official-monitoring-date {
+    font-size: 7.5pt;
+    line-height: 1;
+  }
+
+  .official-monitoring-entry > .official-monitoring-actor {
+    font-size: 8.5pt;
+  }
   .monitoring-screen-sheet {
     display: none;
   }
   .monitoring-print-pages {
     display: block;
   }
-  .official-monitoring-entry > .official-monitoring-date {
-    font-size: 8px;
-  }
+
   .monitoring-print-heading {
     display: grid;
     gap: 4px;
