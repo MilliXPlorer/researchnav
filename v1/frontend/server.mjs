@@ -63,6 +63,7 @@ function securityHeaders(nonce) {
       `script-src 'self' 'nonce-${nonce}' https://accounts.google.com`,
       "style-src 'self' 'unsafe-inline'",
       "font-src 'self' data:",
+      "img-src 'self' data: blob:",
       "connect-src 'self' https://accounts.google.com",
       "frame-src https://accounts.google.com",
       "frame-ancestors 'none'",
