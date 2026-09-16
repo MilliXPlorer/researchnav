@@ -25,7 +25,7 @@ class SharedMonitoringController extends DomainController
     public function research(Request $request): JsonResponse
     {
         $actor = $this->actor($request);
-        $query = ResearchDocument::query()->with('authors');
+        $query = ResearchDocument::query()->with('authors.user');
         if (DomainAuthorization::isResearcher($actor)) {
             $query->where(fn ($q) => $q->where('submitted_by', $actor->id)->orWhereHas('authors', fn ($a) => $a->where('user_id', $actor->id)));
         } elseif (DomainAuthorization::isOffice($actor)) {
@@ -42,7 +42,7 @@ class SharedMonitoringController extends DomainController
             });
         }
 
-        return response()->json(['data' => $query->latest()->get()->map(fn ($item) => ['id' => $item->id, 'title' => $item->title, 'research_stage' => $item->research_stage, 'institute' => $item->institute, 'researchers' => $item->authors->pluck('author_name')->all()])]);
+        return response()->json(['data' => $query->latest()->get()->map(fn ($item) => ['id' => $item->id, 'title' => $item->title, 'research_stage' => $item->research_stage, 'institute' => $item->institute, 'researchers' => $this->researcherNames($item)])]);
     }
 
     public function progressUpdates(Request $request): JsonResponse
@@ -87,8 +87,9 @@ class SharedMonitoringController extends DomainController
         if ($researchDocument->section?->instructor !== null) {
             $assignedActors->put('Instructor', $researchDocument->section->instructor->displayName());
         }
+        $researchDocument->loadMissing('authors.user');
 
-        return response()->json(['data' => ['research_document_id' => $researchDocument->id, 'title' => $researchDocument->title, 'researchers' => $researchDocument->authors()->pluck('author_name'), 'stages' => ['before_proposal_defense' => $this->stage(self::PRE, $entries->where('monitoring_stage', 'before_proposal_defense'), $actor->id, $assignedActors), 'after_proposal_defense' => $this->stage(self::POST, $entries->where('monitoring_stage', 'after_proposal_defense'), $actor->id, $assignedActors)]]])->header('Cache-Control', 'private, no-store');
+        return response()->json(['data' => ['research_document_id' => $researchDocument->id, 'title' => $researchDocument->title, 'researchers' => $this->researcherNames($researchDocument), 'stages' => ['before_proposal_defense' => $this->stage(self::PRE, $entries->where('monitoring_stage', 'before_proposal_defense'), $actor->id, $assignedActors), 'after_proposal_defense' => $this->stage(self::POST, $entries->where('monitoring_stage', 'after_proposal_defense'), $actor->id, $assignedActors)]]])->header('Cache-Control', 'private, no-store');
     }
 
     public function update(Request $request, ResearchDocument $researchDocument, MonitoringService $activity): JsonResponse
@@ -381,6 +382,18 @@ class SharedMonitoringController extends DomainController
             }
         }
         $disk->copy($source, $this->signatureDirectory($researchId, $stage).'/'.$targetEntryId.'.'.pathinfo($source, PATHINFO_EXTENSION));
+    }
+
+    private function researcherNames(ResearchDocument $researchDocument): array
+    {
+        return $researchDocument->authors
+            ->map(
+                fn ($author) =>
+                    $author->user?->profileName()
+                    ?: $author->author_name
+            )
+            ->values()
+            ->all();
     }
 
     private function sectionCapacity(string $stage, string $designation): int
