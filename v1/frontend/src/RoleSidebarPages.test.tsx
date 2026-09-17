@@ -206,6 +206,55 @@ describe("role workspace pages", () => {
     ).toBeInTheDocument();
   });
 
+  it("renders personal user logs from the shared endpoint", async () => {
+    const fetchMock = stubFetch([
+      [
+        /^\/api\/user-logs$/,
+        () =>
+          new Response(
+            JSON.stringify(
+              pageResponse([
+                {
+                  id: 1,
+                  user: {
+                    id: "user-1",
+                    email: "instructor@example.test",
+                  },
+                  action: "CLASS_SECTION_CREATED",
+                  entity_type: "class_section",
+                  entity_id: "7",
+                  description: "Created a research section.",
+                  ip_address: "127.0.0.1",
+                  user_agent: "Vitest",
+                  created_at: "2026-09-17T10:00:00+08:00",
+                },
+              ]),
+            ),
+          ),
+      ],
+    ]);
+
+    render(
+      <RoleSidebarPage
+        role="instructor"
+        selectedNav="User Logs"
+        navigate={vi.fn()}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "User Logs" }),
+    ).toBeInTheDocument();
+
+    expect(screen.getByText("CLASS SECTION CREATED")).toBeInTheDocument();
+    expect(screen.getByText("Created a research section.")).toBeInTheDocument();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/user-logs",
+      expect.anything(),
+    );
+  });
+
   it("reloads Assigned Research when the active account changes", async () => {
     let monitoringRequests = 0;
 

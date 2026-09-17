@@ -350,6 +350,47 @@ describe("role workspaces", () => {
 
   const dashboardScopeFor = (role: Role) => `${role}:fixture@example.test`;
 
+  it("uses the reduced staff sidebar navigation", () => {
+    const navFor = (role: Role) =>
+      roleConfigs.find((config) => config.id === role)?.nav;
+
+    expect(navFor("instructor")).toEqual([
+      "Dashboard",
+      "My Sections",
+      "User Logs",
+    ]);
+
+    expect(navFor("adviser")).toEqual([
+      "Dashboard",
+      "Assigned Research",
+      "User Logs",
+    ]);
+
+    expect(navFor("panel")).toEqual([
+      "Dashboard",
+      "Assigned Research",
+      "User Logs",
+    ]);
+
+    expect(navFor("statistician")).toEqual([
+      "Dashboard",
+      "Assigned Research",
+      "User Logs",
+    ]);
+
+    expect(navFor("librarian")).toEqual([
+      "Dashboard",
+      "Assigned Research",
+      "User Logs",
+    ]);
+
+    expect(navFor("research_editor")).toEqual([
+      "Dashboard",
+      "Assigned Research",
+      "User Logs",
+    ]);
+  });
+
   it("exposes every role destination through the workspace menu", async () => {
     const activeSession = {
       email: "researcher@example.test",
@@ -451,7 +492,7 @@ describe("role workspaces", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Assigned Research" }));
+    fireEvent.click(screen.getByRole("button", { name: "User Logs" }));
     expect(navigate).toHaveBeenCalledWith("/app");
 
     fireEvent.click(
@@ -599,7 +640,7 @@ describe("role workspaces", () => {
     )?.nav;
     expect(officeNav).toEqual([
       "Dashboard",
-      "Research Folders",
+      "Assigned Research",
       "Similarity Check",
       "Upload Manuscript",
       "User & Role Management",
@@ -1834,7 +1875,7 @@ describe("authenticated notifications", () => {
       }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Assigned Research" }),
+      screen.getByRole("button", { name: "My Sections" }),
     ).toBeInTheDocument();
   });
 

@@ -1145,6 +1145,16 @@ export function listAdminAuditLogs(
   );
 }
 
+export function listUserLogs(
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<LaravelPaginatedResponse<AdminAuditLogResource>> {
+  return apiRequest(
+    "/api/user-logs",
+    undefined,
+    fetcher,
+  );
+}
+
 export async function getSystemStatus(
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<SystemStatusResource> {
@@ -1671,18 +1681,6 @@ export async function listAdviserFeedbackHistory(
   ).data;
 }
 
-export async function listAdviserReviewHistory(
-  fetcher: ApiFetch = globalThis.fetch,
-): Promise<InstructorReviewHistoryItem[]> {
-  return (
-    await apiRequest<{ data: InstructorReviewHistoryItem[] }>(
-      "/api/adviser/review-history",
-      undefined,
-      fetcher,
-    )
-  ).data;
-}
-
 export async function listAdviserMonitoring(
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<InstructorMonitoringEntry[]> {
@@ -1777,19 +1775,6 @@ export interface InstructorClassReport {
   documents_count: number;
   statuses: Record<string, number>;
   similarity_buckets: { low: number; moderate: number; high: number };
-}
-
-export interface InstructorReviewHistoryItem {
-  id: number;
-  research_document_id: number;
-  title: string;
-  document_file_id: number | null;
-  review_type: string;
-  remarks: string | null;
-  required_action: string | null;
-  status: string;
-  reviewed_at: string | null;
-  created_at: string | null;
 }
 
 export interface InstructorMonitoringEntry {
@@ -2257,18 +2242,6 @@ export async function assignInstructorPanelist(
   );
 }
 
-export async function listInstructorReviewHistory(
-  fetcher: ApiFetch = globalThis.fetch,
-): Promise<InstructorReviewHistoryItem[]> {
-  return (
-    await apiRequest<{ data: InstructorReviewHistoryItem[] }>(
-      "/api/instructor/review-history",
-      undefined,
-      fetcher,
-    )
-  ).data;
-}
-
 export async function listInstructorMonitoring(
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<InstructorMonitoringEntry[]> {
@@ -2641,18 +2614,6 @@ export async function saveLibrarianReferenceReview(
   );
 }
 
-export async function listLibrarianReviewHistory(
-  fetcher: ApiFetch = globalThis.fetch,
-): Promise<InstructorReviewHistoryItem[]> {
-  return (
-    await apiRequest<{ data: InstructorReviewHistoryItem[] }>(
-      "/api/librarian/review-history",
-      undefined,
-      fetcher,
-    )
-  ).data;
-}
-
 export async function listLibrarianMonitoring(
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<InstructorMonitoringEntry[]> {
@@ -2710,17 +2671,7 @@ export async function saveEditorReview(
     fetcher,
   );
 }
-export async function listEditorHistory(
-  fetcher: ApiFetch = globalThis.fetch,
-): Promise<InstructorReviewHistoryItem[]> {
-  return (
-    await apiRequest<{ data: InstructorReviewHistoryItem[] }>(
-      "/api/editor/review-history",
-      undefined,
-      fetcher,
-    )
-  ).data;
-}
+
 export async function listEditorMonitoring(
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<InstructorMonitoringEntry[]> {

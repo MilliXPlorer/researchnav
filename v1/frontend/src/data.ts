@@ -85,11 +85,7 @@ export const roleConfigs: RoleConfig[] = [
     nav: [
       "Dashboard",
       "Assigned Research",
-      "Title Review",
-      "Manuscript Review",
-      "Research Progress Updates",
-      "Defense Monitoring Forms",
-      "Review History",
+      "User Logs",
     ],
   },
   {
@@ -100,12 +96,7 @@ export const roleConfigs: RoleConfig[] = [
     nav: [
       "Dashboard",
       "My Sections",
-      "Assigned Research",
-      "Title Review",
-      "Manuscript Review",
-      "Research Progress Updates",
-      "Defense Monitoring Forms",
-      "Review History",
+      "User Logs",
     ],
   },
   {
@@ -115,12 +106,8 @@ export const roleConfigs: RoleConfig[] = [
     description: "Read manuscripts and submit evaluations.",
     nav: [
       "Dashboard",
-      "Research Folders",
-      "Assigned Defenses",
-      "Defense Evaluation",
-      "Availability Calendar",
-      "Defense Monitoring Forms",
-      "Evaluation History",
+      "Assigned Research",
+      "User Logs",
     ],
   },
   {
@@ -131,9 +118,7 @@ export const roleConfigs: RoleConfig[] = [
     nav: [
       "Dashboard",
       "Assigned Research",
-      "Statistical Review",
-      "Defense Monitoring Forms",
-      "Review History",
+      "User Logs",
     ],
   },
   {
@@ -145,9 +130,7 @@ export const roleConfigs: RoleConfig[] = [
     nav: [
       "Dashboard",
       "Assigned Research",
-      "Editorial Review",
-      "Defense Monitoring Forms",
-      "Review History",
+      "User Logs",
     ],
   },
   {
@@ -172,11 +155,8 @@ export const roleConfigs: RoleConfig[] = [
       "Review references, citations, links, and source documentation.",
     nav: [
       "Dashboard",
-      "Assignment Requests",
       "Assigned Research",
-      "Reference Review",
-      "Defense Monitoring Forms",
-      "Review History",
+      "User Logs",
     ],
   },
   {
@@ -190,7 +170,7 @@ export const roleConfigs: RoleConfig[] = [
 
     nav: [
       "Dashboard",
-      "Research Folders",
+      "Assigned Research",
       "Similarity Check",
       "Upload Manuscript",
       "User & Role Management",

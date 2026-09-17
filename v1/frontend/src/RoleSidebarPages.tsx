@@ -31,7 +31,6 @@ import {
   listAdviserAdvisees,
   listAdviserMonitoring,
   listAdviserPendingReviews,
-  listAdviserReviewHistory,
   listAdviserFeedbackHistory,
   listAdviserSimilarityAlerts,
   listCategories,
@@ -41,7 +40,6 @@ import {
   listInstructorClassReports,
   listInstructorMonitoring,
   listInstructorPanelists,
-  listInstructorReviewHistory,
   listInstructorAssignedSubmissions,
   listInstructorSections,
   listInstructorSimilarityOverview,
@@ -67,9 +65,8 @@ import {
   listSupportAssignmentInbox,
   listLibrarianAssignedResearch,
   listLibrarianMonitoring,
-  listLibrarianReviewHistory,
   listEditorAssignedResearch,
-  listEditorHistory,
+  listUserLogs,
   listEditorMonitoring,
   markStatisticalReviewNotApplicable,
   provisionAccount,
@@ -232,8 +229,8 @@ export default function RoleSidebarPage({
         case "Defense Monitoring Forms":
         case "Monitoring":
           return <EditorMonitoring role={role} />;
-        case "Review History":
-          return <EditorHistory role={role} navigate={navigate} />;
+        case "User Logs":
+          return <UserLogs role={role} />;
         default:
           return null;
       }
@@ -266,12 +263,12 @@ export default function RoleSidebarPage({
         case "Defense Monitoring Forms":
         case "Monitoring":
           return <AdviserMonitoring role={role} />;
-        case "Review History":
-          return <AdviserReviewHistory role={role} navigate={navigate} />;
         case "Similarity Alerts":
           return <AdviserSimilarityAlerts role={role} navigate={navigate} />;
         case "Feedback History":
           return <AdviserFeedbackHistory role={role} />;
+        case "User Logs":
+          return <UserLogs role={role} />;
         default:
           return null;
       }
@@ -307,19 +304,20 @@ export default function RoleSidebarPage({
         case "Defense Monitoring Forms":
         case "Monitoring":
           return <InstructorMonitoring role={role} />;
-        case "Review History":
-          return <InstructorReviewHistory role={role} navigate={navigate} />;
         case "Panelist Availability":
           return <InstructorPanelists role={role} />;
         case "Similarity Overview":
           return <InstructorSimilarityOverview role={role} />;
         case "Class Reports":
           return <InstructorClassReports role={role} />;
+        case "User Logs":
+          return <UserLogs role={role} />;
         default:
           return null;
       }
     case "panel":
       switch (selectedNav) {
+        case "Assigned Research":
         case "Research Folders":
           return <AssignedResearchFolders role={role} actorKey={actorKey} />;
         case "Assigned Defenses":
@@ -336,6 +334,8 @@ export default function RoleSidebarPage({
         case "Evaluation History":
         case "Panel History":
           return <PanelHistory role={role} />;
+        case "User Logs":
+          return <UserLogs role={role} />;
         default:
           return null;
       }
@@ -350,9 +350,10 @@ export default function RoleSidebarPage({
         case "Defense Monitoring Forms":
         case "Monitoring":
           return <SharedMonitoring role={role} />;
-        case "Review History":
         case "Sign-offs Issued":
           return <StatisticianSignoffs role={role} />;
+        case "User Logs":
+          return <UserLogs role={role} />;
         default:
           return null;
       }
@@ -383,14 +384,14 @@ export default function RoleSidebarPage({
         case "Defense Monitoring Forms":
         case "Monitoring":
           return <LibrarianMonitoring role={role} />;
-        case "Review History":
-          return <LibrarianReviewHistory role={role} navigate={navigate} />;
         case "Repository Catalog":
           return <LibrarianRepositoryCatalog role={role} navigate={navigate} />;
         case "Metadata Standards":
           return <LibrarianMetadataStandards role={role} />;
         case "Retention & Compliance":
           return <LibrarianRetentionLogs role={role} />;
+        case "User Logs":
+          return <UserLogs role={role} />;
         default:
           return null;
       }
@@ -467,6 +468,103 @@ function PanelAvailability({ role }: { role: Role }) {
           database has no safe Panelist availability field.
         </p>
       </section>
+    </div>
+  );
+}
+
+function UserLogs({ role }: { role: Role }) {
+  const [logs, setLogs] = useState<
+    Awaited<ReturnType<typeof listUserLogs>>["data"]
+  >([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    setLoading(true);
+    setError(null);
+
+    void listUserLogs()
+      .then((response) => {
+        if (!cancelled) {
+          setLogs(response.data);
+        }
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled) {
+          setError(
+            reason instanceof Error
+              ? reason.message
+              : "Unable to load your activity logs.",
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [attempt]);
+
+  return (
+    <div className="workspace-content admin-sidebar-page">
+      <RolePageHeader
+        role={role}
+        title="User Logs"
+        description="Activity recorded for your account."
+        action={
+          <Button onClick={() => setAttempt((value) => value + 1)}>
+            Refresh
+          </Button>
+        }
+      />
+
+      {loading ? (
+        <Loading label="Loading user logs" />
+      ) : error ? (
+        <InlineError
+          message={error}
+          retry={() => setAttempt((value) => value + 1)}
+        />
+      ) : logs.length === 0 ? (
+        <p className="admin-empty">No activity has been recorded yet.</p>
+      ) : (
+        <section className="panel-card admin-data-card">
+          <div className="admin-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Action</th>
+                  <th>Related record</th>
+                  <th>Description</th>
+                  <th>Date &amp; time</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {logs.map((log) => (
+                  <tr key={log.id}>
+                    <td>{label(log.action)}</td>
+                    <td>
+                      {log.subject
+                        ? `${label(log.subject.type)} #${log.subject.id}`
+                        : "—"}
+                    </td>
+                    <td>{log.description ?? "—"}</td>
+                    <td>{displayDate(log.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
     </div>
   );
 }
@@ -676,81 +774,6 @@ function AdviserPendingReviews({
                         }
                       >
                         Open review
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
-    </div>
-  );
-}
-
-function AdviserReviewHistory({
-  role,
-  navigate,
-}: {
-  role: Role;
-  navigate: (path: string) => void;
-}) {
-  const [attempt, reload] = useAttempt();
-  const state = useLoad(() => listAdviserReviewHistory(), attempt);
-  return (
-    <div className="workspace-content admin-sidebar-page">
-      <RolePageHeader
-        role={role}
-        title="Review history"
-        description="Your persisted title and manuscript review actions."
-        action={<Button onClick={reload}>Refresh</Button>}
-      />
-      {state.status === "loading" ? (
-        <Loading label="Loading review history" />
-      ) : state.status === "error" ? (
-        <InlineError message={state.message} retry={reload} />
-      ) : state.data.length === 0 ? (
-        <p className="admin-empty">No Adviser review history is available.</p>
-      ) : (
-        <section className="panel-card admin-data-card">
-          <div className="admin-table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Research</th>
-                  <th>Stage</th>
-                  <th>Type</th>
-                  <th>Remarks</th>
-                  <th>Required action</th>
-                  <th>Status</th>
-                  <th>Date</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {state.data.map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.title}</td>
-                    <td>
-                      {label(
-                        (item as typeof item & { research_stage?: string })
-                          .research_stage ?? "",
-                      )}
-                    </td>
-                    <td>{label(item.review_type)}</td>
-                    <td>{item.remarks ?? "—"}</td>
-                    <td>{item.required_action ?? "—"}</td>
-                    <td>{label(item.status)}</td>
-                    <td>{displayDate(item.reviewed_at ?? item.created_at)}</td>
-                    <td>
-                      <Button
-                        variant="secondary"
-                        onClick={() =>
-                          navigate(`/research/${item.research_document_id}`)
-                        }
-                      >
-                        Open research
                       </Button>
                     </td>
                   </tr>
@@ -1570,76 +1593,6 @@ function InstructorPanelists({ role }: { role: Role }) {
             </form>
           </section>
         </>
-      )}
-    </div>
-  );
-}
-
-function InstructorReviewHistory({
-  role,
-  navigate,
-}: {
-  role: Role;
-  navigate: (path: string) => void;
-}) {
-  const [attempt, reload] = useAttempt();
-  const state = useLoad(() => listInstructorReviewHistory(), attempt);
-  return (
-    <div className="workspace-content admin-sidebar-page">
-      <RolePageHeader
-        role={role}
-        title="Review history"
-        description="Your persisted comments, revision requests, and recommendations."
-        action={<Button onClick={reload}>Refresh</Button>}
-      />
-      {state.status === "loading" ? (
-        <Loading label="Loading review history" />
-      ) : state.status === "error" ? (
-        <InlineError message={state.message} retry={reload} />
-      ) : state.data.length === 0 ? (
-        <p className="admin-empty">
-          No Instructor review history is available.
-        </p>
-      ) : (
-        <section className="panel-card admin-data-card">
-          <div className="admin-table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Research</th>
-                  <th>Type</th>
-                  <th>Remarks</th>
-                  <th>Required action</th>
-                  <th>Status</th>
-                  <th>Date</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {state.data.map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.title}</td>
-                    <td>{label(item.review_type)}</td>
-                    <td>{item.remarks ?? "—"}</td>
-                    <td>{item.required_action ?? "—"}</td>
-                    <td>{label(item.status)}</td>
-                    <td>{displayDate(item.reviewed_at ?? item.created_at)}</td>
-                    <td>
-                      <Button
-                        variant="secondary"
-                        onClick={() =>
-                          navigate(`/research/${item.research_document_id}`)
-                        }
-                      >
-                        Open research
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
       )}
     </div>
   );
@@ -5961,48 +5914,7 @@ function EditorMonitoring({ role }: { role: Role }) {
     </div>
   );
 }
-function EditorHistory({
-  role,
-  navigate,
-}: {
-  role: Role;
-  navigate: (path: string) => void;
-}) {
-  const [attempt, reload] = useAttempt();
-  const state = useLoad(() => listEditorHistory(), attempt);
-  return (
-    <div className="workspace-content admin-sidebar-page">
-      <RolePageHeader
-        role={role}
-        title="Review history"
-        description="Previous editorial comments, corrections, and completed reviews."
-      />
-      {state.status === "loading" ? (
-        <Loading label="Loading history" />
-      ) : state.status === "error" ? (
-        <InlineError message={state.message} retry={reload} />
-      ) : state.data.length === 0 ? (
-        <p className="admin-empty">No editorial review history.</p>
-      ) : (
-        <section className="panel-card admin-data-card">
-          {state.data.map((item) => (
-            <p key={item.id}>
-              {item.title} · {label(item.review_type)} · {item.remarks}{" "}
-              <Button
-                variant="secondary"
-                onClick={() =>
-                  navigate(`/research/${item.research_document_id}`)
-                }
-              >
-                Open
-              </Button>
-            </p>
-          ))}
-        </section>
-      )}
-    </div>
-  );
-}
+
 
 function LibrarianAssignmentRequests({ role }: { role: Role }) {
   const [attempt, reload] = useAttempt();
@@ -6310,61 +6222,6 @@ function LibrarianMonitoring({ role }: { role: Role }) {
                       {entry.verified_at
                         ? displayDate(entry.verified_at)
                         : "Pending Instructor verification"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
-    </div>
-  );
-}
-
-function LibrarianReviewHistory({
-  role,
-  navigate,
-}: {
-  role: Role;
-  navigate: (path: string) => void;
-}) {
-  const [attempt, reload] = useAttempt();
-  const state = useLoad(() => listLibrarianReviewHistory(), attempt);
-  return (
-    <div className="workspace-content admin-sidebar-page">
-      <RolePageHeader
-        role={role}
-        title="Review history"
-        description="Previous Librarian comments, correction requests, and reference clearances."
-      />
-      {state.status === "loading" ? (
-        <Loading label="Loading history" />
-      ) : state.status === "error" ? (
-        <InlineError message={state.message} retry={reload} />
-      ) : state.data.length === 0 ? (
-        <p className="admin-empty">No Librarian review history.</p>
-      ) : (
-        <section className="panel-card admin-data-card">
-          <div className="admin-table-wrap">
-            <table>
-              <tbody>
-                {state.data.map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.title}</td>
-                    <td>{label(item.review_type)}</td>
-                    <td>{item.remarks}</td>
-                    <td>{item.required_action ?? "—"}</td>
-                    <td>{label(item.status)}</td>
-                    <td>
-                      <Button
-                        variant="secondary"
-                        onClick={() =>
-                          navigate(`/research/${item.research_document_id}`)
-                        }
-                      >
-                        Open research
-                      </Button>
                     </td>
                   </tr>
                 ))}

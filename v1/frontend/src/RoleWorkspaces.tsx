@@ -413,7 +413,7 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
       signoffs: {
         title: "Sign-offs",
         description: "Recorded statistical sign-offs.",
-        destination: "Review History",
+        destination: "Sign-offs Issued",
       },
       completed_references: {
         title: "Completed references",

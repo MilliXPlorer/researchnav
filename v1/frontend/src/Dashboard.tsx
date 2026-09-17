@@ -84,7 +84,6 @@ const navIcons: Record<string, LucideIcon> = {
   "Manuscript Review": BookOpenCheck,
   "Defense Monitoring Forms": Activity,
   "Research Progress Updates": Activity,
-  "Review History": FileClock,
   "Review Submissions": ClipboardCheck,
   "Assigned Defenses": Presentation,
   "Defense Evaluation": ClipboardCheck,

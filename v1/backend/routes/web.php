@@ -32,6 +32,7 @@ use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
+use App\Http\Controllers\UserLogController;
 
 Route::prefix('api')
     ->middleware([AddApiSecurityHeaders::class, 'api.bodylimit'])
@@ -55,6 +56,13 @@ Route::prefix('api')
             Route::delete('photo', [ProfileController::class, 'removePhoto'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('photo/{version}', [ProfileController::class, 'photo'])->whereUuid('version');
         });
+
+        Route::get('user-logs', [UserLogController::class, 'index'])
+            ->middleware([
+                'current.user',
+                'account.active',
+                'role:instructor,adviser,panel,statistician,librarian,research_editor',
+            ]);
 
         Route::prefix('admin')->middleware(['current.user', 'account.active', 'active.admin'])->group(function (): void {
             Route::get('accounts', [ApiController::class, 'accounts']);
