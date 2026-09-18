@@ -1,3 +1,4 @@
+import { philippineYear } from "./dateTime";
 import { useId } from "react";
 import type { ComponentProps, KeyboardEvent } from "react";
 
@@ -8,7 +9,7 @@ type DatePickerInputProps = Omit<
   type: "date" | "datetime-local";
 };
 
-const currentYear = new Date().getUTCFullYear();
+const currentYear = philippineYear();
 const years = Array.from({ length: currentYear - 1901 + 1 }, (_, index) =>
   String(currentYear - index),
 );

@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  formatPhilippineDateTime,
+  philippineDateToday,
+} from "./dateTime";
+import {
   ArrowLeft,
   CheckCircle2,
   ClipboardCheck,
@@ -696,7 +700,7 @@ function requireResearcherPage(
 }
 
 function displayDate(value: string | null) {
-  return value ? new Date(value).toLocaleString() : "—";
+  return formatPhilippineDateTime(value);
 }
 
 function label(value: string) {
@@ -811,7 +815,7 @@ function AdviserMonitoring({ role }: { role: Role }) {
     try {
       await saveAdviserMonitoring(researchId, {
         monitoring_stage: stage,
-        activity_date: new Date().toISOString().slice(0, 10),
+        activity_date: philippineDateToday(),
         activity: activity.trim(),
         remarks: remarks.trim() || null,
         status: "completed",
@@ -1621,7 +1625,7 @@ function InstructorMonitoring({ role }: { role: Role }) {
     try {
       await saveInstructorMonitoring(researchId, {
         monitoring_stage: stage,
-        activity_date: new Date().toISOString().slice(0, 10),
+        activity_date: philippineDateToday(),
         activity: activity.trim(),
         remarks: remarks.trim() || null,
         status: "completed",
@@ -5845,7 +5849,7 @@ function EditorMonitoring({ role }: { role: Role }) {
               event.preventDefault();
               void saveEditorMonitoring(id, {
                 monitoring_stage: stage,
-                activity_date: new Date().toISOString().slice(0, 10),
+                activity_date: philippineDateToday(),
                 activity,
                 status: "completed",
                 signature_status: "signed",
@@ -6130,7 +6134,7 @@ function LibrarianMonitoring({ role }: { role: Role }) {
     event.preventDefault();
     await saveLibrarianMonitoring(id, {
       monitoring_stage: stage,
-      activity_date: new Date().toISOString().slice(0, 10),
+      activity_date: philippineDateToday(),
       activity,
       remarks: remarks || null,
       status: "completed",

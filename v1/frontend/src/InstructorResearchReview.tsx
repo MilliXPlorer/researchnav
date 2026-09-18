@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { formatPhilippineDateTime } from "./dateTime";
 import { Download, MessageSquareText, RotateCcw, Scale } from "lucide-react";
 import {
   ApiError,
@@ -517,7 +518,7 @@ export default function InstructorResearchReview({
                   </span>
                   <time>
                     {item.validated_at
-                      ? new Date(item.validated_at).toLocaleString()
+                      ? formatPhilippineDateTime(item.validated_at)
                       : "Pending"}
                   </time>
                 </div>

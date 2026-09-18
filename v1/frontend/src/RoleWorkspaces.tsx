@@ -1,6 +1,7 @@
 import { ExternalLink, LibraryBig, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { Button } from "./components";
+import { formatPhilippineDate } from "./dateTime";
 import { Modal } from "./Modal";
 import AdminResearchWorkspace from "./AdminResearchWorkspace";
 import InstructorResearchReview from "./InstructorResearchReview";
@@ -1370,6 +1371,5 @@ function humanize(value: string) {
 }
 
 function formatDate(value: string) {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
+  return formatPhilippineDate(value);
 }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { formatPhilippineDateTime } from "./dateTime";
 import { Folder, RefreshCw } from "lucide-react";
 import {
   ApiError,
@@ -23,8 +24,7 @@ function humanize(value: string | null) {
 
 function displayDate(value: string | null) {
   if (!value) return "Date not recorded";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  return formatPhilippineDateTime(value);
 }
 
 function errorMessage(error: unknown) {

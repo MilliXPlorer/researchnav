@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { BadgeCheck, Pencil, Plus, Printer, Trash2 } from "lucide-react";
+import { formatPhilippineDate } from "./dateTime";
 import preDefenseForm from "./form_templates/monitoring-pre-defense.png";
 import postDefenseForm from "./form_templates/monitoring-post-defense.png";
 import { Button } from "./components";
@@ -563,7 +564,7 @@ export default function SharedMonitoring({
             <span>
               Verified by Research Instructor:{" "}
               {current.verified_at
-                ? `Verified ${new Date(current.verified_at).toLocaleDateString()}`
+                ? `Verified ${formatPhilippineDate(current.verified_at)}`
                 : "Pending verification"}
             </span>
             <div className="row-actions">

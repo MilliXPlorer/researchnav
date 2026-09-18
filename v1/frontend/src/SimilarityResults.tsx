@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { formatPhilippineDateTime } from "./dateTime";
 import { ExternalLink } from "lucide-react";
 import {
   listPersistedSimilarityResults,
@@ -324,7 +325,7 @@ export default function SimilarityResults({
                   <p>
                     <strong>Analysis date:</strong>{" "}
                     {result.analyzed_at
-                      ? new Date(result.analyzed_at).toLocaleString()
+                      ? formatPhilippineDateTime(result.analyzed_at)
                       : "Not recorded"}
                   </p>
                   <button

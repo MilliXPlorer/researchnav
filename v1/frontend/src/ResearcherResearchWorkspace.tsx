@@ -1,3 +1,4 @@
+import { formatPhilippineDateTime } from "./dateTime";
 import {
   ArrowLeft,
   Eye,
@@ -79,9 +80,7 @@ function humanize(value: string) {
 }
 
 function formatDate(value: string | null) {
-  if (!value) return "—";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  return formatPhilippineDateTime(value);
 }
 
 function formatBytes(bytes: number) {

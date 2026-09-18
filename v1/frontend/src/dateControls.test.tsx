@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { philippineYear } from "./dateTime";
 import { describe, expect, it, vi } from "vitest";
 import {
   AcademicYearSelect,
@@ -31,7 +32,7 @@ describe("date controls", () => {
   });
 
   it("offers publication and academic years as selections", () => {
-    const latestYear = new Date().getUTCFullYear();
+    const latestYear = philippineYear();
     render(
       <>
         <PublicationYearInput

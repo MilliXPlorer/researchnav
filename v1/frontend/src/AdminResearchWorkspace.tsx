@@ -1,4 +1,5 @@
 import { ArrowLeft, Pencil, Trash2 } from "lucide-react";
+import { formatPhilippineDateTime } from "./dateTime";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   archiveInternalResearch,
@@ -1238,7 +1239,7 @@ export default function AdminResearchWorkspace({
                   <strong>{humanize(item.activity_type)}</strong>
                   {item.remarks ? ` — ${item.remarks}` : ""}
                   {item.activity_date
-                    ? ` (${new Date(item.activity_date).toLocaleString()})`
+                    ? ` (${formatPhilippineDateTime(item.activity_date)})`
                     : ""}
                 </span>
               </li>
@@ -1408,7 +1409,7 @@ export default function AdminResearchWorkspace({
                       <dt>Validated at</dt>
                       <dd>
                         {validation.validated_at
-                          ? new Date(validation.validated_at).toLocaleString()
+                          ? formatPhilippineDateTime(validation.validated_at)
                           : "Not recorded"}
                       </dd>
                     </div>

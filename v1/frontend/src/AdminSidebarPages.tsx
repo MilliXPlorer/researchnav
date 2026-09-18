@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { formatPhilippineDateTime } from "./dateTime";
 import { Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import {
   ApiError,
@@ -1279,7 +1280,7 @@ function fullName(user: AdminUserResource) {
     .join(" ");
 }
 function displayDate(value: string | null) {
-  return value ? new Date(value).toLocaleString() : "—";
+  return formatPhilippineDateTime(value);
 }
 function label(value: string) {
   return value
