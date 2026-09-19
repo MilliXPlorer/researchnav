@@ -824,8 +824,7 @@ function AllUsers({
                           : "none"
                       }
                     >
-                      Name
-                      {sort === "last_name" && (sortDirection === "asc" ? " ↑" : " ↓")}
+                      Name {sort === "last_name" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
                     </th>
                     <th
                       onClick={() => changeSort("email")}
@@ -837,8 +836,7 @@ function AllUsers({
                           : "none"
                       }
                     >
-                      Email
-                      {sort === "email" && (sortDirection === "asc" ? " ↑" : " ↓")}
+                      Email {sort === "email" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
                     </th>
 
                     <th
@@ -851,8 +849,7 @@ function AllUsers({
                           : "none"
                       }
                     >
-                      Role
-                      {sort === "role" && (sortDirection === "asc" ? " ↑" : " ↓")}
+                      Role {sort === "role" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
                     </th>
 
                     <th
@@ -865,8 +862,7 @@ function AllUsers({
                           : "none"
                       }
                     >
-                      Access
-                      {sort === "access_status" && (sortDirection === "asc" ? " ↑" : " ↓")}
+                      Access {sort === "access_status" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
                     </th>
 
                     <th
@@ -879,8 +875,7 @@ function AllUsers({
                           : "none"
                       }
                     >
-                      Last login
-                      {sort === "last_login_at" && (sortDirection === "asc" ? " ↑" : " ↓")}
+                      Last login {sort === "last_login_at" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
                     </th>
 
                     <th
@@ -893,8 +888,7 @@ function AllUsers({
                           : "none"
                       }
                     >
-                      Created
-                      {sort === "created_at" && (sortDirection === "asc" ? " ↑" : " ↓")}
+                      Created {sort === "created_at" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
                     </th>
                     <th>Actions</th>
                   </tr>
