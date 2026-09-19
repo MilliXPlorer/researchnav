@@ -814,16 +814,21 @@ function AllUsers({
                 <caption className="sr-only">User accounts</caption>
                 <thead>
                   <tr>
-                    <th aria-sort={sort === "last_name" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}>
-                      <button
-                        type="button"
-                        onClick={() => changeSort("last_name")}
-                      >
-                        Name
-                        {sort === "last_name" && (sortDirection === "asc" ? " ↑" : " ↓")}
-                      </button>
+                    <th
+                      onClick={() => changeSort("last_name")}
+                      aria-sort={
+                        sort === "last_name"
+                          ? sortDirection === "asc"
+                            ? "ascending"
+                            : "descending"
+                          : "none"
+                      }
+                    >
+                      Name
+                      {sort === "last_name" && (sortDirection === "asc" ? " ↑" : " ↓")}
                     </th>
                     <th
+                      onClick={() => changeSort("email")}
                       aria-sort={
                         sort === "email"
                           ? sortDirection === "asc"
@@ -832,13 +837,12 @@ function AllUsers({
                           : "none"
                       }
                     >
-                      <button type="button" onClick={() => changeSort("email")}>
-                        Email
-                        {sort === "email" && (sortDirection === "asc" ? " ↑" : " ↓")}
-                      </button>
+                      Email
+                      {sort === "email" && (sortDirection === "asc" ? " ↑" : " ↓")}
                     </th>
 
                     <th
+                      onClick={() => changeSort("role")}
                       aria-sort={
                         sort === "role"
                           ? sortDirection === "asc"
@@ -847,13 +851,12 @@ function AllUsers({
                           : "none"
                       }
                     >
-                      <button type="button" onClick={() => changeSort("role")}>
-                        Role
-                        {sort === "role" && (sortDirection === "asc" ? " ↑" : " ↓")}
-                      </button>
+                      Role
+                      {sort === "role" && (sortDirection === "asc" ? " ↑" : " ↓")}
                     </th>
 
                     <th
+                      onClick={() => changeSort("access_status")}
                       aria-sort={
                         sort === "access_status"
                           ? sortDirection === "asc"
@@ -862,13 +865,12 @@ function AllUsers({
                           : "none"
                       }
                     >
-                      <button type="button" onClick={() => changeSort("access_status")}>
-                        Access
-                        {sort === "access_status" && (sortDirection === "asc" ? " ↑" : " ↓")}
-                      </button>
+                      Access
+                      {sort === "access_status" && (sortDirection === "asc" ? " ↑" : " ↓")}
                     </th>
 
                     <th
+                      onClick={() => changeSort("last_login_at")}
                       aria-sort={
                         sort === "last_login_at"
                           ? sortDirection === "asc"
@@ -877,13 +879,12 @@ function AllUsers({
                           : "none"
                       }
                     >
-                      <button type="button" onClick={() => changeSort("last_login_at")}>
-                        Last login
-                        {sort === "last_login_at" && (sortDirection === "asc" ? " ↑" : " ↓")}
-                      </button>
+                      Last login
+                      {sort === "last_login_at" && (sortDirection === "asc" ? " ↑" : " ↓")}
                     </th>
 
                     <th
+                      onClick={() => changeSort("created_at")}
                       aria-sort={
                         sort === "created_at"
                           ? sortDirection === "asc"
@@ -892,10 +893,8 @@ function AllUsers({
                           : "none"
                       }
                     >
-                      <button type="button" onClick={() => changeSort("created_at")}>
-                        Created
-                        {sort === "created_at" && (sortDirection === "asc" ? " ↑" : " ↓")}
-                      </button>
+                      Created
+                      {sort === "created_at" && (sortDirection === "asc" ? " ↑" : " ↓")}
                     </th>
                     <th>Actions</th>
                   </tr>

@@ -768,9 +768,8 @@ describe("administrator sidebar pages", () => {
     ).toBeInTheDocument();
 
     fireEvent.click(
-      screen.getByRole("button", { name: /Name/i }),
+      screen.getByRole("columnheader", { name: /Name/i }),
     );
-
     await waitFor(() => {
       const sortCall = fetchMock.mock.calls.find(([input]) => {
         const params = userParams(input);
@@ -822,10 +821,10 @@ describe("administrator sidebar pages", () => {
 
     await screen.findByText("member@example.test");
 
-    const nameButton = screen.getByRole("button", { name: /Name/i });
+    const nameHeader = screen.getByRole("columnheader", { name: /Name/i });
 
-    fireEvent.click(nameButton);
-    fireEvent.click(nameButton);
+    fireEvent.click(nameHeader);
+    fireEvent.click(nameHeader);
 
     await waitFor(() => {
       const descendingCall = fetchMock.mock.calls.find(([input]) => {
@@ -887,7 +886,7 @@ describe("administrator sidebar pages", () => {
     ] as const;
 
     for (const [label, sort] of columns) {
-      fireEvent.click(screen.getByRole("button", { name: label }));
+      fireEvent.click(screen.getByRole("columnheader", { name: label }));
 
       await waitFor(() => {
         const matchingCall = fetchMock.mock.calls.find(([input]) => {
