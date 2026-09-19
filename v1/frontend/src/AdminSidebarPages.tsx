@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatPhilippineDateTime } from "./dateTime";
 import { Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import {
@@ -26,6 +26,7 @@ import { DatePickerInput } from "./dateControls";
 import { ConfirmDialog, Modal } from "./Modal";
 import ResearchOfficeBulkImport from "./ResearchOfficeBulkImport";
 import { useLiveFilters } from "./useLiveFilters";
+import { useDebouncedValue } from "./useDebouncedValue";
 import { filterUserRows } from "./userManagement";
 
 const roles: AdminRole[] = [
@@ -553,14 +554,23 @@ function AllUsers({
   );
   const [saveMessage, setSaveMessage] = useState("");
   const [loading, setLoading] = useState(true);
-  const { filters, change } = useLiveFilters(
-    { search: "", role: "", access_status: "" },
-    (next) => {
-      setPage(1);
-      setQuery(next);
-      reload();
-    },
-  );
+  const [filters, setFilters] = useState({
+    search: "",
+    role: "",
+    access_status: "",
+  });
+  const debouncedSearch = useDebouncedValue(filters.search, 350);
+  const searchMounted = useRef(false);
+
+  useEffect(() => {
+    if (!searchMounted.current) {
+      searchMounted.current = true;
+      return;
+    }
+    setPage(1);
+    setQuery((current) => ({ ...current, search: debouncedSearch }));
+    reload();
+  }, [debouncedSearch]);
 
   function reload() {
     setError("");
@@ -692,7 +702,12 @@ function AllUsers({
             Search
             <input
               value={filters.search}
-              onChange={(event) => change("search", event.target.value)}
+              onChange={(event) =>
+                setFilters((current) => ({
+                  ...current,
+                  search: event.target.value,
+                }))
+              }
               placeholder="Name, email, or ID"
             />
           </label>
@@ -700,7 +715,13 @@ function AllUsers({
             Role
             <select
               value={filters.role}
-              onChange={(event) => change("role", event.target.value)}
+              onChange={(event) => {
+                const next = event.target.value;
+                setFilters((current) => ({ ...current, role: next }));
+                setPage(1);
+                setQuery((current) => ({ ...current, role: next }));
+                reload();
+              }}
             >
               <option value="">All roles</option>
               {roles.map((role) => (
@@ -714,7 +735,13 @@ function AllUsers({
             Access status
             <select
               value={filters.access_status}
-              onChange={(event) => change("access_status", event.target.value)}
+              onChange={(event) => {
+                const next = event.target.value;
+                setFilters((current) => ({ ...current, access_status: next }));
+                setPage(1);
+                setQuery((current) => ({ ...current, access_status: next }));
+                reload();
+              }}
             >
               <option value="">All statuses</option>
               {accessStatuses.map((status) => (

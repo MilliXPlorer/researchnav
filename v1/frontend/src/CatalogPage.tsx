@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import searchLoading from "./assets/search-loading.webm";
 import {
   ArrowLeft,
   ArrowRight,
@@ -398,10 +399,22 @@ export default function CatalogPage({
         <div className={`catalog-layout${session ? " is-authenticated" : ""}`}>
           <section className="result-list" aria-label="Research results">
             {hasActiveSimilarityQuery && similarityLoading ? (
-              <EmptyState
-                title="Calculating similarity results"
-                message="Ranking public research studies for your submitted search…"
-              />
+              <div className="empty-state">
+              <div style={{ width: 110, height: 110, margin: "0 auto 12px" }}>
+                <video
+                  src={searchLoading}
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  aria-hidden="true"
+                  style={{ width: "100%", height: "100%" }}
+                />
+              </div>
+
+                <h3>Calculating similarity results</h3>
+                <p>Ranking public research studies for your submitted search…</p>
+              </div>
             ) : hasActiveSimilarityQuery && similarityError ? (
               <div role="alert">
                 <EmptyState

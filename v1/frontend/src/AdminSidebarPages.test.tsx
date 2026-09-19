@@ -1,11 +1,19 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
   waitFor,
   within,
 } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import AdminSidebarPage from "./AdminSidebarPages";
 import Dashboard from "./Dashboard";
 
@@ -591,5 +599,131 @@ describe("administrator sidebar pages", () => {
       screen.getByText("database.audit_logs_unavailable"),
     ).toBeInTheDocument();
     expect(screen.getByText(/10 applied/)).toBeInTheDocument();
+  });
+
+  it("debounces the AllUsers search at 350 ms and resets page to 1", async () => {
+    let userRequests = 0;
+    const refined = { ...user, email: "anna@example.test" };
+    const page1Users = [
+      user,
+      { ...user, id: "b", email: "second@example.test" },
+    ];
+    function userParams(input: string | URL | Request) {
+      const url = input instanceof Request ? input.url : String(input);
+      const sep = url.indexOf("?");
+      return new URLSearchParams(sep >= 0 ? url.slice(sep + 1) : "");
+    }
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const params = userParams(input);
+      const path = (input instanceof Request ? input.url : String(input)).split("?")[0];
+      if (path === "/api/admin/users") {
+        userRequests += 1;
+        if (params.get("search") === "ann") {
+          return new Response(
+            JSON.stringify({
+              data: [refined],
+              links: { first: null, last: null, prev: null, next: null },
+              meta: {
+                current_page: 1,
+                from: 1,
+                last_page: 1,
+                links: [],
+                path: "/api/admin/users",
+                per_page: 25,
+                to: 1,
+                total: 1,
+              },
+            }),
+          );
+        }
+        if (params.get("page") === "2") {
+          return new Response(
+            JSON.stringify({
+              data: [
+                { ...user, id: "c", email: "page2@example.test" },
+              ],
+              links: {
+                first: null,
+                last: null,
+                prev: "/api/admin/users?page=1",
+                next: null,
+              },
+              meta: {
+                current_page: 2,
+                from: 3,
+                last_page: 2,
+                links: [],
+                path: "/api/admin/users",
+                per_page: 25,
+                to: 3,
+                total: 3,
+              },
+            }),
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            data: page1Users,
+            links: {
+              first: null,
+              last: null,
+              prev: null,
+              next: "/api/admin/users?page=2",
+            },
+            meta: {
+              current_page: 1,
+              from: 1,
+              last_page: 2,
+              links: [],
+              path: "/api/admin/users",
+              per_page: 25,
+              to: 2,
+              total: 3,
+            },
+          }),
+        );
+      }
+      return new Response(JSON.stringify(systemStatusResponse));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AdminSidebarPage selectedNav="All Users" />);
+    expect(
+      await screen.findByText("member@example.test"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("second@example.test")).toBeInTheDocument();
+    expect(screen.getByText("Page 1 of 2", { exact: false })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(
+      await screen.findByText("page2@example.test"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Page 2 of 2", { exact: false })).toBeInTheDocument();
+    const requestsAfterPage2 = userRequests;
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    fireEvent.change(screen.getByLabelText("Search"), {
+      target: { value: "ann" },
+    });
+    expect(screen.getByLabelText("Search")).toHaveValue("ann");
+
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(userRequests).toBe(requestsAfterPage2);
+
+    await act(async () => {
+      vi.advanceTimersByTime(50);
+    });
+    expect(userRequests).toBeGreaterThan(requestsAfterPage2);
+
+    const searchCall = fetchMock.mock.calls.find(
+      ([input]) => userParams(input).get("search") === "ann",
+    );
+    expect(searchCall).toBeDefined();
+    expect(userParams(searchCall![0]).get("page")).not.toBe("2");
+
+    vi.useRealTimers();
   });
 });
