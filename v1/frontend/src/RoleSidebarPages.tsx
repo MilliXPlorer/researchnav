@@ -127,7 +127,7 @@ import {
   type ResearchDocumentSummaryResource,
   type StatisticianQueueItem,
 } from "./api";
-import { Button } from "./components";
+import { Button, Pagination as PageControls } from "./components";
 import {
   AcademicYearSelect,
   DatePickerInput,
@@ -604,29 +604,11 @@ function UserLogs({ role }: { role: Role }) {
             </table>
           </div>
 
-          <div className="admin-pagination">
-            <Button
-              variant="secondary"
-              disabled={page <= 1}
-              onClick={() => setPage((current) => Math.max(1, current - 1))}
-            >
-              Previous
-            </Button>
-
-            <span>
-              Page {page} of {lastPage}
-            </span>
-
-            <Button
-              variant="secondary"
-              disabled={page >= lastPage}
-              onClick={() =>
-                setPage((current) => Math.min(lastPage, current + 1))
-              }
-            >
-              Next
-            </Button>
-          </div>
+          <PageControls
+            page={page}
+            lastPage={lastPage}
+            onPage={(nextPage) => setPage(nextPage)}
+          />
         </section>
       )}
       {confirmClear && (

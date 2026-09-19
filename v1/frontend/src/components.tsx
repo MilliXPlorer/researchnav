@@ -116,6 +116,40 @@ export function SimilarityRing({
   );
 }
 
+export function Pagination({
+  page,
+  lastPage,
+  onPage,
+}: {
+  page: number;
+  lastPage: number;
+  onPage: (page: number) => void;
+}) {
+  return (
+    <nav className="admin-pagination" aria-label="Pagination">
+      <Button
+        variant="secondary"
+        disabled={page <= 1}
+        onClick={() => onPage(Math.max(1, page - 1))}
+      >
+        Previous
+      </Button>
+
+      <span>
+        Page {page} of {lastPage}
+      </span>
+
+      <Button
+        variant="secondary"
+        disabled={page >= lastPage}
+        onClick={() => onPage(Math.min(lastPage, page + 1))}
+      >
+        Next
+      </Button>
+    </nav>
+  );
+}
+
 export function SectionHeading({
   eyebrow,
   title,
