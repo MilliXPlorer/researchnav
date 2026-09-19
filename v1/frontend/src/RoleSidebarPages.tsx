@@ -488,6 +488,18 @@ function UserLogs({ role }: { role: Role }) {
   const [lastPage, setLastPage] = useState(1);
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [query, setQuery] = useState({
+    search: "",
+    created_from: "",
+    created_to: "",
+  });
+  const { filters, change } = useLiveFilters(
+    { search: "", created_from: "", created_to: "" },
+    (next) => {
+      setPage(1);
+      setQuery(next);
+    },
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -495,7 +507,10 @@ function UserLogs({ role }: { role: Role }) {
     setLoading(true);
     setError(null);
 
-    void listUserLogs(page)
+    void listUserLogs({
+      ...query,
+      page: page > 1 ? page : undefined,
+    })
       .then((response) => {
         if (!cancelled) {
           setLogs(response.data);
@@ -519,7 +534,7 @@ function UserLogs({ role }: { role: Role }) {
     return () => {
       cancelled = true;
     };
-  }, [attempt, page]);
+  }, [attempt, page, query]);
   async function clearVisibleLogs() {
     setClearing(true);
     setError(null);
@@ -565,6 +580,41 @@ function UserLogs({ role }: { role: Role }) {
         }
       />
 
+      <section className="panel-card admin-data-card">
+        <form
+          className="admin-filters"
+          onSubmit={(event) => event.preventDefault()}
+        >
+          <label>
+            Search logs
+            <input
+              type="search"
+              value={filters.search}
+              placeholder="Action, record, or description"
+              onChange={(event) => change("search", event.target.value)}
+            />
+          </label>
+          <label>
+            From
+            <DatePickerInput
+              type="date"
+              value={filters.created_from}
+              max={filters.created_to || undefined}
+              onChange={(event) => change("created_from", event.target.value)}
+            />
+          </label>
+          <label>
+            To
+            <DatePickerInput
+              type="date"
+              value={filters.created_to}
+              min={filters.created_from || undefined}
+              onChange={(event) => change("created_to", event.target.value)}
+            />
+          </label>
+        </form>
+      </section>
+
       {loading ? (
         <Loading label="Loading user logs" />
       ) : error ? (
@@ -573,7 +623,11 @@ function UserLogs({ role }: { role: Role }) {
           retry={() => setAttempt((value) => value + 1)}
         />
       ) : logs.length === 0 ? (
-        <p className="admin-empty">No activity has been recorded yet.</p>
+        <p className="admin-empty">
+          {Object.values(query).some(Boolean)
+            ? "No activity matches these filters."
+            : "No activity has been recorded yet."}
+        </p>
       ) : (
         <section className="panel-card admin-data-card">
           <div className="admin-table-wrap">

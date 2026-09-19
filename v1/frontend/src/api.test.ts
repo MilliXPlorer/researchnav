@@ -14,6 +14,7 @@ import {
   listAdminAuditLogs,
   listAdminCoordinators,
   listAdminUsers,
+  listUserLogs,
   listFeedback,
   listMonitoringLogs,
   listAdviserPendingReviews,
@@ -463,6 +464,43 @@ describe("administrator API", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/admin/users/uuid%2Fwith%20space",
       expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+});
+
+describe("user logs API", () => {
+  it("serializes search, date filters, and pagination", async () => {
+    const response = {
+      data: [],
+      links: { first: null, last: null, prev: null, next: null },
+      meta: {
+        current_page: 2,
+        from: null,
+        last_page: 2,
+        links: [],
+        path: "/api/user-logs",
+        per_page: 25,
+        to: null,
+        total: 0,
+      },
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(response)));
+
+    await expect(
+      listUserLogs(
+        {
+          search: "proposal review",
+          created_from: "2026-09-01",
+          created_to: "2026-09-19",
+          page: 2,
+        },
+        fetchMock,
+      ),
+    ).resolves.toEqual(response);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/user-logs?search=proposal+review&created_from=2026-09-01&created_to=2026-09-19&page=2",
+      expect.anything(),
     );
   });
 });

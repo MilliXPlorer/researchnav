@@ -1154,14 +1154,15 @@ export function listAdminAuditLogs(
 }
 
 export function listUserLogs(
-  page = 1,
+  input: {
+    search?: string;
+    created_from?: string;
+    created_to?: string;
+    page?: number;
+  } = {},
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<LaravelPaginatedResponse<AdminAuditLogResource>> {
-  return apiRequest(
-    page > 1 ? `/api/user-logs?page=${page}` : "/api/user-logs",
-    undefined,
-    fetcher,
-  );
+  return apiRequest(adminQuery("/api/user-logs", input), undefined, fetcher);
 }
 
 export async function getSystemStatus(

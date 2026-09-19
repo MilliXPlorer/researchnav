@@ -363,6 +363,86 @@ describe("role workspace pages", () => {
     );
   });
 
+  it("searches and filters user logs while preserving filters across pages", async () => {
+    const log = (action: string) => ({
+      id: action,
+      action,
+      actor: null,
+      subject: { type: "research_document", id: "101" },
+      description: "Proposal review activity.",
+      created_at: "2026-09-10T08:00:00+08:00",
+    });
+    const response = (action: string, page: number) => ({
+      data: [log(action)],
+      links: { first: null, last: null, prev: null, next: null },
+      meta: {
+        current_page: page,
+        from: page,
+        last_page: 2,
+        links: [],
+        path: "/api/user-logs",
+        per_page: 25,
+        to: page,
+        total: 2,
+      },
+    });
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "/api/user-logs") {
+        return new Response(JSON.stringify(response("PAGE_ONE_EVENT", 1)));
+      }
+      if (url === "/api/user-logs?page=2") {
+        return new Response(JSON.stringify(response("PAGE_TWO_EVENT", 2)));
+      }
+      if (
+        url ===
+        "/api/user-logs?search=proposal&created_from=2026-09-10&created_to=2026-09-10"
+      ) {
+        return new Response(JSON.stringify(response("FILTERED_PAGE_ONE", 1)));
+      }
+      if (
+        url ===
+        "/api/user-logs?search=proposal&created_from=2026-09-10&created_to=2026-09-10&page=2"
+      ) {
+        return new Response(JSON.stringify(response("FILTERED_PAGE_TWO", 2)));
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <RoleSidebarPage
+        role="instructor"
+        selectedNav="User Logs"
+        navigate={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText("PAGE ONE EVENT")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(await screen.findByText("PAGE TWO EVENT")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Search logs"), {
+      target: { value: "proposal" },
+    });
+    fireEvent.change(screen.getByLabelText("From"), {
+      target: { value: "2026-09-10" },
+    });
+    fireEvent.change(screen.getByLabelText("To"), {
+      target: { value: "2026-09-10" },
+    });
+
+    expect(await screen.findByText("FILTERED PAGE ONE")).toBeInTheDocument();
+    expect(screen.getByText("Page 1 of 2")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(await screen.findByText("FILTERED PAGE TWO")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/user-logs?search=proposal&created_from=2026-09-10&created_to=2026-09-10&page=2",
+      expect.anything(),
+    );
+  });
+
   it("reloads Assigned Research when the active account changes", async () => {
     let monitoringRequests = 0;
 
