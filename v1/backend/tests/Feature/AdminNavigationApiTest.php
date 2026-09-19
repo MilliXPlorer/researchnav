@@ -73,6 +73,62 @@ class AdminNavigationApiTest extends TestCase
         $this->as($admin)->getJson('/api/admin/users?search='.str_repeat('x', 201))->assertUnprocessable();
     }
 
+    public function test_users_listing_can_sort_by_email_ascending(): void
+    {
+        $admin = $this->user([
+            'role' => 'admin',
+            'access_status' => 'active',
+        ]);
+
+        $this->user([
+            'email' => 'sorttest-charlie@example.edu',
+        ]);
+
+        $this->user([
+            'email' => 'sorttest-alpha@example.edu',
+        ]);
+
+        $this->user([
+            'email' => 'sorttest-bravo@example.edu',
+        ]);
+
+        $response = $this->as($admin)->getJson(
+            '/api/admin/users?search=sorttest&sort=email&direction=asc'
+        );
+
+        $response->assertOk();
+
+        $this->assertSame([
+            'sorttest-alpha@example.edu',
+            'sorttest-bravo@example.edu',
+            'sorttest-charlie@example.edu',
+        ], $response->json('data.*.email'));
+    }
+
+    public function test_users_listing_can_sort_by_email_descending(): void
+    {
+        $admin = $this->user([
+            'role' => 'admin',
+            'access_status' => 'active',
+        ]);
+
+        $this->user(['email' => 'sorttest-alpha@example.edu']);
+        $this->user(['email' => 'sorttest-bravo@example.edu']);
+        $this->user(['email' => 'sorttest-charlie@example.edu']);
+
+        $response = $this->as($admin)->getJson(
+            '/api/admin/users?search=sorttest&sort=email&direction=desc'
+        );
+
+        $response->assertOk();
+
+        $this->assertSame([
+            'sorttest-charlie@example.edu',
+            'sorttest-bravo@example.edu',
+            'sorttest-alpha@example.edu',
+        ], $response->json('data.*.email'));
+    }
+
     public function test_user_updates_sync_canonical_fields_audit_changes_and_reject_invalid_transitions(): void
     {
         $actor = $this->user(['role' => 'admin', 'access_status' => 'active']);
@@ -161,6 +217,82 @@ class AdminNavigationApiTest extends TestCase
         $this->assertStringNotContainsString(User::class, json_encode($entry, JSON_THROW_ON_ERROR));
 
         $this->as($admin)->getJson('/api/admin/audit-logs?action=not safe!')->assertUnprocessable();
+    }
+
+    public function test_users_listing_can_sort_by_last_name_ascending(): void
+    {
+        $admin = $this->user([
+            'role' => 'admin',
+            'access_status' => 'active',
+        ]);
+
+        $this->user([
+            'email' => 'name-sort-c@example.edu',
+            'first_name' => 'Anna',
+            'last_name' => 'Santos',
+        ]);
+
+        $this->user([
+            'email' => 'name-sort-a@example.edu',
+            'first_name' => 'Bea',
+            'last_name' => 'Cruz',
+        ]);
+
+        $this->user([
+            'email' => 'name-sort-b@example.edu',
+            'first_name' => 'Carlo',
+            'last_name' => 'Reyes',
+        ]);
+
+        $response = $this->as($admin)->getJson(
+            '/api/admin/users?search=name-sort&sort=last_name&direction=asc'
+        );
+
+        $response->assertOk();
+
+        $this->assertSame([
+            'Cruz',
+            'Reyes',
+            'Santos',
+        ], $response->json('data.*.names.last_name'));
+    }
+
+    public function test_users_listing_can_sort_by_last_name_descending(): void
+    {
+        $admin = $this->user([
+            'role' => 'admin',
+            'access_status' => 'active',
+        ]);
+
+        $this->user([
+            'email' => 'name-sort-a@example.edu',
+            'first_name' => 'Anna',
+            'last_name' => 'Cruz',
+        ]);
+
+        $this->user([
+            'email' => 'name-sort-b@example.edu',
+            'first_name' => 'Bea',
+            'last_name' => 'Reyes',
+        ]);
+
+        $this->user([
+            'email' => 'name-sort-c@example.edu',
+            'first_name' => 'Carlo',
+            'last_name' => 'Santos',
+        ]);
+
+        $response = $this->as($admin)->getJson(
+            '/api/admin/users?search=name-sort&sort=last_name&direction=desc'
+        );
+
+        $response->assertOk();
+
+        $this->assertSame([
+            'Santos',
+            'Reyes',
+            'Cruz',
+        ], $response->json('data.*.names.last_name'));
     }
 
     public function test_system_status_reports_seeded_live_counts_without_configuration_secrets(): void
@@ -302,6 +434,297 @@ class AdminNavigationApiTest extends TestCase
                 'role' => $role,
             ], $this->origin())->assertBadRequest();
         }
+    }
+
+    public function test_users_listing_can_sort_by_role_ascending(): void
+    {
+        $admin = $this->user([
+            'role' => 'admin',
+            'access_status' => 'active',
+        ]);
+
+        $this->user([
+            'email' => 'role-sort-c@example.edu',
+            'role' => 'researcher',
+        ]);
+
+        $this->user([
+            'email' => 'role-sort-a@example.edu',
+            'role' => 'adviser',
+        ]);
+
+        $this->user([
+            'email' => 'role-sort-b@example.edu',
+            'role' => 'panel',
+        ]);
+
+        $response = $this->as($admin)->getJson(
+            '/api/admin/users?search=role-sort&sort=role&direction=asc'
+        );
+
+        $response->assertOk();
+
+        $this->assertSame([
+            'adviser',
+            'panel',
+            'researcher',
+        ], $response->json('data.*.role'));
+    }
+
+    public function test_users_listing_can_sort_by_role_descending(): void
+    {
+        $admin = $this->user([
+            'role' => 'admin',
+            'access_status' => 'active',
+        ]);
+
+        $this->user([
+            'email' => 'role-sort-a@example.edu',
+            'role' => 'adviser',
+        ]);
+
+        $this->user([
+            'email' => 'role-sort-b@example.edu',
+            'role' => 'panel',
+        ]);
+
+        $this->user([
+            'email' => 'role-sort-c@example.edu',
+            'role' => 'researcher',
+        ]);
+
+        $response = $this->as($admin)->getJson(
+            '/api/admin/users?search=role-sort&sort=role&direction=desc'
+        );
+
+        $response->assertOk();
+
+        $this->assertSame([
+            'researcher',
+            'panel',
+            'adviser',
+        ], $response->json('data.*.role'));
+    }
+    public function test_users_listing_can_sort_by_access_status_ascending(): void
+    {
+        $admin = $this->user([
+            'role' => 'admin',
+            'access_status' => 'active',
+        ]);
+
+        $this->user([
+            'email' => 'access-sort-c@example.edu',
+            'access_status' => 'invited',
+        ]);
+
+        $this->user([
+            'email' => 'access-sort-a@example.edu',
+            'access_status' => 'active',
+        ]);
+
+        $this->user([
+            'email' => 'access-sort-b@example.edu',
+            'access_status' => 'blocked',
+        ]);
+
+        $response = $this->as($admin)->getJson(
+            '/api/admin/users?search=access-sort&sort=access_status&direction=asc'
+        );
+
+        $response->assertOk();
+
+        $this->assertSame([
+            'active',
+            'blocked',
+            'invited',
+        ], $response->json('data.*.access_status'));
+    }
+
+    public function test_users_listing_can_sort_by_access_status_descending(): void
+    {
+        $admin = $this->user([
+            'role' => 'admin',
+            'access_status' => 'active',
+        ]);
+
+        $this->user([
+            'email' => 'access-sort-a@example.edu',
+            'access_status' => 'active',
+        ]);
+
+        $this->user([
+            'email' => 'access-sort-b@example.edu',
+            'access_status' => 'blocked',
+        ]);
+
+        $this->user([
+            'email' => 'access-sort-c@example.edu',
+            'access_status' => 'invited',
+        ]);
+
+        $response = $this->as($admin)->getJson(
+            '/api/admin/users?search=access-sort&sort=access_status&direction=desc'
+        );
+
+        $response->assertOk();
+
+        $this->assertSame([
+            'invited',
+            'blocked',
+            'active',
+        ], $response->json('data.*.access_status'));
+    }
+
+    public function test_users_listing_can_sort_by_created_at_ascending(): void
+    {
+        $admin = $this->user([
+            'role' => 'admin',
+            'access_status' => 'active',
+        ]);
+
+        $newest = $this->user([
+            'email' => 'created-sort-newest@example.edu',
+        ]);
+        $newest->forceFill([
+            'created_at' => '2026-09-03 08:00:00',
+        ])->save();
+
+        $oldest = $this->user([
+            'email' => 'created-sort-oldest@example.edu',
+        ]);
+        $oldest->forceFill([
+            'created_at' => '2026-09-01 08:00:00',
+        ])->save();
+
+        $middle = $this->user([
+            'email' => 'created-sort-middle@example.edu',
+        ]);
+        $middle->forceFill([
+            'created_at' => '2026-09-02 08:00:00',
+        ])->save();
+
+        $response = $this->as($admin)->getJson(
+            '/api/admin/users?search=created-sort&sort=created_at&direction=asc'
+        );
+
+        $response->assertOk();
+
+        $this->assertSame([
+            'created-sort-oldest@example.edu',
+            'created-sort-middle@example.edu',
+            'created-sort-newest@example.edu',
+        ], $response->json('data.*.email'));
+    }
+
+    public function test_users_listing_can_sort_by_created_at_descending(): void
+    {
+        $admin = $this->user([
+            'role' => 'admin',
+            'access_status' => 'active',
+        ]);
+
+        $oldest = $this->user([
+            'email' => 'created-sort-oldest@example.edu',
+        ]);
+        $oldest->forceFill([
+            'created_at' => '2026-09-01 08:00:00',
+        ])->save();
+
+        $middle = $this->user([
+            'email' => 'created-sort-middle@example.edu',
+        ]);
+        $middle->forceFill([
+            'created_at' => '2026-09-02 08:00:00',
+        ])->save();
+
+        $newest = $this->user([
+            'email' => 'created-sort-newest@example.edu',
+        ]);
+        $newest->forceFill([
+            'created_at' => '2026-09-03 08:00:00',
+        ])->save();
+
+        $response = $this->as($admin)->getJson(
+            '/api/admin/users?search=created-sort&sort=created_at&direction=desc'
+        );
+
+        $response->assertOk();
+
+        $this->assertSame([
+            'created-sort-newest@example.edu',
+            'created-sort-middle@example.edu',
+            'created-sort-oldest@example.edu',
+        ], $response->json('data.*.email'));
+    }
+
+    public function test_users_listing_can_sort_by_last_login_at_ascending(): void
+    {
+        $admin = $this->user([
+            'role' => 'admin',
+            'access_status' => 'active',
+        ]);
+
+        $this->user([
+            'email' => 'login-sort-newest@example.edu',
+            'last_login_at' => '2026-09-03 08:00:00',
+        ]);
+
+        $this->user([
+            'email' => 'login-sort-oldest@example.edu',
+            'last_login_at' => '2026-09-01 08:00:00',
+        ]);
+
+        $this->user([
+            'email' => 'login-sort-middle@example.edu',
+            'last_login_at' => '2026-09-02 08:00:00',
+        ]);
+
+        $response = $this->as($admin)->getJson(
+            '/api/admin/users?search=login-sort&sort=last_login_at&direction=asc'
+        );
+
+        $response->assertOk();
+
+        $this->assertSame([
+            'login-sort-oldest@example.edu',
+            'login-sort-middle@example.edu',
+            'login-sort-newest@example.edu',
+        ], $response->json('data.*.email'));
+    }
+
+    public function test_users_listing_can_sort_by_last_login_at_descending(): void
+    {
+        $admin = $this->user([
+            'role' => 'admin',
+            'access_status' => 'active',
+        ]);
+
+        $this->user([
+            'email' => 'login-sort-oldest@example.edu',
+            'last_login_at' => '2026-09-01 08:00:00',
+        ]);
+
+        $this->user([
+            'email' => 'login-sort-middle@example.edu',
+            'last_login_at' => '2026-09-02 08:00:00',
+        ]);
+
+        $this->user([
+            'email' => 'login-sort-newest@example.edu',
+            'last_login_at' => '2026-09-03 08:00:00',
+        ]);
+
+        $response = $this->as($admin)->getJson(
+            '/api/admin/users?search=login-sort&sort=last_login_at&direction=desc'
+        );
+
+        $response->assertOk();
+
+        $this->assertSame([
+            'login-sort-newest@example.edu',
+            'login-sort-middle@example.edu',
+            'login-sort-oldest@example.edu',
+        ], $response->json('data.*.email'));
     }
 
     private function user(array $attributes = []): User

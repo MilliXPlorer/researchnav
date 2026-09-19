@@ -1096,6 +1096,14 @@ export function listAdminUsers(
     access_status?: AccessStatus;
     page?: number;
     per_page?: 10 | 25 | 50 | 100;
+    sort?:
+      | "last_name"
+      | "email"
+      | "role"
+      | "access_status"
+      | "last_login_at"
+      | "created_at";
+    direction?: "asc" | "desc";
   } = {},
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<LaravelPaginatedResponse<AdminUserResource>> {

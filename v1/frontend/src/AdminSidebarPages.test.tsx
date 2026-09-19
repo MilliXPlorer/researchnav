@@ -726,4 +726,180 @@ describe("administrator sidebar pages", () => {
 
     vi.useRealTimers();
   });
+
+  it("sorts AllUsers by last name ascending when Name is clicked", async () => {
+    function userParams(input: string | URL | Request) {
+      const url = input instanceof Request ? input.url : String(input);
+      const sep = url.indexOf("?");
+      return new URLSearchParams(sep >= 0 ? url.slice(sep + 1) : "");
+    }
+
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const path = (input instanceof Request ? input.url : String(input)).split("?")[0];
+
+      if (path === "/api/admin/users") {
+        return new Response(
+          JSON.stringify({
+            data: [user],
+            links: { first: null, last: null, prev: null, next: null },
+            meta: {
+              current_page: 1,
+              from: 1,
+              last_page: 1,
+              links: [],
+              path: "/api/admin/users",
+              per_page: 25,
+              to: 1,
+              total: 1,
+            },
+          }),
+        );
+      }
+
+      return new Response(JSON.stringify(systemStatusResponse));
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AdminSidebarPage selectedNav="All Users" />);
+
+    expect(
+      await screen.findByText("member@example.test"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Name/i }),
+    );
+
+    await waitFor(() => {
+      const sortCall = fetchMock.mock.calls.find(([input]) => {
+        const params = userParams(input);
+        return (
+          params.get("sort") === "last_name" &&
+          params.get("direction") === "asc"
+        );
+      });
+
+      expect(sortCall).toBeDefined();
+    });
+  });
+
+  it("toggles AllUsers Name sorting to descending on second click", async () => {
+    function userParams(input: string | URL | Request) {
+      const url = input instanceof Request ? input.url : String(input);
+      const sep = url.indexOf("?");
+      return new URLSearchParams(sep >= 0 ? url.slice(sep + 1) : "");
+    }
+
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const path = (input instanceof Request ? input.url : String(input)).split("?")[0];
+
+      if (path === "/api/admin/users") {
+        return new Response(
+          JSON.stringify({
+            data: [user],
+            links: { first: null, last: null, prev: null, next: null },
+            meta: {
+              current_page: 1,
+              from: 1,
+              last_page: 1,
+              links: [],
+              path: "/api/admin/users",
+              per_page: 25,
+              to: 1,
+              total: 1,
+            },
+          }),
+        );
+      }
+
+      return new Response(JSON.stringify(systemStatusResponse));
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AdminSidebarPage selectedNav="All Users" />);
+
+    await screen.findByText("member@example.test");
+
+    const nameButton = screen.getByRole("button", { name: /Name/i });
+
+    fireEvent.click(nameButton);
+    fireEvent.click(nameButton);
+
+    await waitFor(() => {
+      const descendingCall = fetchMock.mock.calls.find(([input]) => {
+        const params = userParams(input);
+        return (
+          params.get("sort") === "last_name" &&
+          params.get("direction") === "desc"
+        );
+      });
+
+      expect(descendingCall).toBeDefined();
+    });
+  });
+
+  it("sorts AllUsers by each remaining sortable column", async () => {
+    function userParams(input: string | URL | Request) {
+      const url = input instanceof Request ? input.url : String(input);
+      const sep = url.indexOf("?");
+      return new URLSearchParams(sep >= 0 ? url.slice(sep + 1) : "");
+    }
+
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const path = (input instanceof Request ? input.url : String(input)).split("?")[0];
+
+      if (path === "/api/admin/users") {
+        return new Response(
+          JSON.stringify({
+            data: [user],
+            links: { first: null, last: null, prev: null, next: null },
+            meta: {
+              current_page: 1,
+              from: 1,
+              last_page: 1,
+              links: [],
+              path: "/api/admin/users",
+              per_page: 25,
+              to: 1,
+              total: 1,
+            },
+          }),
+        );
+      }
+
+      return new Response(JSON.stringify(systemStatusResponse));
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AdminSidebarPage selectedNav="All Users" />);
+
+    await screen.findByText("member@example.test");
+
+    const columns = [
+      ["Email", "email"],
+      ["Role", "role"],
+      ["Access", "access_status"],
+      ["Last login", "last_login_at"],
+      ["Created", "created_at"],
+    ] as const;
+
+    for (const [label, sort] of columns) {
+      fireEvent.click(screen.getByRole("button", { name: label }));
+
+      await waitFor(() => {
+        const matchingCall = fetchMock.mock.calls.find(([input]) => {
+          const params = userParams(input);
+          return (
+            params.get("sort") === sort &&
+            params.get("direction") === "asc"
+          );
+        });
+
+        expect(matchingCall).toBeDefined();
+      });
+    }
+  });
 });

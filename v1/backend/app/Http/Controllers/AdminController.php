@@ -26,7 +26,56 @@ class AdminController extends DomainController
     public function users(AdminUserIndexRequest $request): JsonResponse
     {
         $input = $request->validated();
-        $query = User::query()->select(['id', 'email', 'student_employee_id', 'first_name', 'middle_name', 'last_name', 'role', 'access_status', 'is_admin', 'invitation_sent_at', 'confirmed_at', 'last_login_at', 'created_at', 'updated_at'])->orderByDesc('created_at')->orderByDesc('id');
+        $query = User::query()->select([
+            'id',
+            'email',
+            'student_employee_id',
+            'first_name',
+            'middle_name',
+            'last_name',
+            'role',
+            'access_status',
+            'is_admin',
+            'invitation_sent_at',
+            'confirmed_at',
+            'last_login_at',
+            'created_at',
+            'updated_at',
+        ]);
+
+        $sort = $input['sort'] ?? null;
+        $direction = $input['direction'] ?? 'asc';
+
+        if ($sort === 'email') {
+            $query
+                ->orderBy('email', $direction)
+                ->orderBy('id', $direction);
+        } elseif ($sort === 'last_name') {
+            $query
+                ->orderBy('last_name', $direction)
+                ->orderBy('first_name', $direction)
+                ->orderBy('id', $direction);
+        } elseif ($sort === 'role') {
+            $query
+                ->orderBy('role', $direction)
+                ->orderBy('last_name', $direction)
+                ->orderBy('id', $direction);
+        } elseif ($sort === 'access_status') {
+            $query
+                ->orderBy('access_status', $direction)
+                ->orderBy('last_name', $direction)
+                ->orderBy('id', $direction);
+        } elseif ($sort === 'created_at') {
+            $query
+                ->orderBy('created_at', $direction)
+                ->orderBy('id', $direction);
+        } elseif ($sort === 'last_login_at') {
+            $query
+                ->orderBy('last_login_at', $direction)
+                ->orderBy('id', $direction);
+        } else {
+            $query->orderByDesc('created_at')->orderByDesc('id');
+        }
         if (($role = $input['role'] ?? null) !== null) {
             $query->where('role', $role);
         }

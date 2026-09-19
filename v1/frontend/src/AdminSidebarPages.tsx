@@ -538,6 +538,16 @@ function AllUsers({
     access_status: "",
   });
   const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<
+    | "last_name"
+    | "email"
+    | "role"
+    | "access_status"
+    | "last_login_at"
+    | "created_at"
+    | null
+  >(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [result, setResult] =
     useState<LaravelPaginatedResponse<AdminUserResource> | null>(null);
   const [error, setError] = useState("");
@@ -584,6 +594,8 @@ function AllUsers({
       ...query,
       role: (query.role as AdminRole) || undefined,
       access_status: (query.access_status as AccessStatus) || undefined,
+      sort: sort || undefined,
+      direction: sort ? sortDirection : undefined,
       page,
       per_page: 25,
     })
@@ -601,7 +613,7 @@ function AllUsers({
     return () => {
       cancelled = true;
     };
-  }, [attempt, page, query]);
+  }, [attempt, page, query, sort, sortDirection]);
 
   function applyFilters(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -662,6 +674,26 @@ function AllUsers({
   }
 
   const visibleUsers = filterUserRows(result?.data ?? [], filters, fullName);
+
+  function changeSort(
+    column:
+      | "last_name"
+      | "email"
+      | "role"
+      | "access_status"
+      | "last_login_at"
+      | "created_at",
+  ) {
+    setPage(1);
+
+    if (sort === column) {
+      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+
+    setSort(column);
+    setSortDirection("asc");
+  }
 
   return (
     <div
@@ -782,12 +814,89 @@ function AllUsers({
                 <caption className="sr-only">User accounts</caption>
                 <thead>
                   <tr>
-                    <th>Name</th>
-                    <th>Email</th>
-                    <th>Role</th>
-                    <th>Access</th>
-                    <th>Last login</th>
-                    <th>Created</th>
+                    <th aria-sort={sort === "last_name" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}>
+                      <button
+                        type="button"
+                        onClick={() => changeSort("last_name")}
+                      >
+                        Name
+                        {sort === "last_name" && (sortDirection === "asc" ? " ↑" : " ↓")}
+                      </button>
+                    </th>
+                    <th
+                      aria-sort={
+                        sort === "email"
+                          ? sortDirection === "asc"
+                            ? "ascending"
+                            : "descending"
+                          : "none"
+                      }
+                    >
+                      <button type="button" onClick={() => changeSort("email")}>
+                        Email
+                        {sort === "email" && (sortDirection === "asc" ? " ↑" : " ↓")}
+                      </button>
+                    </th>
+
+                    <th
+                      aria-sort={
+                        sort === "role"
+                          ? sortDirection === "asc"
+                            ? "ascending"
+                            : "descending"
+                          : "none"
+                      }
+                    >
+                      <button type="button" onClick={() => changeSort("role")}>
+                        Role
+                        {sort === "role" && (sortDirection === "asc" ? " ↑" : " ↓")}
+                      </button>
+                    </th>
+
+                    <th
+                      aria-sort={
+                        sort === "access_status"
+                          ? sortDirection === "asc"
+                            ? "ascending"
+                            : "descending"
+                          : "none"
+                      }
+                    >
+                      <button type="button" onClick={() => changeSort("access_status")}>
+                        Access
+                        {sort === "access_status" && (sortDirection === "asc" ? " ↑" : " ↓")}
+                      </button>
+                    </th>
+
+                    <th
+                      aria-sort={
+                        sort === "last_login_at"
+                          ? sortDirection === "asc"
+                            ? "ascending"
+                            : "descending"
+                          : "none"
+                      }
+                    >
+                      <button type="button" onClick={() => changeSort("last_login_at")}>
+                        Last login
+                        {sort === "last_login_at" && (sortDirection === "asc" ? " ↑" : " ↓")}
+                      </button>
+                    </th>
+
+                    <th
+                      aria-sort={
+                        sort === "created_at"
+                          ? sortDirection === "asc"
+                            ? "ascending"
+                            : "descending"
+                          : "none"
+                      }
+                    >
+                      <button type="button" onClick={() => changeSort("created_at")}>
+                        Created
+                        {sort === "created_at" && (sortDirection === "asc" ? " ↑" : " ↓")}
+                      </button>
+                    </th>
                     <th>Actions</th>
                   </tr>
                 </thead>
