@@ -63,6 +63,14 @@ Route::prefix('api')
                 'account.active',
                 'role:instructor,adviser,panel,statistician,librarian,research_editor',
             ]);
+        Route::post('user-logs/clear', [UserLogController::class, 'clear'])
+            ->middleware([
+                'current.user',
+                'account.active',
+                'role:instructor,adviser,panel,statistician,librarian,research_editor',
+                'origin.allowed',
+                'throttle:domain-mutations',
+            ]);
 
         Route::prefix('admin')->middleware(['current.user', 'account.active', 'active.admin'])->group(function (): void {
             Route::get('accounts', [ApiController::class, 'accounts']);

@@ -71,6 +71,7 @@ import {
   listLibrarianMonitoring,
   listEditorAssignedResearch,
   listUserLogs,
+  clearUserLogs,
   listEditorMonitoring,
   markStatisticalReviewNotApplicable,
   provisionAccount,
@@ -483,6 +484,10 @@ function UserLogs({ role }: { role: Role }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const [page, setPage] = useState(1);
+  const [lastPage, setLastPage] = useState(1);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -490,10 +495,11 @@ function UserLogs({ role }: { role: Role }) {
     setLoading(true);
     setError(null);
 
-    void listUserLogs()
+    void listUserLogs(page)
       .then((response) => {
         if (!cancelled) {
           setLogs(response.data);
+          setLastPage(response.meta.last_page);
         }
       })
       .catch((reason: unknown) => {
@@ -510,12 +516,29 @@ function UserLogs({ role }: { role: Role }) {
           setLoading(false);
         }
       });
-
     return () => {
       cancelled = true;
     };
-  }, [attempt]);
+  }, [attempt, page]);
+  async function clearVisibleLogs() {
+    setClearing(true);
+    setError(null);
 
+    try {
+      await clearUserLogs();
+      setConfirmClear(false);
+      setPage(1);
+      setAttempt((value) => value + 1);
+    } catch (reason: unknown) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Unable to clear your visible activity logs.",
+      );
+    } finally {
+      setClearing(false);
+    }
+  }
   return (
     <div className="workspace-content admin-sidebar-page">
       <RolePageHeader
@@ -523,9 +546,22 @@ function UserLogs({ role }: { role: Role }) {
         title="User Logs"
         description="Activity recorded for your account."
         action={
-          <Button onClick={() => setAttempt((value) => value + 1)}>
-            Refresh
-          </Button>
+          <div className="row-actions">
+            <Button
+              variant="secondary"
+              disabled={loading || clearing || logs.length === 0}
+              onClick={() => setConfirmClear(true)}
+            >
+              Clear Logs
+            </Button>
+
+            <Button
+              disabled={clearing}
+              onClick={() => setAttempt((value) => value + 1)}
+            >
+              Refresh
+            </Button>
+          </div>
         }
       />
 
@@ -567,7 +603,41 @@ function UserLogs({ role }: { role: Role }) {
               </tbody>
             </table>
           </div>
+
+          <div className="admin-pagination">
+            <Button
+              variant="secondary"
+              disabled={page <= 1}
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+            >
+              Previous
+            </Button>
+
+            <span>
+              Page {page} of {lastPage}
+            </span>
+
+            <Button
+              variant="secondary"
+              disabled={page >= lastPage}
+              onClick={() =>
+                setPage((current) => Math.min(lastPage, current + 1))
+              }
+            >
+              Next
+            </Button>
+          </div>
         </section>
+      )}
+      {confirmClear && (
+        <ConfirmDialog
+          title="Clear Logs"
+          message="Are you sure to clear logs?"
+          confirmLabel="Clear logs"
+          busy={clearing}
+          onConfirm={() => void clearVisibleLogs()}
+          onCancel={() => setConfirmClear(false)}
+        />
       )}
     </div>
   );

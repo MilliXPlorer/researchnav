@@ -60,6 +60,35 @@ class UserLogsTest extends TestCase
         }
     }
 
+    public function test_user_can_clear_visible_logs(): void
+    {
+        $actor = $this->user(['role' => 'instructor']);
+
+        AuditLog::query()->create([
+            AuditLog::column('user_id') => $actor->id,
+            'action' => 'OLD_EVENT',
+            'entity_type' => 'research_document',
+            'entity_id' => '101',
+            'description' => 'Old visible activity',
+            'created_at' => now()->subMinute(),
+        ]);
+
+        $this->as($actor)
+            ->postJson(
+                '/api/user-logs/clear',
+                [],
+                ['Origin' => 'http://localhost:5173'],
+            )
+            ->assertNoContent();
+
+        $this->assertSame(1, AuditLog::query()->count());
+
+        $this->as($actor)
+            ->getJson('/api/user-logs')
+            ->assertOk()
+            ->assertJsonCount(0, 'data');
+    }
+
     /** @param array<string, mixed> $attributes */
     private function user(array $attributes = []): User
     {

@@ -48,6 +48,7 @@ class User extends Authenticatable
             'invitation_sent_at' => 'datetime',
             'confirmed_at' => 'datetime',
             'last_login_at' => 'datetime',
+            'user_logs_cleared_at' => 'datetime',
             'password' => 'hashed',
         ];
     }

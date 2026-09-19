@@ -1146,10 +1146,11 @@ export function listAdminAuditLogs(
 }
 
 export function listUserLogs(
+  page = 1,
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<LaravelPaginatedResponse<AdminAuditLogResource>> {
   return apiRequest(
-    "/api/user-logs",
+    page > 1 ? `/api/user-logs?page=${page}` : "/api/user-logs",
     undefined,
     fetcher,
   );
@@ -1256,6 +1257,19 @@ export interface PublicRepositorySimilarityResource extends PublicResearchResour
 
 export interface PublicRepositorySimilarityResponse {
   data?: PublicRepositorySimilarityResource[];
+}
+
+export async function clearUserLogs(
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<void> {
+  await apiRequest<void>(
+    "/api/user-logs/clear",
+    {
+      method: "POST",
+      body: JSON.stringify({}),
+    },
+    fetcher,
+  );
 }
 
 function toAuthors(authors: PublicResearchResource["authors"]) {
