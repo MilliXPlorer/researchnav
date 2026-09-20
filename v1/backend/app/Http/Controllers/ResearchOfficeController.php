@@ -171,7 +171,7 @@ class ResearchOfficeController extends DomainController
         $documents = ResearchDocument::query()
             ->where('submission_status', 'approved')
             ->where('archive_status', 'archived')
-            ->where(fn (Builder $q) => $q->where('institute', $fullName)->orWhere('academic_unit', $fullName))
+            ->where('institute', $fullName)
             ->orderByDesc('publication_year')
             ->orderByDesc('title')
             ->get(['id', 'title', 'publication_year']);
