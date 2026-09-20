@@ -85,7 +85,6 @@ export const roleConfigs: RoleConfig[] = [
     nav: [
       "Dashboard",
       "Assigned Research",
-      "Defense Monitoring Forms",
       "User Logs",
     ],
   },
@@ -97,7 +96,6 @@ export const roleConfigs: RoleConfig[] = [
     nav: [
       "Dashboard",
       "My Sections",
-      "Defense Monitoring Forms",
       "User Logs",
     ],
   },
@@ -109,7 +107,6 @@ export const roleConfigs: RoleConfig[] = [
     nav: [
       "Dashboard",
       "Assigned Research",
-      "Defense Monitoring Forms",
       "User Logs",
     ],
   },
@@ -121,7 +118,6 @@ export const roleConfigs: RoleConfig[] = [
     nav: [
       "Dashboard",
       "Assigned Research",
-      "Defense Monitoring Forms",
       "User Logs",
     ],
   },
@@ -134,7 +130,6 @@ export const roleConfigs: RoleConfig[] = [
     nav: [
       "Dashboard",
       "Assigned Research",
-      "Defense Monitoring Forms",
       "User Logs",
     ],
   },
@@ -161,7 +156,6 @@ export const roleConfigs: RoleConfig[] = [
     nav: [
       "Dashboard",
       "Assigned Research",
-      "Defense Monitoring Forms",
       "User Logs",
     ],
   },
@@ -179,7 +173,6 @@ export const roleConfigs: RoleConfig[] = [
       "Assigned Research",
       "Similarity Check",
       "Upload Manuscript",
-      "Defense Monitoring Forms",
       "User & Role Management",
       "Reports & Exports",
     ],

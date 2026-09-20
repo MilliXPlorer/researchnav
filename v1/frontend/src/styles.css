@@ -8048,10 +8048,8 @@ td strong {
 .assigned-research-folders .research-folder-row {
   border-radius: var(--radius-sm);
 }
-.assigned-research-folders:not(.has-selection) {
-  grid-template-columns: 1fr;
-}
-.assigned-research-folders:not(.has-selection) .project-folder-sidebar {
+.assigned-research-folders {
+  width: 100%;
   position: static;
 }
 .assigned-research-folders .research-folder-row-main {
@@ -8975,8 +8973,9 @@ td strong {
 }
 .project-workspace-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
-  overflow-x: auto;
+  overflow-x: visible;
   margin: 0 0 18px;
   padding: 4px;
   border: 1px solid var(--line);
@@ -9009,6 +9008,30 @@ td strong {
 .project-workspace-tabs button svg {
   width: 16px;
   height: 16px;
+}
+.project-monitoring-dropdown {
+  position: relative;
+  flex: 0 0 auto;
+}
+.project-monitoring-dropdown-menu {
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 190px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--paper);
+  box-shadow: 0 12px 28px rgba(16, 32, 25, 0.14);
+}
+
+.project-workspace-tabs .project-monitoring-dropdown-menu button {
+  display: flex;
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  text-align: left;
 }
 .project-workspace-section {
   min-width: 0;

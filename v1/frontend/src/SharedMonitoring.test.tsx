@@ -201,9 +201,7 @@ describe("shared monitoring", () => {
       Array.from(printPages?.querySelectorAll("img") ?? []).map((image) =>
         image.getAttribute("src"),
       ),
-    ).toEqual([
-      "/src/form_templates/monitoring-before-proposal-1.png",
-    ]);
+    ).toEqual(["/src/form_templates/monitoring-before-proposal-1.png"]);
   });
 
   it("does not expose mutations in a read-only monitoring workspace", async () => {
@@ -225,6 +223,29 @@ describe("shared monitoring", () => {
     expect(
       screen.queryByRole("button", { name: "Verify completed form" }),
     ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: "Add new defense monitoring entry",
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("fails closed when editable stages are missing", async () => {
+    const withoutEditableStages = {
+      ...monitoring,
+      editable_stages: undefined,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ data: withoutEditableStages })),
+      ),
+    );
+
+    render(<SharedMonitoring role="panel" researchDocumentId={42} embedded />);
+
+    await screen.findByRole("tab", { name: "After Proposal Defense" });
     expect(
       screen.queryByRole("button", {
         name: "Add new defense monitoring entry",

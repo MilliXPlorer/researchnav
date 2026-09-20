@@ -184,7 +184,7 @@ describe("role workspace pages", () => {
     );
 
     expect(
-      await screen.findByRole("heading", { name: "Research folders" }),
+      await screen.findByRole("heading", { name: "Assigned Research" }),
     ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/monitoring/research",
@@ -1888,10 +1888,18 @@ describe("role workspace pages", () => {
               data: {
                 section_id: 7,
                 research_document_id: 11,
+                instructor: null,
                 adviser,
                 research_office_representative: null,
                 chair: null,
                 panel_members: [],
+                support_assignments: {
+                  editor: null,
+                  statistician: null,
+                  librarian: null,
+                },
+                pre_defense_ready: false,
+                post_defense_ready: false,
                 complete: false,
               },
             }),
@@ -1901,6 +1909,7 @@ describe("role workspace pages", () => {
         /\/api\/instructor\/sections\/7\/documents\/11\/team\/candidates/,
         () => listData([adviser]),
       ],
+      [/\/api\/research\/11\/(files|folders|feedback)$/, emptyData],
     ]);
 
     render(
@@ -1916,6 +1925,16 @@ describe("role workspace pages", () => {
     expect(
       await screen.findByRole("button", { name: "Back to Research Projects" }),
     ).toBeInTheDocument();
+    const workspace = await screen.findByTestId("study-workspace");
+    expect(
+      [
+        "Overview",
+        "Research actors",
+        "Documents",
+        "Feedback",
+        "Defense Monitoring Forms",
+      ].map((name) => within(workspace).getByRole("button", { name })),
+    ).toHaveLength(5);
     fireEvent.click(
       screen.getByRole("button", { name: "Delete research project" }),
     );

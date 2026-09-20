@@ -2,13 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { formatPhilippineDateTime, philippineDateToday } from "./dateTime";
 import {
   ArrowLeft,
-  CheckCircle2,
-  ChevronDown,
-  ClipboardCheck,
-  Download,
   ExternalLink,
   Eye,
-  FileText,
   Folder,
   MessageSquareText,
   Pencil,
@@ -18,7 +13,6 @@ import {
   Send,
   Trash2,
   UserPlus,
-  UsersRound,
 } from "lucide-react";
 import {
   ApiError,
@@ -26,7 +20,6 @@ import {
   checkTitleQuerySimilarity,
   createCoordinatorSchedule,
   createInstructorSection,
-  createFeedback,
   getCoordinatorProgramReport,
   getInstructorProjectTeam,
   getInstitutionalReport,
@@ -54,9 +47,6 @@ import {
   listProvisionedAccounts,
   listRepositoryCatalog,
   listResearchDocuments,
-  listResearchFiles,
-  listResearchFolders,
-  listFeedback,
   listMetadataStandards,
   listRetentionLogs,
   listSectionDocuments,
@@ -102,8 +92,6 @@ import {
   updateInstructorSection,
   updateOfficeUserAccess,
   uploadResearchFile,
-  researchFileDownloadUrl,
-  researchFilePreviewUrl,
   addSectionMembers,
   type AccessStatus,
   type AdminRole,
@@ -111,7 +99,6 @@ import {
   type CoordinatorProgramReport,
   type DefenseScheduleResource,
   type DocumentFileResource,
-  type FeedbackResource,
   type InstructorSectionDocumentItem,
   type InstructorAssignedSubmissionItem,
   type InstructorSectionResource,
@@ -137,8 +124,8 @@ import ResearchActivity from "./ResearchActivity";
 import ResearchFolderRow from "./ResearchFolderRow";
 import InstructorResearchReview from "./InstructorResearchReview";
 import SimilarityResults from "./SimilarityResults";
-import SharedMonitoring from "./SharedMonitoring";
 import AssignedResearchFolders from "./AssignedResearchFolders";
+import StudyWorkspace from "./StudyWorkspace";
 import ResearchProgressUpdates from "./ResearchProgressUpdates";
 import PublicResearchMetadataDialog from "./PublicResearchMetadataDialog";
 import ManuscriptFilePicker from "./ManuscriptFilePicker";
@@ -230,13 +217,8 @@ export default function RoleSidebarPage({
           return <AssignedResearchFolders role={role} actorKey={actorKey} />;
         case "Editorial Review":
           return <EditorReview role={role} />;
-        case "Defense Monitoring Forms":
         case "Monitoring":
           return <EditorMonitoring role={role} />;
-        case "Proposal Defense":
-          return <SharedMonitoring role={role} defenseType="proposal" />;
-        case "Final Defense":
-          return <SharedMonitoring role={role} defenseType="final" />;
         case "User Logs":
           return <UserLogs role={role} />;
         default:
@@ -268,13 +250,8 @@ export default function RoleSidebarPage({
           );
         case "Research Progress Updates":
           return <ResearchProgressUpdates role={role} />;
-        case "Defense Monitoring Forms":
         case "Monitoring":
           return <AdviserMonitoring role={role} />;
-        case "Proposal Defense":
-          return <SharedMonitoring role={role} defenseType="proposal" />;
-        case "Final Defense":
-          return <SharedMonitoring role={role} defenseType="final" />;
         case "Similarity Alerts":
           return <AdviserSimilarityAlerts role={role} navigate={navigate} />;
         case "Feedback History":
@@ -294,6 +271,7 @@ export default function RoleSidebarPage({
         case "My Sections":
           return (
             <InstructorSections
+              key={actorKey}
               role={role}
               navigate={navigate}
               sectionId={instructorSectionId}
@@ -313,13 +291,8 @@ export default function RoleSidebarPage({
           );
         case "Research Progress Updates":
           return <ResearchProgressUpdates role={role} />;
-        case "Defense Monitoring Forms":
         case "Monitoring":
           return <InstructorMonitoring role={role} />;
-        case "Proposal Defense":
-          return <SharedMonitoring role={role} defenseType="proposal" />;
-        case "Final Defense":
-          return <SharedMonitoring role={role} defenseType="final" />;
         case "Panelist Availability":
           return <InstructorPanelists role={role} />;
         case "Similarity Overview":
@@ -344,13 +317,6 @@ export default function RoleSidebarPage({
           return <PanelEvaluationForm role={role} />;
         case "Availability Calendar":
           return <PanelAvailability role={role} />;
-        case "Defense Monitoring Forms":
-        case "Monitoring":
-          return <SharedMonitoring role={role} />;
-        case "Proposal Defense":
-          return <SharedMonitoring role={role} defenseType="proposal" />;
-        case "Final Defense":
-          return <SharedMonitoring role={role} defenseType="final" />;
         case "Evaluation History":
         case "Panel History":
           return <PanelHistory role={role} />;
@@ -367,13 +333,6 @@ export default function RoleSidebarPage({
         case "Statistical Review":
         case "Methodology Checklist":
           return <StatisticianMethodologyChecklist role={role} />;
-        case "Defense Monitoring Forms":
-        case "Monitoring":
-          return <SharedMonitoring role={role} />;
-        case "Proposal Defense":
-          return <SharedMonitoring role={role} defenseType="proposal" />;
-        case "Final Defense":
-          return <SharedMonitoring role={role} defenseType="final" />;
         case "Sign-offs Issued":
           return <StatisticianSignoffs role={role} />;
         case "User Logs":
@@ -405,13 +364,8 @@ export default function RoleSidebarPage({
           return <AssignedResearchFolders role={role} actorKey={actorKey} />;
         case "Reference Review":
           return <LibrarianReferenceReview role={role} />;
-        case "Defense Monitoring Forms":
         case "Monitoring":
           return <LibrarianMonitoring role={role} />;
-        case "Proposal Defense":
-          return <SharedMonitoring role={role} defenseType="proposal" />;
-        case "Final Defense":
-          return <SharedMonitoring role={role} defenseType="final" />;
         case "Repository Catalog":
           return <LibrarianRepositoryCatalog role={role} navigate={navigate} />;
         case "Metadata Standards":
@@ -431,11 +385,6 @@ export default function RoleSidebarPage({
           return <ResearcherSimilarityCheck role={role} showModePicker />;
         case "Upload Manuscript":
           return <ResearchOfficeBulkImport />;
-
-        case "Proposal Defense":
-          return <SharedMonitoring role={role} defenseType="proposal" />;
-        case "Final Defense":
-          return <SharedMonitoring role={role} defenseType="final" />;
 
         case "User & Role Management":
           return <OfficeUsers role={role} />;
@@ -2346,7 +2295,6 @@ function InstructorSections({
   const [documentMembers, setDocumentMembers] = useState<
     InstructorStudentResource[]
   >([]);
-  const [documentMembersLoading, setDocumentMembersLoading] = useState(false);
   const [projectTeam, setProjectTeam] = useState<InstructorProjectTeam | null>(
     null,
   );
@@ -2395,27 +2343,12 @@ function InstructorSections({
   const [editProjectBusy, setEditProjectBusy] = useState(false);
   const [confirmProjectDelete, setConfirmProjectDelete] = useState(false);
   const [deleteProjectBusy, setDeleteProjectBusy] = useState(false);
-  const [projectTab, setProjectTab] = useState<
-    "overview" | "team" | "documents" | "feedback" | "monitoring"
-  >("overview");
-  const [monitoringMenuOpen, setMonitoringMenuOpen] = useState(false);
-  const [defenseType, setDefenseType] = useState<"proposal" | "final">(
-    "proposal",
-  );
-  const [projectFiles, setProjectFiles] = useState<DocumentFileResource[]>([]);
-  const [projectFolders, setProjectFolders] = useState<string[]>([]);
-  const [activeFolder, setActiveFolder] = useState("");
-  const [projectFeedback, setProjectFeedback] = useState<FeedbackResource[]>(
-    [],
-  );
-  const [workspaceLoading, setWorkspaceLoading] = useState(false);
-  const [feedbackText, setFeedbackText] = useState("");
-  const [feedbackType, setFeedbackType] =
-    useState<FeedbackResource["feedback_type"]>("comment");
-  const [feedbackFileId, setFeedbackFileId] = useState("");
-  const [feedbackBusy, setFeedbackBusy] = useState(false);
   const studentSearchRef = useRef<Record<number, number>>({});
-  const showingProjectPage = openSection !== null && selectedDocument !== null;
+  const showingProjectPage =
+    openSection !== null &&
+    selectedDocument !== null &&
+    projectDocumentId !== undefined &&
+    String(selectedDocument.research_document_id) === String(projectDocumentId);
   const projectAssignmentEditing =
     Object.values(projectDisclosures).some(Boolean);
 
@@ -2449,7 +2382,6 @@ function InstructorSections({
     );
     if (document) void openDocumentMembers(openSection.id, document);
     // Route identifiers and loaded documents intentionally drive this one-time open.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openSection, projectDocumentId, documentsFor]);
 
   function openSectionDetails(section: InstructorSectionResource) {
@@ -2500,79 +2432,26 @@ function InstructorSections({
     }
   }
 
-  async function loadProjectWorkspace(researchDocumentId: number) {
-    setWorkspaceLoading(true);
-    const [files, folders, feedback] = await Promise.allSettled([
-      listResearchFiles(researchDocumentId),
-      listResearchFolders(researchDocumentId),
-      listFeedback(researchDocumentId),
-    ]);
-
-    if (files.status === "fulfilled") setProjectFiles(files.value);
-    if (feedback.status === "fulfilled") setProjectFeedback(feedback.value);
-    if (folders.status === "fulfilled") {
-      setProjectFolders(folders.value);
-      setActiveFolder((current) =>
-        current && folders.value.includes(current)
-          ? current
-          : (folders.value[0] ?? ""),
-      );
-    }
-
-    const failed = [files, folders, feedback].find(
-      (result) => result.status === "rejected",
-    );
-    if (failed?.status === "rejected") {
-      setDetailsNotice(
-        friendlyError(
-          failed.reason,
-          "Some project workspace data could not be loaded",
-        ),
-      );
-    }
-    setWorkspaceLoading(false);
-  }
-
-  async function submitProjectFeedback(
-    event: React.FormEvent<HTMLFormElement>,
-  ) {
-    event.preventDefault();
-    if (!selectedDocument || !feedbackText.trim()) return;
-    setFeedbackBusy(true);
-    setDetailsNotice("");
-    try {
-      await createFeedback(selectedDocument.research_document_id, {
-        comment: feedbackText.trim(),
-        feedback_type: feedbackType,
-        document_file_id: feedbackFileId ? Number(feedbackFileId) : null,
-      });
-      setProjectFeedback(
-        await listFeedback(selectedDocument.research_document_id),
-      );
-      setFeedbackText("");
-      setFeedbackFileId("");
-      setDetailsNotice("Feedback added to the research workspace.");
-    } catch (error) {
-      setDetailsNotice(friendlyError(error, "The feedback could not be added"));
-    } finally {
-      setFeedbackBusy(false);
-    }
-  }
-
   async function openDocumentMembers(
     sectionId: number,
     document: InstructorSectionDocumentItem,
   ) {
     const requestId = ++teamRequestRef.current;
-    if (
-      selectedDocument?.research_document_id !== document.research_document_id
-    ) {
-      setProjectTab("overview");
-    }
+    setDocumentMembers([]);
+    setProjectTeam(null);
+    setTeamCandidates({});
+    setTeamDraft({
+      adviser_id: "",
+      research_office_representative_id: "",
+      chair_id: "",
+      panel_member_ids: [],
+    });
+    setTeamBusy(false);
+    setConfirmTeamSave(null);
+    setConfirmDocumentRemove(null);
+    setStudentBusy((current) => ({ ...current, [sectionId]: false }));
     setSelectedDocument(document);
-    setDocumentMembersLoading(true);
     setTeamLoading(true);
-    void loadProjectWorkspace(document.research_document_id);
     try {
       const [members, team, advisers, officePersonnel, chairs, panelists] =
         await Promise.allSettled([
@@ -2650,7 +2529,6 @@ function InstructorSections({
       setDocumentMembers([]);
     } finally {
       if (requestId === teamRequestRef.current) {
-        setDocumentMembersLoading(false);
         setTeamLoading(false);
       }
     }
@@ -2661,11 +2539,6 @@ function InstructorSections({
     setSelectedDocument(null);
     setDocumentMembers([]);
     setProjectTeam(null);
-    setProjectFiles([]);
-    setProjectFolders([]);
-    setProjectFeedback([]);
-    setActiveFolder("");
-    setProjectTab("overview");
     setProjectManageOpen(false);
     resetProjectDisclosures();
     if (openSection) navigate(`/app/instructor/sections/${openSection.id}`);
@@ -2680,6 +2553,7 @@ function InstructorSections({
     role: "adviser" | "researchOffice" | "chair" | "panelMembers",
   ) {
     if (!openSection || !selectedDocument) return;
+    const requestId = teamRequestRef.current;
     setTeamBusy(true);
     setDetailsNotice("");
     const teamRole =
@@ -2705,6 +2579,7 @@ function InstructorSections({
                   []),
           },
         );
+        if (requestId !== teamRequestRef.current) return;
         setProjectTeam(team);
       } else {
         const field =
@@ -2719,16 +2594,19 @@ function InstructorSections({
           teamRole,
           teamDraft[field] || null,
         );
+        if (requestId !== teamRequestRef.current) return;
         setProjectTeam(team);
       }
+      if (requestId !== teamRequestRef.current) return;
       setDetailsNotice("Research project assignment saved.");
       resetProjectDisclosures();
     } catch (error) {
+      if (requestId !== teamRequestRef.current) return;
       setDetailsNotice(
         friendlyError(error, "The project assignment could not be saved"),
       );
     } finally {
-      setTeamBusy(false);
+      if (requestId === teamRequestRef.current) setTeamBusy(false);
     }
   }
 
@@ -2825,6 +2703,7 @@ function InstructorSections({
     role: "adviser" | "researchOffice" | "chair" | "panelMembers",
   ) {
     if (!openSection || !selectedDocument) return;
+    const requestId = teamRequestRef.current;
     const teamRole =
       role === "researchOffice"
         ? "research_office_representative"
@@ -2845,11 +2724,13 @@ function InstructorSections({
               selectedDocument.research_document_id,
               teamRole,
             );
+      if (requestId !== teamRequestRef.current) return;
       setTeamCandidates((current) => ({
         ...current,
         [teamRole]: candidates,
       }));
     } catch (error) {
+      if (requestId !== teamRequestRef.current) return;
       setDetailsNotice(
         friendlyError(error, "Eligible project staff could not be refreshed"),
       );
@@ -2858,38 +2739,46 @@ function InstructorSections({
 
   async function addStudentToDocument(userId: string) {
     if (!openSection || !selectedDocument) return;
+    const requestId = teamRequestRef.current;
+    const sectionId = openSection.id;
     setStudentBusy((current) => ({ ...current, [openSection.id]: true }));
     try {
-      setDocumentMembers(
-        await addSectionDocumentMember(
-          openSection.id,
-          selectedDocument.research_document_id,
-          userId,
-        ),
+      const members = await addSectionDocumentMember(
+        sectionId,
+        selectedDocument.research_document_id,
+        userId,
       );
+      if (requestId !== teamRequestRef.current) return;
+      setDocumentMembers(members);
       setDetailsNotice("Student researcher added to this research title.");
     } catch (error) {
+      if (requestId !== teamRequestRef.current) return;
       setDetailsNotice(
         friendlyError(error, "The student could not be assigned to this title"),
       );
     } finally {
-      setStudentBusy((current) => ({ ...current, [openSection.id]: false }));
+      if (requestId === teamRequestRef.current) {
+        setStudentBusy((current) => ({ ...current, [sectionId]: false }));
+      }
     }
   }
 
   async function removeStudentFromDocument(userId: string) {
     if (!openSection || !selectedDocument) return;
+    const requestId = teamRequestRef.current;
+    const sectionId = openSection.id;
     setStudentBusy((current) => ({ ...current, [openSection.id]: true }));
     try {
-      setDocumentMembers(
-        await removeSectionDocumentMember(
-          openSection.id,
-          selectedDocument.research_document_id,
-          userId,
-        ),
+      const members = await removeSectionDocumentMember(
+        sectionId,
+        selectedDocument.research_document_id,
+        userId,
       );
+      if (requestId !== teamRequestRef.current) return;
+      setDocumentMembers(members);
       setDetailsNotice("Student researcher removed from this research title.");
     } catch (error) {
+      if (requestId !== teamRequestRef.current) return;
       setDetailsNotice(
         friendlyError(
           error,
@@ -2897,7 +2786,9 @@ function InstructorSections({
         ),
       );
     } finally {
-      setStudentBusy((current) => ({ ...current, [openSection.id]: false }));
+      if (requestId === teamRequestRef.current) {
+        setStudentBusy((current) => ({ ...current, [sectionId]: false }));
+      }
     }
   }
 
@@ -3563,7 +3454,7 @@ function InstructorSections({
           </div>
         </section>
       )}
-      {openSection && selectedDocument && (
+      {showingProjectPage && openSection && selectedDocument && (
         <section
           className="section-page-view"
           aria-label={`Research project: ${selectedDocument.title}`}
@@ -3580,1282 +3471,529 @@ function InstructorSections({
               <ArrowLeft />
             </Button>
           </div>
-          <div className="title-member-panel project-page-panel">
-            <div className="title-member-panel-heading">
-              <div>
-                <p className="eyebrow">Research project</p>
-                <h3>{selectedDocument.title}</h3>
-              </div>
-              <div className="section-block-actions">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className="icon-button"
-                  aria-label="Edit research title"
-                  title="Edit research title"
-                  onClick={() => {
-                    setEditProjectTitle(selectedDocument.title);
-                    setEditingProject(true);
-                  }}
-                >
-                  <Pencil />
-                </Button>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className="icon-button"
-                  aria-label="Delete research project"
-                  title="Delete research project"
-                  onClick={() => setConfirmProjectDelete(true)}
-                >
-                  <Trash2 />
-                </Button>
-              </div>
-            </div>
-            {editingProject && (
-              <Modal
-                label="Edit research title"
-                onClose={() => setEditingProject(false)}
-                busy={editProjectBusy}
-              >
-                <form
-                  onSubmit={saveProjectTitle}
-                  className="admin-inline-form section-project-create"
-                  aria-label="Edit research title"
-                >
-                  <h2>Edit research title</h2>
-                  <label>
-                    Research title
-                    <input
-                      value={editProjectTitle}
-                      onChange={(event) =>
-                        setEditProjectTitle(event.target.value)
-                      }
-                      required
-                      maxLength={500}
-                      disabled={editProjectBusy}
-                    />
-                  </label>
-                  <div className="modal-actions">
-                    <Button type="submit" disabled={editProjectBusy}>
-                      {editProjectBusy ? "Saving…" : "Save title"}
-                    </Button>
-                  </div>
-                </form>
-              </Modal>
-            )}
-            <div className="project-workspace-context">
-              <span>{openSection.name}</span>
-              <span>{openSection.section_code}</span>
-              <span>
-                {openSection.academic_year ?? "Academic year not set"}
-              </span>
-              <span>{label(selectedDocument.research_stage)}</span>
-              <span>{label(selectedDocument.submission_status)}</span>
-            </div>
-
-            <nav
-              className="project-workspace-tabs"
-              aria-label="Research study workspace"
+          <StudyWorkspace
+            key={selectedDocument.research_document_id}
+            role={role}
+            researchDocumentId={selectedDocument.research_document_id}
+            title={selectedDocument.title}
+            context={[
+              openSection.name,
+              openSection.section_code ?? "Section code not set",
+              openSection.academic_year ?? "Academic year not set",
+              label(selectedDocument.research_stage),
+              label(selectedDocument.submission_status),
+            ]}
+            researchers={documentMembers.map((member) => ({
+              id: member.id,
+              name: studentName(member),
+              email: member.email,
+            }))}
+            projectTeam={projectTeam}
+            teamLoading={teamLoading}
+            canPostFeedback
+            monitoringReadOnly={false}
+            controls={{
+              onEditTitle: () => {
+                setEditProjectTitle(selectedDocument.title);
+                setEditingProject(true);
+              },
+              onDeleteProject: () => setConfirmProjectDelete(true),
+              onManageAssignments: teamLoading
+                ? undefined
+                : () => {
+                    resetProjectDisclosures();
+                    setProjectManageOpen(true);
+                  },
+              onRemoveResearcher: teamLoading
+                ? undefined
+                : (researcher) => {
+                    const member = documentMembers.find(
+                      (candidate) => candidate.id === researcher.id,
+                    );
+                    if (member) setConfirmDocumentRemove(member);
+                  },
+              researcherActionsDisabled: studentBusy[openSection.id],
+            }}
+          />
+          {editingProject && (
+            <Modal
+              label="Edit research title"
+              onClose={() => setEditingProject(false)}
+              busy={editProjectBusy}
             >
-              {(
-                [
-                  ["overview", "Overview", FileText],
-                  ["team", "Research actors", UsersRound],
-                  ["documents", "Documents", Folder],
-                  ["feedback", "Feedback", MessageSquareText],
-                ] as const
-              ).map(([tab, tabLabel, Icon]) => (
-                <button
-                  type="button"
-                  key={tab}
-                  className={projectTab === tab ? "is-active" : ""}
-                  aria-current={projectTab === tab ? "page" : undefined}
-                  onClick={() => setProjectTab(tab)}
-                >
-                  <Icon aria-hidden="true" />
-                  <span>{tabLabel}</span>
-                </button>
-              ))}
-              <button
-                type="button"
-                className={projectTab === "monitoring" ? "is-active" : ""}
-                aria-current={projectTab === "monitoring" ? "page" : undefined}
-                aria-expanded={monitoringMenuOpen}
-                onClick={() => setMonitoringMenuOpen((open) => !open)}
+              <form
+                onSubmit={saveProjectTitle}
+                className="admin-inline-form section-project-create"
+                aria-label="Edit research title"
               >
-                <ClipboardCheck aria-hidden="true" />
-                <span>Defense Monitoring Forms</span>
-                <ChevronDown
-                  className="sidebar-nav-chevron"
-                  aria-hidden="true"
-                />
-              </button>
-              {monitoringMenuOpen &&
-                (["proposal", "final"] as const).map((type) => (
-                  <button
-                    type="button"
-                    key={type}
-                    className={
-                      projectTab === "monitoring" && defenseType === type
-                        ? "is-active"
-                        : ""
+                <h2>Edit research title</h2>
+                <label>
+                  Research title
+                  <input
+                    value={editProjectTitle}
+                    onChange={(event) =>
+                      setEditProjectTitle(event.target.value)
                     }
-                    onClick={() => {
-                      setDefenseType(type);
-                      setProjectTab("monitoring");
-                    }}
-                  >
-                    {type === "proposal" ? "Proposal Defense" : "Final Defense"}
-                  </button>
-                ))}
-            </nav>
-
-            {workspaceLoading && (
-              <p className="section-documents-loading">
-                Loading study workspace…
-              </p>
-            )}
-
-            {projectTab === "overview" && (
-              <div className="project-workspace-section project-overview-grid">
-                <section className="project-overview-card project-overview-card-wide">
-                  <div className="project-card-heading">
-                    <div>
-                      <p className="eyebrow">Study summary</p>
-                      <h4>Research workspace</h4>
-                    </div>
-                    <span className="badge badge-active">Central record</span>
-                  </div>
-                  <dl className="project-overview-stats">
-                    <div>
-                      <dt>Researchers</dt>
-                      <dd>{documentMembers.length}</dd>
-                    </div>
-                    <div>
-                      <dt>Documents</dt>
-                      <dd>{projectFiles.length}</dd>
-                    </div>
-                    <div>
-                      <dt>Feedback</dt>
-                      <dd>{projectFeedback.length}</dd>
-                    </div>
-                    <div>
-                      <dt>Document folders</dt>
-                      <dd>{projectFolders.length}</dd>
-                    </div>
-                  </dl>
-                  <div className="project-readiness-list">
-                    <div>
-                      <CheckCircle2 aria-hidden="true" />
-                      <span>
-                        <strong>Before Proposal Defense</strong>
-                        <small>
-                          {projectTeam?.pre_defense_ready
-                            ? "Required actors are assigned and accepted."
-                            : "Waiting for one or more required actor assignments."}
-                        </small>
-                      </span>
-                    </div>
-                    <div>
-                      <CheckCircle2 aria-hidden="true" />
-                      <span>
-                        <strong>After Proposal Defense</strong>
-                        <small>
-                          {projectTeam?.post_defense_ready
-                            ? "Adviser, editor, librarian, three panels, Research Rep, and Chair are ready."
-                            : "Post-defense actor list is not complete yet."}
-                        </small>
-                      </span>
-                    </div>
-                  </div>
-                </section>
-
-                <section className="project-overview-card">
-                  <div className="project-card-heading">
-                    <div>
-                      <p className="eyebrow">Researchers</p>
-                      <h4>Study members</h4>
-                    </div>
-                    <button
-                      type="button"
-                      className="text-action"
-                      onClick={() => setProjectTab("team")}
-                    >
-                      Manage
-                    </button>
-                  </div>
-                  {documentMembers.length === 0 ? (
-                    <p className="project-empty-copy">
-                      No researchers assigned yet.
-                    </p>
-                  ) : (
-                    <ul className="project-compact-list">
-                      {documentMembers.map((member) => (
-                        <li key={member.id}>
-                          <span
-                            className="project-person-avatar"
-                            aria-hidden="true"
-                          >
-                            {studentName(member).slice(0, 1).toUpperCase()}
-                          </span>
-                          <span>
-                            <strong>{studentName(member)}</strong>
-                            <small>{member.email}</small>
-                          </span>
-                          <button
-                            type="button"
-                            className="icon-button button-quiet"
-                            aria-label={`Remove ${studentName(member)}`}
-                            title="Remove researcher"
-                            onClick={() => setConfirmDocumentRemove(member)}
-                          >
-                            <Trash2 />
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </section>
-
-                <section className="project-overview-card">
-                  <div className="project-card-heading">
-                    <div>
-                      <p className="eyebrow">Recent files</p>
-                      <h4>Latest documents</h4>
-                    </div>
-                    <button
-                      type="button"
-                      className="text-action"
-                      onClick={() => setProjectTab("documents")}
-                    >
-                      View all
-                    </button>
-                  </div>
-                  {projectFiles.length === 0 ? (
-                    <p className="project-empty-copy">
-                      No manuscript files uploaded yet.
-                    </p>
-                  ) : (
-                    <ul className="project-compact-list project-file-preview-list">
-                      {[...projectFiles]
-                        .sort(
-                          (a, b) =>
-                            new Date(b.uploaded_at ?? 0).getTime() -
-                            new Date(a.uploaded_at ?? 0).getTime(),
-                        )
-                        .slice(0, 4)
-                        .map((file) => (
-                          <li key={file.id}>
-                            <FileText aria-hidden="true" />
-                            <span>
-                              <strong>{file.original_filename}</strong>
-                              <small>
-                                {file.relative_path ?? "Unfiled"} · v
-                                {file.version_number}
-                              </small>
-                            </span>
-                          </li>
-                        ))}
-                    </ul>
-                  )}
-                </section>
-              </div>
-            )}
-
-            {projectTab === "team" && (
-              <div className="project-workspace-section">
-                <div className="project-section-heading">
-                  <div>
-                    <p className="eyebrow">Research actors</p>
-                    <h4>People assigned to this study</h4>
-                    <p>
-                      Instructor-managed roles can be updated here. Editor,
-                      Librarian, and Statistician are requested by the
-                      researchers and remain visible in the same study
-                      workspace.
-                    </p>
-                  </div>
+                    required
+                    maxLength={500}
+                    disabled={editProjectBusy}
+                  />
+                </label>
+                <div className="modal-actions">
+                  <Button type="submit" disabled={editProjectBusy}>
+                    {editProjectBusy ? "Saving…" : "Save title"}
+                  </Button>
+                </div>
+              </form>
+            </Modal>
+          )}
+          {projectManageOpen && (
+            <Modal
+              label="Manage project assignments"
+              onClose={() => {
+                resetProjectDisclosures();
+                setProjectManageOpen(false);
+              }}
+              busy={teamBusy}
+            >
+              <div
+                className={`project-disclosures project-assignment-modal${projectAssignmentEditing ? " is-editing" : ""}`}
+                aria-label="Project assignments"
+              >
+                <h2>Manage project assignments</h2>
+                <div className="project-assignment-control">
+                  <span>
+                    <strong>Student researchers</strong>
+                    <small>Add students enrolled in this section.</small>
+                  </span>
                   <Button
                     type="button"
                     variant="secondary"
-                    onClick={() => {
-                      resetProjectDisclosures();
-                      setProjectManageOpen(true);
-                      void openDocumentMembers(
-                        openSection.id,
-                        selectedDocument,
-                      );
-                    }}
+                    className="icon-button"
+                    aria-label="Add students"
+                    title="Add students"
+                    aria-expanded={projectDisclosures.students}
+                    aria-controls={
+                      projectDisclosures.students
+                        ? "project-students-editor"
+                        : undefined
+                    }
+                    onClick={() =>
+                      setProjectDisclosures({
+                        students: !projectDisclosures.students,
+                        adviser: false,
+                        researchOffice: false,
+                        chair: false,
+                        panelMembers: false,
+                      })
+                    }
                   >
-                    <UsersRound /> Manage assignments
+                    <UserPlus />
                   </Button>
                 </div>
-
-                <section className="project-team-block">
-                  <div className="project-team-block-heading">
-                    <div>
-                      <h5>Student researchers</h5>
-                      <span>{documentMembers.length} assigned</span>
-                    </div>
-                  </div>
-                  {documentMembersLoading ? (
-                    <p className="section-documents-loading">
-                      Loading assigned students…
-                    </p>
-                  ) : documentMembers.length === 0 ? (
-                    <p className="project-empty-copy">
-                      No students are assigned to this research title.
-                    </p>
-                  ) : (
-                    <ul className="title-member-list project-researcher-list">
-                      {documentMembers.map((member) => (
-                        <li key={member.id}>
-                          <span>
-                            <strong>{studentName(member)}</strong>
-                            <small>{member.email}</small>
-                          </span>
-                          <Button
-                            type="button"
-                            variant="quiet"
-                            className="icon-button"
-                            aria-label={`Remove ${studentName(member)}`}
-                            title="Remove student from this study"
-                            disabled={studentBusy[openSection.id]}
-                            onClick={() => setConfirmDocumentRemove(member)}
-                          >
-                            <Trash2 />
-                          </Button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </section>
-
-                {teamLoading ? (
-                  <p className="section-documents-loading">
-                    Loading current actor assignments…
-                  </p>
-                ) : (
-                  <div className="project-stage-columns">
-                    <section className="project-team-block">
-                      <div className="project-team-block-heading">
-                        <div>
-                          <p className="eyebrow">Before Proposal Defense</p>
-                          <h5>Pre-defense actors</h5>
-                        </div>
-                        <span
-                          className={
-                            projectTeam?.pre_defense_ready
-                              ? "status-dot is-ready"
-                              : "status-dot"
-                          }
-                        >
-                          {projectTeam?.pre_defense_ready
-                            ? "Ready"
-                            : "Incomplete"}
-                        </span>
-                      </div>
-                      <div className="project-actor-grid">
-                        {[
-                          [
-                            "Research Instructor",
-                            projectTeam?.instructor?.name,
-                            "Automatically assigned",
-                          ],
-                          [
-                            "Research Adviser",
-                            projectTeam?.adviser?.name,
-                            "Instructor assigned",
-                          ],
-                          [
-                            "Editor",
-                            projectTeam?.support_assignments?.editor?.name,
-                            projectTeam?.support_assignments?.editor?.status ??
-                              "Researcher assigned",
-                          ],
-                          [
-                            "Statistician",
-                            projectTeam?.support_assignments?.statistician
-                              ?.name,
-                            projectTeam?.support_assignments?.statistician
-                              ?.status ?? "Researcher assigned",
-                          ],
-                          [
-                            "Librarian",
-                            projectTeam?.support_assignments?.librarian?.name,
-                            projectTeam?.support_assignments?.librarian
-                              ?.status ?? "Researcher assigned",
-                          ],
-                        ].map(([actorLabel, actorName, note]) => (
-                          <div
-                            className="project-actor-row"
-                            key={`pre-${actorLabel}`}
-                          >
-                            <span>
-                              <strong>{actorLabel}</strong>
-                              <small>{note}</small>
-                            </span>
-                            <span
-                              className={
-                                actorName ? "actor-name" : "actor-name is-empty"
-                              }
-                            >
-                              {actorName || "Unassigned"}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </section>
-
-                    <section className="project-team-block">
-                      <div className="project-team-block-heading">
-                        <div>
-                          <p className="eyebrow">After Proposal Defense</p>
-                          <h5>Post-defense actors</h5>
-                        </div>
-                        <span
-                          className={
-                            projectTeam?.post_defense_ready
-                              ? "status-dot is-ready"
-                              : "status-dot"
-                          }
-                        >
-                          {projectTeam?.post_defense_ready
-                            ? "Ready"
-                            : "Incomplete"}
-                        </span>
-                      </div>
-                      <div className="project-actor-grid">
-                        {[
-                          [
-                            "Research Instructor",
-                            projectTeam?.instructor?.name,
-                            "Automatically assigned",
-                          ],
-                          [
-                            "Research Adviser",
-                            projectTeam?.adviser?.name,
-                            "Instructor assigned",
-                          ],
-                          [
-                            "Editor",
-                            projectTeam?.support_assignments?.editor?.name,
-                            projectTeam?.support_assignments?.editor?.status ??
-                              "Researcher assigned",
-                          ],
-                          [
-                            "Librarian",
-                            projectTeam?.support_assignments?.librarian?.name,
-                            projectTeam?.support_assignments?.librarian
-                              ?.status ?? "Researcher assigned",
-                          ],
-                          [
-                            "Panel 1",
-                            projectTeam?.panel_members[0]?.name,
-                            "Instructor assigned",
-                          ],
-                          [
-                            "Panel 2",
-                            projectTeam?.panel_members[1]?.name,
-                            "Instructor assigned",
-                          ],
-                          [
-                            "Panel 3",
-                            projectTeam?.panel_members[2]?.name,
-                            "Instructor assigned",
-                          ],
-                          [
-                            "Research Rep",
-                            projectTeam?.research_office_representative?.name,
-                            "Research Office personnel",
-                          ],
-                          ["Chair", projectTeam?.chair?.name, "Panel chair"],
-                        ].map(([actorLabel, actorName, note]) => (
-                          <div
-                            className="project-actor-row"
-                            key={`post-${actorLabel}`}
-                          >
-                            <span>
-                              <strong>{actorLabel}</strong>
-                              <small>{note}</small>
-                            </span>
-                            <span
-                              className={
-                                actorName ? "actor-name" : "actor-name is-empty"
-                              }
-                            >
-                              {actorName || "Unassigned"}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </section>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {projectTab === "documents" && (
-              <div className="project-workspace-section project-documents-layout">
-                <aside
-                  className="project-folder-sidebar"
-                  aria-label="Document folders"
-                >
-                  <div className="project-folder-sidebar-heading">
-                    <div>
-                      <p className="eyebrow">Paper files</p>
-                      <h4>Folders</h4>
-                    </div>
-                  </div>
-                  <div className="project-folder-nav">
-                    {[
-                      ...projectFolders,
-                      ...(projectFiles.some((file) => !file.relative_path)
-                        ? ["Unfiled"]
-                        : []),
-                    ].map((folder) => {
-                      const count = projectFiles.filter((file) =>
-                        folder === "Unfiled"
-                          ? !file.relative_path
-                          : file.relative_path === folder,
-                      ).length;
-                      return (
-                        <button
-                          type="button"
-                          key={folder}
-                          className={activeFolder === folder ? "is-active" : ""}
-                          onClick={() => setActiveFolder(folder)}
-                        >
-                          <Folder aria-hidden="true" />
-                          <span>{folder}</span>
-                          <small>{count}</small>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </aside>
-
-                <section className="project-folder-content">
-                  <div className="project-section-heading project-folder-heading">
-                    <div>
-                      <p className="eyebrow">Document folder</p>
-                      <h4>{activeFolder || "Select a folder"}</h4>
-                      <p>
-                        Previous revisions stay visible so the review history is
-                        never lost.
-                      </p>
-                    </div>
-                  </div>
-
-                  {!activeFolder ? (
-                    <p className="project-empty-copy">
-                      Choose a document folder.
-                    </p>
-                  ) : projectFiles.filter((file) =>
-                      activeFolder === "Unfiled"
-                        ? !file.relative_path
-                        : file.relative_path === activeFolder,
-                    ).length === 0 ? (
-                    <div className="project-empty-folder">
-                      <Folder aria-hidden="true" />
-                      <strong>No documents in this folder yet.</strong>
-                      <span>
-                        Files uploaded by the researchers will appear here with
-                        their revision history.
-                      </span>
-                    </div>
-                  ) : (
-                    <div className="project-document-list">
-                      {projectFiles
-                        .filter((file) =>
-                          activeFolder === "Unfiled"
-                            ? !file.relative_path
-                            : file.relative_path === activeFolder,
-                        )
-                        .sort((a, b) => b.version_number - a.version_number)
-                        .map((file) => (
-                          <article
-                            className="project-document-row"
-                            key={file.id}
-                          >
-                            <div
-                              className="project-document-icon"
-                              aria-hidden="true"
-                            >
-                              <FileText />
-                            </div>
-                            <div className="project-document-copy">
-                              <div>
-                                <strong>{file.original_filename}</strong>
-                                <span
-                                  className={
-                                    file.is_current
-                                      ? "file-version is-current"
-                                      : "file-version"
-                                  }
-                                >
-                                  {file.is_current ? "Current" : "Previous"} · v
-                                  {file.version_number}
-                                </span>
-                              </div>
-                              <small>
-                                {label(file.document_type)} ·{" "}
-                                {file.uploader_name ?? "Researcher"} ·{" "}
-                                {displayDate(file.uploaded_at)}
-                              </small>
-                            </div>
-                            <div className="project-document-actions">
-                              {file.mime_type === "application/pdf" && (
-                                <a
-                                  className="icon-link-button"
-                                  href={researchFilePreviewUrl(
-                                    selectedDocument.research_document_id,
-                                    file.id,
-                                  )}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  aria-label={`Preview ${file.original_filename}`}
-                                  title="Preview PDF"
-                                >
-                                  <Eye />
-                                </a>
-                              )}
-                              <a
-                                className="icon-link-button"
-                                href={researchFileDownloadUrl(
-                                  selectedDocument.research_document_id,
-                                  file.id,
-                                )}
-                                aria-label={`Download ${file.original_filename}`}
-                                title="Download file"
-                              >
-                                <Download />
-                              </a>
-                            </div>
-                          </article>
-                        ))}
-                    </div>
-                  )}
-                </section>
-              </div>
-            )}
-
-            {projectTab === "feedback" && (
-              <div className="project-workspace-section project-feedback-layout">
-                <section className="project-feedback-thread">
-                  <div className="project-section-heading">
-                    <div>
-                      <p className="eyebrow">Review conversation</p>
-                      <h4>Feedback and comments</h4>
-                      <p>
-                        Comments stay attached to this study and can optionally
-                        reference a specific file.
-                      </p>
-                    </div>
-                    <span>
-                      {projectFeedback.length} comment
-                      {projectFeedback.length === 1 ? "" : "s"}
-                    </span>
-                  </div>
-                  {projectFeedback.length === 0 ? (
-                    <div className="project-empty-folder">
-                      <MessageSquareText aria-hidden="true" />
-                      <strong>No feedback yet.</strong>
-                      <span>
-                        Review comments from assigned research actors will
-                        appear here.
-                      </span>
-                    </div>
-                  ) : (
-                    <div className="project-comment-list">
-                      {projectFeedback.map((feedback) => {
-                        const linkedFile = projectFiles.find(
-                          (file) => file.id === feedback.document_file_id,
-                        );
-                        return (
-                          <article
-                            className="project-comment"
-                            key={feedback.id}
-                          >
-                            <span
-                              className="project-person-avatar"
-                              aria-hidden="true"
-                            >
-                              {(feedback.reviewer_name ?? "R")
-                                .slice(0, 1)
-                                .toUpperCase()}
-                            </span>
-                            <div className="project-comment-body">
-                              <div className="project-comment-meta">
-                                <span>
-                                  <strong>
-                                    {feedback.reviewer_name ??
-                                      "Assigned reviewer"}
-                                  </strong>
-                                  <small>
-                                    {feedback.reviewer_role ?? "Research actor"}
-                                  </small>
-                                </span>
-                                <time>{displayDate(feedback.created_at)}</time>
-                              </div>
-                              <p>{feedback.comment}</p>
-                              <div className="project-comment-footer">
-                                <span>{label(feedback.feedback_type)}</span>
-                                <span>{label(feedback.feedback_status)}</span>
-                                {linkedFile && (
-                                  <span>{linkedFile.original_filename}</span>
-                                )}
-                              </div>
-                            </div>
-                          </article>
-                        );
-                      })}
-                    </div>
-                  )}
-                </section>
-
-                <aside className="project-feedback-composer">
-                  <form onSubmit={submitProjectFeedback}>
-                    <div>
-                      <p className="eyebrow">Add review note</p>
-                      <h4>New feedback</h4>
+                {projectDisclosures.students && (
+                  <div
+                    id="project-students-editor"
+                    className="title-member-picker"
+                  >
+                    <div className="project-editor-heading">
+                      <p className="eyebrow">Project assignment</p>
+                      <h3>Student researchers</h3>
                     </div>
                     <label>
-                      Feedback type
-                      <select
-                        value={feedbackType}
+                      Search students
+                      <input
+                        value={studentQueries[openSection.id] ?? ""}
                         onChange={(event) =>
-                          setFeedbackType(
-                            event.target
-                              .value as FeedbackResource["feedback_type"],
-                          )
+                          setStudentQueries((current) => ({
+                            ...current,
+                            [openSection.id]: event.target.value,
+                          }))
                         }
-                      >
-                        <option value="comment">Comment</option>
-                        <option value="suggestion">Suggestion</option>
-                        <option value="revision_request">
-                          Revision request
-                        </option>
-                        <option value="approval_remark">Approval remark</option>
-                        <option value="general_feedback">
-                          General feedback
-                        </option>
-                      </select>
-                    </label>
-                    <label>
-                      Related document
-                      <select
-                        value={feedbackFileId}
-                        onChange={(event) =>
-                          setFeedbackFileId(event.target.value)
-                        }
-                      >
-                        <option value="">Whole study / no specific file</option>
-                        {projectFiles.map((file) => (
-                          <option key={file.id} value={file.id}>
-                            {file.relative_path ?? "Unfiled"} —{" "}
-                            {file.original_filename} (v{file.version_number})
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      Comment
-                      <textarea
-                        required
-                        value={feedbackText}
-                        onChange={(event) =>
-                          setFeedbackText(event.target.value)
-                        }
-                        placeholder="Write a clear review note for the researchers…"
+                        placeholder="Search this section roster"
                       />
                     </label>
-                    <Button disabled={feedbackBusy || !feedbackText.trim()}>
-                      <Send /> {feedbackBusy ? "Posting…" : "Post feedback"}
-                    </Button>
-                  </form>
-                </aside>
-              </div>
-            )}
+                    <p className="project-picker-note">
+                      Only students already enrolled in this section can be
+                      assigned to the study.
+                    </p>
+                    <ul className="student-candidates">
+                      {(studentsFor[openSection.id] ?? [])
+                        .filter(
+                          (candidate) =>
+                            !documentMembers.some(
+                              (member) => member.id === candidate.id,
+                            ),
+                        )
+                        .filter((candidate) => {
+                          const query = (studentQueries[openSection.id] ?? "")
+                            .trim()
+                            .toLocaleLowerCase();
+                          return (
+                            query === "" ||
+                            `${studentName(candidate)} ${candidate.email} ${candidate.student_employee_id ?? ""}`
+                              .toLocaleLowerCase()
+                              .includes(query)
+                          );
+                        })
+                        .map((candidate) => (
+                          <li key={candidate.id}>
+                            <span>
+                              {studentName(candidate)} ({candidate.email})
+                            </span>
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              disabled={studentBusy[openSection.id]}
+                              onClick={() =>
+                                void addStudentToDocument(candidate.id)
+                              }
+                            >
+                              Add
+                            </Button>
+                          </li>
+                        ))}
+                    </ul>
+                  </div>
+                )}
+                {(
+                  [
+                    [
+                      "adviser",
+                      "Assign research adviser",
+                      "Research adviser",
+                      "adviser_id",
+                    ],
+                    [
+                      "researchOffice",
+                      "Assign Research Office representative",
+                      "Research Office representative",
+                      "research_office_representative_id",
+                    ],
+                    ["chair", "Assign panel chair", "Panel chair", "chair_id"],
+                  ] as const
+                ).map(([disclosure, buttonLabel, fieldLabel, field]) => {
+                  const candidateKey =
+                    disclosure === "researchOffice"
+                      ? "research_office_representative"
+                      : disclosure;
+                  const candidates = teamCandidates[candidateKey] ?? [];
+                  const searchQuery = (teamSearches[disclosure] ?? "")
+                    .trim()
+                    .toLocaleLowerCase();
+                  const matchingCandidates = candidates.filter(
+                    (person) =>
+                      searchQuery === "" ||
+                      `${person.name} ${person.email}`
+                        .toLocaleLowerCase()
+                        .includes(searchQuery),
+                  );
 
-            {projectTab === "monitoring" && (
-              <div className="project-workspace-section">
-                <SharedMonitoring
-                  key={defenseType}
-                  role={role}
-                  researchDocumentId={selectedDocument.research_document_id}
-                  embedded
-                  defenseType={defenseType}
-                />
-              </div>
-            )}
-            {projectManageOpen && (
-              <Modal
-                label="Manage project assignments"
-                onClose={() => {
-                  resetProjectDisclosures();
-                  setProjectManageOpen(false);
-                }}
-                busy={teamBusy}
-              >
-                <div
-                  className={`project-disclosures project-assignment-modal${projectAssignmentEditing ? " is-editing" : ""}`}
-                  aria-label="Project assignments"
-                >
-                  <h2>Manage project assignments</h2>
+                  return (
+                    <div key={disclosure}>
+                      <div className="project-assignment-control">
+                        <span>
+                          <strong>{fieldLabel}</strong>
+                          <small>View or change the current assignment.</small>
+                        </span>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          className="icon-button"
+                          aria-label={buttonLabel}
+                          title={buttonLabel}
+                          aria-expanded={projectDisclosures[disclosure]}
+                          aria-controls={
+                            projectDisclosures[disclosure]
+                              ? `project-${disclosure}-editor`
+                              : undefined
+                          }
+                          onClick={() => {
+                            const opening = !projectDisclosures[disclosure];
+                            setProjectDisclosures({
+                              students: false,
+                              adviser: false,
+                              researchOffice: false,
+                              chair: false,
+                              panelMembers: false,
+                              [disclosure]: opening,
+                            });
+                            if (opening) {
+                              void refreshProjectTeamCandidates(disclosure);
+                            }
+                          }}
+                        >
+                          {projectTeam?.[
+                            disclosure === "researchOffice"
+                              ? "research_office_representative"
+                              : disclosure
+                          ] ? (
+                            <Pencil />
+                          ) : (
+                            <Plus />
+                          )}
+                        </Button>
+                      </div>
+                      {projectDisclosures[disclosure] && (
+                        <div
+                          id={`project-${disclosure}-editor`}
+                          className="project-role-editor"
+                        >
+                          <div className="project-editor-heading">
+                            <p className="eyebrow">Project assignment</p>
+                            <h3>{fieldLabel}</h3>
+                          </div>
+                          <p>
+                            <strong>Current:</strong>{" "}
+                            {projectTeam?.[
+                              disclosure === "researchOffice"
+                                ? "research_office_representative"
+                                : disclosure
+                            ]?.name ?? "Unassigned"}
+                          </p>
+                          <label>
+                            Search and select {fieldLabel.toLowerCase()}
+                            <input
+                              type="search"
+                              value={teamSearches[disclosure] ?? ""}
+                              placeholder="Search by name or email"
+                              autoComplete="off"
+                              onChange={(event) =>
+                                setTeamSearches((current) => ({
+                                  ...current,
+                                  [disclosure]: event.target.value,
+                                }))
+                              }
+                            />
+                          </label>
+                          <fieldset>
+                            <legend>{fieldLabel}</legend>
+                            {teamLoading ? (
+                              <p
+                                className="project-assignment-empty"
+                                role="status"
+                              >
+                                Loading eligible accounts…
+                              </p>
+                            ) : candidates.length === 0 ? (
+                              <p className="project-assignment-empty">
+                                No eligible {fieldLabel.toLowerCase()} account
+                                is available. Ask the Coordinator or
+                                Administrator to activate the required account
+                                first.
+                              </p>
+                            ) : matchingCandidates.length === 0 ? (
+                              <p
+                                className="project-assignment-empty"
+                                role="status"
+                              >
+                                No accounts match “
+                                {teamSearches[disclosure]?.trim()}”.
+                              </p>
+                            ) : (
+                              <ProjectAccountOptions
+                                candidates={matchingCandidates}
+                                selectedIds={
+                                  teamDraft[field] ? [teamDraft[field]] : []
+                                }
+                                mode="single"
+                                groupName={`project-${disclosure}-selection`}
+                                onClear={() =>
+                                  setTeamDraft((current) => ({
+                                    ...current,
+                                    [field]: "",
+                                  }))
+                                }
+                                disabledIds={
+                                  disclosure === "chair"
+                                    ? teamDraft.panel_member_ids
+                                    : []
+                                }
+                                disabledLabel={
+                                  disclosure === "chair"
+                                    ? "Panel member"
+                                    : undefined
+                                }
+                                onToggle={(person, selected) =>
+                                  setTeamDraft((current) => ({
+                                    ...current,
+                                    [field]: selected ? person.user_id : "",
+                                  }))
+                                }
+                              />
+                            )}
+                          </fieldset>
+                          <div className="project-role-actions">
+                            <span>
+                              {teamDraft[field]
+                                ? "1 account selected"
+                                : "No account selected"}
+                            </span>
+                            <Button
+                              type="button"
+                              disabled={
+                                teamBusy ||
+                                teamLoading ||
+                                !projectTeamRoleChanged(disclosure)
+                              }
+                              onClick={() => requestProjectTeamSave(disclosure)}
+                            >
+                              {teamBusy
+                                ? "Saving…"
+                                : projectTeamRoleAction(disclosure)}
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                <div>
                   <div className="project-assignment-control">
                     <span>
-                      <strong>Student researchers</strong>
-                      <small>Add students enrolled in this section.</small>
+                      <strong>Panel members</strong>
+                      <small>Select the project evaluation panel.</small>
                     </span>
                     <Button
                       type="button"
                       variant="secondary"
                       className="icon-button"
-                      aria-label="Add students"
-                      title="Add students"
-                      aria-expanded={projectDisclosures.students}
+                      aria-label="Assign panel members"
+                      title="Assign panel members"
+                      aria-expanded={projectDisclosures.panelMembers}
                       aria-controls={
-                        projectDisclosures.students
-                          ? "project-students-editor"
+                        projectDisclosures.panelMembers
+                          ? "project-panel-members-editor"
                           : undefined
                       }
-                      onClick={() =>
+                      onClick={() => {
+                        const opening = !projectDisclosures.panelMembers;
                         setProjectDisclosures({
-                          students: !projectDisclosures.students,
+                          students: false,
                           adviser: false,
                           researchOffice: false,
                           chair: false,
-                          panelMembers: false,
-                        })
-                      }
+                          panelMembers: opening,
+                        });
+                        if (opening) {
+                          void refreshProjectTeamCandidates("panelMembers");
+                        }
+                      }}
                     >
-                      <UserPlus />
+                      {projectTeam?.panel_members.length ? (
+                        <Pencil />
+                      ) : (
+                        <Plus />
+                      )}
                     </Button>
                   </div>
-                  {projectDisclosures.students && (
+                  {projectDisclosures.panelMembers && (
                     <div
-                      id="project-students-editor"
-                      className="title-member-picker"
+                      id="project-panel-members-editor"
+                      className="project-role-editor"
                     >
                       <div className="project-editor-heading">
                         <p className="eyebrow">Project assignment</p>
-                        <h3>Student researchers</h3>
+                        <h3>Panel members</h3>
                       </div>
+                      <p>
+                        <strong>Current:</strong>{" "}
+                        {projectTeam?.panel_members
+                          .map((member) => member.name)
+                          .join(", ") || "None"}
+                      </p>
                       <label>
-                        Search students
+                        Search and select panel members
                         <input
-                          value={studentQueries[openSection.id] ?? ""}
+                          type="search"
+                          value={teamSearches.panelMembers ?? ""}
+                          placeholder="Search by name or email"
                           onChange={(event) =>
-                            setStudentQueries((current) => ({
+                            setTeamSearches((current) => ({
                               ...current,
-                              [openSection.id]: event.target.value,
+                              panelMembers: event.target.value,
                             }))
                           }
-                          placeholder="Search this section roster"
                         />
                       </label>
-                      <p className="project-picker-note">
-                        Only students already enrolled in this section can be
-                        assigned to the study.
-                      </p>
-                      <ul className="student-candidates">
-                        {(studentsFor[openSection.id] ?? [])
-                          .filter(
-                            (candidate) =>
-                              !documentMembers.some(
-                                (member) => member.id === candidate.id,
-                              ),
-                          )
-                          .filter((candidate) => {
-                            const query = (studentQueries[openSection.id] ?? "")
-                              .trim()
-                              .toLocaleLowerCase();
-                            return (
-                              query === "" ||
-                              `${studentName(candidate)} ${candidate.email} ${candidate.student_employee_id ?? ""}`
-                                .toLocaleLowerCase()
-                                .includes(query)
-                            );
-                          })
-                          .map((candidate) => (
-                            <li key={candidate.id}>
-                              <span>
-                                {studentName(candidate)} ({candidate.email})
-                              </span>
-                              <Button
-                                type="button"
-                                variant="secondary"
-                                disabled={studentBusy[openSection.id]}
-                                onClick={() =>
-                                  void addStudentToDocument(candidate.id)
-                                }
-                              >
-                                Add
-                              </Button>
-                            </li>
-                          ))}
-                      </ul>
-                    </div>
-                  )}
-                  {(
-                    [
-                      [
-                        "adviser",
-                        "Assign research adviser",
-                        "Research adviser",
-                        "adviser_id",
-                      ],
-                      [
-                        "researchOffice",
-                        "Assign Research Office representative",
-                        "Research Office representative",
-                        "research_office_representative_id",
-                      ],
-                      [
-                        "chair",
-                        "Assign panel chair",
-                        "Panel chair",
-                        "chair_id",
-                      ],
-                    ] as const
-                  ).map(([disclosure, buttonLabel, fieldLabel, field]) => {
-                    const candidateKey =
-                      disclosure === "researchOffice"
-                        ? "research_office_representative"
-                        : disclosure;
-                    const candidates = teamCandidates[candidateKey] ?? [];
-                    const searchQuery = (teamSearches[disclosure] ?? "")
-                      .trim()
-                      .toLocaleLowerCase();
-                    const matchingCandidates = candidates.filter(
-                      (person) =>
-                        searchQuery === "" ||
-                        `${person.name} ${person.email}`
-                          .toLocaleLowerCase()
-                          .includes(searchQuery),
-                    );
-
-                    return (
-                      <div key={disclosure}>
-                        <div className="project-assignment-control">
-                          <span>
-                            <strong>{fieldLabel}</strong>
-                            <small>
-                              View or change the current assignment.
-                            </small>
-                          </span>
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            className="icon-button"
-                            aria-label={buttonLabel}
-                            title={buttonLabel}
-                            aria-expanded={projectDisclosures[disclosure]}
-                            aria-controls={
-                              projectDisclosures[disclosure]
-                                ? `project-${disclosure}-editor`
-                                : undefined
-                            }
-                            onClick={() => {
-                              const opening = !projectDisclosures[disclosure];
-                              setProjectDisclosures({
-                                students: false,
-                                adviser: false,
-                                researchOffice: false,
-                                chair: false,
-                                panelMembers: false,
-                                [disclosure]: opening,
-                              });
-                              if (opening) {
-                                void refreshProjectTeamCandidates(disclosure);
-                              }
-                            }}
-                          >
-                            {projectTeam?.[
-                              disclosure === "researchOffice"
-                                ? "research_office_representative"
-                                : disclosure
-                            ] ? (
-                              <Pencil />
-                            ) : (
-                              <Plus />
-                            )}
-                          </Button>
-                        </div>
-                        {projectDisclosures[disclosure] && (
-                          <div
-                            id={`project-${disclosure}-editor`}
-                            className="project-role-editor"
-                          >
-                            <div className="project-editor-heading">
-                              <p className="eyebrow">Project assignment</p>
-                              <h3>{fieldLabel}</h3>
-                            </div>
-                            <p>
-                              <strong>Current:</strong>{" "}
-                              {projectTeam?.[
-                                disclosure === "researchOffice"
-                                  ? "research_office_representative"
-                                  : disclosure
-                              ]?.name ?? "Unassigned"}
-                            </p>
-                            <label>
-                              Search and select {fieldLabel.toLowerCase()}
-                              <input
-                                type="search"
-                                value={teamSearches[disclosure] ?? ""}
-                                placeholder="Search by name or email"
-                                autoComplete="off"
-                                onChange={(event) =>
-                                  setTeamSearches((current) => ({
-                                    ...current,
-                                    [disclosure]: event.target.value,
-                                  }))
-                                }
-                              />
-                            </label>
-                            <fieldset>
-                              <legend>{fieldLabel}</legend>
-                              {teamLoading ? (
-                                <p
-                                  className="project-assignment-empty"
-                                  role="status"
-                                >
-                                  Loading eligible accounts…
-                                </p>
-                              ) : candidates.length === 0 ? (
-                                <p className="project-assignment-empty">
-                                  No eligible {fieldLabel.toLowerCase()} account
-                                  is available. Ask the Coordinator or
-                                  Administrator to activate the required account
-                                  first.
-                                </p>
-                              ) : matchingCandidates.length === 0 ? (
-                                <p
-                                  className="project-assignment-empty"
-                                  role="status"
-                                >
-                                  No accounts match “
-                                  {teamSearches[disclosure]?.trim()}”.
-                                </p>
-                              ) : (
-                                <ProjectAccountOptions
-                                  candidates={matchingCandidates}
-                                  selectedIds={
-                                    teamDraft[field] ? [teamDraft[field]] : []
-                                  }
-                                  mode="single"
-                                  groupName={`project-${disclosure}-selection`}
-                                  onClear={() =>
-                                    setTeamDraft((current) => ({
-                                      ...current,
-                                      [field]: "",
-                                    }))
-                                  }
-                                  disabledIds={
-                                    disclosure === "chair"
-                                      ? teamDraft.panel_member_ids
-                                      : []
-                                  }
-                                  disabledLabel={
-                                    disclosure === "chair"
-                                      ? "Panel member"
-                                      : undefined
-                                  }
-                                  onToggle={(person, selected) =>
-                                    setTeamDraft((current) => ({
-                                      ...current,
-                                      [field]: selected ? person.user_id : "",
-                                    }))
-                                  }
-                                />
-                              )}
-                            </fieldset>
-                            <div className="project-role-actions">
-                              <span>
-                                {teamDraft[field]
-                                  ? "1 account selected"
-                                  : "No account selected"}
-                              </span>
-                              <Button
-                                type="button"
-                                disabled={
-                                  teamBusy ||
-                                  teamLoading ||
-                                  !projectTeamRoleChanged(disclosure)
-                                }
-                                onClick={() =>
-                                  requestProjectTeamSave(disclosure)
-                                }
-                              >
-                                {teamBusy
-                                  ? "Saving…"
-                                  : projectTeamRoleAction(disclosure)}
-                              </Button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                  <div>
-                    <div className="project-assignment-control">
-                      <span>
-                        <strong>Panel members</strong>
-                        <small>Select the project evaluation panel.</small>
-                      </span>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        className="icon-button"
-                        aria-label="Assign panel members"
-                        title="Assign panel members"
-                        aria-expanded={projectDisclosures.panelMembers}
-                        aria-controls={
-                          projectDisclosures.panelMembers
-                            ? "project-panel-members-editor"
-                            : undefined
-                        }
-                        onClick={() => {
-                          const opening = !projectDisclosures.panelMembers;
-                          setProjectDisclosures({
-                            students: false,
-                            adviser: false,
-                            researchOffice: false,
-                            chair: false,
-                            panelMembers: opening,
-                          });
-                          if (opening) {
-                            void refreshProjectTeamCandidates("panelMembers");
-                          }
-                        }}
-                      >
-                        {projectTeam?.panel_members.length ? (
-                          <Pencil />
+                      <fieldset>
+                        <legend>Panel members</legend>
+                        {teamLoading ? (
+                          <p className="project-assignment-empty" role="status">
+                            Loading eligible panel members…
+                          </p>
+                        ) : (teamCandidates.panel_member ?? []).length === 0 ? (
+                          <p className="project-assignment-empty">
+                            No eligible panel accounts are available. Ask the
+                            Coordinator or Administrator to activate a Panel
+                            account first.
+                          </p>
+                        ) : matchingPanelCandidates.length === 0 ? (
+                          <p className="project-assignment-empty" role="status">
+                            No panel accounts match “
+                            {teamSearches.panelMembers?.trim()}”.
+                          </p>
                         ) : (
-                          <Plus />
-                        )}
-                      </Button>
-                    </div>
-                    {projectDisclosures.panelMembers && (
-                      <div
-                        id="project-panel-members-editor"
-                        className="project-role-editor"
-                      >
-                        <div className="project-editor-heading">
-                          <p className="eyebrow">Project assignment</p>
-                          <h3>Panel members</h3>
-                        </div>
-                        <p>
-                          <strong>Current:</strong>{" "}
-                          {projectTeam?.panel_members
-                            .map((member) => member.name)
-                            .join(", ") || "None"}
-                        </p>
-                        <label>
-                          Search and select panel members
-                          <input
-                            type="search"
-                            value={teamSearches.panelMembers ?? ""}
-                            placeholder="Search by name or email"
-                            onChange={(event) =>
-                              setTeamSearches((current) => ({
-                                ...current,
-                                panelMembers: event.target.value,
-                              }))
+                          <ProjectAccountOptions
+                            candidates={matchingPanelCandidates}
+                            selectedIds={teamDraft.panel_member_ids}
+                            disabledIds={
+                              teamDraft.chair_id ? [teamDraft.chair_id] : []
+                            }
+                            disabledLabel="Panel chair"
+                            onToggle={(person, selected) =>
+                              setTeamDraft((current) => {
+                                if (
+                                  selected &&
+                                  current.panel_member_ids.length >= 3 &&
+                                  !current.panel_member_ids.includes(
+                                    person.user_id,
+                                  )
+                                ) {
+                                  return current;
+                                }
+                                return {
+                                  ...current,
+                                  panel_member_ids: selected
+                                    ? Array.from(
+                                        new Set([
+                                          ...current.panel_member_ids,
+                                          person.user_id,
+                                        ]),
+                                      ).slice(0, 3)
+                                    : current.panel_member_ids.filter(
+                                        (id) => id !== person.user_id,
+                                      ),
+                                };
+                              })
                             }
                           />
-                        </label>
-                        <fieldset>
-                          <legend>Panel members</legend>
-                          {teamLoading ? (
-                            <p
-                              className="project-assignment-empty"
-                              role="status"
-                            >
-                              Loading eligible panel members…
-                            </p>
-                          ) : (teamCandidates.panel_member ?? []).length ===
-                            0 ? (
-                            <p className="project-assignment-empty">
-                              No eligible panel accounts are available. Ask the
-                              Coordinator or Administrator to activate a Panel
-                              account first.
-                            </p>
-                          ) : matchingPanelCandidates.length === 0 ? (
-                            <p
-                              className="project-assignment-empty"
-                              role="status"
-                            >
-                              No panel accounts match “
-                              {teamSearches.panelMembers?.trim()}”.
-                            </p>
-                          ) : (
-                            <ProjectAccountOptions
-                              candidates={matchingPanelCandidates}
-                              selectedIds={teamDraft.panel_member_ids}
-                              disabledIds={
-                                teamDraft.chair_id ? [teamDraft.chair_id] : []
-                              }
-                              disabledLabel="Panel chair"
-                              onToggle={(person, selected) =>
-                                setTeamDraft((current) => {
-                                  if (
-                                    selected &&
-                                    current.panel_member_ids.length >= 3 &&
-                                    !current.panel_member_ids.includes(
-                                      person.user_id,
-                                    )
-                                  ) {
-                                    return current;
-                                  }
-                                  return {
-                                    ...current,
-                                    panel_member_ids: selected
-                                      ? Array.from(
-                                          new Set([
-                                            ...current.panel_member_ids,
-                                            person.user_id,
-                                          ]),
-                                        ).slice(0, 3)
-                                      : current.panel_member_ids.filter(
-                                          (id) => id !== person.user_id,
-                                        ),
-                                  };
-                                })
-                              }
-                            />
-                          )}
-                        </fieldset>
-                        <div className="project-role-actions">
-                          <span>
-                            {teamDraft.panel_member_ids.length} / 3 selected
-                          </span>
-                          <Button
-                            type="button"
-                            disabled={
-                              teamBusy ||
-                              teamLoading ||
-                              !projectTeamRoleChanged("panelMembers")
-                            }
-                            onClick={() =>
-                              requestProjectTeamSave("panelMembers")
-                            }
-                          >
-                            {teamBusy
-                              ? "Saving…"
-                              : projectTeamRoleAction("panelMembers")}
-                          </Button>
-                        </div>
+                        )}
+                      </fieldset>
+                      <div className="project-role-actions">
+                        <span>
+                          {teamDraft.panel_member_ids.length} / 3 selected
+                        </span>
+                        <Button
+                          type="button"
+                          disabled={
+                            teamBusy ||
+                            teamLoading ||
+                            !projectTeamRoleChanged("panelMembers")
+                          }
+                          onClick={() => requestProjectTeamSave("panelMembers")}
+                        >
+                          {teamBusy
+                            ? "Saving…"
+                            : projectTeamRoleAction("panelMembers")}
+                        </Button>
                       </div>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
-              </Modal>
-            )}
-          </div>
+              </div>
+            </Modal>
+          )}
         </section>
       )}
       {confirmRemove && openSection && (

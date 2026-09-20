@@ -160,7 +160,7 @@ export default function SharedMonitoring({
   const readOnly = forceReadOnly || role === "researcher";
   const canEditCurrent =
     !readOnly &&
-    (data?.editable_stages?.includes(stage) ?? true) &&
+    (data?.editable_stages?.includes(stage) ?? false) &&
     !(role === "panel" && stageTiming === "before") &&
     !(role === "statistician" && stageTiming === "after");
   function geometryFor(formStage: MonitoringStage) {

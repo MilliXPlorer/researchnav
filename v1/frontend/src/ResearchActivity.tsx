@@ -88,6 +88,7 @@ export default function ResearchActivity({
   partialFallback = false,
   fallbackData,
   forceMock = false,
+  hideFeedback = false,
 }: {
   researchDocumentId: string | number;
   title?: string;
@@ -96,6 +97,7 @@ export default function ResearchActivity({
   partialFallback?: boolean;
   fallbackData?: ActivityData;
   forceMock?: boolean;
+  hideFeedback?: boolean;
 }) {
   const [state, setState] = useState<ActivityState>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);
@@ -107,7 +109,7 @@ export default function ResearchActivity({
 
     if (!partialFallback) {
       void Promise.all([
-        listFeedback(researchDocumentId),
+        hideFeedback ? Promise.resolve([]) : listFeedback(researchDocumentId),
         listResearchRevisions(researchDocumentId),
         listMonitoringLogs(researchDocumentId),
       ])
@@ -132,7 +134,7 @@ export default function ResearchActivity({
     }
 
     void Promise.allSettled([
-      listFeedback(researchDocumentId),
+      hideFeedback ? Promise.resolve([]) : listFeedback(researchDocumentId),
       listResearchRevisions(researchDocumentId),
       listMonitoringLogs(researchDocumentId),
     ])
@@ -183,6 +185,7 @@ export default function ResearchActivity({
     partialFallback,
     fallbackData,
     forceMock,
+    hideFeedback,
   ]);
 
   const displayedState =
@@ -298,59 +301,63 @@ export default function ResearchActivity({
         </section>
       )}
 
-      <section className="activity-block">
-        <h3>Reviewer feedback and remarks</h3>
-        {feedback.length === 0 ? (
-          <p className="admin-empty">No feedback has been recorded yet.</p>
-        ) : (
-          <ul className="activity-list">
-            {feedback.map((item) => (
-              <li key={item.id}>
-                <div className="activity-row-top">
-                  <span className="activity-tag">
-                    {humanize(item.feedback_type)}
-                  </span>
-                  <span
-                    className={`status-chip status-${item.feedback_status === "resolved" ? "approved" : item.feedback_status === "acknowledged" ? "under-review" : "revision-required"}`}
-                  >
-                    {humanize(item.feedback_status)}
-                  </span>
-                  <time>{activityDate(item.created_at)}</time>
-                </div>
-                <p className="activity-comment">{item.comment}</p>
-                {item.reviewer_name && <p>Reviewer: {item.reviewer_name}</p>}
-                {researcherActions && !mockSections.includes("feedback") && (
-                  <div className="row-actions">
-                    <Button
-                      variant="secondary"
-                      disabled={item.researcher_acknowledged_at != null}
-                      onClick={() =>
-                        void applyFeedbackAction(item, "acknowledge")
-                      }
+      {!hideFeedback && (
+        <section className="activity-block">
+          <h3>Reviewer feedback and remarks</h3>
+          {feedback.length === 0 ? (
+            <p className="admin-empty">No feedback has been recorded yet.</p>
+          ) : (
+            <ul className="activity-list">
+              {feedback.map((item) => (
+                <li key={item.id}>
+                  <div className="activity-row-top">
+                    <span className="activity-tag">
+                      {humanize(item.feedback_type)}
+                    </span>
+                    <span
+                      className={`status-chip status-${item.feedback_status === "resolved" ? "approved" : item.feedback_status === "acknowledged" ? "under-review" : "revision-required"}`}
                     >
-                      {item.researcher_acknowledged_at
-                        ? "Acknowledged"
-                        : "Acknowledge"}
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      disabled={item.researcher_addressed_at != null}
-                      onClick={() => void applyFeedbackAction(item, "address")}
-                    >
-                      {item.researcher_addressed_at
-                        ? "Addressed"
-                        : "Mark addressed"}
-                    </Button>
+                      {humanize(item.feedback_status)}
+                    </span>
+                    <time>{activityDate(item.created_at)}</time>
                   </div>
-                )}
-                {item.researcher_action_remarks && (
-                  <p>Researcher action: {item.researcher_action_remarks}</p>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+                  <p className="activity-comment">{item.comment}</p>
+                  {item.reviewer_name && <p>Reviewer: {item.reviewer_name}</p>}
+                  {researcherActions && !mockSections.includes("feedback") && (
+                    <div className="row-actions">
+                      <Button
+                        variant="secondary"
+                        disabled={item.researcher_acknowledged_at != null}
+                        onClick={() =>
+                          void applyFeedbackAction(item, "acknowledge")
+                        }
+                      >
+                        {item.researcher_acknowledged_at
+                          ? "Acknowledged"
+                          : "Acknowledge"}
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        disabled={item.researcher_addressed_at != null}
+                        onClick={() =>
+                          void applyFeedbackAction(item, "address")
+                        }
+                      >
+                        {item.researcher_addressed_at
+                          ? "Addressed"
+                          : "Mark addressed"}
+                      </Button>
+                    </div>
+                  )}
+                  {item.researcher_action_remarks && (
+                    <p>Researcher action: {item.researcher_action_remarks}</p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
       <section className="activity-block">
         <h3>Revision requests</h3>
