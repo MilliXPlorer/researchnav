@@ -380,8 +380,10 @@ export default function RoleSidebarPage({
       }
     case "research-office":
       switch (selectedNav) {
+        case "Assigned Research":
         case "Research Folders":
           return <AssignedResearchFolders role={role} actorKey={actorKey} />;
+
         case "Similarity Check":
           return <ResearcherSimilarityCheck role={role} showModePicker />;
         case "Upload Manuscript":
