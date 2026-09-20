@@ -2755,8 +2755,17 @@ export interface SharedMonitoringData {
   research_document_id: number;
   title: string;
   researchers: string[];
+  editable_stages: Array<
+    | "before_proposal_defense"
+    | "after_proposal_defense"
+    | "before_final_defense"
+    | "after_final_defense"
+  >;
   stages: Record<
-    "before_proposal_defense" | "after_proposal_defense",
+    | "before_proposal_defense"
+    | "after_proposal_defense"
+    | "before_final_defense"
+    | "after_final_defense",
     {
       sections: Array<{
         designation: string;

@@ -1,8 +1,10 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { BadgeCheck, Pencil, Plus, Printer, Trash2 } from "lucide-react";
 import { formatPhilippineDate } from "./dateTime";
-import preDefenseForm from "./form_templates/monitoring-pre-defense.png";
-import postDefenseForm from "./form_templates/monitoring-post-defense.png";
+import beforeProposalForm from "./form_templates/monitoring-before-proposal-1.png";
+import afterProposalForm from "./form_templates/monitoring-after-proposal-1.png";
+import beforeFinalForm from "./form_templates/monitoring-before-final-1.png";
+import afterFinalForm from "./form_templates/monitoring-after-final-1.png";
 import { Button } from "./components";
 import { Modal } from "./Modal";
 import {
@@ -87,16 +89,22 @@ async function centeredSignature(signature: Blob): Promise<Blob> {
 }
 import type { Role } from "./types";
 
+export type DefenseType = "proposal" | "final";
+type StageTiming = "before" | "after";
+type MonitoringStage = `${StageTiming}_${DefenseType}_defense`;
+
 export default function SharedMonitoring({
   role,
   researchDocumentId,
   embedded = false,
   readOnly: forceReadOnly = false,
+  defenseType: controlledDefenseType,
 }: {
   role: Role;
   researchDocumentId?: string | number;
   embedded?: boolean;
   readOnly?: boolean;
+  defenseType?: DefenseType;
 }) {
   const [research, setResearch] = useState<SharedMonitoringResearch[]>([]);
   const [selectedResearch, setSelectedResearch] = useState("");
@@ -105,9 +113,12 @@ export default function SharedMonitoring({
       ? String(researchDocumentId)
       : selectedResearch;
   const [data, setData] = useState<SharedMonitoringData | null>(null);
-  const [stage, setStage] = useState<
-    "before_proposal_defense" | "after_proposal_defense"
-  >(role === "panel" ? "after_proposal_defense" : "before_proposal_defense");
+  const [defenseType, setDefenseType] = useState<DefenseType>("proposal");
+  const selectedDefenseType = controlledDefenseType ?? defenseType;
+  const [stageTiming, setStageTiming] = useState<StageTiming>(
+    role === "panel" ? "after" : "before",
+  );
+  const stage: MonitoringStage = `${stageTiming}_${selectedDefenseType}_defense`;
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [editingEntryId, setEditingEntryId] = useState<number | undefined>();
@@ -149,12 +160,11 @@ export default function SharedMonitoring({
   const readOnly = forceReadOnly || role === "researcher";
   const canEditCurrent =
     !readOnly &&
-    !(role === "panel" && stage === "before_proposal_defense") &&
-    !(role === "statistician" && stage === "after_proposal_defense");
-  function geometryFor(
-    formStage: "before_proposal_defense" | "after_proposal_defense",
-  ) {
-    return formStage === "before_proposal_defense"
+    (data?.editable_stages?.includes(stage) ?? true) &&
+    !(role === "panel" && stageTiming === "before") &&
+    !(role === "statistician" && stageTiming === "after");
+  function geometryFor(formStage: MonitoringStage) {
+    return formStage.startsWith("before_")
       ? [
           [25.05, 14.45, 14],
           [41.35, 12.55, 16],
@@ -175,10 +185,7 @@ export default function SharedMonitoring({
         ];
   }
 
-  function officialSheet(
-    formStage: "before_proposal_defense" | "after_proposal_defense",
-    className = "",
-  ) {
+  function officialSheet(formStage: MonitoringStage, className = "") {
     const form = data?.stages[formStage];
     if (!form) return null;
     const geometry = geometryFor(formStage);
@@ -189,8 +196,12 @@ export default function SharedMonitoring({
           className="official-monitoring-template"
           src={
             formStage === "before_proposal_defense"
-              ? preDefenseForm
-              : postDefenseForm
+              ? beforeProposalForm
+              : formStage === "after_proposal_defense"
+                ? afterProposalForm
+                : formStage === "before_final_defense"
+                  ? beforeFinalForm
+                  : afterFinalForm
           }
           alt=""
         />
@@ -474,6 +485,35 @@ export default function SharedMonitoring({
         </div>
       )}
 
+      {controlledDefenseType === undefined && (
+        <div className="monitoring-stage-tabs" aria-label="Defense type">
+          <button
+            type="button"
+            aria-pressed={selectedDefenseType === "proposal"}
+            className={selectedDefenseType === "proposal" ? "is-active" : ""}
+            onClick={() => {
+              setDefenseType("proposal");
+              setStageTiming(role === "panel" ? "after" : "before");
+              setEditing(false);
+            }}
+          >
+            Proposal Defense
+          </button>
+          <button
+            type="button"
+            aria-pressed={selectedDefenseType === "final"}
+            className={selectedDefenseType === "final" ? "is-active" : ""}
+            onClick={() => {
+              setDefenseType("final");
+              setStageTiming(role === "panel" ? "after" : "before");
+              setEditing(false);
+            }}
+          >
+            Final Defense
+          </button>
+        </div>
+      )}
+
       <div
         className="monitoring-stage-tabs"
         role="tablist"
@@ -482,26 +522,28 @@ export default function SharedMonitoring({
         <button
           type="button"
           role="tab"
-          aria-selected={stage === "before_proposal_defense"}
-          className={stage === "before_proposal_defense" ? "is-active" : ""}
+          aria-selected={stageTiming === "before"}
+          className={stageTiming === "before" ? "is-active" : ""}
           onClick={() => {
-            setStage("before_proposal_defense");
+            setStageTiming("before");
             setEditing(false);
           }}
         >
-          Before Proposal Defense
+          Before {selectedDefenseType === "proposal" ? "Proposal" : "Final"}{" "}
+          Defense
         </button>
         <button
           type="button"
           role="tab"
-          aria-selected={stage === "after_proposal_defense"}
-          className={stage === "after_proposal_defense" ? "is-active" : ""}
+          aria-selected={stageTiming === "after"}
+          className={stageTiming === "after" ? "is-active" : ""}
           onClick={() => {
-            setStage("after_proposal_defense");
+            setStageTiming("after");
             setEditing(false);
           }}
         >
-          After Proposal Defense
+          After {selectedDefenseType === "proposal" ? "Proposal" : "Final"}{" "}
+          Defense
         </button>
       </div>
 
@@ -615,7 +657,7 @@ export default function SharedMonitoring({
                   </Button>
                 </>
               )}
-              {role === "instructor" && (
+              {!readOnly && role === "instructor" && (
                 <Button
                   type="button"
                   className="icon-button"

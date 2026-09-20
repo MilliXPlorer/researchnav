@@ -154,6 +154,7 @@ export default function Dashboard({
   });
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [similarityMenuOpen, setSimilarityMenuOpen] = useState(false);
+  const [monitoringMenuOpen, setMonitoringMenuOpen] = useState(false);
   const similarityMode = initialSimilarityMode ?? "title";
   const [accountOpen, setAccountOpen] = useState(false);
   const [notificationState, setNotificationState] = useState({
@@ -425,7 +426,41 @@ export default function Dashboard({
         <nav aria-label={`${config.label} navigation`}>
           {config.nav.map((item) => {
             const Icon = getNavIcon(item);
-            const active = item === selectedNav;
+            const active =
+              item === selectedNav ||
+              (item === "Defense Monitoring Forms" &&
+                ["Proposal Defense", "Final Defense"].includes(selectedNav));
+            if (item === "Defense Monitoring Forms") {
+              return (
+                <div className="sidebar-nav-group" key={item}>
+                  <button
+                    className={active ? "active" : ""}
+                    aria-label="Defense Monitoring Forms"
+                    aria-expanded={monitoringMenuOpen}
+                    onClick={() => setMonitoringMenuOpen((open) => !open)}
+                  >
+                    <Icon aria-hidden="true" />
+                    <span>Defense Monitoring Forms</span>
+                    <ChevronDown
+                      className="sidebar-nav-chevron"
+                      aria-hidden="true"
+                    />
+                  </button>
+                  {monitoringMenuOpen && (
+                    <div className="sidebar-nav-children">
+                      <button
+                        onClick={() => selectNavigation("Proposal Defense")}
+                      >
+                        Proposal Defense
+                      </button>
+                      <button onClick={() => selectNavigation("Final Defense")}>
+                        Final Defense
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            }
             if (role === "researcher" && item === "Similarity Check") {
               return (
                 <div className="sidebar-nav-group" key={item}>
@@ -561,7 +596,43 @@ export default function Dashboard({
             <p className="eyebrow">{config.label} workspace</p>
             {config.nav.map((item) => {
               const Icon = getNavIcon(item);
-              const active = item === selectedNav;
+              const active =
+                item === selectedNav ||
+                (item === "Defense Monitoring Forms" &&
+                  ["Proposal Defense", "Final Defense"].includes(selectedNav));
+              if (item === "Defense Monitoring Forms") {
+                return (
+                  <div className="sidebar-nav-group" key={item}>
+                    <button
+                      className={active ? "active" : ""}
+                      aria-expanded={monitoringMenuOpen}
+                      onClick={() => setMonitoringMenuOpen((open) => !open)}
+                    >
+                      <Icon aria-hidden="true" />
+                      <span>Defense Monitoring Forms</span>
+                      <ChevronDown
+                        className="sidebar-nav-chevron"
+                        aria-hidden="true"
+                      />
+                    </button>
+                    {monitoringMenuOpen && (
+                      <div className="sidebar-nav-children">
+                        {(["Proposal", "Final"] as const).map((type) => (
+                          <button
+                            key={type}
+                            onClick={() => {
+                              selectNavigation(`${type} Defense`);
+                              setWorkspaceMenuOpen(false);
+                            }}
+                          >
+                            {type} Defense
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
               if (role === "researcher" && item === "Similarity Check") {
                 return (
                   <div className="sidebar-nav-group" key={item}>

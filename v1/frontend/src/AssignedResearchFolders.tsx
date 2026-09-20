@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   ClipboardCheck,
+  ChevronDown,
   Download,
   Eye,
   FileText,
@@ -66,6 +67,10 @@ export default function AssignedResearchFolders({
   const [projectTab, setProjectTab] = useState<
     "overview" | "team" | "documents" | "feedback" | "monitoring"
   >("overview");
+  const [monitoringMenuOpen, setMonitoringMenuOpen] = useState(false);
+  const [defenseType, setDefenseType] = useState<"proposal" | "final">(
+    "proposal",
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -292,6 +297,8 @@ export default function AssignedResearchFolders({
                     onOpen={() => {
                       setSelected(String(item.id));
                       setProjectTab("overview");
+                      setMonitoringMenuOpen(false);
+                      setDefenseType("proposal");
                     }}
                   />
                 </div>
@@ -323,11 +330,6 @@ export default function AssignedResearchFolders({
                         ["team", "Research actors", UsersRound],
                         ["documents", "Documents", Folder],
                         ["feedback", "Feedback", MessageSquareText],
-                        [
-                          "monitoring",
-                          "Defense Monitoring Forms",
-                          ClipboardCheck,
-                        ],
                       ] as const
                     ).map(([tab, tabLabel, Icon]) => (
                       <button
@@ -341,6 +343,46 @@ export default function AssignedResearchFolders({
                         <span>{tabLabel}</span>
                       </button>
                     ))}
+                    <button
+                      type="button"
+                      className={projectTab === "monitoring" ? "is-active" : ""}
+                      aria-current={
+                        projectTab === "monitoring" ? "page" : undefined
+                      }
+                      aria-expanded={monitoringMenuOpen}
+                      onClick={() => setMonitoringMenuOpen((open) => !open)}
+                    >
+                      <ClipboardCheck aria-hidden="true" />
+                      <span>Defense Monitoring Forms</span>
+                      <ChevronDown
+                        className="sidebar-nav-chevron"
+                        aria-hidden="true"
+                      />
+                    </button>
+                    {monitoringMenuOpen && (
+                      <>
+                        {(["proposal", "final"] as const).map((type) => (
+                          <button
+                            type="button"
+                            key={type}
+                            className={
+                              projectTab === "monitoring" &&
+                              defenseType === type
+                                ? "is-active"
+                                : ""
+                            }
+                            onClick={() => {
+                              setDefenseType(type);
+                              setProjectTab("monitoring");
+                            }}
+                          >
+                            {type === "proposal"
+                              ? "Proposal Defense"
+                              : "Final Defense"}
+                          </button>
+                        ))}
+                      </>
+                    )}
                   </nav>
 
                   {projectTab === "overview" && (
@@ -628,10 +670,12 @@ export default function AssignedResearchFolders({
                   {projectTab === "monitoring" && (
                     <div className="project-workspace-section">
                       <SharedMonitoring
+                        key={defenseType}
                         role={role}
                         researchDocumentId={research.id}
                         embedded
                         readOnly
+                        defenseType={defenseType}
                       />
                     </div>
                   )}

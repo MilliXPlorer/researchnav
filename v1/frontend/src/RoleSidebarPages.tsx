@@ -3,6 +3,7 @@ import { formatPhilippineDateTime, philippineDateToday } from "./dateTime";
 import {
   ArrowLeft,
   CheckCircle2,
+  ChevronDown,
   ClipboardCheck,
   Download,
   ExternalLink,
@@ -232,6 +233,10 @@ export default function RoleSidebarPage({
         case "Defense Monitoring Forms":
         case "Monitoring":
           return <EditorMonitoring role={role} />;
+        case "Proposal Defense":
+          return <SharedMonitoring role={role} defenseType="proposal" />;
+        case "Final Defense":
+          return <SharedMonitoring role={role} defenseType="final" />;
         case "User Logs":
           return <UserLogs role={role} />;
         default:
@@ -266,6 +271,10 @@ export default function RoleSidebarPage({
         case "Defense Monitoring Forms":
         case "Monitoring":
           return <AdviserMonitoring role={role} />;
+        case "Proposal Defense":
+          return <SharedMonitoring role={role} defenseType="proposal" />;
+        case "Final Defense":
+          return <SharedMonitoring role={role} defenseType="final" />;
         case "Similarity Alerts":
           return <AdviserSimilarityAlerts role={role} navigate={navigate} />;
         case "Feedback History":
@@ -307,6 +316,10 @@ export default function RoleSidebarPage({
         case "Defense Monitoring Forms":
         case "Monitoring":
           return <InstructorMonitoring role={role} />;
+        case "Proposal Defense":
+          return <SharedMonitoring role={role} defenseType="proposal" />;
+        case "Final Defense":
+          return <SharedMonitoring role={role} defenseType="final" />;
         case "Panelist Availability":
           return <InstructorPanelists role={role} />;
         case "Similarity Overview":
@@ -334,6 +347,10 @@ export default function RoleSidebarPage({
         case "Defense Monitoring Forms":
         case "Monitoring":
           return <SharedMonitoring role={role} />;
+        case "Proposal Defense":
+          return <SharedMonitoring role={role} defenseType="proposal" />;
+        case "Final Defense":
+          return <SharedMonitoring role={role} defenseType="final" />;
         case "Evaluation History":
         case "Panel History":
           return <PanelHistory role={role} />;
@@ -353,6 +370,10 @@ export default function RoleSidebarPage({
         case "Defense Monitoring Forms":
         case "Monitoring":
           return <SharedMonitoring role={role} />;
+        case "Proposal Defense":
+          return <SharedMonitoring role={role} defenseType="proposal" />;
+        case "Final Defense":
+          return <SharedMonitoring role={role} defenseType="final" />;
         case "Sign-offs Issued":
           return <StatisticianSignoffs role={role} />;
         case "User Logs":
@@ -387,6 +408,10 @@ export default function RoleSidebarPage({
         case "Defense Monitoring Forms":
         case "Monitoring":
           return <LibrarianMonitoring role={role} />;
+        case "Proposal Defense":
+          return <SharedMonitoring role={role} defenseType="proposal" />;
+        case "Final Defense":
+          return <SharedMonitoring role={role} defenseType="final" />;
         case "Repository Catalog":
           return <LibrarianRepositoryCatalog role={role} navigate={navigate} />;
         case "Metadata Standards":
@@ -406,6 +431,11 @@ export default function RoleSidebarPage({
           return <ResearcherSimilarityCheck role={role} showModePicker />;
         case "Upload Manuscript":
           return <ResearchOfficeBulkImport />;
+
+        case "Proposal Defense":
+          return <SharedMonitoring role={role} defenseType="proposal" />;
+        case "Final Defense":
+          return <SharedMonitoring role={role} defenseType="final" />;
 
         case "User & Role Management":
           return <OfficeUsers role={role} />;
@@ -2368,6 +2398,10 @@ function InstructorSections({
   const [projectTab, setProjectTab] = useState<
     "overview" | "team" | "documents" | "feedback" | "monitoring"
   >("overview");
+  const [monitoringMenuOpen, setMonitoringMenuOpen] = useState(false);
+  const [defenseType, setDefenseType] = useState<"proposal" | "final">(
+    "proposal",
+  );
   const [projectFiles, setProjectFiles] = useState<DocumentFileResource[]>([]);
   const [projectFolders, setProjectFolders] = useState<string[]>([]);
   const [activeFolder, setActiveFolder] = useState("");
@@ -3630,7 +3664,6 @@ function InstructorSections({
                   ["team", "Research actors", UsersRound],
                   ["documents", "Documents", Folder],
                   ["feedback", "Feedback", MessageSquareText],
-                  ["monitoring", "Defense Monitoring Forms", ClipboardCheck],
                 ] as const
               ).map(([tab, tabLabel, Icon]) => (
                 <button
@@ -3644,6 +3677,38 @@ function InstructorSections({
                   <span>{tabLabel}</span>
                 </button>
               ))}
+              <button
+                type="button"
+                className={projectTab === "monitoring" ? "is-active" : ""}
+                aria-current={projectTab === "monitoring" ? "page" : undefined}
+                aria-expanded={monitoringMenuOpen}
+                onClick={() => setMonitoringMenuOpen((open) => !open)}
+              >
+                <ClipboardCheck aria-hidden="true" />
+                <span>Defense Monitoring Forms</span>
+                <ChevronDown
+                  className="sidebar-nav-chevron"
+                  aria-hidden="true"
+                />
+              </button>
+              {monitoringMenuOpen &&
+                (["proposal", "final"] as const).map((type) => (
+                  <button
+                    type="button"
+                    key={type}
+                    className={
+                      projectTab === "monitoring" && defenseType === type
+                        ? "is-active"
+                        : ""
+                    }
+                    onClick={() => {
+                      setDefenseType(type);
+                      setProjectTab("monitoring");
+                    }}
+                  >
+                    {type === "proposal" ? "Proposal Defense" : "Final Defense"}
+                  </button>
+                ))}
             </nav>
 
             {workspaceLoading && (
@@ -4317,9 +4382,11 @@ function InstructorSections({
             {projectTab === "monitoring" && (
               <div className="project-workspace-section">
                 <SharedMonitoring
+                  key={defenseType}
                   role={role}
                   researchDocumentId={selectedDocument.research_document_id}
                   embedded
+                  defenseType={defenseType}
                 />
               </div>
             )}

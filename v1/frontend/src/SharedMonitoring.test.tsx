@@ -6,6 +6,12 @@ const monitoring = {
   research_document_id: 42,
   title: "Community access study",
   researchers: ["Ada Lovelace", "Grace Hopper"],
+  editable_stages: [
+    "before_proposal_defense",
+    "after_proposal_defense",
+    "before_final_defense",
+    "after_final_defense",
+  ],
   stages: {
     before_proposal_defense: {
       sections: [
@@ -43,6 +49,52 @@ const monitoring = {
               status: "completed",
               signature_status: "signed",
               signature_url: "/signature/11",
+              verified_by: null,
+              verified_at: null,
+              is_owned: true,
+            },
+          ],
+        },
+      ],
+      verified_by: null,
+      verified_at: null,
+    },
+    before_final_defense: {
+      sections: [
+        {
+          designation: "Adviser",
+          entry: null,
+          entries: [],
+        },
+      ],
+      verified_by: null,
+      verified_at: null,
+    },
+    after_final_defense: {
+      sections: [
+        {
+          designation: "Panel 1",
+          entry: {
+            id: 12,
+            activity_date: "2026-09-15",
+            activity: "Final manuscript approved",
+            remarks: "Ready for binding",
+            status: "completed",
+            signature_status: "signed",
+            signature_url: "/signature/12",
+            verified_by: null,
+            verified_at: null,
+            is_owned: true,
+          },
+          entries: [
+            {
+              id: 12,
+              activity_date: "2026-09-15",
+              activity: "Final manuscript approved",
+              remarks: "Ready for binding",
+              status: "completed",
+              signature_status: "signed",
+              signature_url: "/signature/12",
               verified_by: null,
               verified_at: null,
               is_owned: true,
@@ -149,6 +201,90 @@ describe("shared monitoring", () => {
       Array.from(printPages?.querySelectorAll("img") ?? []).map((image) =>
         image.getAttribute("src"),
       ),
-    ).toEqual(["/src/form_templates/monitoring-pre-defense.png"]);
+    ).toEqual([
+      "/src/form_templates/monitoring-before-proposal-1.png",
+    ]);
+  });
+
+  it("does not expose mutations in a read-only monitoring workspace", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ data: monitoring }))),
+    );
+
+    render(
+      <SharedMonitoring
+        role="instructor"
+        researchDocumentId={42}
+        embedded
+        readOnly
+      />,
+    );
+
+    await screen.findByRole("tab", { name: "Before Proposal Defense" });
+    expect(
+      screen.queryByRole("button", { name: "Verify completed form" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: "Add new defense monitoring entry",
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("switches between Proposal and Final Defense while retaining Before and After tabs", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ data: monitoring }))),
+    );
+
+    render(
+      <SharedMonitoring role="instructor" researchDocumentId={42} embedded />,
+    );
+
+    expect(
+      await screen.findByRole("button", { name: "Proposal Defense" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(
+      screen.getByRole("tab", { name: "Before Proposal Defense" }),
+    ).toHaveAttribute("aria-selected", "true");
+    expect(
+      screen.getByRole("tab", { name: "After Proposal Defense" }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("Adviser").length).toBeGreaterThan(0);
+
+    fireEvent.click(
+      screen.getByRole("tab", { name: "After Proposal Defense" }),
+    );
+    expect(screen.getAllByText("Proposal review").length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Final Defense" }));
+    expect(
+      screen.getByRole("tab", { name: "Before Final Defense" }),
+    ).toHaveAttribute("aria-selected", "true");
+    expect(
+      screen.getByRole("tab", { name: "After Final Defense" }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("Adviser").length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("tab", { name: "After Final Defense" }));
+    const finalImages = Array.from(
+      document.querySelectorAll(".official-monitoring-sheet img"),
+    ).map((image) => image.getAttribute("src"));
+
+    expect(finalImages).toContain(
+      "/src/form_templates/monitoring-after-final-1.png",
+    );
+    expect(
+      screen.getAllByText("Final manuscript approved").length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.queryByRole("tab", { name: "After Proposal Defense" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Proposal Defense" }));
+    expect(
+      screen.getByRole("tab", { name: "Before Proposal Defense" }),
+    ).toHaveAttribute("aria-selected", "true");
   });
 });

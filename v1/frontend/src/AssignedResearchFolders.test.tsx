@@ -128,6 +128,52 @@ describe("AssignedResearchFolders", () => {
     expect(screen.getByText("Noel Reyes")).toBeInTheDocument();
   });
 
+  it("expands Defense Monitoring Forms into Proposal and Final Defense", async () => {
+    const research = {
+      id: 17,
+      title: "Coastal Resilience Study",
+      institute: "Institute of Science",
+      degree_program: "Environmental Science",
+      research_stage: "proposal",
+      submission_status: "approved",
+      researchers: ["Ari Santos"],
+      authors: [{ id: 4, author_name: "Ari Santos" }],
+    };
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const path = String(input);
+      if (
+        path.startsWith("/api/research?") ||
+        path === "/api/monitoring/research"
+      ) {
+        return new Response(JSON.stringify({ data: [research] }));
+      }
+      if (path === `/api/research/${research.id}`) {
+        return new Response(JSON.stringify({ data: research }));
+      }
+      if (path.includes("/files") || path.includes("/people")) {
+        return new Response(JSON.stringify({ data: [] }));
+      }
+      return new Response(JSON.stringify({ data: research }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AssignedResearchFolders role="panel" />);
+
+    fireEvent.click(await screen.findByText(research.title));
+    const parent = await screen.findByRole("button", {
+      name: "Defense Monitoring Forms",
+    });
+    expect(parent).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(parent);
+    expect(parent).toHaveAttribute("aria-expanded", "true");
+    expect(
+      screen.getByRole("button", { name: "Proposal Defense" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Final Defense" }),
+    ).toBeInTheDocument();
+  });
+
   it("reloads assigned folders when the active account changes", async () => {
     let requestCount = 0;
 

@@ -22,6 +22,8 @@ class SharedMonitoringController extends DomainController
 
     private const POST = ['Adviser', 'Instructor', 'Editor', 'Librarian', 'Panel 1', 'Panel 2', 'Panel 3', 'Research Rep', 'Chair'];
 
+    private const STAGES = ['before_proposal_defense', 'after_proposal_defense', 'before_final_defense', 'after_final_defense'];
+
     public function research(Request $request): JsonResponse
     {
         $actor = $this->actor($request);
@@ -89,19 +91,24 @@ class SharedMonitoringController extends DomainController
         }
         $researchDocument->loadMissing('authors.user');
 
-        return response()->json(['data' => ['research_document_id' => $researchDocument->id, 'title' => $researchDocument->title, 'researchers' => $this->researcherNames($researchDocument), 'stages' => ['before_proposal_defense' => $this->stage(self::PRE, $entries->where('monitoring_stage', 'before_proposal_defense'), $actor->id, $assignedActors), 'after_proposal_defense' => $this->stage(self::POST, $entries->where('monitoring_stage', 'after_proposal_defense'), $actor->id, $assignedActors)]]])->header('Cache-Control', 'private, no-store');
+        return response()->json(['data' => ['research_document_id' => $researchDocument->id, 'title' => $researchDocument->title, 'researchers' => $this->researcherNames($researchDocument), 'editable_stages' => collect(self::STAGES)->filter(fn (string $stage) => $this->canEditStage($actor, $researchDocument, $stage))->values()->all(), 'stages' => collect(self::STAGES)->mapWithKeys(fn (string $stage) => [$stage => $this->stage($this->isBeforeStage($stage) ? self::PRE : self::POST, $entries->where('monitoring_stage', $stage), $actor->id, $assignedActors)])->all()]])->header('Cache-Control', 'private, no-store');
     }
 
     public function update(Request $request, ResearchDocument $researchDocument, MonitoringService $activity): JsonResponse
     {
         $actor = $this->actor($request);
         $this->authorizeView($actor, $researchDocument);
-        $input = $request->validate(['entry_id' => ['nullable', 'integer'], 'signature_entry_id' => ['nullable', 'integer'], 'monitoring_stage' => ['required', Rule::in(['before_proposal_defense', 'after_proposal_defense'])], 'activity' => ['required', 'string', 'max:10000'], 'remarks' => ['nullable', 'string', 'max:10000'], 'status' => ['required', Rule::in(['pending', 'in_progress', 'completed', 'not_applicable'])], 'signature_status' => ['required', Rule::in(['unsigned', 'signed'])]]);
+        $input = $request->validate(['entry_id' => ['nullable', 'integer'], 'signature_entry_id' => ['nullable', 'integer'], 'monitoring_stage' => ['required', Rule::in(self::STAGES)], 'activity' => ['required', 'string', 'max:10000'], 'remarks' => ['nullable', 'string', 'max:10000'], 'status' => ['required', Rule::in(['pending', 'in_progress', 'completed', 'not_applicable'])], 'signature_status' => ['required', Rule::in(['unsigned', 'signed'])]]);
         [$role, $designation] = $this->editableSection($actor, $researchDocument, $input['monitoring_stage']);
         DB::transaction(function () use ($actor, $researchDocument, $input, $role, $designation, $activity): int {
             $this->preserveLegacySignaturesForRows($researchDocument->id, $input['monitoring_stage'], $actor->id);
+            $hasSignature = isset($input['signature_entry_id'])
+                || $this->signaturePath($researchDocument->id, $input['monitoring_stage'], $actor->id, $input['entry_id'] ?? null, isset($input['entry_id'])) !== null;
+            if ($input['signature_status'] === 'signed' && ! $hasSignature) {
+                throw ValidationException::withMessages(['signature_status' => ['A stored signature is required before an entry can be marked signed.']]);
+            }
             $savedAt = now();
-            $values = ['reviewer_role' => $role, 'activity_date' => $savedAt->toDateString(), 'activity' => $input['activity'], 'remarks' => $input['remarks'] ?? null, 'status' => $input['status'], 'signature_status' => $input['signature_status'], 'updated_at' => $savedAt];
+            $values = ['reviewer_role' => $role, 'activity_date' => $savedAt->toDateString(), 'activity' => $input['activity'], 'remarks' => $input['remarks'] ?? null, 'status' => $input['status'], 'signature_status' => $hasSignature ? 'signed' : 'unsigned', 'updated_at' => $savedAt];
             if (isset($input['entry_id'])) {
                 $entry = DB::table('monitoring_entries')->where('id', $input['entry_id'])->where('research_document_id', $researchDocument->id)->where('reviewer_id', $actor->id)->where('monitoring_stage', $input['monitoring_stage'])->where('designation', $designation);
                 abort_unless($entry->exists(), 404);
@@ -122,6 +129,7 @@ class SharedMonitoringController extends DomainController
             } elseif (! isset($input['entry_id'])) {
                 $this->preserveSignatureForEntry($researchDocument->id, $input['monitoring_stage'], $actor->id, $entryId);
             }
+            DB::table('monitoring_entries')->where('research_document_id', $researchDocument->id)->where('monitoring_stage', $input['monitoring_stage'])->update(['verified_by' => null, 'verified_at' => null]);
             $activity->log($researchDocument, 'SHARED_MONITORING_UPDATED', $actor, $designation.' monitoring section updated.', null, $input['status'], $input['status']);
 
             return $entryId;
@@ -135,7 +143,7 @@ class SharedMonitoringController extends DomainController
         $actor = $this->actor($request);
         $this->authorizeView($actor, $researchDocument);
         $input = $request->validate([
-            'monitoring_stage' => ['required', Rule::in(['before_proposal_defense', 'after_proposal_defense'])],
+            'monitoring_stage' => ['required', Rule::in(self::STAGES)],
             'entry_id' => ['nullable', 'integer'],
             'signature' => ['required', 'file', 'mimes:png,jpg,jpeg', 'max:2048'],
         ]);
@@ -155,6 +163,7 @@ class SharedMonitoringController extends DomainController
         }
         $extension = $input['signature']->guessExtension() === 'jpeg' ? 'jpg' : $input['signature']->guessExtension();
         $disk->putFileAs($directory, $input['signature'], $signatureName.'.'.$extension);
+        DB::table('monitoring_entries')->where('research_document_id', $researchDocument->id)->where('monitoring_stage', $input['monitoring_stage'])->update(['verified_by' => null, 'verified_at' => null, 'updated_at' => now()]);
 
         return $this->show($request, $researchDocument);
     }
@@ -189,7 +198,7 @@ class SharedMonitoringController extends DomainController
     {
         $actor = $this->actor($request);
         $this->authorizeView($actor, $researchDocument);
-        abort_unless(in_array($stage, ['before_proposal_defense', 'after_proposal_defense'], true), 404);
+        abort_unless(in_array($stage, self::STAGES, true), 404);
         $entryId = $request->integer('entry');
         $entry = DB::table('monitoring_entries')->where('research_document_id', $researchDocument->id)->where('monitoring_stage', $stage)->where('reviewer_id', $reviewer)->when($entryId > 0, fn ($query) => $query->where('id', $entryId))->first();
         abort_if($entry === null || $entry->signature_status !== 'signed', 404);
@@ -205,10 +214,10 @@ class SharedMonitoringController extends DomainController
         if (! DomainAuthorization::isAssignedReviewer($actor, $researchDocument) || $actor->role !== 'instructor') {
             abort(403);
         }
-        $stage = $request->validate(['monitoring_stage' => ['required', Rule::in(['before_proposal_defense', 'after_proposal_defense'])]])['monitoring_stage'];
-        $required = $stage === 'before_proposal_defense' ? self::PRE : self::POST;
+        $stage = $request->validate(['monitoring_stage' => ['required', Rule::in(self::STAGES)]])['monitoring_stage'];
+        $required = $this->isBeforeStage($stage) ? self::PRE : self::POST;
         $entries = DB::table('monitoring_entries')->where('research_document_id', $researchDocument->id)->where('monitoring_stage', $stage)->get();
-        $complete = $entries->filter(fn ($row) => ($row->status === 'completed' && $row->signature_status === 'signed') || $row->status === 'not_applicable')->pluck('designation')->map(fn ($value) => strtolower($value));
+        $complete = $entries->filter(fn ($row) => ($row->status === 'completed' && $row->signature_status === 'signed' && $this->signaturePath($researchDocument->id, $stage, (string) $row->reviewer_id, (int) $row->id, true) !== null) || $row->status === 'not_applicable')->pluck('designation')->map(fn ($value) => strtolower($value));
         $missing = collect($required)->map(fn ($value) => strtolower($value))->diff($complete);
         if ($missing->isNotEmpty()) {
             throw ValidationException::withMessages(['monitoring_stage' => ['Incomplete sections: '.$missing->implode(', ')]]);
@@ -247,10 +256,7 @@ class SharedMonitoringController extends DomainController
     {
         $canonical = $actor->roleDefinition?->slug;
         $role = $canonical === 'research_editor' ? 'research_editor' : $actor->role;
-        if ($stage === 'after_proposal_defense' && $role === 'statistician') {
-            abort(403);
-        }
-        if ($stage === 'before_proposal_defense' && $role === 'panel') {
+        if (! $this->canEditStage($actor, $research, $stage)) {
             abort(403);
         }
         $designation = match ($role) {
@@ -398,10 +404,41 @@ class SharedMonitoringController extends DomainController
 
     private function sectionCapacity(string $stage, string $designation): int
     {
-        $capacities = $stage === 'before_proposal_defense'
+        $capacities = $this->isBeforeStage($stage)
             ? ['Adviser' => 7, 'Instructor' => 6, 'Editor' => 6, 'Statistician' => 5, 'Librarian' => 4]
             : ['Adviser' => 5, 'Instructor' => 3, 'Editor' => 3, 'Librarian' => 3, 'Panel 1' => 3, 'Panel 2' => 3, 'Panel 3' => 3, 'Research Rep' => 3, 'Chair' => 3];
 
         return $capacities[$designation] ?? 1;
+    }
+
+    private function isBeforeStage(string $stage): bool
+    {
+        return str_starts_with($stage, 'before_');
+    }
+
+    private function canEditStage(User $actor, ResearchDocument $research, string $stage): bool
+    {
+        $canonical = $actor->roleDefinition?->slug;
+        $role = $canonical === 'research_editor' ? 'research_editor' : $actor->role;
+        if ($role === 'panel' && $this->isBeforeStage($stage)) {
+            return false;
+        }
+        if ($role === 'statistician' && ! $this->isBeforeStage($stage)) {
+            return false;
+        }
+        if ($role === 'research-office') {
+            if ($this->isBeforeStage($stage)) {
+                return false;
+            }
+            $active = ReviewAssignment::column('is_active');
+
+            return $research->reviewAssignments()
+                ->where(ReviewAssignment::column('reviewer_id'), $actor->id)
+                ->where(ReviewAssignment::column('review_role'), 'research-office')
+                ->when($active === 'status', fn ($query) => $query->whereIn($active, ['accepted', 'confirmed', 'active']), fn ($query) => $query->where($active, true))
+                ->exists();
+        }
+
+        return in_array($role, ['adviser', 'instructor', 'research_editor', 'statistician', 'librarian', 'panel'], true);
     }
 }

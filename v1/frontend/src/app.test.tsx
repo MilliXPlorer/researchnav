@@ -357,38 +357,98 @@ describe("role workspaces", () => {
     expect(navFor("instructor")).toEqual([
       "Dashboard",
       "My Sections",
+      "Defense Monitoring Forms",
       "User Logs",
     ]);
 
     expect(navFor("adviser")).toEqual([
       "Dashboard",
       "Assigned Research",
+      "Defense Monitoring Forms",
       "User Logs",
     ]);
 
     expect(navFor("panel")).toEqual([
       "Dashboard",
       "Assigned Research",
+      "Defense Monitoring Forms",
       "User Logs",
     ]);
 
     expect(navFor("statistician")).toEqual([
       "Dashboard",
       "Assigned Research",
+      "Defense Monitoring Forms",
       "User Logs",
     ]);
 
     expect(navFor("librarian")).toEqual([
       "Dashboard",
       "Assigned Research",
+      "Defense Monitoring Forms",
       "User Logs",
     ]);
 
     expect(navFor("research_editor")).toEqual([
       "Dashboard",
       "Assigned Research",
+      "Defense Monitoring Forms",
       "User Logs",
     ]);
+  });
+
+  it("expands the staff Defense Monitoring Forms parent without broadening unrelated roles", async () => {
+    const session = {
+      email: "panel@example.test",
+      role: "panel" as const,
+      accessStatus: "active" as const,
+      isAdmin: false,
+      firstName: "Panel",
+      middleName: null,
+      lastName: "Member",
+      studentEmployeeId: null,
+      displayName: "Panel Member",
+      profilePhotoUrl: null,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        if (String(input) === "/api/notifications") {
+          return new Response(JSON.stringify({ data: [] }));
+        }
+        if (String(input) === "/api/monitoring/research") {
+          return new Response(JSON.stringify({ data: [] }));
+        }
+        return new Response(
+          JSON.stringify({
+            data: { schema_version: 1, role: "panel", sections: [] },
+          }),
+        );
+      }),
+    );
+
+    render(<Dashboard session={session} navigate={vi.fn()} />);
+
+    const parent = screen.getByRole("button", {
+      name: "Defense Monitoring Forms",
+    });
+    expect(parent).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(parent);
+    expect(parent).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Final Defense" }));
+    expect(
+      await screen.findByRole("tab", { name: "After Final Defense" }),
+    ).toBeInTheDocument();
+
+    expect(
+      roleConfigs.find((config) => config.id === "admin")?.nav,
+    ).not.toContain("Defense Monitoring Forms");
+    expect(
+      roleConfigs.find((config) => config.id === "researcher")?.nav,
+    ).not.toContain("Defense Monitoring Forms");
+    expect(
+      roleConfigs.find((config) => config.id === "coordinator")?.nav,
+    ).not.toContain("Defense Monitoring Forms");
   });
 
   it("exposes every role destination through the workspace menu", async () => {
@@ -643,6 +703,7 @@ describe("role workspaces", () => {
       "Assigned Research",
       "Similarity Check",
       "Upload Manuscript",
+      "Defense Monitoring Forms",
       "User & Role Management",
       "Reports & Exports",
     ]);
