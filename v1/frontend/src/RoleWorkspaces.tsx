@@ -1,5 +1,5 @@
 import { ExternalLink, LibraryBig, ShieldCheck } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "./components";
 import { formatPhilippineDate } from "./dateTime";
 import { Modal } from "./Modal";
@@ -77,6 +77,11 @@ const OFFICE_INSTITUTES = [
     logo: iasLogo,
   },
 ] as const;
+
+type OfficeInstituteStudies = Record<
+  string,
+  OfficeInstituteStudy[] | null | undefined
+>;
 
 export default function RoleWorkspace({
   role,
@@ -571,6 +576,53 @@ function DashboardSections({
   const [selectedSectionKey, setSelectedSectionKey] = useState<string | null>(
     null,
   );
+  const [officeInstituteStudies, setOfficeInstituteStudies] =
+    useState<OfficeInstituteStudies>({});
+  const officeDashboardReady =
+    role === "research-office" &&
+    dashboardState.scope === dashboardScope &&
+    dashboardState.status === "ready" &&
+    dashboardState.dashboard.role === role;
+
+  useEffect(() => {
+    if (!officeDashboardReady) return;
+
+    let active = true;
+    void Promise.all(
+      OFFICE_INSTITUTES.map(async ({ code }) => {
+        try {
+          return [code, await listOfficeInstituteStudies(code)] as const;
+        } catch {
+          return [code, null] as const;
+        }
+      }),
+    ).then((entries) => {
+      if (active) setOfficeInstituteStudies(Object.fromEntries(entries));
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [officeDashboardReady]);
+
+  async function reloadOfficeInstituteStudies(code: string) {
+    setOfficeInstituteStudies((current) => ({
+      ...current,
+      [code]: undefined,
+    }));
+    try {
+      const studies = await listOfficeInstituteStudies(code);
+      setOfficeInstituteStudies((current) => ({
+        ...current,
+        [code]: studies,
+      }));
+    } catch {
+      setOfficeInstituteStudies((current) => ({
+        ...current,
+        [code]: null,
+      }));
+    }
+  }
   if (
     dashboardState.scope !== dashboardScope ||
     dashboardState.status === "loading" ||
@@ -627,9 +679,7 @@ function DashboardSections({
         onSelect={(section) => setSelectedSectionKey(section.key)}
       />
       {role === "research-office" && (
-        <InstituteCountAnalytics
-          institutes={dashboardState.dashboard.institutional_overview}
-        />
+        <InstituteCountAnalytics studiesByInstitute={officeInstituteStudies} />
       )}
       <div className="dashboard-visualizations">
         <DashboardWorkloadChart
@@ -642,7 +692,8 @@ function DashboardSections({
       </div>
       {role === "research-office" && (
         <OfficeInstitutionalOverview
-          institutes={dashboardState.dashboard.institutional_overview}
+          studiesByInstitute={officeInstituteStudies}
+          onReload={reloadOfficeInstituteStudies}
         />
       )}
       {selectedSectionKey !== null && (
@@ -678,51 +729,34 @@ function DashboardSections({
 }
 
 function OfficeInstitutionalOverview({
-  institutes,
+  studiesByInstitute,
+  onReload,
 }: {
-  institutes?: Array<{ institute: string; total: number }> | null;
+  studiesByInstitute: OfficeInstituteStudies;
+  onReload: (code: string) => Promise<void>;
 }) {
   const [selectedInstitute, setSelectedInstitute] = useState<string | null>(
     null,
   );
-  const [studiesState, setStudiesState] = useState<
-    | { status: "idle" }
-    | { status: "loading"; code: string }
-    | { status: "error"; code: string }
-    | { status: "ready"; code: string; studies: OfficeInstituteStudy[] }
-  >({ status: "idle" });
-  const totals = new Map(
-    (institutes ?? []).map((unit) => [unit.institute, unit.total]),
-  );
-
-  async function loadStudies(code: string) {
-    setStudiesState({ status: "loading", code });
-    try {
-      const studies = await listOfficeInstituteStudies(code);
-      setStudiesState({ status: "ready", code, studies });
-    } catch {
-      setStudiesState({ status: "error", code });
-    }
-  }
 
   function selectInstitute(code: string) {
     if (selectedInstitute === code) {
       setSelectedInstitute(null);
-      setStudiesState({ status: "idle" });
       return;
     }
     setSelectedInstitute(code);
-    void loadStudies(code);
   }
 
   function closeInstituteStudies() {
     setSelectedInstitute(null);
-    setStudiesState({ status: "idle" });
   }
 
   const selectedInstituteName = OFFICE_INSTITUTES.find(
     (institute) => institute.code === selectedInstitute,
   )?.name;
+  const selectedStudies = selectedInstitute
+    ? studiesByInstitute[selectedInstitute]
+    : undefined;
 
   return (
     <>
@@ -735,15 +769,15 @@ function OfficeInstitutionalOverview({
             <p className="eyebrow">Research by institute</p>
             <h2 id="office-institute-overview-title">Institutional Overview</h2>
             <p>
-              Select an institute to browse its Supabase studies and manuscript
+              Select an institute to browse its research studies and manuscript
               files.
             </p>
           </div>
         </header>
         <div className="office-institute-grid">
           {OFFICE_INSTITUTES.map((institute) => {
-            const total =
-              institutes === null ? null : (totals.get(institute.name) ?? 0);
+            const studies = studiesByInstitute[institute.code];
+            const total = Array.isArray(studies) ? studies.length : null;
             return (
               <button
                 type="button"
@@ -764,8 +798,10 @@ function OfficeInstitutionalOverview({
                 <div className="office-institute-total">
                   <strong>{total ?? "-"}</strong>
                   <span>
-                    {total === null
-                      ? "Supabase unavailable"
+                    {studies === undefined
+                      ? "Loading studies"
+                      : studies === null
+                        ? "Studies unavailable"
                       : total === 1
                         ? "research record"
                         : "research records"}
@@ -785,7 +821,7 @@ function OfficeInstitutionalOverview({
           <div className="office-study-browser" aria-live="polite">
             <header>
               <div>
-                <p className="eyebrow">Supabase manuscripts</p>
+                <p className="eyebrow">Research manuscripts</p>
                 <h3>{selectedInstituteName}</h3>
                 <p>
                   Select a study to choose which file to open, or download all
@@ -793,29 +829,28 @@ function OfficeInstitutionalOverview({
                 </p>
               </div>
             </header>
-            {studiesState.status === "loading" ? (
+            {selectedStudies === undefined ? (
               <p className="office-institute-message">Loading studies...</p>
-            ) : studiesState.status === "error" ? (
+            ) : selectedStudies === null ? (
               <div className="office-institute-message" role="alert">
-                <p>Studies could not be loaded from Supabase.</p>
+                <p>Studies could not be loaded from ResearchNAV.</p>
                 <Button
                   variant="secondary"
-                  onClick={() => void loadStudies(selectedInstitute)}
+                  onClick={() => void onReload(selectedInstitute)}
                 >
                   Retry
                 </Button>
               </div>
-            ) : studiesState.status === "ready" &&
-              studiesState.studies.length === 0 ? (
+            ) : selectedStudies.length === 0 ? (
               <p className="office-institute-message">
                 No studies are stored for this institute.
               </p>
-            ) : studiesState.status === "ready" ? (
+            ) : (
               <div className="office-study-list" aria-label="Studies">
-                {studiesState.studies.map((study) => (
+                {selectedStudies.map((study) => (
                   <a
                     className="office-study-item"
-                    key={`${study.year}/${study.title}`}
+                    key={study.id}
                     href={officeInstituteStudyOpenUrl(selectedInstitute, study)}
                     target="_blank"
                     rel="noreferrer"
@@ -826,7 +861,7 @@ function OfficeInstitutionalOverview({
                   </a>
                 ))}
               </div>
-            ) : null}
+            )}
           </div>
         </Modal>
       )}
@@ -842,17 +877,17 @@ const INSTITUTE_CHART_TOP = 26;
 const INSTITUTE_CHART_BOTTOM = 48;
 
 function InstituteCountAnalytics({
-  institutes,
+  studiesByInstitute,
 }: {
-  institutes?: Array<{ institute: string; total: number }> | null;
+  studiesByInstitute: OfficeInstituteStudies;
 }) {
-  const totals = new Map(
-    (institutes ?? []).map((unit) => [unit.institute, unit.total]),
-  );
   const points = OFFICE_INSTITUTES.map((institute) => ({
     ...institute,
-    total: totals.get(institute.name) ?? 0,
+    total: studiesByInstitute[institute.code]?.length ?? 0,
   }));
+  const allUnavailable = OFFICE_INSTITUTES.every(
+    ({ code }) => studiesByInstitute[code] === null,
+  );
   const maximum = Math.max(1, ...points.map((point) => point.total));
   const plotWidth =
     INSTITUTE_CHART_WIDTH - INSTITUTE_CHART_LEFT - INSTITUTE_CHART_RIGHT;
@@ -871,24 +906,24 @@ function InstituteCountAnalytics({
     <figure className="office-institute-analytics">
       <figcaption>
         <div>
-          <p className="eyebrow">Supabase analytics</p>
+          <p className="eyebrow">Research analytics</p>
           <h2>Manuscripts by institute</h2>
-          <p>Live distribution based on research-title folders in Supabase.</p>
+          <p>Live distribution based on archived ResearchNAV studies.</p>
         </div>
         <strong>
           {points.reduce((sum, point) => sum + point.total, 0)} total
         </strong>
       </figcaption>
-      {institutes === null ? (
+      {allUnavailable ? (
         <p className="office-institute-message">
-          Supabase analytics are unavailable.
+          Research analytics are unavailable.
         </p>
       ) : (
         <div className="office-institute-chart-scroll">
           <svg
             viewBox={`0 0 ${INSTITUTE_CHART_WIDTH} ${INSTITUTE_CHART_HEIGHT}`}
             role="img"
-            aria-label="Supabase manuscripts by institute"
+            aria-label="Research manuscripts by institute"
           >
             <defs>
               <linearGradient

@@ -654,25 +654,14 @@ describe("role workspaces", () => {
         if (path === "/api/office/institutes/IHS/studies") {
           return new Response(
             JSON.stringify({
-              data: [{ year: "2026", title: "Community Health Study" }],
-            }),
-          );
-        }
-        if (
-          path ===
-          "/api/office/institutes/IHS/studies/2026/Community%20Health%20Study/files"
-        ) {
-          return new Response(
-            JSON.stringify({
               data: [
-                {
-                  name: "manuscript.pdf",
-                  path: "Institute of Health Sciences/2026/Community Health Study/manuscript.pdf",
-                  extension: "pdf",
-                },
+                { id: 42, year: "2026", title: "Community Health Study" },
               ],
             }),
           );
+        }
+        if (/^\/api\/office\/institutes\/[^/]+\/studies$/.test(path)) {
+          return new Response(JSON.stringify({ data: [] }));
         }
         return new Response(JSON.stringify({ error: "NOT_FOUND" }), {
           status: 404,
@@ -701,7 +690,7 @@ describe("role workspaces", () => {
       />,
     );
 
-    const analytics = screen.getByText("Supabase analytics");
+    const analytics = screen.getByText("Research analytics");
     const overview = await screen.findByRole("heading", {
       name: "Institutional Overview",
     });
@@ -710,7 +699,9 @@ describe("role workspaces", () => {
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(
-      screen.getByLabelText("Institute of Health Sciences: 4 research records"),
+      await screen.findByLabelText(
+        "Institute of Health Sciences: 1 research records",
+      ),
     ).toBeInTheDocument();
     expect(
       screen.getByLabelText(
@@ -719,7 +710,7 @@ describe("role workspaces", () => {
     ).toBeInTheDocument();
 
     fireEvent.click(
-      screen.getByLabelText("Institute of Health Sciences: 4 research records"),
+      screen.getByLabelText("Institute of Health Sciences: 1 research records"),
     );
     const studyLink = await screen.findByRole("link", {
       name: /Community Health Study/,
@@ -728,7 +719,7 @@ describe("role workspaces", () => {
     expect(studyLink).toHaveAttribute(
       "href",
       expect.stringContaining(
-        "/api/office/institutes/IHS/studies/2026/Community%20Health%20Study/open",
+        "/api/office/institutes/IHS/studies/2026/Community%20Health%20Study/open?id=42",
       ),
     );
   });

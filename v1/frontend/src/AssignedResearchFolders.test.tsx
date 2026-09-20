@@ -185,6 +185,9 @@ describe("AssignedResearchFolders", () => {
     ).not.toBeInTheDocument();
     expect(screen.queryByTestId("study-workspace")).not.toBeInTheDocument();
 
+    const search = screen.getByLabelText("Search assigned studies");
+    fireEvent.change(search, { target: { value: "coastal" } });
+
     fireEvent.click(
       screen.getByRole("button", {
         name: "Open research folder Coastal Resilience Study",
@@ -212,6 +215,138 @@ describe("AssignedResearchFolders", () => {
       }),
     ).toBeInTheDocument();
     expect(screen.queryByTestId("study-workspace")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Search assigned studies")).toHaveValue(
+      "coastal",
+    );
+  });
+
+  it.each<Role>([
+    "adviser",
+    "panel",
+    "statistician",
+    "research_editor",
+    "librarian",
+  ])(
+    "searches assigned studies by title and researcher for %s",
+    async (role) => {
+      const secondResearch = {
+        ...research,
+        id: 18,
+        title: "Mountain Agriculture Study",
+        institute: "Institute of Agriculture",
+        research_stage: "final",
+        researchers: ["Bea Flores"],
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL) => {
+          expect(String(input)).toBe("/api/monitoring/research");
+          return new Response(
+            JSON.stringify({ data: [research, secondResearch] }),
+          );
+        }),
+      );
+
+      render(<AssignedResearchFolders role={role} />);
+
+      const search = await screen.findByLabelText("Search assigned studies");
+      expect(search).toHaveAttribute(
+        "placeholder",
+        "Search assigned studies...",
+      );
+      fireEvent.change(search, { target: { value: "  mountain  " } });
+      expect(
+        screen.getByRole("button", {
+          name: "Open research folder Mountain Agriculture Study",
+        }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", {
+          name: "Open research folder Coastal Resilience Study",
+        }),
+      ).not.toBeInTheDocument();
+
+      fireEvent.change(search, { target: { value: "ari santos" } });
+      expect(
+        screen.getByRole("button", {
+          name: "Open research folder Coastal Resilience Study",
+        }),
+      ).toBeInTheDocument();
+
+      fireEvent.change(search, { target: { value: "missing study" } });
+      expect(
+        screen.getByText("No assigned studies match your search."),
+      ).toBeInTheDocument();
+
+      fireEvent.change(search, { target: { value: "" } });
+      expect(
+        screen.getByRole("button", {
+          name: "Open research folder Mountain Agriculture Study",
+        }),
+      ).toBeInTheDocument();
+    },
+  );
+
+  it("combines Research Office search with stage and institute filters", async () => {
+    const officeResearch = [
+      research,
+      {
+        ...research,
+        id: 18,
+        title: "Coastal Farming Study",
+        institute: "Institute of Agriculture",
+        research_stage: "final",
+        researchers: ["Bea Flores"],
+      },
+      {
+        ...research,
+        id: 19,
+        title: "Forest Systems Study",
+        institute: "Institute of Science",
+        research_stage: "final",
+        researchers: ["Cara Yu"],
+      },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ data: officeResearch }))),
+    );
+
+    render(<AssignedResearchFolders role="research-office" />);
+
+    const search = await screen.findByLabelText("Search assigned studies");
+    fireEvent.change(search, { target: { value: "coastal" } });
+    fireEvent.change(screen.getByLabelText("Research stage filter"), {
+      target: { value: "final" },
+    });
+    fireEvent.change(screen.getByLabelText("Institute filter"), {
+      target: { value: "Institute of Agriculture" },
+    });
+
+    expect(
+      screen.getByRole("button", {
+        name: "Open research folder Coastal Farming Study",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: "Open research folder Coastal Resilience Study",
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: "Open research folder Forest Systems Study",
+      }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(screen.getByLabelText("Research stage filter")).toHaveValue("");
+    expect(screen.getByLabelText("Institute filter")).toHaveValue("");
+    expect(
+      screen.getByRole("button", {
+        name: "Open research folder Coastal Resilience Study",
+      }),
+    ).toBeInTheDocument();
   });
 
   it("opens its floating defense menu only on demand and selects Final monitoring", async () => {
@@ -350,6 +485,9 @@ describe("AssignedResearchFolders", () => {
         expect.objectContaining({ method: "PUT" }),
       ),
     );
+    expect(
+      screen.getByRole("button", { name: "Save assignment" }),
+    ).toBeDisabled();
   });
 
   it("reloads assigned folders when the active account changes", async () => {

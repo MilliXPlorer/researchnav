@@ -3358,6 +3358,7 @@ export interface InstitutionalReport {
 }
 
 export interface OfficeInstituteStudy {
+  id: number;
   year: string;
   title: string;
 }
@@ -3500,7 +3501,7 @@ export function officeInstituteStudyOpenUrl(
   institute: string,
   study: OfficeInstituteStudy,
 ): string {
-  return `/api/office/institutes/${encodeURIComponent(institute)}/studies/${encodeURIComponent(study.year)}/${encodeURIComponent(study.title)}/open`;
+  return `/api/office/institutes/${encodeURIComponent(institute)}/studies/${encodeURIComponent(study.year)}/${encodeURIComponent(study.title)}/open?id=${encodeURIComponent(String(study.id))}`;
 }
 
 /* -------------------------------- Researcher APIs -------------------------------- */

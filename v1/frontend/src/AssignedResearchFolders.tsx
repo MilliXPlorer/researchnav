@@ -16,6 +16,7 @@ import {
 import { Button } from "./components";
 import ResearchFolderRow from "./ResearchFolderRow";
 import StudyWorkspace from "./StudyWorkspace";
+import { matchesStudySearch } from "./studySearch";
 import type { Role } from "./types";
 
 function label(value: string) {
@@ -61,6 +62,7 @@ function AssignedResearchFoldersContent({
   const [representativeBusy, setRepresentativeBusy] = useState(false);
   const [folderSearch, setFolderSearch] = useState("");
   const [instituteFilter, setInstituteFilter] = useState("");
+  const [stageFilter, setStageFilter] = useState("");
 
   useEffect(() => {
     selectedRef.current = selected;
@@ -176,24 +178,29 @@ function AssignedResearchFoldersContent({
   const institutes = Array.from(
     new Set(folders.map((folder) => folder.institute).filter(Boolean)),
   ).sort() as string[];
-  const normalizedFolderSearch = folderSearch.trim().toLocaleLowerCase();
-  const visibleFolders =
-    role === "research-office"
-      ? folders
-          .filter(
-            (folder) =>
-              (!instituteFilter || folder.institute === instituteFilter) &&
-              (!normalizedFolderSearch ||
-                `${folder.title} ${folder.researchers.join(" ")}`
-                  .toLocaleLowerCase()
-                  .includes(normalizedFolderSearch)),
-          )
-          .sort(
-            (left, right) =>
-              (left.institute || "").localeCompare(right.institute || "") ||
-              left.title.localeCompare(right.title),
-          )
-      : folders;
+  const stages = Array.from(
+    new Set(folders.map((folder) => folder.research_stage).filter(Boolean)),
+  ).sort();
+  const visibleFolders = folders
+    .filter(
+      (folder) =>
+        (!stageFilter || folder.research_stage === stageFilter) &&
+        (role !== "research-office" ||
+          !instituteFilter ||
+          folder.institute === instituteFilter) &&
+        matchesStudySearch(folderSearch, [
+          folder.title,
+          folder.researchers.join(" "),
+          folder.institute,
+          folder.research_stage,
+        ]),
+    )
+    .sort((left, right) =>
+      role === "research-office"
+        ? (left.institute || "").localeCompare(right.institute || "") ||
+          left.title.localeCompare(right.title)
+        : 0,
+    );
 
   const actorExtension =
     role !== "research-office" || !research ? undefined : research.section_id !=
@@ -289,20 +296,36 @@ function AssignedResearchFoldersContent({
                   <h4>Folders</h4>
                 </div>
               </div>
-              {role === "research-office" && (
-                <div className="office-folder-filters">
-                  <label>
-                    <span>Search folders</span>
-                    <input
-                      type="search"
-                      value={folderSearch}
-                      placeholder="Title or researcher"
-                      onChange={(event) => setFolderSearch(event.target.value)}
-                    />
-                  </label>
+              <div className="study-list-controls assigned-research-controls">
+                <label className="study-list-search">
+                  <span>Search assigned studies</span>
+                  <input
+                    type="search"
+                    value={folderSearch}
+                    placeholder="Search assigned studies..."
+                    onChange={(event) => setFolderSearch(event.target.value)}
+                  />
+                </label>
+                <label>
+                  <span>Research stage</span>
+                  <select
+                    aria-label="Research stage filter"
+                    value={stageFilter}
+                    onChange={(event) => setStageFilter(event.target.value)}
+                  >
+                    <option value="">All stages</option>
+                    {stages.map((stage) => (
+                      <option key={stage} value={stage}>
+                        {label(stage)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {role === "research-office" && (
                   <label>
                     <span>Institute</span>
                     <select
+                      aria-label="Institute filter"
                       value={instituteFilter}
                       onChange={(event) =>
                         setInstituteFilter(event.target.value)
@@ -316,12 +339,24 @@ function AssignedResearchFoldersContent({
                       ))}
                     </select>
                   </label>
-                </div>
-              )}
+                )}
+                {(stageFilter || instituteFilter) && (
+                  <Button
+                    type="button"
+                    variant="quiet"
+                    onClick={() => {
+                      setStageFilter("");
+                      setInstituteFilter("");
+                    }}
+                  >
+                    Clear filters
+                  </Button>
+                )}
+              </div>
               <div className="project-folder-nav research-folder-list">
                 {visibleFolders.length === 0 && (
                   <p className="project-empty-copy">
-                    No ongoing research folders match these filters.
+                    No assigned studies match your search.
                   </p>
                 )}
                 {visibleFolders.map((item, index) => (

@@ -2,10 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Models\DocumentFile;
 use App\Models\ResearchAuthor;
 use App\Models\ResearchDocument;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -125,7 +127,54 @@ class RoleWorkspaceApiSecondTest extends TestCase
 
         $this->as($office)->getJson('/api/office/institutes/ICS/studies')
             ->assertOk()
+            ->assertJsonPath('data.0.id', $document->id)
+            ->assertJsonPath('data.0.year', '2025')
             ->assertJsonPath('data.0.title', 'Sample Study');
+    }
+
+    public function test_office_can_open_and_download_an_institute_study_from_private_storage(): void
+    {
+        Storage::fake('researchnav_private');
+        $office = $this->user(['role' => 'research-office']);
+        $owner = $this->user(['role' => 'researcher']);
+        $document = ResearchDocument::factory()->create([
+            'submitted_by' => $owner->id,
+            'submission_status' => 'approved',
+            'archive_status' => 'archived',
+            'publication_year' => 2025,
+            'institute' => 'Institute of Computer Studies',
+            'title' => 'Sample Study',
+        ]);
+        $storedFilename = Str::uuid()->toString().'.pdf';
+        DocumentFile::query()->create([
+            'research_document_id' => $document->id,
+            'uploaded_by' => $owner->id,
+            'document_type' => 'final_manuscript',
+            'version_number' => 1,
+            'original_filename' => 'manuscript.pdf',
+            'stored_filename' => $storedFilename,
+            'file_path' => 'research/'.$document->id.'/'.$storedFilename,
+            'file_extension' => 'pdf',
+            'mime_type' => 'application/pdf',
+            'file_size' => 21,
+            'is_current' => true,
+            'uploaded_at' => now(),
+        ]);
+        Storage::disk('researchnav_private')->put(
+            'research/'.$document->id.'/'.$storedFilename,
+            '%PDF-1.4 test content',
+        );
+        $studyPath = '/api/office/institutes/ICS/studies/2025/Sample%20Study';
+
+        $this->as($office)->get($studyPath.'/open?id='.$document->id)
+            ->assertOk()
+            ->assertSee('manuscript.pdf')
+            ->assertSee('Download all manuscripts (.zip)');
+
+        $this->as($office)->get($studyPath.'/download?id='.$document->id)
+            ->assertOk()
+            ->assertDownload('Sample Study.zip')
+            ->assertHeader('content-type', 'application/zip');
     }
 
     public function test_research_index_mine_filter_returns_only_own_submissions(): void

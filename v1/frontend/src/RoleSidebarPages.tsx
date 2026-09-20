@@ -134,6 +134,7 @@ import type { ResearchRecord, Role } from "./types";
 import { useLiveFilters } from "./useLiveFilters";
 import { filterUserRows } from "./userManagement";
 import { useClientSorting } from "./useClientSorting";
+import { matchesStudySearch } from "./studySearch";
 
 const roles: AdminRole[] = [
   "admin",
@@ -2244,6 +2245,12 @@ function InstructorSections({
   const state = useLoad(() => listInstructorSections(), attempt);
   const [pageNotice, setPageNotice] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [sectionSearch, setSectionSearch] = useState("");
+  const [academicYearFilter, setAcademicYearFilter] = useState("");
+  const [sectionStatusFilter, setSectionStatusFilter] = useState("");
+  const [studySearch, setStudySearch] = useState("");
+  const [studyStageFilter, setStudyStageFilter] = useState("");
+  const [studyStatusFilter, setStudyStatusFilter] = useState("");
   const openSection =
     sectionId !== undefined && state.status === "ready"
       ? (state.data.find((item) => String(item.id) === String(sectionId)) ??
@@ -2268,12 +2275,21 @@ function InstructorSections({
   const [studentsFor, setStudentsFor] = useState<
     Record<number, InstructorStudentResource[]>
   >({});
+  const visibleStudents = (
+    openSection ? (studentsFor[openSection.id] ?? []) : []
+  ).filter((student) =>
+    matchesStudySearch(studySearch, [
+      studentName(student),
+      student.email,
+      student.student_employee_id,
+    ]),
+  );
   const {
     sortedRows: sortedStudents,
     sort: studentSort,
     direction: studentSortDirection,
     changeSort: changeStudentSort,
-  } = useClientSorting(openSection ? (studentsFor[openSection.id] ?? []) : [], {
+  } = useClientSorting(visibleStudents, {
     student: (student) => studentName(student),
     email: (student) => student.email,
     student_id: (student) => student.student_employee_id,
@@ -2351,6 +2367,42 @@ function InstructorSections({
     String(selectedDocument.research_document_id) === String(projectDocumentId);
   const projectAssignmentEditing =
     Object.values(projectDisclosures).some(Boolean);
+  const sections = state.status === "ready" ? state.data : [];
+  const academicYears = Array.from(
+    new Set(sections.map((section) => section.academic_year).filter(Boolean)),
+  ).sort() as string[];
+  const visibleSections = sections.filter(
+    (section) =>
+      (!academicYearFilter || section.academic_year === academicYearFilter) &&
+      (!sectionStatusFilter ||
+        (section.is_active ? "active" : "inactive") === sectionStatusFilter) &&
+      matchesStudySearch(sectionSearch, [
+        section.name,
+        section.section_code,
+        section.academic_year,
+        section.is_active ? "active" : "inactive",
+      ]),
+  );
+  const sectionDocuments = openSection
+    ? (documentsFor[openSection.id] ?? [])
+    : [];
+  const studyStages = Array.from(
+    new Set(sectionDocuments.map((document) => document.research_stage)),
+  ).sort();
+  const studyStatuses = Array.from(
+    new Set(sectionDocuments.map((document) => document.submission_status)),
+  ).sort();
+  const visibleDocuments = sectionDocuments.filter(
+    (document) =>
+      (!studyStageFilter || document.research_stage === studyStageFilter) &&
+      (!studyStatusFilter ||
+        document.submission_status === studyStatusFilter) &&
+      matchesStudySearch(studySearch, [
+        document.title,
+        document.research_stage,
+        document.submission_status,
+      ]),
+  );
 
   function resetProjectDisclosures() {
     setProjectDisclosures({
@@ -2967,15 +3019,75 @@ function InstructorSections({
               {pageNotice}
             </p>
           )}
+          {state.status === "ready" && (
+            <div className="study-list-controls">
+              <label className="study-list-search">
+                <span>Search sections or studies</span>
+                <input
+                  type="search"
+                  value={sectionSearch}
+                  placeholder="Search sections or studies..."
+                  onChange={(event) => setSectionSearch(event.target.value)}
+                />
+              </label>
+              <label>
+                <span>Academic year</span>
+                <select
+                  aria-label="Academic year filter"
+                  value={academicYearFilter}
+                  onChange={(event) =>
+                    setAcademicYearFilter(event.target.value)
+                  }
+                >
+                  <option value="">All academic years</option>
+                  {academicYears.map((year) => (
+                    <option key={year} value={year}>
+                      {year}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Status</span>
+                <select
+                  aria-label="Section status filter"
+                  value={sectionStatusFilter}
+                  onChange={(event) =>
+                    setSectionStatusFilter(event.target.value)
+                  }
+                >
+                  <option value="">All statuses</option>
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </label>
+              {(academicYearFilter || sectionStatusFilter) && (
+                <Button
+                  type="button"
+                  variant="quiet"
+                  onClick={() => {
+                    setAcademicYearFilter("");
+                    setSectionStatusFilter("");
+                  }}
+                >
+                  Clear filters
+                </Button>
+              )}
+            </div>
+          )}
           {state.status === "loading" ? (
             <Loading label="Loading sections" />
           ) : state.status === "error" ? (
             <InlineError message={state.message} retry={reload} />
           ) : state.data.length === 0 ? (
             <p className="admin-empty">No class sections have been created.</p>
+          ) : visibleSections.length === 0 ? (
+            <p className="admin-empty">
+              No sections or studies match your search.
+            </p>
           ) : (
             <section className="section-folder-grid" aria-label="Your sections">
-              {state.data.map((section) => (
+              {visibleSections.map((section) => (
                 <button
                   type="button"
                   className="section-folder-card"
@@ -3066,6 +3178,59 @@ function InstructorSections({
                 {openSection.members_count} student
                 {openSection.members_count === 1 ? "" : "s"}
               </span>
+            </div>
+            <div className="study-list-controls section-study-controls">
+              <label className="study-list-search">
+                <span>Search studies or researchers</span>
+                <input
+                  type="search"
+                  value={studySearch}
+                  placeholder="Search studies or researchers..."
+                  onChange={(event) => setStudySearch(event.target.value)}
+                />
+              </label>
+              <label>
+                <span>Research stage</span>
+                <select
+                  aria-label="Research stage filter"
+                  value={studyStageFilter}
+                  onChange={(event) => setStudyStageFilter(event.target.value)}
+                >
+                  <option value="">All stages</option>
+                  {studyStages.map((stage) => (
+                    <option key={stage} value={stage}>
+                      {label(stage)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Submission status</span>
+                <select
+                  aria-label="Submission status filter"
+                  value={studyStatusFilter}
+                  onChange={(event) => setStudyStatusFilter(event.target.value)}
+                >
+                  <option value="">All statuses</option>
+                  {studyStatuses.map((status) => (
+                    <option key={status} value={status}>
+                      {label(status)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {(studyStageFilter || studyStatusFilter) && (
+                <Button
+                  type="button"
+                  variant="quiet"
+                  onClick={() => {
+                    setStudyStageFilter("");
+                    setStudyStatusFilter("");
+                  }}
+                >
+                  Clear filters
+                </Button>
+              )}
             </div>
             {detailsNotice && (
               <p
@@ -3223,16 +3388,20 @@ function InstructorSections({
                     Retry
                   </Button>
                 </p>
-              ) : (documentsFor[openSection.id] ?? []).length === 0 ? (
+              ) : sectionDocuments.length === 0 ? (
                 <div className="section-empty-folder-state">
                   <p className="admin-empty">No research-title folders yet.</p>
                   <p>
                     Create a research project to add its folder to this section.
                   </p>
                 </div>
+              ) : visibleDocuments.length === 0 ? (
+                <p className="admin-empty">
+                  No studies match your search and filters.
+                </p>
               ) : (
                 <div className="research-title-folders">
-                  {(documentsFor[openSection.id] ?? []).map((document) => (
+                  {visibleDocuments.map((document) => (
                     <ResearchFolderRow
                       key={document.research_document_id}
                       title={document.title}
@@ -3299,6 +3468,8 @@ function InstructorSections({
                 <p className="admin-empty">
                   No student researchers are enrolled in this section.
                 </p>
+              ) : sortedStudents.length === 0 ? (
+                <p className="admin-empty">No researchers match your search.</p>
               ) : (
                 <div className="admin-table-wrap">
                   <table>

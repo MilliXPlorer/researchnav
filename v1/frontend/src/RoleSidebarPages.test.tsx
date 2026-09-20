@@ -1823,9 +1823,260 @@ describe("role workspace pages", () => {
     fireEvent.click(card);
     expect(navigate).toHaveBeenCalledWith("/app/instructor/sections/7");
     fireEvent.click(screen.getByRole("button", { name: "Add Section" }));
-    expect(screen.getByLabelText("Section name")).toBeInTheDocument();
-    expect(screen.getByLabelText("Section code")).toBeRequired();
-    expect(screen.getByLabelText("Academic year")).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog", { name: "Create class section" });
+    expect(within(dialog).getByLabelText("Section name")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Section code")).toBeRequired();
+    expect(within(dialog).getByLabelText("Academic year")).toBeInTheDocument();
+  });
+
+  it("searches and filters section cards using the loaded section metadata", async () => {
+    stubFetch([
+      [
+        /\/api\/instructor\/sections$/,
+        () =>
+          listData([
+            {
+              id: 7,
+              name: "Computer Science 4A",
+              section_code: "BSCS-4A",
+              academic_year: "2025-2026",
+              is_active: true,
+              documents_count: 2,
+              members_count: 4,
+              created_at: null,
+            },
+            {
+              id: 8,
+              name: "Information Systems 3B",
+              section_code: "BSIS-3B",
+              academic_year: "2024-2025",
+              is_active: false,
+              documents_count: 1,
+              members_count: 3,
+              created_at: null,
+            },
+          ]),
+      ],
+    ]);
+
+    render(
+      <RoleSidebarPage
+        role="instructor"
+        selectedNav="My Sections"
+        navigate={vi.fn()}
+      />,
+    );
+
+    const search = await screen.findByLabelText("Search sections or studies");
+    fireEvent.change(search, { target: { value: "  bscs-4a  " } });
+    expect(
+      screen.getByRole("button", { name: "Open section Computer Science 4A" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: "Open section Information Systems 3B",
+      }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: "" } });
+    expect(
+      screen.getByRole("button", {
+        name: "Open section Information Systems 3B",
+      }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Academic year filter"), {
+      target: { value: "2025-2026" },
+    });
+    fireEvent.change(screen.getByLabelText("Section status filter"), {
+      target: { value: "inactive" },
+    });
+    expect(
+      screen.getByText("No sections or studies match your search."),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(
+      screen.getByRole("button", {
+        name: "Open section Information Systems 3B",
+      }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: "missing section" } });
+    expect(
+      screen.getByText("No sections or studies match your search."),
+    ).toBeInTheDocument();
+  });
+
+  it("searches loaded studies and researchers and combines study filters", async () => {
+    const student = {
+      id: "student-1",
+      email: "maria@example.edu",
+      student_employee_id: "2023-0001",
+      first_name: "Maria",
+      middle_name: null,
+      last_name: "Santos",
+      added_at: null,
+    };
+    stubFetch([
+      [
+        /\/api\/instructor\/sections$/,
+        () =>
+          listData([
+            {
+              id: 7,
+              name: "CS-101",
+              section_code: "BSCS-4A",
+              academic_year: "2025-2026",
+              is_active: true,
+              documents_count: 2,
+              members_count: 1,
+              created_at: null,
+            },
+          ]),
+      ],
+      [
+        /\/api\/instructor\/sections\/7\/documents$/,
+        () =>
+          listData([
+            {
+              research_document_id: 11,
+              title: "Coastal Resilience",
+              research_stage: "proposal",
+              submission_status: "draft",
+              updated_at: null,
+            },
+            {
+              research_document_id: 12,
+              title: "Mountain Agriculture",
+              research_stage: "final",
+              submission_status: "approved",
+              updated_at: null,
+            },
+          ]),
+      ],
+      [/\/api\/instructor\/sections\/7\/members$/, () => listData([student])],
+      [/\/api\/instructor\/students(\?|$)/, () => listData([student])],
+    ]);
+
+    render(
+      <RoleSidebarPage
+        role="instructor"
+        selectedNav="My Sections"
+        navigate={vi.fn()}
+        instructorSectionId="7"
+      />,
+    );
+
+    const search = await screen.findByLabelText(
+      "Search studies or researchers",
+    );
+    await screen.findByRole("button", {
+      name: "Open research project Coastal Resilience",
+    });
+    fireEvent.change(search, { target: { value: "  mountain  " } });
+    expect(
+      screen.getByRole("button", {
+        name: "Open research project Mountain Agriculture",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: "Open research project Coastal Resilience",
+      }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: "Maria Santos" } });
+    expect(screen.getByText("maria@example.edu")).toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: "coastal" } });
+    fireEvent.change(screen.getByLabelText("Research stage filter"), {
+      target: { value: "proposal" },
+    });
+    fireEvent.change(screen.getByLabelText("Submission status filter"), {
+      target: { value: "approved" },
+    });
+    expect(
+      screen.getByText("No studies match your search and filters."),
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Submission status filter"), {
+      target: { value: "draft" },
+    });
+    expect(
+      screen.getByRole("button", {
+        name: "Open research project Coastal Resilience",
+      }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    fireEvent.change(search, { target: { value: "" } });
+    expect(
+      screen.getByRole("button", {
+        name: "Open research project Mountain Agriculture",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("does not retain section cards when the Instructor account context changes", async () => {
+    let requestCount = 0;
+    stubFetch([
+      [
+        /\/api\/instructor\/sections$/,
+        () => {
+          requestCount += 1;
+          return listData([
+            {
+              id: requestCount,
+              name:
+                requestCount === 1
+                  ? "Instructor A Section"
+                  : "Instructor B Section",
+              section_code: requestCount === 1 ? "A-1" : "B-1",
+              academic_year: "2025-2026",
+              is_active: true,
+              documents_count: 0,
+              members_count: 0,
+              created_at: null,
+            },
+          ]);
+        },
+      ],
+    ]);
+
+    const { rerender } = render(
+      <RoleSidebarPage
+        role="instructor"
+        selectedNav="My Sections"
+        navigate={vi.fn()}
+        actorKey="instructor-a@example.test"
+      />,
+    );
+    expect(
+      await screen.findByRole("button", {
+        name: "Open section Instructor A Section",
+      }),
+    ).toBeInTheDocument();
+
+    rerender(
+      <RoleSidebarPage
+        role="instructor"
+        selectedNav="My Sections"
+        navigate={vi.fn()}
+        actorKey="instructor-b@example.test"
+      />,
+    );
+    expect(
+      await screen.findByRole("button", {
+        name: "Open section Instructor B Section",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: "Open section Instructor A Section",
+      }),
+    ).not.toBeInTheDocument();
+    expect(requestCount).toBe(2);
   });
 
   it("loads the project route with independent assignment disclosures and confirmations", async () => {
@@ -2106,6 +2357,9 @@ describe("role workspace pages", () => {
     expect(
       screen.queryByRole("button", { name: "Attach existing research" }),
     ).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Search studies or researchers"), {
+      target: { value: "Project Alpha" },
+    });
     fireEvent.click(
       screen.getByRole("button", { name: "Add Research Project" }),
     );
