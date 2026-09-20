@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Exceptions\ApiValidationException;
+use App\Http\Requests\LibrarianCatalogIndexRequest;
+use App\Models\Category;
 use App\Models\MetadataReview;
 use App\Models\ResearchDocument;
 use App\Models\RetentionLog;
@@ -119,19 +121,35 @@ class LibrarianController extends DomainController
             ->header('Cache-Control', 'private, no-store');
     }
 
-    public function repositoryCatalog(Request $request): JsonResponse
+    public function repositoryCatalog(LibrarianCatalogIndexRequest $request): JsonResponse
     {
+        $input = $request->validated();
         $query = ResearchDocument::query()
             ->whereIn('submission_status', ['approved', 'archived'])
-            ->with('category:id,name')
-            ->orderByDesc('updated_at');
+            ->with('category:id,name');
 
-        if (($search = $request->query('search')) !== null && $search !== '') {
+        if (($search = $input['search'] ?? null) !== null && $search !== '') {
             $query->where('title', 'like', '%'.$this->escapedLike($search).'%');
         }
-        if (($category = $request->query('category')) !== null && $category !== '') {
+        if (($category = $input['category'] ?? null) !== null) {
             $query->where('category_id', $category);
         }
+
+        $sort = $input['sort'] ?? null;
+        $direction = $input['direction'] ?? 'asc';
+        if ($sort === 'category') {
+            $query->orderBy(
+                Category::query()
+                    ->select('name')
+                    ->whereColumn('categories.id', 'research_documents.category_id'),
+                $direction,
+            );
+        } elseif ($sort !== null) {
+            $query->orderBy($sort, $direction);
+        } else {
+            $query->orderByDesc('updated_at');
+        }
+        $query->orderBy('id', $sort === null ? 'desc' : $direction);
 
         return response()
             ->json([

@@ -34,6 +34,7 @@ const mockResearch: ResearchDocumentSummaryResource = {
   archive_status: "not_archived",
   visibility: "private",
   submitted_at: "2026-08-22T09:30:00.000Z",
+  updated_at: "2026-08-22T09:30:00.000Z",
   approved_at: null,
   archived_at: null,
   authors: [

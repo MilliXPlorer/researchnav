@@ -1141,6 +1141,8 @@ export function listAdminAuditLogs(
     actor_id?: string;
     created_from?: string;
     created_to?: string;
+    sort?: "actor" | "action" | "subject" | "created_at";
+    direction?: "asc" | "desc";
     page?: number;
     per_page?: 10 | 25 | 50 | 100;
   } = {},
@@ -1158,6 +1160,8 @@ export function listUserLogs(
     search?: string;
     created_from?: string;
     created_to?: string;
+    sort?: "action" | "subject" | "created_at";
+    direction?: "asc" | "desc";
     page?: number;
   } = {},
   fetcher: ApiFetch = globalThis.fetch,
@@ -1585,6 +1589,7 @@ export interface ResearchDocumentSummaryResource {
   archive_status: InternalResearchResource["archive_status"];
   visibility: InternalResearchResource["visibility"];
   submitted_at: string | null;
+  updated_at: string | null;
   approved_at: string | null;
   archived_at: string | null;
   authors: ResearchAuthorResource[];
@@ -3164,20 +3169,72 @@ export async function listArchivingQueue(
   ).data;
 }
 
-export function listRepositoryCatalog(
+export async function listRepositoryCatalog(
   input: {
     search?: string;
     category?: string | number;
     page?: number;
     per_page?: number;
+    sort?:
+      | "title"
+      | "category"
+      | "submission_status"
+      | "archive_status"
+      | "visibility"
+      | "publication_year"
+      | "updated_at";
+    direction?: "asc" | "desc";
   } = {},
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<LaravelPaginatedResponse<RepositoryCatalogRow>> {
-  return apiRequest(
+  const response = await apiRequest<
+    | LaravelPaginatedResponse<RepositoryCatalogRow>
+    | {
+        data: {
+          data: RepositoryCatalogRow[];
+          current_page: number;
+          from: number | null;
+          last_page: number;
+          links: Array<{ url: string | null; label: string; active: boolean }>;
+          path: string;
+          per_page: number;
+          to: number | null;
+          total: number;
+          first_page_url: string | null;
+          last_page_url: string | null;
+          prev_page_url: string | null;
+          next_page_url: string | null;
+        };
+      }
+  >(
     adminQuery("/api/librarian/catalog", input),
     undefined,
     fetcher,
   );
+
+  if ("meta" in response) return response;
+
+  const page = response.data;
+
+  return {
+    data: page.data,
+    links: {
+      first: page.first_page_url,
+      last: page.last_page_url,
+      prev: page.prev_page_url,
+      next: page.next_page_url,
+    },
+    meta: {
+      current_page: page.current_page,
+      from: page.from,
+      last_page: page.last_page,
+      links: page.links,
+      path: page.path,
+      per_page: page.per_page,
+      to: page.to,
+      total: page.total,
+    },
+  };
 }
 
 export async function listMetadataStandards(
@@ -3329,6 +3386,8 @@ export async function listOfficeUsers(
     access_status?: AccessStatus;
     page?: number;
     per_page?: number;
+    sort?: "last_name" | "email" | "role" | "access_status" | "created_at";
+    direction?: "asc" | "desc";
   } = {},
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<LaravelPaginatedResponse<OfficeUserRow>> {
@@ -3441,6 +3500,8 @@ export function listResearchDocuments(
   input: {
     mine?: boolean;
     submission_status?: ResearchDocumentSummaryResource["submission_status"];
+    sort?: "title" | "submission_status" | "updated_at";
+    direction?: "asc" | "desc";
     page?: number;
     per_page?: number;
   } = {},

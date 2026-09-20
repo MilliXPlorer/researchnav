@@ -6,14 +6,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import AdminSidebarPage from "./AdminSidebarPages";
 import Dashboard from "./Dashboard";
 
@@ -219,6 +212,102 @@ describe("administrator sidebar pages", () => {
         name: "System status and capabilities",
       }),
     ).toBeInTheDocument();
+  });
+
+  it("paginates access requests with the shared pagination controls", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const path = String(input);
+
+      if (path === "/api/admin/access-requests?status=pending&page=2") {
+        return new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: 2,
+                email: "second@example.test",
+                full_name: "Second Applicant",
+                requested_role: "researcher",
+                program: "BSCS",
+                justification: null,
+                status: "pending",
+                requested_at: "2026-09-20T09:00:00.000Z",
+                decided_by_email: null,
+              },
+            ],
+            links: {
+              first: null,
+              last: null,
+              prev: null,
+              next: null,
+            },
+            meta: {
+              current_page: 2,
+              from: 2,
+              last_page: 2,
+              links: [],
+              path: "/api/admin/access-requests",
+              per_page: 1,
+              to: 2,
+              total: 2,
+            },
+          }),
+        );
+      }
+
+      return new Response(
+        JSON.stringify({
+          data: [
+            {
+              id: 1,
+              email: "first@example.test",
+              full_name: "First Applicant",
+              requested_role: "researcher",
+              program: "BSCS",
+              justification: null,
+              status: "pending",
+              requested_at: "2026-09-20T08:00:00.000Z",
+              decided_by_email: null,
+            },
+          ],
+          links: {
+            first: null,
+            last: null,
+            prev: null,
+            next: null,
+          },
+          meta: {
+            current_page: 1,
+            from: 1,
+            last_page: 2,
+            links: [],
+            path: "/api/admin/access-requests",
+            per_page: 1,
+            to: 1,
+            total: 2,
+          },
+        }),
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AdminSidebarPage selectedNav="Access Requests" />);
+
+    expect(await screen.findByText("first@example.test")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Page 2" }));
+
+    expect(await screen.findByText("second@example.test")).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([input]) =>
+            String(input) ===
+            "/api/admin/access-requests?status=pending&page=2",
+        ),
+      ).toBe(true);
+    });
   });
 
   it("loads provisioned accounts and provisions a selected role", async () => {
@@ -582,6 +671,13 @@ describe("administrator sidebar pages", () => {
     vi.stubGlobal("fetch", fetchMock);
     const { rerender } = render(<AdminSidebarPage selectedNav="Audit Logs" />);
     expect(await screen.findByText("admin@example.test")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Sort by Timestamp" }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("sort=created_at&direction=asc"),
+        expect.anything(),
+      ),
+    );
     fireEvent.change(screen.getByLabelText("Action"), {
       target: { value: "missing" },
     });
@@ -615,7 +711,9 @@ describe("administrator sidebar pages", () => {
     }
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const params = userParams(input);
-      const path = (input instanceof Request ? input.url : String(input)).split("?")[0];
+      const path = (input instanceof Request ? input.url : String(input)).split(
+        "?",
+      )[0];
       if (path === "/api/admin/users") {
         userRequests += 1;
         if (params.get("search") === "ann") {
@@ -639,9 +737,7 @@ describe("administrator sidebar pages", () => {
         if (params.get("page") === "2") {
           return new Response(
             JSON.stringify({
-              data: [
-                { ...user, id: "c", email: "page2@example.test" },
-              ],
+              data: [{ ...user, id: "c", email: "page2@example.test" }],
               links: {
                 first: null,
                 last: null,
@@ -688,17 +784,13 @@ describe("administrator sidebar pages", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<AdminSidebarPage selectedNav="All Users" />);
-    expect(
-      await screen.findByText("member@example.test"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("member@example.test")).toBeInTheDocument();
     expect(screen.getByText("second@example.test")).toBeInTheDocument();
-    expect(screen.getByText("Page 1 of 2", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("Showing 1–2 of 3 users")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    expect(
-      await screen.findByText("page2@example.test"),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Page 2 of 2", { exact: false })).toBeInTheDocument();
+    expect(await screen.findByText("page2@example.test")).toBeInTheDocument();
+    expect(screen.getByText("Showing 3–3 of 3 users")).toBeInTheDocument();
     const requestsAfterPage2 = userRequests;
 
     vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -727,6 +819,88 @@ describe("administrator sidebar pages", () => {
     vi.useRealTimers();
   });
 
+  it("resets sorting to page 1 and preserves filters and sorting across pages", async () => {
+    function userParams(input: string | URL | Request) {
+      const url = input instanceof Request ? input.url : String(input);
+      const separator = url.indexOf("?");
+      return new URLSearchParams(
+        separator >= 0 ? url.slice(separator + 1) : "",
+      );
+    }
+
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const path = (input instanceof Request ? input.url : String(input)).split(
+        "?",
+      )[0];
+      if (path === "/api/admin/users") {
+        const params = userParams(input);
+        const currentPage = Number(params.get("page") ?? 1);
+        return new Response(
+          JSON.stringify({
+            data: [
+              {
+                ...user,
+                id: `page-${currentPage}`,
+                email: `page-${currentPage}@example.test`,
+              },
+            ],
+            links: { first: null, last: null, prev: null, next: null },
+            meta: {
+              current_page: currentPage,
+              from: currentPage,
+              last_page: 2,
+              links: [],
+              path: "/api/admin/users",
+              per_page: 25,
+              to: currentPage,
+              total: 2,
+            },
+          }),
+        );
+      }
+      return new Response(JSON.stringify(systemStatusResponse));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AdminSidebarPage selectedNav="All Users" />);
+    await screen.findByText("page-1@example.test");
+
+    fireEvent.change(screen.getByLabelText("Access status"), {
+      target: { value: "active" },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Page 2" }));
+    await screen.findByText("page-2@example.test");
+
+    fireEvent.click(screen.getByRole("columnheader", { name: "Name ↕" }));
+
+    await waitFor(() => {
+      const resetSortCall = fetchMock.mock.calls.find(([input]) => {
+        const params = userParams(input);
+        return (
+          params.get("access_status") === "active" &&
+          params.get("sort") === "last_name" &&
+          params.get("direction") === "asc" &&
+          params.get("page") !== "2"
+        );
+      });
+      expect(resetSortCall).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Page 2" }));
+    await waitFor(() => {
+      const sortedPageCall = fetchMock.mock.calls.find(([input]) => {
+        const params = userParams(input);
+        return (
+          params.get("access_status") === "active" &&
+          params.get("sort") === "last_name" &&
+          params.get("direction") === "asc" &&
+          params.get("page") === "2"
+        );
+      });
+      expect(sortedPageCall).toBeDefined();
+    });
+  });
+
   it("sorts AllUsers by last name ascending when Name is clicked", async () => {
     function userParams(input: string | URL | Request) {
       const url = input instanceof Request ? input.url : String(input);
@@ -735,7 +909,9 @@ describe("administrator sidebar pages", () => {
     }
 
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
-      const path = (input instanceof Request ? input.url : String(input)).split("?")[0];
+      const path = (input instanceof Request ? input.url : String(input)).split(
+        "?",
+      )[0];
 
       if (path === "/api/admin/users") {
         return new Response(
@@ -763,13 +939,16 @@ describe("administrator sidebar pages", () => {
 
     render(<AdminSidebarPage selectedNav="All Users" />);
 
-    expect(
-      await screen.findByText("member@example.test"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("member@example.test")).toBeInTheDocument();
 
-    fireEvent.click(
-      screen.getByRole("columnheader", { name: /Name/i }),
-    );
+    expect(
+      screen.getByRole("columnheader", { name: "Name ↕" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("columnheader", { name: "Actions" }),
+    ).not.toHaveTextContent(/[↕↑↓]/);
+
+    fireEvent.click(screen.getByRole("columnheader", { name: /Name/i }));
     await waitFor(() => {
       const sortCall = fetchMock.mock.calls.find(([input]) => {
         const params = userParams(input);
@@ -781,6 +960,9 @@ describe("administrator sidebar pages", () => {
 
       expect(sortCall).toBeDefined();
     });
+    expect(
+      screen.getByRole("columnheader", { name: "Name ↑" }),
+    ).toBeInTheDocument();
   });
 
   it("toggles AllUsers Name sorting to descending on second click", async () => {
@@ -791,7 +973,9 @@ describe("administrator sidebar pages", () => {
     }
 
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
-      const path = (input instanceof Request ? input.url : String(input)).split("?")[0];
+      const path = (input instanceof Request ? input.url : String(input)).split(
+        "?",
+      )[0];
 
       if (path === "/api/admin/users") {
         return new Response(
@@ -826,6 +1010,10 @@ describe("administrator sidebar pages", () => {
     fireEvent.click(nameHeader);
     fireEvent.click(nameHeader);
 
+    expect(
+      screen.getByRole("columnheader", { name: "Name ↓" }),
+    ).toBeInTheDocument();
+
     await waitFor(() => {
       const descendingCall = fetchMock.mock.calls.find(([input]) => {
         const params = userParams(input);
@@ -847,7 +1035,9 @@ describe("administrator sidebar pages", () => {
     }
 
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
-      const path = (input instanceof Request ? input.url : String(input)).split("?")[0];
+      const path = (input instanceof Request ? input.url : String(input)).split(
+        "?",
+      )[0];
 
       if (path === "/api/admin/users") {
         return new Response(
@@ -886,14 +1076,13 @@ describe("administrator sidebar pages", () => {
     ] as const;
 
     for (const [label, sort] of columns) {
-      fireEvent.click(screen.getByRole("columnheader", { name: label }));
+      fireEvent.click(screen.getByRole("columnheader", { name: `${label} ↕` }));
 
       await waitFor(() => {
         const matchingCall = fetchMock.mock.calls.find(([input]) => {
           const params = userParams(input);
           return (
-            params.get("sort") === sort &&
-            params.get("direction") === "asc"
+            params.get("sort") === sort && params.get("direction") === "asc"
           );
         });
 

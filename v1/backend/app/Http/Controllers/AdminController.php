@@ -119,7 +119,7 @@ class AdminController extends DomainController
     public function auditLogs(AdminAuditLogIndexRequest $request): JsonResponse
     {
         $input = $request->validated();
-        $query = AuditLog::query()->with('user:id,email')->orderByDesc('created_at')->orderByDesc('id');
+        $query = AuditLog::query()->with('user:id,email');
         if (($action = $input['action'] ?? null) !== null) {
             $query->where('action', $action);
         }
@@ -132,6 +132,29 @@ class AdminController extends DomainController
         if (($to = $input['created_to'] ?? null) !== null) {
             $query->whereDate('created_at', '<=', $to);
         }
+
+        $sort = $input['sort'] ?? null;
+        $direction = $input['direction'] ?? 'asc';
+        if ($sort === 'actor') {
+            $actorEmail = User::withTrashed()
+                ->select('email')
+                ->whereColumn('users.id', AuditLog::column('user_id'));
+            $query
+                ->orderByRaw(
+                    "CASE WHEN ({$actorEmail->toSql()}) IS NULL THEN 1 ELSE 0 END",
+                    $actorEmail->getBindings(),
+                )
+                ->orderBy($actorEmail, $direction);
+        } elseif ($sort === 'action') {
+            $query->orderBy('action', $direction);
+        } elseif ($sort === 'subject') {
+            $query->orderBy('entity_type', $direction)->orderBy('entity_id', $direction);
+        } elseif ($sort === 'created_at') {
+            $query->orderBy('created_at', $direction);
+        } else {
+            $query->orderByDesc('created_at');
+        }
+        $query->orderBy((new AuditLog)->getKeyName(), $sort === null ? 'desc' : $direction);
 
         return AdminAuditLogResource::collection($query->paginate($input['per_page'] ?? 25)->appends($request->query()))->response()->header('Cache-Control', 'private, no-store');
     }

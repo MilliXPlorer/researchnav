@@ -48,6 +48,47 @@ export function StatusChip({ status }: { status: Status }) {
   );
 }
 
+export type SortDirection = "asc" | "desc";
+
+/** A table header that keeps sorting controls inside the existing header styling. */
+export function SortableHeader({
+  sortKey,
+  activeSort,
+  direction = "asc",
+  onSort,
+  children,
+  label,
+}: {
+  sortKey: string;
+  activeSort: string | null;
+  direction?: SortDirection;
+  onSort: (sortKey: string) => void;
+  children: ReactNode;
+  label?: string;
+}) {
+  const active = activeSort === sortKey;
+  const indicator = active ? (direction === "asc" ? "↑" : "↓") : "↕";
+  const accessibleLabel =
+    label ?? (typeof children === "string" ? children : sortKey);
+
+  return (
+    <th
+      aria-sort={
+        active ? (direction === "asc" ? "ascending" : "descending") : "none"
+      }
+    >
+      <button
+        type="button"
+        className="sortable-header-button"
+        onClick={() => onSort(sortKey)}
+        aria-label={`Sort by ${accessibleLabel}`}
+      >
+        {children} <span aria-hidden="true">{indicator}</span>
+      </button>
+    </th>
+  );
+}
+
 /** API-provided classification, always rendered as text as well as color. */
 export function SimilarityBadge({
   classification,
@@ -117,37 +158,97 @@ export function SimilarityRing({
 }
 
 export function Pagination({
-  page,
-  lastPage,
+  meta,
   onPage,
+  noun = "records",
 }: {
-  page: number;
-  lastPage: number;
+  meta: {
+    current_page: number;
+    from: number | null;
+    last_page: number;
+    per_page: number;
+    to: number | null;
+    total: number;
+  };
   onPage: (page: number) => void;
+  noun?: string;
 }) {
+  const { current_page: page, last_page: lastPage } = meta;
+  const pages = paginationItems(page, lastPage);
+
   return (
     <nav className="admin-pagination" aria-label="Pagination">
+      <span className="pagination-summary">
+        Showing {(meta.from ?? 0).toLocaleString()}–
+        {(meta.to ?? 0).toLocaleString()} of {meta.total.toLocaleString()}{" "}
+        {noun}
+      </span>
       <Button
         variant="secondary"
         disabled={page <= 1}
         onClick={() => onPage(Math.max(1, page - 1))}
+        aria-label="Previous"
       >
-        Previous
+        ← Previous
       </Button>
-
-      <span>
-        Page {page} of {lastPage}
+      <span className="pagination-pages">
+        {pages.map((item, index) =>
+          item === "ellipsis" ? (
+            <span
+              key={`ellipsis-${index}`}
+              className="pagination-ellipsis"
+              aria-hidden="true"
+            >
+              …
+            </span>
+          ) : (
+            <Button
+              key={item}
+              variant={item === page ? "primary" : "secondary"}
+              className="pagination-page"
+              aria-label={`Page ${item}`}
+              aria-current={item === page ? "page" : undefined}
+              onClick={() => onPage(item)}
+            >
+              {item}
+            </Button>
+          ),
+        )}
       </span>
-
       <Button
         variant="secondary"
         disabled={page >= lastPage}
         onClick={() => onPage(Math.min(lastPage, page + 1))}
+        aria-label="Next"
       >
-        Next
+        Next →
       </Button>
     </nav>
   );
+}
+
+function paginationItems(page: number, lastPage: number) {
+  if (lastPage <= 7) {
+    return Array.from({ length: lastPage }, (_, index) => index + 1);
+  }
+
+  const visible = new Set([1, lastPage, page - 1, page, page + 1]);
+  if (page <= 2) visible.add(2);
+  if (page >= lastPage - 1) visible.add(lastPage - 1);
+
+  const pageNumbers = [...visible]
+    .filter((item) => item >= 1 && item <= lastPage)
+    .sort((first, second) => first - second);
+  const items: Array<number | "ellipsis"> = [];
+
+  pageNumbers.forEach((item, index) => {
+    if (index > 0 && item - pageNumbers[index - 1] > 1) {
+      items.push("ellipsis");
+    }
+    items.push(item);
+  });
+
+  return items;
 }
 
 export function SectionHeading({

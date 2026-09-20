@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\ArchiveResearchRequest;
+use App\Http\Requests\ResearchIndexRequest;
 use App\Http\Requests\StoreResearchRequest;
 use App\Http\Requests\SubmitResearchRequest;
 use App\Http\Requests\TransitionResearchRequest;
@@ -19,9 +20,10 @@ use Illuminate\Http\Request;
 
 class ResearchController extends DomainController
 {
-    public function index(Request $request)
+    public function index(ResearchIndexRequest $request)
     {
         $actor = $this->actor($request);
+        $input = $request->validated();
         $query = ResearchDocument::query()->with(['authors', 'category']);
         if (! DomainAuthorization::isOffice($actor)) {
             $query->where(function ($query) use ($actor): void {
@@ -51,12 +53,21 @@ class ResearchController extends DomainController
                     ->where('user_id', $actor->id);
             })->whereNull('import_source_sha256');
         }
-        if ($request->filled('submission_status')) {
-            $request->validate(['submission_status' => ['string', 'in:'.implode(',', ResearchDocument::SUBMISSION_STATUSES)]]);
-            $query->where('submission_status', $request->string('submission_status')->toString());
+        if (($submissionStatus = $input['submission_status'] ?? null) !== null) {
+            $query->where('submission_status', $submissionStatus);
         }
 
-        return ResearchDocumentResource::collection($query->latest()->paginate());
+        $sort = $input['sort'] ?? null;
+        $direction = $input['direction'] ?? 'asc';
+        if ($sort !== null) {
+            $query->orderBy($sort, $direction)->orderBy('id', $direction);
+        } else {
+            $query->latest()->orderByDesc('id');
+        }
+
+        return ResearchDocumentResource::collection(
+            $query->paginate($input['per_page'] ?? null)->appends($request->query()),
+        );
     }
 
     public function store(StoreResearchRequest $request, ResearchService $service)

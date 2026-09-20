@@ -66,6 +66,7 @@ const draftResource = (overrides: Record<string, unknown> = {}) => ({
   archive_status: "not_archived",
   visibility: "private",
   submitted_at: null,
+  updated_at: "2026-09-18T10:00:00.000Z",
   approved_at: null,
   archived_at: null,
   authors: [
@@ -249,10 +250,7 @@ describe("role workspace pages", () => {
     expect(screen.getByText("CLASS SECTION CREATED")).toBeInTheDocument();
     expect(screen.getByText("Created a research section.")).toBeInTheDocument();
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/user-logs",
-      expect.anything(),
-    );
+    expect(fetchMock).toHaveBeenCalledWith("/api/user-logs", expect.anything());
   });
 
   it("paginates user logs", async () => {
@@ -355,7 +353,7 @@ describe("role workspace pages", () => {
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
 
     expect(await screen.findByText("PAGE TWO EVENT")).toBeInTheDocument();
-    expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
+    expect(screen.getByText("Showing 26–26 of 26 logs")).toBeInTheDocument();
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/user-logs?page=2",
@@ -433,7 +431,7 @@ describe("role workspace pages", () => {
     });
 
     expect(await screen.findByText("FILTERED PAGE ONE")).toBeInTheDocument();
-    expect(screen.getByText("Page 1 of 2")).toBeInTheDocument();
+    expect(screen.getByText("Showing 1–1 of 2 logs")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     expect(await screen.findByText("FILTERED PAGE TWO")).toBeInTheDocument();
@@ -441,6 +439,57 @@ describe("role workspace pages", () => {
       "/api/user-logs?search=proposal&created_from=2026-09-10&created_to=2026-09-10&page=2",
       expect.anything(),
     );
+  });
+
+  it("resets user-log pagination and preserves filters when server sorting changes", async () => {
+    const fetchMock = vi.fn<
+      (input: string | URL | Request) => Promise<Response>
+    >(
+      async () =>
+        new Response(
+          JSON.stringify(
+            pageResponse([
+              {
+                id: 1,
+                action: "PROPOSAL_REVIEWED",
+                actor: null,
+                subject: { type: "research_document", id: "101" },
+                description: "Proposal review activity.",
+                created_at: "2026-09-10T08:00:00+08:00",
+              },
+            ]),
+          ),
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <RoleSidebarPage
+        role="instructor"
+        selectedNav="User Logs"
+        navigate={vi.fn()}
+      />,
+    );
+
+    await screen.findByText("PROPOSAL REVIEWED");
+    fireEvent.change(screen.getByLabelText("Search logs"), {
+      target: { value: "proposal" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sort by Action" }));
+
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.map(([input]) => String(input));
+      expect(calls).toContain(
+        "/api/user-logs?search=proposal&sort=action&direction=asc",
+      );
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sort by Action" }));
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.map(([input]) => String(input));
+      expect(calls).toContain(
+        "/api/user-logs?search=proposal&sort=action&direction=desc",
+      );
+    });
   });
 
   it("reloads Assigned Research when the active account changes", async () => {
@@ -717,46 +766,45 @@ describe("role workspace pages", () => {
   it("clears visible user logs without deleting audit history", async () => {
     let cleared = false;
 
-    const fetchMock = vi.fn(async (
-      input: string | URL | Request,
-      init?: RequestInit,
-    ) => {
-      const url = String(input);
+    const fetchMock = vi.fn(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
 
-      if (url === "/api/user-logs/clear" && init?.method === "POST") {
-        cleared = true;
-        return new Response(null, { status: 204 });
-      }
+        if (url === "/api/user-logs/clear" && init?.method === "POST") {
+          cleared = true;
+          return new Response(null, { status: 204 });
+        }
 
-      if (url === "/api/user-logs") {
-        return new Response(
-          JSON.stringify(
-            pageResponse(
-              cleared
-                ? []
-                : [
-                    {
-                      id: 1,
-                      user: {
-                        id: "user-1",
-                        email: "instructor@example.test",
+        if (url === "/api/user-logs") {
+          return new Response(
+            JSON.stringify(
+              pageResponse(
+                cleared
+                  ? []
+                  : [
+                      {
+                        id: 1,
+                        user: {
+                          id: "user-1",
+                          email: "instructor@example.test",
+                        },
+                        action: "VISIBLE_EVENT",
+                        entity_type: "research_document",
+                        entity_id: "1",
+                        description: "Visible activity.",
+                        ip_address: "127.0.0.1",
+                        user_agent: "Vitest",
+                        created_at: "2026-09-19T08:00:00+08:00",
                       },
-                      action: "VISIBLE_EVENT",
-                      entity_type: "research_document",
-                      entity_id: "1",
-                      description: "Visible activity.",
-                      ip_address: "127.0.0.1",
-                      user_agent: "Vitest",
-                      created_at: "2026-09-19T08:00:00+08:00",
-                    },
-                  ],
+                    ],
+              ),
             ),
-          ),
-        );
-      }
+          );
+        }
 
-      return new Response(null, { status: 404 });
-    });
+        return new Response(null, { status: 404 });
+      },
+    );
 
     vi.stubGlobal("fetch", fetchMock);
 
@@ -772,11 +820,7 @@ describe("role workspace pages", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Clear Logs" }));
 
-    expect(
-      screen.getByText(
-        "Are you sure to clear logs?",
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Are you sure to clear logs?")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Clear logs" }));
 
@@ -785,7 +829,7 @@ describe("role workspace pages", () => {
     });
 
     expect(
-      screen.getByText("No activity has been recorded yet."),
+      await screen.findByText("No activity has been recorded yet."),
     ).toBeInTheDocument();
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -1296,6 +1340,66 @@ describe("role workspace pages", () => {
     expect(navigate).not.toHaveBeenCalledWith(
       expect.stringContaining("/catalog"),
     );
+    expect(screen.getByText(/9\/18\/2026/)).toBeInTheDocument();
+  });
+
+  it("sorts related studies on the server and resets to the first page", async () => {
+    const owned = draftResource();
+    const fetchMock = stubFetch([
+      [
+        /\/api\/research\?/,
+        (path) => {
+          const page = path.includes("page=2") ? 2 : 1;
+          return new Response(
+            JSON.stringify({
+              ...pageResponse([owned]),
+              meta: {
+                ...pageResponse([owned]).meta,
+                current_page: page,
+                from: page === 1 ? 1 : 11,
+                last_page: 2,
+                to: page === 1 ? 10 : 11,
+                total: 11,
+              },
+            }),
+          );
+        },
+      ],
+      [/\/api\/research\/7\/similarity$/, () => listData([])],
+    ]);
+
+    render(
+      <RoleSidebarPage
+        role="researcher"
+        selectedNav="Related Studies"
+        navigate={vi.fn()}
+      />,
+    );
+
+    await screen.findByRole("heading", { name: "Select a record" });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/research?mine=1&page=2&per_page=10",
+        expect.anything(),
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Sort by Title" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/research?mine=1&sort=title&direction=asc&page=1&per_page=10",
+        expect.anything(),
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Sort by Title" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/research?mine=1&sort=title&direction=desc&page=1&per_page=10",
+        expect.anything(),
+      );
+    });
   });
 
   it("shows an error instead of mock submissions after a failed Researcher list request", async () => {
@@ -2101,9 +2205,7 @@ describe("role workspace pages", () => {
           };
           return new Response(JSON.stringify({ data: officeUser }));
         }
-        return new Response(
-          JSON.stringify({ data: pageResponse([officeUser]) }),
-        );
+        return new Response(JSON.stringify(pageResponse([officeUser])));
       }),
     );
 
@@ -2177,9 +2279,7 @@ describe("role workspace pages", () => {
     ];
     vi.stubGlobal(
       "fetch",
-      vi.fn(
-        async () => new Response(JSON.stringify({ data: pageResponse(users) })),
-      ),
+      vi.fn(async () => new Response(JSON.stringify(pageResponse(users)))),
     );
 
     render(

@@ -6363,6 +6363,18 @@ td strong {
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
+.sortable-header-button {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: inherit;
+  text-transform: inherit;
+}
 .admin-table-wrap tbody tr:last-child td {
   border-bottom: 0;
 }
@@ -6394,10 +6406,22 @@ td strong {
   justify-content: flex-end;
   gap: 8px;
 }
-.admin-pagination span {
+.admin-pagination .pagination-summary {
   margin-right: auto;
   color: var(--slate);
   font-size: 11px;
+}
+.pagination-pages {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.admin-pagination .pagination-page {
+  min-width: 36px;
+  padding-inline: 10px;
+}
+.pagination-ellipsis {
+  color: var(--slate);
 }
 .admin-pagination .button {
   min-height: 36px;
@@ -6685,8 +6709,11 @@ td strong {
     align-items: stretch;
     flex-direction: column;
   }
-  .admin-pagination span {
+  .admin-pagination .pagination-summary {
     margin-right: 0;
+  }
+  .pagination-pages {
+    flex-wrap: wrap;
   }
   .admin-stat-grid {
     grid-template-columns: repeat(2, 1fr);

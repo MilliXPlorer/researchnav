@@ -569,6 +569,70 @@ describe("role dashboard API", () => {
 });
 
 describe("specialist workspace API routes", () => {
+  it("normalizes the librarian catalog's nested paginator", async () => {
+    const rows = [
+      {
+        id: 7,
+        title: "Catalog record",
+        category: null,
+        submission_status: "approved",
+        archive_status: "archived",
+        visibility: "public",
+        publication_year: 2026,
+        updated_at: "2026-09-20T08:00:00.000Z",
+      },
+    ];
+    const paginator = {
+      current_page: 1,
+      from: 1,
+      last_page: 1,
+      links: [],
+      path: "/api/librarian/catalog",
+      per_page: 25,
+      to: 1,
+      total: 1,
+      first_page_url: "/api/librarian/catalog?page=1",
+      last_page_url: "/api/librarian/catalog?page=1",
+      prev_page_url: null,
+      next_page_url: null,
+      data: rows,
+    };
+    const normalized = {
+      data: rows,
+      links: {
+        first: "/api/librarian/catalog?page=1",
+        last: "/api/librarian/catalog?page=1",
+        prev: null,
+        next: null,
+      },
+      meta: {
+        current_page: 1,
+        from: 1,
+        last_page: 1,
+        links: [],
+        path: "/api/librarian/catalog",
+        per_page: 25,
+        to: 1,
+        total: 1,
+      },
+    };
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ data: paginator, schema_version: 1 })),
+    );
+
+    await expect(
+      listRepositoryCatalog(
+        { sort: "title", direction: "asc" },
+        fetchMock,
+      ),
+    ).resolves.toEqual(normalized);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/librarian/catalog?sort=title&direction=asc",
+      expect.anything(),
+    );
+  });
+
   it("uses canonical statistician, librarian, and office paths with exact methods", async () => {
     const fetchMock = vi.fn(
       async (path: RequestInfo | URL, init?: RequestInit) => {

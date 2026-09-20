@@ -21,13 +21,14 @@ import {
   type RequestableRole,
   type SystemStatusResource,
 } from "./api";
-import { Button } from "./components";
+import { Button, Pagination, SortableHeader } from "./components";
 import { DatePickerInput } from "./dateControls";
 import { ConfirmDialog, Modal } from "./Modal";
 import ResearchOfficeBulkImport from "./ResearchOfficeBulkImport";
 import { useLiveFilters } from "./useLiveFilters";
 import { useDebouncedValue } from "./useDebouncedValue";
 import { filterUserRows } from "./userManagement";
+import { useClientSorting } from "./useClientSorting";
 
 const roles: AdminRole[] = [
   "admin",
@@ -161,6 +162,7 @@ function AccessRequests() {
     Record<number, RequestableRole>
   >({});
   const [attempt, setAttempt] = useState(0);
+  const [page, setPage] = useState(1);
 
   function reload() {
     setError("");
@@ -170,7 +172,7 @@ function AccessRequests() {
 
   useEffect(() => {
     let cancelled = false;
-    void listAccessRequests({ status })
+    void listAccessRequests({ status, page })
       .then((response) => {
         if (cancelled) return;
         setResult(response);
@@ -187,7 +189,7 @@ function AccessRequests() {
     return () => {
       cancelled = true;
     };
-  }, [attempt, status]);
+  }, [attempt, status, page]);
 
   async function decide(
     request: AccessRequestResource,
@@ -243,9 +245,10 @@ function AccessRequests() {
             Status
             <select
               value={status}
-              onChange={(event) =>
-                setStatus(event.target.value as AccessRequestResource["status"])
-              }
+              onChange={(event) => {
+                setStatus(event.target.value as AccessRequestResource["status"]);
+                setPage(1);
+              }}
             >
               <option value="pending">Pending</option>
               <option value="approved">Approved</option>
@@ -264,6 +267,7 @@ function AccessRequests() {
         ) : result.data.length === 0 ? (
           <p className="admin-empty">No {status} access requests.</p>
         ) : (
+          <>
           <div className="admin-table-wrap">
             <table>
               <caption className="sr-only">Access requests</caption>
@@ -353,6 +357,16 @@ function AccessRequests() {
               </tbody>
             </table>
           </div>
+
+          <Pagination
+          meta={result.meta}
+          noun="requests"
+          onPage={(nextPage) => {
+            setPage(nextPage);
+            reload();
+          }}
+          />
+          </>
         )}
       </section>
     </div>
@@ -376,6 +390,16 @@ function AccountProvisioning({
   const [notice, setNotice] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [loading, setLoading] = useState(true);
+  const {
+    sortedRows: sortedUsers,
+    sort,
+    direction,
+    changeSort,
+  } = useClientSorting(users ?? [], {
+    email: (user) => user.email,
+    role: (user) => user.role,
+    access: (user) => user.accessStatus,
+  });
 
   function reload() {
     setError("");
@@ -502,13 +526,40 @@ function AccountProvisioning({
                 <caption className="sr-only">Provisioned accounts</caption>
                 <thead>
                   <tr>
-                    <th>Email</th>
-                    <th>Role</th>
-                    <th>Access</th>
+                    <SortableHeader
+                      sortKey="email"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={(key) =>
+                        changeSort(key as "email" | "role" | "access")
+                      }
+                    >
+                      Email
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="role"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={(key) =>
+                        changeSort(key as "email" | "role" | "access")
+                      }
+                    >
+                      Role
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="access"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={(key) =>
+                        changeSort(key as "email" | "role" | "access")
+                      }
+                    >
+                      Access
+                    </SortableHeader>
                   </tr>
                 </thead>
                 <tbody>
-                  {users.map((user) => (
+                  {sortedUsers.map((user) => (
                     <tr key={user.email}>
                       <td>{user.email}</td>
                       <td>{label(user.role)}</td>
@@ -824,7 +875,12 @@ function AllUsers({
                           : "none"
                       }
                     >
-                      Name {sort === "last_name" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
+                      Name{" "}
+                      {sort === "last_name"
+                        ? sortDirection === "asc"
+                          ? "↑"
+                          : "↓"
+                        : "↕"}
                     </th>
                     <th
                       onClick={() => changeSort("email")}
@@ -836,7 +892,12 @@ function AllUsers({
                           : "none"
                       }
                     >
-                      Email {sort === "email" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
+                      Email{" "}
+                      {sort === "email"
+                        ? sortDirection === "asc"
+                          ? "↑"
+                          : "↓"
+                        : "↕"}
                     </th>
 
                     <th
@@ -849,7 +910,12 @@ function AllUsers({
                           : "none"
                       }
                     >
-                      Role {sort === "role" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
+                      Role{" "}
+                      {sort === "role"
+                        ? sortDirection === "asc"
+                          ? "↑"
+                          : "↓"
+                        : "↕"}
                     </th>
 
                     <th
@@ -862,7 +928,12 @@ function AllUsers({
                           : "none"
                       }
                     >
-                      Access {sort === "access_status" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
+                      Access{" "}
+                      {sort === "access_status"
+                        ? sortDirection === "asc"
+                          ? "↑"
+                          : "↓"
+                        : "↕"}
                     </th>
 
                     <th
@@ -875,7 +946,12 @@ function AllUsers({
                           : "none"
                       }
                     >
-                      Last login {sort === "last_login_at" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
+                      Last login{" "}
+                      {sort === "last_login_at"
+                        ? sortDirection === "asc"
+                          ? "↑"
+                          : "↓"
+                        : "↕"}
                     </th>
 
                     <th
@@ -888,7 +964,12 @@ function AllUsers({
                           : "none"
                       }
                     >
-                      Created {sort === "created_at" ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}
+                      Created{" "}
+                      {sort === "created_at"
+                        ? sortDirection === "asc"
+                          ? "↑"
+                          : "↓"
+                        : "↕"}
                     </th>
                     <th>Actions</th>
                   </tr>
@@ -944,6 +1025,7 @@ function AllUsers({
             </div>
             <Pagination
               meta={result.meta}
+              noun="users"
               onPage={(nextPage) => {
                 setPage(nextPage);
                 reload();
@@ -1041,6 +1123,10 @@ function AuditLogs() {
     created_to: "",
   });
   const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<
+    "actor" | "action" | "subject" | "created_at" | null
+  >(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [result, setResult] = useState<Awaited<
     ReturnType<typeof listAdminAuditLogs>
   > | null>(null);
@@ -1064,7 +1150,13 @@ function AuditLogs() {
 
   useEffect(() => {
     let cancelled = false;
-    void listAdminAuditLogs({ ...query, page, per_page: 25 })
+    void listAdminAuditLogs({
+      ...query,
+      sort: sort || undefined,
+      direction: sort ? sortDirection : undefined,
+      page,
+      per_page: 25,
+    })
       .then((response) => {
         if (cancelled) return;
         setResult(response);
@@ -1079,7 +1171,17 @@ function AuditLogs() {
     return () => {
       cancelled = true;
     };
-  }, [attempt, page, query]);
+  }, [attempt, page, query, sort, sortDirection]);
+
+  function changeSort(column: "actor" | "action" | "subject" | "created_at") {
+    setPage(1);
+    if (sort === column) {
+      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSort(column);
+    setSortDirection("asc");
+  }
   return (
     <div className="workspace-content admin-sidebar-page">
       <PageHeader
@@ -1140,11 +1242,55 @@ function AuditLogs() {
                 <caption className="sr-only">Audit log entries</caption>
                 <thead>
                   <tr>
-                    <th>Actor</th>
-                    <th>Action</th>
-                    <th>Subject</th>
+                    <SortableHeader
+                      sortKey="actor"
+                      activeSort={sort}
+                      direction={sortDirection}
+                      onSort={(key) =>
+                        changeSort(
+                          key as "actor" | "action" | "subject" | "created_at",
+                        )
+                      }
+                    >
+                      Actor
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="action"
+                      activeSort={sort}
+                      direction={sortDirection}
+                      onSort={(key) =>
+                        changeSort(
+                          key as "actor" | "action" | "subject" | "created_at",
+                        )
+                      }
+                    >
+                      Action
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="subject"
+                      activeSort={sort}
+                      direction={sortDirection}
+                      onSort={(key) =>
+                        changeSort(
+                          key as "actor" | "action" | "subject" | "created_at",
+                        )
+                      }
+                    >
+                      Subject
+                    </SortableHeader>
                     <th>Description</th>
-                    <th>Timestamp</th>
+                    <SortableHeader
+                      sortKey="created_at"
+                      activeSort={sort}
+                      direction={sortDirection}
+                      onSort={(key) =>
+                        changeSort(
+                          key as "actor" | "action" | "subject" | "created_at",
+                        )
+                      }
+                    >
+                      Timestamp
+                    </SortableHeader>
                   </tr>
                 </thead>
                 <tbody>
@@ -1166,6 +1312,7 @@ function AuditLogs() {
             </div>
             <Pagination
               meta={result.meta}
+              noun="logs"
               onPage={(nextPage) => {
                 setPage(nextPage);
                 reload();
@@ -1372,35 +1519,6 @@ function Stat({
       <strong>{value === null ? "—" : value.toLocaleString()}</strong>
       <span>{statLabel}</span>
     </section>
-  );
-}
-function Pagination({
-  meta,
-  onPage,
-}: {
-  meta: LaravelPaginatedResponse<unknown>["meta"];
-  onPage: (page: number) => void;
-}) {
-  return (
-    <nav className="admin-pagination" aria-label="Pagination">
-      <span>
-        Page {meta.current_page} of {meta.last_page} · {meta.total} total
-      </span>
-      <Button
-        variant="secondary"
-        disabled={meta.current_page <= 1}
-        onClick={() => onPage(meta.current_page - 1)}
-      >
-        Previous
-      </Button>
-      <Button
-        variant="secondary"
-        disabled={meta.current_page >= meta.last_page}
-        onClick={() => onPage(meta.current_page + 1)}
-      >
-        Next
-      </Button>
-    </nav>
   );
 }
 function fullName(user: AdminUserResource) {

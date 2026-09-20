@@ -19,6 +19,8 @@ class AdminAuditLogIndexRequest extends FormRequest
             'actor_id' => ['nullable', 'uuid'],
             'created_from' => ['nullable', 'date'],
             'created_to' => ['nullable', 'date'],
+            'sort' => ['nullable', 'string', Rule::in(['actor', 'action', 'subject', 'created_at'])],
+            'direction' => ['nullable', 'string', Rule::in(['asc', 'desc'])],
             'per_page' => ['nullable', 'integer', Rule::in([10, 25, 50, 100])],
             'page' => ['nullable', 'integer', 'min:1'],
         ];

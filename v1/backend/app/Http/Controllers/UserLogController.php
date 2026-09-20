@@ -23,9 +23,7 @@ class UserLogController extends DomainController
             ->when(
                 $actor->user_logs_cleared_at,
                 fn ($query, $cutoff) => $query->where('created_at', '>', $cutoff),
-            )
-            ->orderByDesc('created_at')
-            ->orderByDesc('id');
+            );
 
         if (($search = trim($input['search'] ?? '')) !== '') {
             $like = $this->like($search);
@@ -45,6 +43,19 @@ class UserLogController extends DomainController
         if (($to = $input['created_to'] ?? null) !== null) {
             $query->where('created_at', '<=', Carbon::parse($to)->endOfDay());
         }
+
+        $sort = $input['sort'] ?? null;
+        $direction = $input['direction'] ?? 'asc';
+        if ($sort === 'action') {
+            $query->orderBy('action', $direction);
+        } elseif ($sort === 'subject') {
+            $query->orderBy('entity_type', $direction)->orderBy('entity_id', $direction);
+        } elseif ($sort === 'created_at') {
+            $query->orderBy('created_at', $direction);
+        } else {
+            $query->orderByDesc('created_at');
+        }
+        $query->orderBy((new AuditLog)->getKeyName(), $sort === null ? 'desc' : $direction);
 
         return AdminAuditLogResource::collection(
             $query->paginate(25)->appends($input)

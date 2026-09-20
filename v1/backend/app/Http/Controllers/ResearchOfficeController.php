@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Exceptions\ApiValidationException;
+use App\Http\Requests\OfficeUserIndexRequest;
 use App\Models\ComplianceReview;
 use App\Models\DocumentFile;
 use App\Models\ResearchDocument;
@@ -46,18 +47,11 @@ class ResearchOfficeController extends DomainController
         return response()->json(['data' => $this->payload($review)]);
     }
 
-    public function users(Request $request): JsonResponse
+    public function users(OfficeUserIndexRequest $request): JsonResponse
     {
-        $input = $this->validated($request, [
-            'search' => ['nullable', 'string', 'max:200'],
-            'role' => ['nullable', 'string', 'max:50'],
-            'access_status' => ['nullable', 'string', 'max:20'],
-            'per_page' => ['nullable', 'integer', 'between:1,100'],
-        ]);
+        $input = $request->validated();
         $query = User::query()
-            ->select(['id', 'email', 'first_name', 'middle_name', 'last_name', 'role', 'access_status', 'created_at', 'updated_at'])
-            ->orderByDesc('created_at')
-            ->orderByDesc('id');
+            ->select(['id', 'email', 'first_name', 'middle_name', 'last_name', 'role', 'access_status', 'created_at', 'updated_at']);
 
         if (isset($input['role']) && $input['role'] !== '') {
             $query->where('role', $input['role']);
@@ -73,6 +67,15 @@ class ResearchOfficeController extends DomainController
                 }
             });
         }
+
+        $sort = $input['sort'] ?? null;
+        $direction = $input['direction'] ?? 'asc';
+        if ($sort !== null) {
+            $query->orderBy($sort, $direction);
+        } else {
+            $query->orderByDesc('created_at');
+        }
+        $query->orderBy('id', $sort === null ? 'desc' : $direction);
 
         return response()
             ->json([

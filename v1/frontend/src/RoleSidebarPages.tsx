@@ -1,8 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  formatPhilippineDateTime,
-  philippineDateToday,
-} from "./dateTime";
+import { formatPhilippineDateTime, philippineDateToday } from "./dateTime";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -127,7 +124,7 @@ import {
   type ResearchDocumentSummaryResource,
   type StatisticianQueueItem,
 } from "./api";
-import { Button, Pagination as PageControls } from "./components";
+import { Button, Pagination, SortableHeader } from "./components";
 import {
   AcademicYearSelect,
   DatePickerInput,
@@ -148,6 +145,7 @@ import { classificationLabel, formatSimilarityPercentage } from "./similarity";
 import type { ResearchRecord, Role } from "./types";
 import { useLiveFilters } from "./useLiveFilters";
 import { filterUserRows } from "./userManagement";
+import { useClientSorting } from "./useClientSorting";
 
 const roles: AdminRole[] = [
   "admin",
@@ -485,7 +483,9 @@ function UserLogs({ role }: { role: Role }) {
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [page, setPage] = useState(1);
-  const [lastPage, setLastPage] = useState(1);
+  const [paginationMeta, setPaginationMeta] = useState<
+    Awaited<ReturnType<typeof listUserLogs>>["meta"] | null
+  >(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [query, setQuery] = useState({
@@ -493,28 +493,40 @@ function UserLogs({ role }: { role: Role }) {
     created_from: "",
     created_to: "",
   });
+
+  function reloadLogs() {
+    setLoading(true);
+    setError(null);
+    setAttempt((value) => value + 1);
+  }
+
   const { filters, change } = useLiveFilters(
     { search: "", created_from: "", created_to: "" },
     (next) => {
       setPage(1);
       setQuery(next);
+      setLoading(true);
+      setError(null);
     },
   );
+  const [sort, setSort] = useState<"action" | "subject" | "created_at" | null>(
+    null,
+  );
+  const [direction, setDirection] = useState<"asc" | "desc">("asc");
 
   useEffect(() => {
     let cancelled = false;
 
-    setLoading(true);
-    setError(null);
-
     void listUserLogs({
       ...query,
+      sort: sort || undefined,
+      direction: sort ? direction : undefined,
       page: page > 1 ? page : undefined,
     })
       .then((response) => {
         if (!cancelled) {
           setLogs(response.data);
-          setLastPage(response.meta.last_page);
+          setPaginationMeta(response.meta);
         }
       })
       .catch((reason: unknown) => {
@@ -534,7 +546,19 @@ function UserLogs({ role }: { role: Role }) {
     return () => {
       cancelled = true;
     };
-  }, [attempt, page, query]);
+  }, [attempt, direction, page, query, sort]);
+
+  function sortLogs(column: "action" | "subject" | "created_at") {
+    setPage(1);
+    setLoading(true);
+    setError(null);
+    if (sort === column) {
+      setDirection((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSort(column);
+    setDirection("asc");
+  }
   async function clearVisibleLogs() {
     setClearing(true);
     setError(null);
@@ -543,7 +567,7 @@ function UserLogs({ role }: { role: Role }) {
       await clearUserLogs();
       setConfirmClear(false);
       setPage(1);
-      setAttempt((value) => value + 1);
+      reloadLogs();
     } catch (reason: unknown) {
       setError(
         reason instanceof Error
@@ -570,10 +594,7 @@ function UserLogs({ role }: { role: Role }) {
               Clear Logs
             </Button>
 
-            <Button
-              disabled={clearing}
-              onClick={() => setAttempt((value) => value + 1)}
-            >
+            <Button disabled={clearing} onClick={reloadLogs}>
               Refresh
             </Button>
           </div>
@@ -618,10 +639,7 @@ function UserLogs({ role }: { role: Role }) {
       {loading ? (
         <Loading label="Loading user logs" />
       ) : error ? (
-        <InlineError
-          message={error}
-          retry={() => setAttempt((value) => value + 1)}
-        />
+        <InlineError message={error} retry={reloadLogs} />
       ) : logs.length === 0 ? (
         <p className="admin-empty">
           {Object.values(query).some(Boolean)
@@ -634,10 +652,37 @@ function UserLogs({ role }: { role: Role }) {
             <table>
               <thead>
                 <tr>
-                  <th>Action</th>
-                  <th>Related record</th>
+                  <SortableHeader
+                    sortKey="action"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      sortLogs(key as "action" | "subject" | "created_at")
+                    }
+                  >
+                    Action
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="subject"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      sortLogs(key as "action" | "subject" | "created_at")
+                    }
+                  >
+                    Related record
+                  </SortableHeader>
                   <th>Description</th>
-                  <th>Date &amp; time</th>
+                  <SortableHeader
+                    sortKey="created_at"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      sortLogs(key as "action" | "subject" | "created_at")
+                    }
+                  >
+                    Date &amp; time
+                  </SortableHeader>
                 </tr>
               </thead>
 
@@ -658,11 +703,17 @@ function UserLogs({ role }: { role: Role }) {
             </table>
           </div>
 
-          <PageControls
-            page={page}
-            lastPage={lastPage}
-            onPage={(nextPage) => setPage(nextPage)}
-          />
+          {paginationMeta && (
+            <Pagination
+              meta={paginationMeta}
+              noun="logs"
+              onPage={(nextPage) => {
+                setLoading(true);
+                setError(null);
+                setPage(nextPage);
+              }}
+            />
+          )}
         </section>
       )}
       {confirmClear && (
@@ -731,36 +782,6 @@ function InlineError({
         Retry
       </Button>
     </section>
-  );
-}
-
-function Pagination({
-  meta,
-  onPage,
-}: {
-  meta: LaravelPaginatedResponse<unknown>["meta"];
-  onPage: (page: number) => void;
-}) {
-  return (
-    <nav className="admin-pagination" aria-label="Pagination">
-      <span>
-        Page {meta.current_page} of {meta.last_page} · {meta.total} total
-      </span>
-      <Button
-        variant="secondary"
-        disabled={meta.current_page <= 1}
-        onClick={() => onPage(meta.current_page - 1)}
-      >
-        Previous
-      </Button>
-      <Button
-        variant="secondary"
-        disabled={meta.current_page >= meta.last_page}
-        onClick={() => onPage(meta.current_page + 1)}
-      >
-        Next
-      </Button>
-    </nav>
   );
 }
 
@@ -913,6 +934,18 @@ function AdviserMonitoring({ role }: { role: Role }) {
   const [remarks, setRemarks] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const { sortedRows, sort, direction, changeSort } = useClientSorting(
+    entries.status === "ready" ? entries.data : [],
+    {
+      title: (entry) => entry.title,
+      stage: (entry) => entry.monitoring_stage,
+      designation: (entry) => entry.designation ?? entry.reviewer_role,
+      status: (entry) => entry.status,
+      signature: (entry) => entry.signature_status,
+      verification: (entry) =>
+        entry.verified_at ? Date.parse(entry.verified_at) : null,
+    },
+  );
   async function save(event: React.FormEvent) {
     event.preventDefault();
     if (!researchId || !activity.trim()) return;
@@ -1031,18 +1064,120 @@ function AdviserMonitoring({ role }: { role: Role }) {
             <table>
               <thead>
                 <tr>
-                  <th>Research</th>
-                  <th>Stage</th>
-                  <th>Designation</th>
+                  <SortableHeader
+                    sortKey="title"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "title"
+                          | "stage"
+                          | "designation"
+                          | "status"
+                          | "signature"
+                          | "verification",
+                      )
+                    }
+                  >
+                    Research
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="stage"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "title"
+                          | "stage"
+                          | "designation"
+                          | "status"
+                          | "signature"
+                          | "verification",
+                      )
+                    }
+                  >
+                    Stage
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="designation"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "title"
+                          | "stage"
+                          | "designation"
+                          | "status"
+                          | "signature"
+                          | "verification",
+                      )
+                    }
+                  >
+                    Designation
+                  </SortableHeader>
                   <th>Activity</th>
                   <th>Remarks</th>
-                  <th>Status</th>
-                  <th>Signature</th>
-                  <th>Verification</th>
+                  <SortableHeader
+                    sortKey="status"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "title"
+                          | "stage"
+                          | "designation"
+                          | "status"
+                          | "signature"
+                          | "verification",
+                      )
+                    }
+                  >
+                    Status
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="signature"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "title"
+                          | "stage"
+                          | "designation"
+                          | "status"
+                          | "signature"
+                          | "verification",
+                      )
+                    }
+                  >
+                    Signature
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="verification"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "title"
+                          | "stage"
+                          | "designation"
+                          | "status"
+                          | "signature"
+                          | "verification",
+                      )
+                    }
+                  >
+                    Verification
+                  </SortableHeader>
                 </tr>
               </thead>
               <tbody>
-                {entries.data.map((entry) => (
+                {sortedRows.map((entry) => (
                   <tr key={entry.id}>
                     <td>{entry.title}</td>
                     <td>{label(entry.monitoring_stage)}</td>
@@ -1113,46 +1248,102 @@ function AdviserAdvisees({
                   </p>
                 </div>
               </div>
-              <div className="admin-table-wrap">
-                <table className="checker-results-table">
-                  <caption className="sr-only">Advisee documents</caption>
-                  <thead>
-                    <tr>
-                      <th>Title</th>
-                      <th>Stage</th>
-                      <th>Status</th>
-                      <th>Updated</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {group.documents.map((document) => (
-                      <tr key={document.research_document_id}>
-                        <td>{document.title}</td>
-                        <td>{label(document.research_stage)}</td>
-                        <td>{label(document.submission_status)}</td>
-                        <td>{displayDate(document.updated_at)}</td>
-                        <td>
-                          <Button
-                            variant="secondary"
-                            onClick={() =>
-                              navigate(
-                                `/research/${document.research_document_id}`,
-                              )
-                            }
-                          >
-                            <Eye aria-hidden="true" /> Open review
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <AdviseeDocumentsTable
+                documents={group.documents}
+                navigate={navigate}
+              />
             </section>
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function AdviseeDocumentsTable({
+  documents,
+  navigate,
+}: {
+  documents: Awaited<
+    ReturnType<typeof listAdviserAdvisees>
+  >[number]["documents"];
+  navigate: (path: string) => void;
+}) {
+  const { sortedRows, sort, direction, changeSort } = useClientSorting(
+    documents,
+    {
+      title: (document) => document.title,
+      stage: (document) => document.research_stage,
+      status: (document) => document.submission_status,
+      updated: (document) =>
+        document.updated_at ? Date.parse(document.updated_at) : null,
+    },
+  );
+  const onSort = (key: string) =>
+    changeSort(key as "title" | "stage" | "status" | "updated");
+
+  return (
+    <div className="admin-table-wrap">
+      <table className="checker-results-table">
+        <caption className="sr-only">Advisee documents</caption>
+        <thead>
+          <tr>
+            <SortableHeader
+              sortKey="title"
+              activeSort={sort}
+              direction={direction}
+              onSort={onSort}
+            >
+              Title
+            </SortableHeader>
+            <SortableHeader
+              sortKey="stage"
+              activeSort={sort}
+              direction={direction}
+              onSort={onSort}
+            >
+              Stage
+            </SortableHeader>
+            <SortableHeader
+              sortKey="status"
+              activeSort={sort}
+              direction={direction}
+              onSort={onSort}
+            >
+              Status
+            </SortableHeader>
+            <SortableHeader
+              sortKey="updated"
+              activeSort={sort}
+              direction={direction}
+              onSort={onSort}
+            >
+              Updated
+            </SortableHeader>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sortedRows.map((document) => (
+            <tr key={document.research_document_id}>
+              <td>{document.title}</td>
+              <td>{label(document.research_stage)}</td>
+              <td>{label(document.submission_status)}</td>
+              <td>{displayDate(document.updated_at)}</td>
+              <td>
+                <Button
+                  variant="secondary"
+                  onClick={() =>
+                    navigate(`/research/${document.research_document_id}`)
+                  }
+                >
+                  <Eye aria-hidden="true" /> Open review
+                </Button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -1254,6 +1445,16 @@ function AdviserSimilarityAlerts({
 function AdviserFeedbackHistory({ role }: { role: Role }) {
   const [attempt, reload] = useAttempt();
   const state = useLoad(() => listAdviserFeedbackHistory(), attempt);
+  const { sortedRows, sort, direction, changeSort } = useClientSorting(
+    state.status === "ready" ? state.data : [],
+    {
+      title: (entry) => entry.title,
+      type: (entry) => entry.feedback_type,
+      status: (entry) => entry.feedback_status,
+      posted: (entry) =>
+        entry.created_at ? Date.parse(entry.created_at) : null,
+    },
+  );
   return (
     <div className="workspace-content admin-sidebar-page">
       <RolePageHeader
@@ -1279,15 +1480,51 @@ function AdviserFeedbackHistory({ role }: { role: Role }) {
               <caption className="sr-only">Feedback history</caption>
               <thead>
                 <tr>
-                  <th>Research title</th>
-                  <th>Type</th>
-                  <th>Status</th>
+                  <SortableHeader
+                    sortKey="title"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(key as "title" | "type" | "status" | "posted")
+                    }
+                  >
+                    Research title
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="type"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(key as "title" | "type" | "status" | "posted")
+                    }
+                  >
+                    Type
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="status"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(key as "title" | "type" | "status" | "posted")
+                    }
+                  >
+                    Status
+                  </SortableHeader>
                   <th>Comment</th>
-                  <th>Posted</th>
+                  <SortableHeader
+                    sortKey="posted"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(key as "title" | "type" | "status" | "posted")
+                    }
+                  >
+                    Posted
+                  </SortableHeader>
                 </tr>
               </thead>
               <tbody>
-                {state.data.map((entry) => (
+                {sortedRows.map((entry) => (
                   <tr key={entry.id}>
                     <td>{entry.title ?? "—"}</td>
                     <td>{label(entry.feedback_type)}</td>
@@ -1723,6 +1960,18 @@ function InstructorMonitoring({ role }: { role: Role }) {
   const [remarks, setRemarks] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const { sortedRows, sort, direction, changeSort } = useClientSorting(
+    entries.status === "ready" ? entries.data : [],
+    {
+      title: (entry) => entry.title,
+      stage: (entry) => entry.monitoring_stage,
+      designation: (entry) => entry.designation ?? entry.reviewer_role,
+      status: (entry) => entry.status,
+      signature: (entry) => entry.signature_status,
+      verified: (entry) =>
+        entry.verified_at ? Date.parse(entry.verified_at) : null,
+    },
+  );
   async function save(event: React.FormEvent) {
     event.preventDefault();
     if (!researchId || !activity.trim()) return;
@@ -1865,17 +2114,119 @@ function InstructorMonitoring({ role }: { role: Role }) {
             <table>
               <thead>
                 <tr>
-                  <th>Research</th>
-                  <th>Stage</th>
-                  <th>Designation</th>
+                  <SortableHeader
+                    sortKey="title"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "title"
+                          | "stage"
+                          | "designation"
+                          | "status"
+                          | "signature"
+                          | "verified",
+                      )
+                    }
+                  >
+                    Research
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="stage"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "title"
+                          | "stage"
+                          | "designation"
+                          | "status"
+                          | "signature"
+                          | "verified",
+                      )
+                    }
+                  >
+                    Stage
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="designation"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "title"
+                          | "stage"
+                          | "designation"
+                          | "status"
+                          | "signature"
+                          | "verified",
+                      )
+                    }
+                  >
+                    Designation
+                  </SortableHeader>
                   <th>Activity</th>
-                  <th>Status</th>
-                  <th>Signature</th>
-                  <th>Verified</th>
+                  <SortableHeader
+                    sortKey="status"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "title"
+                          | "stage"
+                          | "designation"
+                          | "status"
+                          | "signature"
+                          | "verified",
+                      )
+                    }
+                  >
+                    Status
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="signature"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "title"
+                          | "stage"
+                          | "designation"
+                          | "status"
+                          | "signature"
+                          | "verified",
+                      )
+                    }
+                  >
+                    Signature
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="verified"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "title"
+                          | "stage"
+                          | "designation"
+                          | "status"
+                          | "signature"
+                          | "verified",
+                      )
+                    }
+                  >
+                    Verified
+                  </SortableHeader>
                 </tr>
               </thead>
               <tbody>
-                {entries.data.map((entry) => (
+                {sortedRows.map((entry) => (
                   <tr key={entry.id}>
                     <td>{entry.title}</td>
                     <td>{label(entry.monitoring_stage)}</td>
@@ -1938,6 +2289,18 @@ function InstructorSections({
   const [studentsFor, setStudentsFor] = useState<
     Record<number, InstructorStudentResource[]>
   >({});
+  const {
+    sortedRows: sortedStudents,
+    sort: studentSort,
+    direction: studentSortDirection,
+    changeSort: changeStudentSort,
+  } = useClientSorting(openSection ? (studentsFor[openSection.id] ?? []) : [], {
+    student: (student) => studentName(student),
+    email: (student) => student.email,
+    student_id: (student) => student.student_employee_id,
+    added: (student) =>
+      student.added_at ? Date.parse(student.added_at) : null,
+  });
   const [studentsState, setStudentsState] = useState<
     Record<number, "loading" | "ready" | "error">
   >({});
@@ -3019,15 +3382,63 @@ function InstructorSections({
                     </caption>
                     <thead>
                       <tr>
-                        <th>Student</th>
-                        <th>Email</th>
-                        <th>Student ID</th>
-                        <th>Added</th>
+                        <SortableHeader
+                          sortKey="student"
+                          activeSort={studentSort}
+                          direction={studentSortDirection}
+                          onSort={(key) =>
+                            changeStudentSort(
+                              key as
+                                "student" | "email" | "student_id" | "added",
+                            )
+                          }
+                        >
+                          Student
+                        </SortableHeader>
+                        <SortableHeader
+                          sortKey="email"
+                          activeSort={studentSort}
+                          direction={studentSortDirection}
+                          onSort={(key) =>
+                            changeStudentSort(
+                              key as
+                                "student" | "email" | "student_id" | "added",
+                            )
+                          }
+                        >
+                          Email
+                        </SortableHeader>
+                        <SortableHeader
+                          sortKey="student_id"
+                          activeSort={studentSort}
+                          direction={studentSortDirection}
+                          onSort={(key) =>
+                            changeStudentSort(
+                              key as
+                                "student" | "email" | "student_id" | "added",
+                            )
+                          }
+                        >
+                          Student ID
+                        </SortableHeader>
+                        <SortableHeader
+                          sortKey="added"
+                          activeSort={studentSort}
+                          direction={studentSortDirection}
+                          onSort={(key) =>
+                            changeStudentSort(
+                              key as
+                                "student" | "email" | "student_id" | "added",
+                            )
+                          }
+                        >
+                          Added
+                        </SortableHeader>
                         <th>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {(studentsFor[openSection.id] ?? []).map((member) => (
+                      {sortedStudents.map((member) => (
                         <tr key={member.id}>
                           <td>{studentName(member)}</td>
                           <td>{member.email}</td>
@@ -4740,6 +5151,17 @@ function PanelEvaluationForm({ role }: { role: Role }) {
 function PanelHistory({ role }: { role: Role }) {
   const [attempt, reload] = useAttempt();
   const state = useLoad(() => listPanelHistory(), attempt);
+  const { sortedRows, sort, direction, changeSort } = useClientSorting(
+    state.status === "ready" ? state.data : [],
+    {
+      manuscript: (evaluation) => evaluation.title,
+      originality: (evaluation) => evaluation.originality,
+      methodology: (evaluation) => evaluation.methodology,
+      clarity: (evaluation) => evaluation.clarity,
+      submitted: (evaluation) =>
+        evaluation.submitted_at ? Date.parse(evaluation.submitted_at) : null,
+    },
+  );
   return (
     <div className="workspace-content admin-sidebar-page">
       <RolePageHeader
@@ -4765,16 +5187,96 @@ function PanelHistory({ role }: { role: Role }) {
               <caption className="sr-only">Panel evaluation history</caption>
               <thead>
                 <tr>
-                  <th>Manuscript</th>
-                  <th>Originality</th>
-                  <th>Methodology</th>
-                  <th>Clarity</th>
+                  <SortableHeader
+                    sortKey="manuscript"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "manuscript"
+                          | "originality"
+                          | "methodology"
+                          | "clarity"
+                          | "submitted",
+                      )
+                    }
+                  >
+                    Manuscript
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="originality"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "manuscript"
+                          | "originality"
+                          | "methodology"
+                          | "clarity"
+                          | "submitted",
+                      )
+                    }
+                  >
+                    Originality
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="methodology"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "manuscript"
+                          | "originality"
+                          | "methodology"
+                          | "clarity"
+                          | "submitted",
+                      )
+                    }
+                  >
+                    Methodology
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="clarity"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "manuscript"
+                          | "originality"
+                          | "methodology"
+                          | "clarity"
+                          | "submitted",
+                      )
+                    }
+                  >
+                    Clarity
+                  </SortableHeader>
                   <th>Comments</th>
-                  <th>Submitted</th>
+                  <SortableHeader
+                    sortKey="submitted"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "manuscript"
+                          | "originality"
+                          | "methodology"
+                          | "clarity"
+                          | "submitted",
+                      )
+                    }
+                  >
+                    Submitted
+                  </SortableHeader>
                 </tr>
               </thead>
               <tbody>
-                {state.data.map((evaluation) => (
+                {sortedRows.map((evaluation) => (
                   <tr key={evaluation.id}>
                     <td>{evaluation.title ?? "—"}</td>
                     <td>{evaluation.originality}</td>
@@ -5107,6 +5609,16 @@ function StatisticianMethodologyChecklist({ role }: { role: Role }) {
 function StatisticianSignoffs({ role }: { role: Role }) {
   const [attempt, reload] = useAttempt();
   const state = useLoad(() => listStatisticianSignoffs(), attempt);
+  const { sortedRows, sort, direction, changeSort } = useClientSorting(
+    state.status === "ready" ? state.data : [],
+    {
+      title: (item) => item.title,
+      status: (item) => item.submission_status,
+      stage: (item) => item.research_stage,
+      signed_off: (item) =>
+        item.signed_off_at ? Date.parse(item.signed_off_at) : null,
+    },
+  );
   return (
     <div className="workspace-content admin-sidebar-page">
       <RolePageHeader
@@ -5132,14 +5644,58 @@ function StatisticianSignoffs({ role }: { role: Role }) {
               <caption className="sr-only">Issued sign-offs</caption>
               <thead>
                 <tr>
-                  <th>Research title</th>
-                  <th>Status</th>
-                  <th>Stage</th>
-                  <th>Signed off</th>
+                  <SortableHeader
+                    sortKey="title"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as "title" | "status" | "stage" | "signed_off",
+                      )
+                    }
+                  >
+                    Research title
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="status"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as "title" | "status" | "stage" | "signed_off",
+                      )
+                    }
+                  >
+                    Status
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="stage"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as "title" | "status" | "stage" | "signed_off",
+                      )
+                    }
+                  >
+                    Stage
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="signed_off"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as "title" | "status" | "stage" | "signed_off",
+                      )
+                    }
+                  >
+                    Signed off
+                  </SortableHeader>
                 </tr>
               </thead>
               <tbody>
-                {state.data.map((item) => (
+                {sortedRows.map((item) => (
                   <tr key={item.id}>
                     <td>{item.title ?? "—"}</td>
                     <td>
@@ -5405,6 +5961,14 @@ function CoordinatorDuplicateFlags({ role }: { role: Role }) {
 function CoordinatorAdviserLoad({ role }: { role: Role }) {
   const [attempt, reload] = useAttempt();
   const state = useLoad(() => listAdviserLoad(), attempt);
+  const { sortedRows, sort, direction, changeSort } = useClientSorting(
+    state.status === "ready" ? state.data : [],
+    {
+      adviser: (item) => item.name,
+      email: (item) => item.email,
+      assignments: (item) => item.active_assignments,
+    },
+  );
   return (
     <div className="workspace-content admin-sidebar-page">
       <RolePageHeader
@@ -5430,13 +5994,40 @@ function CoordinatorAdviserLoad({ role }: { role: Role }) {
               <caption className="sr-only">Adviser load</caption>
               <thead>
                 <tr>
-                  <th>Adviser</th>
-                  <th>Email</th>
-                  <th>Active assignments</th>
+                  <SortableHeader
+                    sortKey="adviser"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(key as "adviser" | "email" | "assignments")
+                    }
+                  >
+                    Adviser
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="email"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(key as "adviser" | "email" | "assignments")
+                    }
+                  >
+                    Email
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="assignments"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(key as "adviser" | "email" | "assignments")
+                    }
+                  >
+                    Active assignments
+                  </SortableHeader>
                 </tr>
               </thead>
               <tbody>
-                {state.data.map((item) => (
+                {sortedRows.map((item) => (
                   <tr key={item.user_id}>
                     <td>{item.name ?? "—"}</td>
                     <td>{item.email ?? "—"}</td>
@@ -5462,6 +6053,14 @@ function CoordinatorAccountRoles({ role }: { role: Role }) {
   const [notice, setNotice] = useState("");
   const [attempt, reload] = useAttempt();
   const [loading, setLoading] = useState(true);
+  const { sortedRows, sort, direction, changeSort } = useClientSorting(
+    users ?? [],
+    {
+      email: (user) => user.email,
+      role: (user) => user.role,
+      access: (user) => user.accessStatus,
+    },
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -5566,13 +6165,40 @@ function CoordinatorAccountRoles({ role }: { role: Role }) {
               </caption>
               <thead>
                 <tr>
-                  <th>Email</th>
-                  <th>Role</th>
-                  <th>Access</th>
+                  <SortableHeader
+                    sortKey="email"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(key as "email" | "role" | "access")
+                    }
+                  >
+                    Email
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="role"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(key as "email" | "role" | "access")
+                    }
+                  >
+                    Role
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="access"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(key as "email" | "role" | "access")
+                    }
+                  >
+                    Access
+                  </SortableHeader>
                 </tr>
               </thead>
               <tbody>
-                {users.map((user) => (
+                {sortedRows.map((user) => (
                   <tr key={user.email}>
                     <td>{user.email}</td>
                     <td>{label(user.role)}</td>
@@ -6025,7 +6651,6 @@ function EditorMonitoring({ role }: { role: Role }) {
   );
 }
 
-
 function LibrarianAssignmentRequests({ role }: { role: Role }) {
   const [attempt, reload] = useAttempt();
   const state = useLoad(() => listSupportAssignmentInbox(), attempt);
@@ -6353,6 +6978,17 @@ function LibrarianRepositoryCatalog({
 }) {
   const [query, setQuery] = useState({ search: "", category: "" });
   const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<
+    | "title"
+    | "category"
+    | "submission_status"
+    | "archive_status"
+    | "visibility"
+    | "publication_year"
+    | "updated_at"
+    | null
+  >(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [result, setResult] = useState<Awaited<
     ReturnType<typeof listRepositoryCatalog>
   > | null>(null);
@@ -6374,6 +7010,8 @@ function LibrarianRepositoryCatalog({
     void listRepositoryCatalog({
       ...query,
       category: query.category ? Number(query.category) : undefined,
+      sort: sort || undefined,
+      direction: sort ? sortDirection : undefined,
       page,
       per_page: 25,
     })
@@ -6393,7 +7031,17 @@ function LibrarianRepositoryCatalog({
     return () => {
       cancelled = true;
     };
-  }, [attempt, page, query]);
+  }, [attempt, page, query, sort, sortDirection]);
+
+  function changeSort(column: NonNullable<typeof sort>) {
+    setPage(1);
+    if (sort === column) {
+      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSort(column);
+    setSortDirection("asc");
+  }
 
   function applyFilters(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -6458,13 +7106,76 @@ function LibrarianRepositoryCatalog({
                 <caption className="sr-only">Repository catalog</caption>
                 <thead>
                   <tr>
-                    <th>Title</th>
-                    <th>Category</th>
-                    <th>Status</th>
-                    <th>Archive</th>
-                    <th>Visibility</th>
-                    <th>Year</th>
-                    <th>Submitted</th>
+                    <SortableHeader
+                      sortKey="title"
+                      activeSort={sort}
+                      direction={sortDirection}
+                      onSort={(key) =>
+                        changeSort(key as NonNullable<typeof sort>)
+                      }
+                    >
+                      Title
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="category"
+                      activeSort={sort}
+                      direction={sortDirection}
+                      onSort={(key) =>
+                        changeSort(key as NonNullable<typeof sort>)
+                      }
+                    >
+                      Category
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="submission_status"
+                      activeSort={sort}
+                      direction={sortDirection}
+                      onSort={(key) =>
+                        changeSort(key as NonNullable<typeof sort>)
+                      }
+                    >
+                      Status
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="archive_status"
+                      activeSort={sort}
+                      direction={sortDirection}
+                      onSort={(key) =>
+                        changeSort(key as NonNullable<typeof sort>)
+                      }
+                    >
+                      Archive
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="visibility"
+                      activeSort={sort}
+                      direction={sortDirection}
+                      onSort={(key) =>
+                        changeSort(key as NonNullable<typeof sort>)
+                      }
+                    >
+                      Visibility
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="publication_year"
+                      activeSort={sort}
+                      direction={sortDirection}
+                      onSort={(key) =>
+                        changeSort(key as NonNullable<typeof sort>)
+                      }
+                    >
+                      Year
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="updated_at"
+                      activeSort={sort}
+                      direction={sortDirection}
+                      onSort={(key) =>
+                        changeSort(key as NonNullable<typeof sort>)
+                      }
+                    >
+                      Updated
+                    </SortableHeader>
                   </tr>
                 </thead>
                 <tbody>
@@ -6484,6 +7195,7 @@ function LibrarianRepositoryCatalog({
             </div>
             <Pagination
               meta={result.meta}
+              noun="records"
               onPage={(nextPage) => {
                 setPage(nextPage);
                 reload();
@@ -6511,6 +7223,20 @@ function LibrarianMetadataStandards({ role }: { role: Role }) {
   });
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState("");
+  const { sortedRows, sort, direction, changeSort } = useClientSorting(
+    state.status === "ready" ? state.data : [],
+    {
+      title: (item) => item.title,
+      category: (item) => item.category,
+      year: (item) => item.publication_year,
+      title_complete: (item) => item.metadata_completeness.title,
+      abstract: (item) => item.metadata_completeness.abstract,
+      keywords: (item) => item.metadata_completeness.keywords,
+      authors: (item) => item.metadata_completeness.authors,
+      category_complete: (item) => item.metadata_completeness.category,
+      review: (item) => item.metadata_review?.review_status,
+    },
+  );
 
   function openReview(item: MetadataStandardsItem) {
     setSelected(item);
@@ -6573,20 +7299,200 @@ function LibrarianMetadataStandards({ role }: { role: Role }) {
                 <caption className="sr-only">Metadata standards</caption>
                 <thead>
                   <tr>
-                    <th>Title</th>
-                    <th>Category</th>
-                    <th>Year</th>
-                    <th>Title</th>
-                    <th>Abstract</th>
-                    <th>Keywords</th>
-                    <th>Authors</th>
-                    <th>Category set</th>
-                    <th>Review</th>
+                    <SortableHeader
+                      sortKey="title"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={(key) =>
+                        changeSort(
+                          key as
+                            | "title"
+                            | "category"
+                            | "year"
+                            | "title_complete"
+                            | "abstract"
+                            | "keywords"
+                            | "authors"
+                            | "category_complete"
+                            | "review",
+                        )
+                      }
+                    >
+                      Title
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="category"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={(key) =>
+                        changeSort(
+                          key as
+                            | "title"
+                            | "category"
+                            | "year"
+                            | "title_complete"
+                            | "abstract"
+                            | "keywords"
+                            | "authors"
+                            | "category_complete"
+                            | "review",
+                        )
+                      }
+                    >
+                      Category
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="year"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={(key) =>
+                        changeSort(
+                          key as
+                            | "title"
+                            | "category"
+                            | "year"
+                            | "title_complete"
+                            | "abstract"
+                            | "keywords"
+                            | "authors"
+                            | "category_complete"
+                            | "review",
+                        )
+                      }
+                    >
+                      Year
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="title_complete"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={(key) =>
+                        changeSort(
+                          key as
+                            | "title"
+                            | "category"
+                            | "year"
+                            | "title_complete"
+                            | "abstract"
+                            | "keywords"
+                            | "authors"
+                            | "category_complete"
+                            | "review",
+                        )
+                      }
+                    >
+                      Title
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="abstract"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={(key) =>
+                        changeSort(
+                          key as
+                            | "title"
+                            | "category"
+                            | "year"
+                            | "title_complete"
+                            | "abstract"
+                            | "keywords"
+                            | "authors"
+                            | "category_complete"
+                            | "review",
+                        )
+                      }
+                    >
+                      Abstract
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="keywords"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={(key) =>
+                        changeSort(
+                          key as
+                            | "title"
+                            | "category"
+                            | "year"
+                            | "title_complete"
+                            | "abstract"
+                            | "keywords"
+                            | "authors"
+                            | "category_complete"
+                            | "review",
+                        )
+                      }
+                    >
+                      Keywords
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="authors"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={(key) =>
+                        changeSort(
+                          key as
+                            | "title"
+                            | "category"
+                            | "year"
+                            | "title_complete"
+                            | "abstract"
+                            | "keywords"
+                            | "authors"
+                            | "category_complete"
+                            | "review",
+                        )
+                      }
+                    >
+                      Authors
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="category_complete"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={(key) =>
+                        changeSort(
+                          key as
+                            | "title"
+                            | "category"
+                            | "year"
+                            | "title_complete"
+                            | "abstract"
+                            | "keywords"
+                            | "authors"
+                            | "category_complete"
+                            | "review",
+                        )
+                      }
+                    >
+                      Category set
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="review"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={(key) =>
+                        changeSort(
+                          key as
+                            | "title"
+                            | "category"
+                            | "year"
+                            | "title_complete"
+                            | "abstract"
+                            | "keywords"
+                            | "authors"
+                            | "category_complete"
+                            | "review",
+                        )
+                      }
+                    >
+                      Review
+                    </SortableHeader>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {state.data.map((item) => (
+                  {sortedRows.map((item) => (
                     <tr key={item.research_document_id}>
                       <td>{item.title}</td>
                       <td>{item.category ?? "—"}</td>
@@ -6721,6 +7627,15 @@ function LibrarianRetentionLogs({ role }: { role: Role }) {
   const [remarks, setRemarks] = useState("");
   const [recording, setRecording] = useState(false);
   const [notice, setNotice] = useState("");
+  const { sortedRows, sort, direction, changeSort } = useClientSorting(
+    state.status === "ready" ? state.data : [],
+    {
+      action: (log) => log.action,
+      document: (log) => log.title,
+      recorded_by: (log) => log.performed_by,
+      date: (log) => (log.activity_date ? Date.parse(log.activity_date) : null),
+    },
+  );
 
   async function record(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -6830,15 +7745,59 @@ function LibrarianRetentionLogs({ role }: { role: Role }) {
               <caption className="sr-only">Retention logs</caption>
               <thead>
                 <tr>
-                  <th>Action</th>
-                  <th>Document</th>
+                  <SortableHeader
+                    sortKey="action"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as "action" | "document" | "recorded_by" | "date",
+                      )
+                    }
+                  >
+                    Action
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="document"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as "action" | "document" | "recorded_by" | "date",
+                      )
+                    }
+                  >
+                    Document
+                  </SortableHeader>
                   <th>Remarks</th>
-                  <th>Recorded by</th>
-                  <th>Date</th>
+                  <SortableHeader
+                    sortKey="recorded_by"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as "action" | "document" | "recorded_by" | "date",
+                      )
+                    }
+                  >
+                    Recorded by
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="date"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as "action" | "document" | "recorded_by" | "date",
+                      )
+                    }
+                  >
+                    Date
+                  </SortableHeader>
                 </tr>
               </thead>
               <tbody>
-                {state.data.map((log) => (
+                {sortedRows.map((log) => (
                   <tr key={log.id}>
                     <td>{label(log.action)}</td>
                     <td>{log.title ?? "—"}</td>
@@ -6865,6 +7824,10 @@ function OfficeUsers({ role }: { role: Role }) {
     access_status: "",
   });
   const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<
+    "last_name" | "email" | "role" | "access_status" | "created_at" | null
+  >(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [result, setResult] = useState<LaravelPaginatedResponse<
     Awaited<ReturnType<typeof listOfficeUsers>>["data"][number]
   > | null>(null);
@@ -6883,12 +7846,24 @@ function OfficeUsers({ role }: { role: Role }) {
     setQuery((current) => ({ ...current, [name]: value }));
   }
 
+  function changeSort(column: NonNullable<typeof sort>) {
+    setPage(1);
+    if (sort === column) {
+      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSort(column);
+    setSortDirection("asc");
+  }
+
   useEffect(() => {
     let cancelled = false;
     void listOfficeUsers({
       ...query,
       role: (query.role as AdminRole) || undefined,
       access_status: (query.access_status as AccessStatus) || undefined,
+      sort: sort || undefined,
+      direction: sort ? sortDirection : undefined,
       page,
       per_page: 25,
     })
@@ -6906,7 +7881,7 @@ function OfficeUsers({ role }: { role: Role }) {
     return () => {
       cancelled = true;
     };
-  }, [attempt, page, query]);
+  }, [attempt, page, query, sort, sortDirection]);
 
   async function save(
     user: Awaited<ReturnType<typeof listOfficeUsers>>["data"][number],
@@ -7036,11 +8011,56 @@ function OfficeUsers({ role }: { role: Role }) {
                 <caption className="sr-only">User accounts</caption>
                 <thead>
                   <tr>
-                    <th>Name</th>
-                    <th>Email</th>
-                    <th>Role</th>
-                    <th>Access</th>
-                    <th>Created</th>
+                    <SortableHeader
+                      sortKey="last_name"
+                      activeSort={sort}
+                      direction={sortDirection}
+                      onSort={(key) =>
+                        changeSort(key as NonNullable<typeof sort>)
+                      }
+                    >
+                      Name
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="email"
+                      activeSort={sort}
+                      direction={sortDirection}
+                      onSort={(key) =>
+                        changeSort(key as NonNullable<typeof sort>)
+                      }
+                    >
+                      Email
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="role"
+                      activeSort={sort}
+                      direction={sortDirection}
+                      onSort={(key) =>
+                        changeSort(key as NonNullable<typeof sort>)
+                      }
+                    >
+                      Role
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="access_status"
+                      activeSort={sort}
+                      direction={sortDirection}
+                      onSort={(key) =>
+                        changeSort(key as NonNullable<typeof sort>)
+                      }
+                    >
+                      Access
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="created_at"
+                      activeSort={sort}
+                      direction={sortDirection}
+                      onSort={(key) =>
+                        changeSort(key as NonNullable<typeof sort>)
+                      }
+                    >
+                      Created
+                    </SortableHeader>
                     <th>Actions</th>
                   </tr>
                 </thead>
@@ -7077,6 +8097,7 @@ function OfficeUsers({ role }: { role: Role }) {
             </div>
             <Pagination
               meta={result.meta}
+              noun="users"
               onPage={(nextPage) => {
                 setPage(nextPage);
                 reload();
@@ -7523,6 +8544,7 @@ function ResearcherSubmissions({
           </div>
           <Pagination
             meta={result.meta}
+            noun="manuscripts"
             onPage={(nextPage) => {
               beginLoad();
               setPage(nextPage);
@@ -8422,13 +9444,33 @@ function ResearcherRelatedStudies({
   const [attempt, reload] = useAttempt();
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [sort, setSort] = useState<
+    "title" | "submission_status" | "updated_at" | null
+  >(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const state = useLoad(
     () =>
-      listResearchDocuments({ mine: true, page, per_page: 10 }).then(
-        requireResearcherPage,
-      ),
+      listResearchDocuments({
+        mine: true,
+        sort: sort || undefined,
+        direction: sort ? sortDirection : undefined,
+        page,
+        per_page: 10,
+      }).then(requireResearcherPage),
     attempt,
   );
+
+  function changeSort(column: NonNullable<typeof sort>) {
+    setPage(1);
+    setSelectedId(null);
+    reload();
+    if (sort === column) {
+      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSort(column);
+    setSortDirection("asc");
+  }
   const selected =
     state.status === "ready"
       ? (state.data.data.find((document) => document.id === selectedId) ??
@@ -8475,9 +9517,36 @@ function ResearcherRelatedStudies({
                 <caption className="sr-only">Your submissions</caption>
                 <thead>
                   <tr>
-                    <th>Title</th>
-                    <th>Status</th>
-                    <th>Updated</th>
+                    <SortableHeader
+                      sortKey="title"
+                      activeSort={sort}
+                      direction={sortDirection}
+                      onSort={(key) =>
+                        changeSort(key as NonNullable<typeof sort>)
+                      }
+                    >
+                      Title
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="submission_status"
+                      activeSort={sort}
+                      direction={sortDirection}
+                      onSort={(key) =>
+                        changeSort(key as NonNullable<typeof sort>)
+                      }
+                    >
+                      Status
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="updated_at"
+                      activeSort={sort}
+                      direction={sortDirection}
+                      onSort={(key) =>
+                        changeSort(key as NonNullable<typeof sort>)
+                      }
+                    >
+                      Updated
+                    </SortableHeader>
                   </tr>
                 </thead>
                 <tbody>
@@ -8495,7 +9564,7 @@ function ResearcherRelatedStudies({
                         </label>
                       </td>
                       <td>{label(record.submission_status)}</td>
-                      <td>{displayDate(record.submitted_at)}</td>
+                      <td>{displayDate(record.updated_at)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -8503,6 +9572,7 @@ function ResearcherRelatedStudies({
             </div>
             <Pagination
               meta={state.data.meta}
+              noun="manuscripts"
               onPage={(nextPage) => {
                 setSelectedId(null);
                 setPage(nextPage);
