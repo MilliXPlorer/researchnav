@@ -169,7 +169,7 @@ class ResearchOfficeController extends DomainController
         $fullName = self::INSTITUTE_CODES[strtoupper($institute)] ?? $institute;
 
         $documents = ResearchDocument::query()
-            ->where('submission_status', 'approved')
+            ->where('submission_status', 'archived')
             ->where('archive_status', 'archived')
             ->where('institute', $fullName)
             ->orderByDesc('publication_year')
