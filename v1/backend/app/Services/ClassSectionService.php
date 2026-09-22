@@ -177,6 +177,7 @@ class ClassSectionService
     {
         DB::transaction(function () use ($actor, $section, $document, $member, $request): void {
             $locked = ClassSection::query()->whereKey($section->id)->lockForUpdate()->firstOrFail();
+            $member = User::query()->whereKey($member->id)->lockForUpdate()->firstOrFail();
             $this->authorizeOwner($actor, $locked);
             $this->ensureDocumentInSection($locked, $document);
             if ($member->role !== 'researcher' || $member->access_status !== 'active') {
@@ -190,6 +191,22 @@ class ClassSectionService
             if (! $isEnrolled) {
                 throw ValidationException::withMessages([
                     'user_id' => ['Add the student to this section roster before assigning them to a research project.'],
+                ]);
+            }
+
+            $hasOtherMembership = DB::table('class_section_members')
+                ->where('user_id', $member->id)
+                ->whereNotNull('research_document_id')
+                ->where('research_document_id', '!=', $document->id)
+                ->exists();
+            $hasOtherAuthorship = ResearchAuthor::query()
+                ->where('user_id', $member->id)
+                ->where('research_document_id', '!=', $document->id)
+                ->whereHas('researchDocument')
+                ->exists();
+            if ($hasOtherMembership || $hasOtherAuthorship) {
+                throw ValidationException::withMessages([
+                    'user_id' => ['This researcher account is already assigned to another study.'],
                 ]);
             }
 

@@ -129,7 +129,7 @@ class ResearcherWorkflowGapsTest extends TestCase
         ]);
     }
 
-    public function test_owner_can_preview_an_owned_pdf_but_not_a_docx(): void
+    public function test_owner_can_preview_an_owned_pdf_and_read_docx_content_in_app(): void
     {
         Storage::fake('researchnav_private');
         $owner = User::factory()->create(['role' => 'researcher']);
@@ -137,10 +137,29 @@ class ResearcherWorkflowGapsTest extends TestCase
         $pdf = $this->file($research, $owner, 'application/pdf', 'pdf');
         $docx = $this->file($research, $owner, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'docx', 'attachment');
         Storage::disk('researchnav_private')->put($pdf->file_path, "%PDF-1.4\n");
-        Storage::disk('researchnav_private')->put($docx->file_path, 'docx');
+        Storage::disk('researchnav_private')->put($docx->file_path, $this->docxBytes('A read-only DOCX paragraph.'));
 
         $this->as($owner)->get('/api/research/'.$research->id.'/files/'.$pdf->id.'/preview')->assertOk()->assertHeader('content-type', 'application/pdf');
         $this->as($owner)->get('/api/research/'.$research->id.'/files/'.$docx->id.'/preview')->assertNotFound();
+        $this->as($owner)->getJson('/api/research/'.$research->id.'/files/'.$docx->id.'/preview-content')
+            ->assertOk()
+            ->assertHeader('cache-control', 'no-store, private')
+            ->assertHeader('x-content-type-options', 'nosniff')
+            ->assertJsonPath('data.document_file_id', $docx->id)
+            ->assertJsonPath('data.paragraphs.0.text', 'A read-only DOCX paragraph.');
+    }
+
+    public function test_docx_preview_rejects_an_oversized_content_types_entry(): void
+    {
+        Storage::fake('researchnav_private');
+        $owner = User::factory()->create(['role' => 'researcher']);
+        $research = $this->research($owner);
+        $docx = $this->file($research, $owner, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'docx', 'attachment');
+        Storage::disk('researchnav_private')->put($docx->file_path, $this->docxBytes('Safe paragraph.', str_repeat('x', 1_048_577)));
+
+        $this->as($owner)->getJson('/api/research/'.$research->id.'/files/'.$docx->id.'/preview-content')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('document_file_id');
     }
 
     private function research(User $owner, array $attributes = []): ResearchDocument
@@ -160,6 +179,20 @@ class ResearcherWorkflowGapsTest extends TestCase
             'original_filename' => "file.{$extension}", 'stored_filename' => "file-{$extension}.{$extension}", 'file_path' => "research/{$research->id}/file-{$extension}.{$extension}",
             'file_extension' => $extension, 'mime_type' => $mime, 'file_size' => 1, 'is_current' => true, 'uploaded_at' => now(),
         ]);
+    }
+
+    private function docxBytes(string $text, ?string $contentTypes = null): string
+    {
+        $path = tempnam(sys_get_temp_dir(), 'researchnav-docx-');
+        $zip = new \ZipArchive;
+        $zip->open($path, \ZipArchive::CREATE | \ZipArchive::OVERWRITE);
+        $zip->addFromString('[Content_Types].xml', $contentTypes ?? '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>');
+        $zip->addFromString('word/document.xml', '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>'.htmlspecialchars($text, ENT_XML1).'</w:t></w:r></w:p></w:body></w:document>');
+        $zip->close();
+        $bytes = file_get_contents($path);
+        @unlink($path);
+
+        return is_string($bytes) ? $bytes : '';
     }
 
     private function as(User $user): static

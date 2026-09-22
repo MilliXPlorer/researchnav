@@ -15,7 +15,6 @@ export const programsByInstitute: Record<
 > = {
   "Institute of Computer Studies": [
     "Bachelor of Science in Computer Science",
-    "Bachelor of Science in Information Technology",
   ],
   "Institute of Health Sciences": ["Bachelor of Science in Midwifery"],
   "Institute of Business and Financial Management": [

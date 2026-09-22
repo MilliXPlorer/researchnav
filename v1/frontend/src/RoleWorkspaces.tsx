@@ -4,8 +4,9 @@ import { Button } from "./components";
 import { formatPhilippineDate } from "./dateTime";
 import { Modal } from "./Modal";
 import AdminResearchWorkspace from "./AdminResearchWorkspace";
-import InstructorResearchReview from "./InstructorResearchReview";
+import AssignedResearchFolders from "./AssignedResearchFolders";
 import ResearcherResearchWorkspace from "./ResearcherResearchWorkspace";
+import type { ResearchWorkspaceDestination } from "./researchWorkspaceRoute";
 import SimilarityResults from "./SimilarityResults";
 import ResearchOfficeBulkImport from "./ResearchOfficeBulkImport";
 import iasLogo from "./institute_logo/ias.webp";
@@ -43,6 +44,7 @@ type WorkspaceProps = {
   dashboardState: RoleDashboardLoadState;
   onRetry: () => void;
   researchDocumentId?: string | number;
+  researchWorkspaceDestination?: ResearchWorkspaceDestination;
 };
 
 const OFFICE_INSTITUTES = [
@@ -91,6 +93,7 @@ export default function RoleWorkspace({
   dashboardState,
   onRetry,
   researchDocumentId,
+  researchWorkspaceDestination,
 }: WorkspaceProps) {
   if (
     ["admin", "research-office"].includes(role) &&
@@ -111,33 +114,32 @@ export default function RoleWorkspace({
         key={`${dashboardScope}:${researchDocumentId}`}
         researchDocumentId={researchDocumentId}
         navigate={navigate}
+        destination={researchWorkspaceDestination}
       />
     );
   }
 
   if (
     researchDocumentId !== undefined &&
-    (["adviser", "instructor", "panel", "statistician"] as Role[]).includes(
-      role,
-    )
+    (
+      [
+        "adviser",
+        "instructor",
+        "panel",
+        "statistician",
+        "librarian",
+        "research_editor",
+      ] as Role[]
+    ).includes(role)
   ) {
-    const readOnly = role === "panel" || role === "statistician";
     return (
-      <div className="workspace-content">
-        <InstructorResearchReview
-          key={`${dashboardScope}:${researchDocumentId}`}
-          submission={{
-            research_document_id: Number(researchDocumentId),
-            title: "Assigned research",
-            research_stage: "title_proposal",
-            submission_status: "submitted",
-            submitter: null,
-            updated_at: null,
-          }}
-          readOnly={readOnly}
-          onUpdated={onRetry}
-        />
-      </div>
+      <AssignedResearchFolders
+        key={`${dashboardScope}:${researchDocumentId}`}
+        role={role}
+        actorKey={dashboardScope}
+        initialResearchDocumentId={researchDocumentId}
+        destination={researchWorkspaceDestination}
+      />
     );
   }
 
@@ -176,7 +178,7 @@ function WorkspaceHeader({
   description,
   action,
 }: {
-  eyebrow: string;
+  eyebrow?: string;
   title: string;
   description: string;
   action?: React.ReactNode;
@@ -184,7 +186,7 @@ function WorkspaceHeader({
   return (
     <header className="workspace-header">
       <div>
-        <p className="eyebrow">{eyebrow}</p>
+        {eyebrow && <p className="eyebrow">{eyebrow}</p>}
         <h1>{title}</h1>
         <p>{description}</p>
       </div>
@@ -239,7 +241,7 @@ type SectionConfig = {
 };
 
 type WorkspaceConfig = {
-  eyebrow: string;
+  eyebrow?: string;
   title: string;
   description: string;
   sections: Record<string, SectionConfig>;
@@ -253,8 +255,7 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
     sections: {},
   },
   researcher: {
-    eyebrow: "My dashboard / Overview",
-    title: "My research.",
+    title: "My dashboard.",
     description:
       "Your own submissions, review progress, and flagged title similarity.",
     sections: {
@@ -802,9 +803,9 @@ function OfficeInstitutionalOverview({
                       ? "Loading studies"
                       : studies === null
                         ? "Studies unavailable"
-                      : total === 1
-                        ? "research record"
-                        : "research records"}
+                        : total === 1
+                          ? "research record"
+                          : "research records"}
                   </span>
                 </div>
               </button>

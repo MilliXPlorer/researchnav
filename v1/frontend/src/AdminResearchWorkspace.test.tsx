@@ -566,15 +566,13 @@ describe("AdminResearchWorkspace", () => {
       ),
     );
     await screen.findByRole("status");
-    fireEvent.click(
-      screen.getAllByRole("button", { name: "Acknowledge" }).at(-1)!,
-    );
+    fireEvent.click(screen.getAllByRole("button", { name: "Resolve" }).at(-1)!);
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/research/42/feedback/6",
         expect.objectContaining({
           method: "PATCH",
-          body: JSON.stringify({ feedback_status: "acknowledged" }),
+          body: JSON.stringify({ feedback_status: "resolved" }),
         }),
       ),
     );
@@ -672,6 +670,9 @@ describe("AdminResearchWorkspace", () => {
     fireEvent.change(screen.getByLabelText("Publication year"), {
       target: { value: "2025" },
     });
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: /Quality Education/i }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Save metadata" }));
 
     await waitFor(() =>
@@ -684,6 +685,7 @@ describe("AdminResearchWorkspace", () => {
             abstract: "Internal abstract",
             keywords: "internal, study",
             publication_year: 2025,
+            sdg_ids: [4],
             institute: null,
             degree_program: null,
             manuscript_date_label: null,

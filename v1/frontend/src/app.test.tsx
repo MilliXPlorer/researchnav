@@ -449,6 +449,66 @@ describe("role workspaces", () => {
     expect(menu).not.toBeInTheDocument();
   });
 
+  it("gives Research Office the same similarity checker submenu", async () => {
+    const session = {
+      email: "office@example.test",
+      role: "research-office" as const,
+      accessStatus: "active" as const,
+      isAdmin: false,
+      firstName: "Research",
+      middleName: null,
+      lastName: "Office",
+      studentEmployeeId: null,
+      displayName: "Research Office",
+      profilePhotoUrl: null,
+    };
+    const navigate = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const path = String(input);
+        if (path === "/api/notifications") {
+          return new Response(
+            JSON.stringify({ data: [], links: { next: null } }),
+          );
+        }
+        if (/^\/api\/office\/institutes\/[^/]+\/studies$/.test(path)) {
+          return new Response(JSON.stringify({ data: [] }));
+        }
+        return new Response(
+          JSON.stringify({
+            data: {
+              schema_version: 1,
+              role: "research-office",
+              sections: [],
+            },
+          }),
+        );
+      }),
+    );
+
+    render(<Dashboard session={session} navigate={navigate} />);
+    const navigation = screen.getByRole("navigation", {
+      name: "Research Office navigation",
+    });
+    fireEvent.click(
+      within(navigation).getByRole("button", { name: "Similarity Check" }),
+    );
+    expect(
+      within(navigation).getByRole("button", { name: "Title Checker" }),
+    ).toBeInTheDocument();
+    expect(
+      within(navigation).getByRole("button", { name: "Content Checker" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      within(navigation).getByRole("button", { name: "Content Checker" }),
+    );
+    expect(navigate).toHaveBeenCalledWith(
+      "/app/research-office/similarity/content",
+    );
+  });
+
   it("leaves instructor section routes when another sidebar page is selected", async () => {
     const session = {
       email: "instructor@example.test",
@@ -654,9 +714,7 @@ describe("role workspaces", () => {
         if (path === "/api/office/institutes/IHS/studies") {
           return new Response(
             JSON.stringify({
-              data: [
-                { id: 42, year: "2026", title: "Community Health Study" },
-              ],
+              data: [{ id: 42, year: "2026", title: "Community Health Study" }],
             }),
           );
         }
@@ -1092,7 +1150,7 @@ describe("role workspaces", () => {
       />,
     );
     expect(
-      screen.getByRole("heading", { name: /My research/ }),
+      screen.getByRole("heading", { name: /My dashboard/ }),
     ).toBeInTheDocument();
     expect(screen.queryByText("Returned study")).not.toBeInTheDocument();
     fireEvent.click(
@@ -2173,14 +2231,9 @@ describe("authenticated notifications", () => {
     );
   });
 
-  it.each([
-    ["adviser", false],
-    ["instructor", false],
-    ["panel", true],
-    ["statistician", true],
-  ] as const)(
-    "opens a notified %s assignment at an authorized %s workspace",
-    async (role, readOnly) => {
+  it.each(["adviser", "instructor", "panel", "statistician"] as const)(
+    "opens a notified %s assignment in its research folder workspace",
+    async (role) => {
       vi.stubGlobal(
         "fetch",
         vi.fn(async (input: string | URL | Request) => {
@@ -2195,6 +2248,8 @@ describe("authenticated notifications", () => {
                 data: { schema_version: 1, role, sections: [] },
               }),
             );
+          if (path === "/api/monitoring/research")
+            return new Response(JSON.stringify({ data: [] }));
           if (path === "/api/research/42")
             return new Response(
               JSON.stringify({
@@ -2208,8 +2263,13 @@ describe("authenticated notifications", () => {
                   submission_status: "under_review",
                   archive_status: "not_archived",
                   visibility: "private",
+                  authors: [{ id: 8, author_name: "Research Student" }],
                 },
               }),
+            );
+          if (path === "/api/research/42/people")
+            return new Response(
+              JSON.stringify({ data: { section: null, reviewers: [] } }),
             );
           if (path.startsWith("/api/research/42/"))
             return new Response(JSON.stringify({ data: [] }));
@@ -2229,25 +2289,15 @@ describe("authenticated notifications", () => {
 
       expect(
         await screen.findByRole("heading", {
-          level: 2,
+          level: 3,
           name: "Deep-linked assigned record",
         }),
       ).toBeInTheDocument();
-      if (readOnly) {
-        expect(
-          screen.getByText("Read-only assigned record."),
-        ).toBeInTheDocument();
-        expect(
-          screen.queryByRole("button", { name: "Add remark" }),
-        ).not.toBeInTheDocument();
-        expect(
-          screen.queryByRole("button", { name: "Request revision" }),
-        ).not.toBeInTheDocument();
-      } else {
-        expect(
-          screen.getByRole("button", { name: "Add remark" }),
-        ).toBeInTheDocument();
-      }
+      expect(screen.getByTestId("study-workspace")).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Documents" }),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("Similarity results")).not.toBeInTheDocument();
     },
   );
 });

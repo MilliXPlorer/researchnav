@@ -148,7 +148,7 @@ class DomainServicesTest extends TestCase
         $reviewer = User::factory()->create(['role' => 'adviser']);
         $this->assignReviewer($research, $reviewer);
         $feedback = app(FeedbackService::class)->create($reviewer, $research, ['comment' => 'Please clarify.', 'feedback_type' => 'suggestion']);
-        app(FeedbackService::class)->setStatus($reviewer, $feedback, 'acknowledged');
+        app(FeedbackService::class)->setStatus($reviewer, $feedback, 'resolved');
         app(ResearchService::class)->submit($actor, $research);
         app(ResearchService::class)->transition($reviewer, $research, 'under_review');
         $revision = app(RevisionService::class)->request($reviewer, $research, ['revision_remarks' => 'Revise methodology.']);
@@ -156,7 +156,7 @@ class DomainServicesTest extends TestCase
         app(RevisionService::class)->resubmit($actor, $revision);
         $validation = app(TitleValidationService::class)->recommend($reviewer, $research, ['validation_status' => 'revision_required', 'adviser_remarks' => 'Use a narrower title.']);
 
-        $this->assertDatabaseHas('feedback_comments', ['id' => $feedback->id, 'feedback_status' => 'acknowledged']);
+        $this->assertDatabaseHas('feedback_comments', ['id' => $feedback->id, 'feedback_status' => 'resolved']);
         $this->assertDatabaseHas('revisions', ['id' => $revision->id, 'revision_number' => 1, 'revision_status' => 'resubmitted']);
         $this->assertDatabaseHas('title_validations', ['id' => $validation->id, 'validation_status' => 'revision_required']);
         $this->assertDatabaseCount('notifications', 7);

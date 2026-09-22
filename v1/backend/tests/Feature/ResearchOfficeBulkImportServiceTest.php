@@ -27,6 +27,7 @@ class ResearchOfficeBulkImportServiceTest extends TestCase
         'year' => 2026,
         'final_binding_date' => 'May 2026',
         'institute' => 'Institute of Computer Studies',
+        'sdg_ids' => [9, 11],
     ];
 
     public function test_path_creation_preserves_words_and_removes_unsafe_characters(): void
@@ -71,6 +72,7 @@ class ResearchOfficeBulkImportServiceTest extends TestCase
             'manuscript_date_label' => 'May 2026',
         ]);
         $this->assertDatabaseHas('research_authors', ['research_document_id' => $document->id, 'author_name' => 'Researcher Two', 'author_order' => 2]);
+        $this->assertSame([9, 11], $document->sdgs->pluck('id')->all());
         $this->assertDatabaseHas('document_files', [
             'research_document_id' => $document->id,
             'document_type' => 'final_manuscript',

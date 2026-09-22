@@ -102,6 +102,14 @@ export async function createApp(options = {}) {
     100,
     120_000,
   );
+  const contentUploadTimeoutMs = configuredInteger(
+    options.contentUploadTimeoutMs ??
+      process.env.SSR_CONTENT_UPLOAD_TIMEOUT_MS ??
+      120_000,
+    "SSR_CONTENT_UPLOAD_TIMEOUT_MS",
+    100,
+    180_000,
+  );
   const maxBodyBytes = configuredInteger(
     options.maxBodyBytes ?? process.env.SSR_MAX_BODY_BYTES ?? 27 * 1024 * 1024,
     "SSR_MAX_BODY_BYTES",
@@ -155,14 +163,22 @@ export async function createApp(options = {}) {
       }
       const contentLength = Number(contentLengthHeader ?? 0);
       const jsonLimit = 32 * 1024;
+      const annotationLimit = 160 * 1024;
       const profilePhotoLimit = 3 * 1024 * 1024;
       const normalizedPathname = pathname.replace(/\/+$/, "");
+      const isAnnotationMutation =
+        request.method === "POST" &&
+        /^\/api\/research\/[^/]+\/files\/[^/]+\/annotations$/.test(
+          normalizedPathname,
+        );
       const requestLimit =
         request.method === "POST" && normalizedPathname === "/api/profile/photo"
           ? profilePhotoLimit
-          : request.is("application/json")
-            ? jsonLimit
-            : maxBodyBytes;
+          : isAnnotationMutation
+            ? annotationLimit
+            : request.is("application/json")
+              ? jsonLimit
+              : maxBodyBytes;
       if (
         !Number.isSafeInteger(contentLength) ||
         contentLength < 0 ||
@@ -170,13 +186,24 @@ export async function createApp(options = {}) {
       ) {
         return response.status(413).json({ error: "PAYLOAD_TOO_LARGE" });
       }
-      request.setTimeout(apiTimeoutMs);
+      const isContentUpload =
+        request.method === "POST" &&
+        normalizedPathname === "/api/similarity/content-upload";
+      const requestTimeoutMs = isContentUpload
+        ? contentUploadTimeoutMs
+        : apiTimeoutMs;
+      request.setTimeout(requestTimeoutMs);
 
-      proxy.web(request, response, {}, () => {
-        if (!response.headersSent) {
-          response.status(502).json({ error: "API_UPSTREAM_UNAVAILABLE" });
-        }
-      });
+      proxy.web(
+        request,
+        response,
+        { timeout: requestTimeoutMs, proxyTimeout: requestTimeoutMs },
+        () => {
+          if (!response.headersSent) {
+            response.status(502).json({ error: "API_UPSTREAM_UNAVAILABLE" });
+          }
+        },
+      );
     } catch {
       response.status(400).send("Bad Request");
     }

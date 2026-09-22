@@ -119,7 +119,7 @@ describe("AssignedResearchFolders", () => {
   });
 
   it.each<Role>(["adviser", "panel"])(
-    "uses the shared read-only workspace for an assigned %s study",
+    "uses the shared workspace for an assigned %s study",
     async (role) => {
       vi.stubGlobal(
         "fetch",
@@ -148,14 +148,17 @@ describe("AssignedResearchFolders", () => {
       ).not.toBeInTheDocument();
       for (const item of [
         "Overview",
-        "Research actors",
+        "Research Team",
         "Documents",
-        "Feedback",
         "Defense Monitoring Forms",
       ]) {
         expect(screen.getByRole("button", { name: item })).toBeInTheDocument();
       }
-      expect(screen.getByText("Read-only record")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Feedback" }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText("Assigned record")).toBeInTheDocument();
+      expect(screen.queryByText("Read only")).not.toBeInTheDocument();
       expect(
         screen.queryByRole("button", {
           name: /edit research title|delete research project|manage assignments|remove|post feedback/i,
@@ -473,7 +476,7 @@ describe("AssignedResearchFolders", () => {
       }),
     );
     fireEvent.click(
-      await screen.findByRole("button", { name: "Research actors" }),
+      await screen.findByRole("button", { name: "Research Team" }),
     );
 
     const representative = await screen.findByLabelText("Representative");

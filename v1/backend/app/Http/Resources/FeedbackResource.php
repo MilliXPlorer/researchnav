@@ -23,6 +23,7 @@ class FeedbackResource extends JsonResource
             'comment' => $this->comment,
             'feedback_type' => $this->feedback_type,
             'feedback_status' => $this->feedback_status,
+            'resolved_at' => $this->resolved_at?->toISOString(),
             'researcher_acknowledged_at' => $this->researcher_acknowledged_at?->toISOString(),
             'researcher_addressed_at' => $this->researcher_addressed_at?->toISOString(),
             'researcher_action_remarks' => $this->researcher_action_remarks,

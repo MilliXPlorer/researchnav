@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import { BadgeCheck, Pencil, Plus, Printer, Trash2 } from "lucide-react";
+import { Pencil, Plus, Printer, Trash2 } from "lucide-react";
 import { formatPhilippineDate } from "./dateTime";
 import beforeProposalForm from "./form_templates/monitoring-before-proposal-1.png";
 import afterProposalForm from "./form_templates/monitoring-after-proposal-1.png";
@@ -13,7 +13,6 @@ import {
   listSharedMonitoringResearch,
   saveSharedMonitoring,
   uploadSharedMonitoringSignature,
-  verifySharedMonitoring,
   type SharedMonitoringData,
   type SharedMonitoringResearch,
 } from "./api";
@@ -421,23 +420,6 @@ export default function SharedMonitoring({
     setHasDrawing(false);
   }
 
-  async function verify() {
-    if (!selected) return;
-    setBusy(true);
-    setError("");
-    try {
-      setData(await verifySharedMonitoring(selected, stage));
-    } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "The defense monitoring form could not be verified.",
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <div
       className={
@@ -656,18 +638,6 @@ export default function SharedMonitoring({
                     <Trash2 size={17} aria-hidden="true" />
                   </Button>
                 </>
-              )}
-              {!readOnly && role === "instructor" && (
-                <Button
-                  type="button"
-                  className="icon-button"
-                  aria-label="Verify completed form"
-                  title="Verify completed form"
-                  disabled={busy}
-                  onClick={() => void verify()}
-                >
-                  <BadgeCheck size={18} aria-hidden="true" />
-                </Button>
               )}
             </div>
           </div>

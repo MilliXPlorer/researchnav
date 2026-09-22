@@ -271,6 +271,27 @@ describe("CatalogPage public similarity search", () => {
     );
   });
 
+  it("requests selected Sustainable Development Goal filters", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ data: [], links: { next: null } })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderCatalog();
+
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: /Quality Education/i }),
+    );
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenLastCalledWith(
+        expect.stringContaining("sdg_ids%5B%5D=4"),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      ),
+    );
+    expect(window.location.search).toContain("sdgs=4");
+  });
+
   it("requests an initial catalog q and preserves the backend ranking order", async () => {
     const fetchMock = vi.fn(
       async () =>

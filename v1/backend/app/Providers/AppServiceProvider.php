@@ -101,6 +101,18 @@ class AppServiceProvider extends ServiceProvider
 
             return [Limit::perMinute(15)->by($key), Limit::perHour(180)->by($key)];
         });
+        RateLimiter::for('similarity-content-upload', function (Request $request): array {
+            $actor = $request->attributes->get('current_user');
+            $userKey = $actor instanceof User ? 'user:'.$actor->id : 'user:'.$request->session()->get('user_id', $request->ip());
+            $ipKey = 'ip:'.$request->ip();
+
+            return [
+                Limit::perMinute(2)->by($userKey.':minute'),
+                Limit::perHour(20)->by($userKey.':hour'),
+                Limit::perMinute(10)->by($ipKey.':minute'),
+                Limit::perHour(60)->by($ipKey.':hour'),
+            ];
+        });
         RateLimiter::for('domain-mutations', fn (Request $request) => Limit::perMinute(30)->by((string) $request->ip()));
         RateLimiter::for('researcher-mutations', function (Request $request): array {
             $actor = $request->attributes->get('current_user');

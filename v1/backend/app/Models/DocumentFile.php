@@ -13,8 +13,10 @@ class DocumentFile extends Model
 {
     public const TYPES = ['title_proposal', 'draft', 'chapter', 'revised_manuscript', 'final_manuscript', 'attachment'];
 
+    public const UPLOAD_PURPOSES = ['initial_submission', 'response_to_feedback', 'revision', 'final_revision'];
+
     protected $fillable = [
-        'research_document_id', 'uploaded_by', 'document_type', 'version_number', 'original_filename',
+        'research_document_id', 'uploaded_by', 'document_type', 'upload_purpose', 'version_number', 'original_filename',
         'relative_path', 'file_order', 'content_sha256', 'stored_filename', 'file_path', 'file_extension', 'mime_type', 'file_size', 'is_current', 'uploaded_at',
     ];
 
@@ -39,6 +41,14 @@ class DocumentFile extends Model
             if ($file->version_number === null || $file->version_number < 1) {
                 throw new InvalidArgumentException('Document file versions must start at 1.');
             }
+            $file->upload_purpose ??= match ($file->document_type) {
+                'revised_manuscript' => 'revision',
+                'final_manuscript' => 'final_revision',
+                default => 'initial_submission',
+            };
+            if (! in_array($file->upload_purpose, self::UPLOAD_PURPOSES, true)) {
+                throw new InvalidArgumentException('Document file upload purpose is invalid.');
+            }
         });
     }
 
@@ -50,6 +60,11 @@ class DocumentFile extends Model
     public function feedbackComments(): HasMany
     {
         return $this->hasMany(FeedbackComment::class, FeedbackComment::column('document_file_id'));
+    }
+
+    public function pdfAnnotations(): HasMany
+    {
+        return $this->hasMany(PdfAnnotation::class);
     }
 
     public function revisions(): HasMany

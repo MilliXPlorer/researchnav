@@ -88,6 +88,7 @@ class ResearchOfficeBulkImportService
                     'submission_status' => 'archived', 'archive_status' => 'archived', 'visibility' => 'public', 'approved_at' => now(), 'archived_at' => now(),
                     'import_source_sha256' => $hash, 'import_source_filename' => $items[0]['name'], 'import_group_name' => $groupName,
                 ]);
+                $document->sdgs()->sync($metadata['sdg_ids'] ?? []);
                 foreach (array_values($metadata['researchers']) as $index => $researcher) {
                     ResearchAuthor::query()->create([
                         'research_document_id' => $document->id, 'user_id' => null, 'author_name' => trim($researcher), 'author_order' => $index + 1, 'is_corresponding_author' => false,
@@ -104,7 +105,7 @@ class ResearchOfficeBulkImportService
                 $this->monitoring->log($document, 'RESEARCH_IMPORTED', $actor, 'Imported and published a reviewed manuscript.', null, 'archived', 'archived');
                 $this->audit->log($actor, 'RESEARCH_IMPORTED', $document, 'Imported a reviewed manuscript.', $request);
 
-                return $document->load(['authors', 'files']);
+                return $document->load(['authors', 'files', 'sdgs']);
             });
             try {
                 ($this->manuscriptSearch ?? app(ManuscriptSearchProjectionService::class))->reindex((int) $document->id, true, true);

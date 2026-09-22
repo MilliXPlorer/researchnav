@@ -17,6 +17,7 @@ import { Button } from "./components";
 import ResearchFolderRow from "./ResearchFolderRow";
 import StudyWorkspace from "./StudyWorkspace";
 import { matchesStudySearch } from "./studySearch";
+import type { ResearchWorkspaceDestination } from "./researchWorkspaceRoute";
 import type { Role } from "./types";
 
 function label(value: string) {
@@ -28,6 +29,8 @@ function label(value: string) {
 export default function AssignedResearchFolders(props: {
   role: Role;
   actorKey?: string;
+  initialResearchDocumentId?: string | number;
+  destination?: ResearchWorkspaceDestination;
 }) {
   return (
     <AssignedResearchFoldersContent
@@ -40,12 +43,20 @@ export default function AssignedResearchFolders(props: {
 function AssignedResearchFoldersContent({
   role,
   actorKey,
+  initialResearchDocumentId,
+  destination,
 }: {
   role: Role;
   actorKey?: string;
+  initialResearchDocumentId?: string | number;
+  destination?: ResearchWorkspaceDestination;
 }) {
   const [folders, setFolders] = useState<SharedMonitoringResearch[]>([]);
-  const [selected, setSelected] = useState("");
+  const [selected, setSelected] = useState(
+    initialResearchDocumentId === undefined
+      ? ""
+      : String(initialResearchDocumentId),
+  );
   const selectedRef = useRef(selected);
   const [research, setResearch] =
     useState<ResearchDocumentSummaryResource | null>(null);
@@ -85,13 +96,13 @@ function AssignedResearchFoldersContent({
     void listSharedMonitoringResearch()
       .then((items) => {
         if (cancelled) return;
-        clearSelectedStudy();
+        if (initialResearchDocumentId === undefined) clearSelectedStudy();
         setFolders(items);
         setError("");
       })
       .catch(() => {
         if (cancelled) return;
-        clearSelectedStudy();
+        if (initialResearchDocumentId === undefined) clearSelectedStudy();
         setFolders([]);
         setError("Assigned research folders could not be loaded.");
       })
@@ -100,7 +111,7 @@ function AssignedResearchFoldersContent({
     return () => {
       cancelled = true;
     };
-  }, [attempt, actorKey]);
+  }, [attempt, actorKey, initialResearchDocumentId]);
 
   useEffect(() => {
     if (!selected) return;
@@ -287,7 +298,7 @@ function AssignedResearchFoldersContent({
             </section>
           ) : (
             <aside
-              className="project-folder-sidebar assigned-research-folders"
+              className="project-folder-sidebar assigned-research-folders research-folder-surface"
               aria-label="Assigned research folders"
             >
               <div className="project-folder-sidebar-heading">
@@ -419,7 +430,6 @@ function AssignedResearchFoldersContent({
                 research.degree_program || "Program not set",
                 label(research.research_stage),
                 label(research.submission_status),
-                "Read only",
               ]}
               researchers={research.authors.map((author) => ({
                 id: String(author.id),
@@ -427,11 +437,18 @@ function AssignedResearchFoldersContent({
               }))}
               people={people}
               projectTeam={team ?? undefined}
-              badgeLabel="Read-only record"
+              badgeLabel="Assigned record"
               summary={research.abstract}
+              sdgs={research.sdgs}
               actorExtension={actorExtension}
-              canPostFeedback={false}
-              showExtendedActivity
+              canPostFeedback={
+                role === "adviser" ||
+                role === "instructor" ||
+                role === "panel" ||
+                role === "research-office" ||
+                role === "admin"
+              }
+              destination={destination}
             />
           )}
         </section>

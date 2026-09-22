@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\ResearchDocument;
+use App\Models\ResearchProjectTeamMember;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
@@ -133,6 +134,50 @@ class SharedMonitoringTest extends TestCase
             ['Origin' => 'http://localhost:5173'],
         )->assertUnprocessable()
             ->assertJsonValidationErrors('signature_status');
+    }
+
+    public function test_monitoring_forms_show_per_stage_team_assignments(): void
+    {
+        $office = $this->user(['role' => 'research-office']);
+        $proposalAdviser = $this->user(['role' => 'adviser', 'first_name' => 'Proposal', 'last_name' => 'Adviser']);
+        $finalAdviser = $this->user(['role' => 'adviser', 'first_name' => 'Final', 'last_name' => 'Adviser']);
+        $research = ResearchDocument::factory()->create();
+        $research->reviewAssignments()->create([
+            'reviewer_id' => $proposalAdviser->id,
+            'assigned_by' => $office->id,
+            'review_role' => 'adviser',
+            'is_active' => true,
+        ]);
+
+        ResearchProjectTeamMember::query()->create([
+            'research_document_id' => $research->id,
+            'defense_type' => 'proposal',
+            'user_id' => $proposalAdviser->id,
+            'team_role' => 'adviser',
+            'assigned_by' => $office->id,
+        ]);
+
+        // Proposal monitoring shows the proposal team; final stays unassigned.
+        $this->as($proposalAdviser)
+            ->getJson('/api/research/'.$research->id.'/shared-monitoring')
+            ->assertOk()
+            ->assertJsonPath('data.stages.before_proposal_defense.sections.0.assigned_actor_name', $proposalAdviser->displayName())
+            ->assertJsonPath('data.stages.before_final_defense.sections.0.assigned_actor_name', null);
+
+        // Assigning the final team updates the final monitoring stages.
+        ResearchProjectTeamMember::query()->create([
+            'research_document_id' => $research->id,
+            'defense_type' => 'final',
+            'user_id' => $finalAdviser->id,
+            'team_role' => 'adviser',
+            'assigned_by' => $office->id,
+        ]);
+
+        $this->as($proposalAdviser)
+            ->getJson('/api/research/'.$research->id.'/shared-monitoring')
+            ->assertOk()
+            ->assertJsonPath('data.stages.before_final_defense.sections.0.assigned_actor_name', $finalAdviser->displayName())
+            ->assertJsonPath('data.stages.before_proposal_defense.sections.0.assigned_actor_name', $proposalAdviser->displayName());
     }
 
     public function test_unassigned_role_does_not_gain_shared_monitoring_access(): void

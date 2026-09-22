@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\MonitoringLog;
 use App\Models\ResearchDocument;
+use App\Models\ResearchProjectTeamMember;
 use App\Models\ReviewAssignment;
 use App\Models\User;
 use App\Notifications\ResearchActivityNotification;
@@ -11,7 +12,9 @@ use App\Services\DomainAuthorization;
 use App\Services\MonitoringService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -85,13 +88,14 @@ class SharedMonitoringController extends DomainController
         $actor = $this->actor($request);
         $this->authorizeView($actor, $researchDocument);
         $entries = DB::table('monitoring_entries')->leftJoin('users', 'monitoring_entries.reviewer_id', '=', 'users.id')->where('monitoring_entries.research_document_id', $researchDocument->id)->orderBy('monitoring_entries.monitoring_stage')->orderBy('monitoring_entries.designation')->select('monitoring_entries.*', DB::raw("TRIM(CONCAT_WS(' ', users.first_name, users.middle_name, users.last_name)) as reviewer_name"))->get();
-        $assignedActors = $researchDocument->reviewAssignments()->with('reviewer')->get()->filter(fn ($assignment) => $assignment->is_active && $assignment->reviewer !== null)->mapWithKeys(fn ($assignment) => [$this->assignmentDesignation($assignment) => $assignment->reviewer->displayName()]);
+        $reviewActors = $researchDocument->reviewAssignments()->with('reviewer')->get()->filter(fn ($assignment) => $assignment->is_active && $assignment->reviewer !== null)->mapWithKeys(fn ($assignment) => [$this->assignmentDesignation($assignment) => $assignment->reviewer->displayName()]);
         if ($researchDocument->section?->instructor !== null) {
-            $assignedActors->put('Instructor', $researchDocument->section->instructor->displayName());
+            $reviewActors->put('Instructor', $researchDocument->section->instructor->displayName());
         }
         $researchDocument->loadMissing('authors.user');
+        $teamByStage = $this->teamMembersByStage($researchDocument);
 
-        return response()->json(['data' => ['research_document_id' => $researchDocument->id, 'title' => $researchDocument->title, 'researchers' => $this->researcherNames($researchDocument), 'editable_stages' => collect(self::STAGES)->filter(fn (string $stage) => $this->canEditStage($actor, $researchDocument, $stage))->values()->all(), 'stages' => collect(self::STAGES)->mapWithKeys(fn (string $stage) => [$stage => $this->stage($this->isBeforeStage($stage) ? self::PRE : self::POST, $entries->where('monitoring_stage', $stage), $actor->id, $assignedActors)])->all()]])->header('Cache-Control', 'private, no-store');
+        return response()->json(['data' => ['research_document_id' => $researchDocument->id, 'title' => $researchDocument->title, 'researchers' => $this->researcherNames($researchDocument), 'editable_stages' => collect(self::STAGES)->filter(fn (string $stage) => $this->canEditStage($actor, $researchDocument, $stage))->values()->all(), 'stages' => collect(self::STAGES)->mapWithKeys(fn (string $stage) => [$stage => $this->stage($this->isBeforeStage($stage) ? self::PRE : self::POST, $entries->where('monitoring_stage', $stage), $actor->id, $this->actorsForStage($stage, $reviewActors, $teamByStage))])->all()]])->header('Cache-Control', 'private, no-store');
     }
 
     public function update(Request $request, ResearchDocument $researchDocument, MonitoringService $activity): JsonResponse
@@ -306,6 +310,59 @@ class SharedMonitoringController extends DomainController
             },
             default => ucfirst(str_replace('_', ' ', (string) $role)),
         };
+    }
+
+    /**
+     * Team rows scoped per defense stage, or null on legacy schemas where the
+     * team table has no defense_type column (proposal and final share one team).
+     *
+     * @return array<string, Collection>|null
+     */
+    private function teamMembersByStage(ResearchDocument $researchDocument): ?array
+    {
+        if (! Schema::hasColumn('research_project_team_members', 'defense_type')) {
+            return null;
+        }
+
+        $grouped = ResearchProjectTeamMember::query()->with('user')
+            ->where('research_document_id', $researchDocument->id)
+            ->orderBy('position')->orderBy('id')->get()->groupBy('defense_type');
+
+        return [
+            'proposal' => $grouped->get('proposal', collect()),
+            'final' => $grouped->get('final', collect()),
+        ];
+    }
+
+    /**
+     * Actor names for one monitoring stage. Support roles and the section
+     * instructor always come from review assignments; managed roles (adviser,
+     * panels, chair, research rep) come from the stage's team rows. The final
+     * defense stays Unassigned until the instructor actually assigns it.
+     */
+    private function actorsForStage(string $stage, Collection $reviewActors, ?array $teamByStage): Collection
+    {
+        if ($teamByStage === null) {
+            return $reviewActors;
+        }
+
+        $isFinal = str_contains($stage, '_final_defense');
+        $members = $teamByStage[$isFinal ? 'final' : 'proposal'];
+        $memberName = fn (string $role) => $members->firstWhere('team_role', $role)?->user?->displayName();
+        // Proposal stages keep the review-assignment fallback so existing
+        // contacts still show when a role was never managed through the team UI.
+        $fallback = fn (string $key) => $isFinal ? null : $reviewActors->get($key);
+
+        $actors = $reviewActors->only(['Instructor', 'Editor', 'Statistician', 'Librarian']);
+        $actors->put('Adviser', $memberName('adviser') ?? $fallback('Adviser'));
+        $actors->put('Research Rep', $memberName('research_office_representative') ?? $fallback('Research Rep'));
+        $actors->put('Chair', $memberName('chair') ?? $fallback('Chair'));
+        $panels = $members->where('team_role', 'panel_member')->values();
+        foreach (['Panel 1', 'Panel 2', 'Panel 3'] as $index => $key) {
+            $actors->put($key, $panels->get($index)?->user?->displayName() ?? ($isFinal ? null : $reviewActors->get($key)));
+        }
+
+        return $actors;
     }
 
     private function stage(array $sections, $entries, string $actorId, $assignedActors): array

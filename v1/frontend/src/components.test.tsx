@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
   Pagination,
@@ -6,6 +6,7 @@ import {
   SimilarityRing,
   SortableHeader,
   StatusChip,
+  ToastNotification,
 } from "./components";
 import { sortRows } from "./useClientSorting";
 
@@ -44,6 +45,45 @@ describe("StatusChip", () => {
     expect(screen.getByText("Revision Required")).toHaveClass(
       "status-revision-required",
     );
+  });
+});
+
+describe("ToastNotification", () => {
+  it("renders the requested status and supports manual dismissal", () => {
+    const onDismiss = vi.fn();
+    render(
+      <ToastNotification
+        message="Section updated."
+        type="success"
+        duration={0}
+        onDismiss={onDismiss}
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("Section updated.");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Dismiss notification" }),
+    );
+    expect(onDismiss).toHaveBeenCalledOnce();
+  });
+
+  it("automatically dismisses after the configured duration", () => {
+    vi.useFakeTimers();
+    const onDismiss = vi.fn();
+
+    try {
+      render(
+        <ToastNotification
+          message="Section updated."
+          duration={1000}
+          onDismiss={onDismiss}
+        />,
+      );
+      act(() => vi.advanceTimersByTime(1000));
+      expect(onDismiss).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

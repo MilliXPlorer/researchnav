@@ -8,6 +8,9 @@ export function isProtectedRoute(pathname: string): boolean {
     /^\/app\/researcher\/(?:submissions|related-studies|similarity(?:\/(?:title|content))?)$/.test(
       pathname,
     ) ||
+    /^\/app\/research-office\/similarity(?:\/(?:title|content))?$/.test(
+      pathname,
+    ) ||
     /^\/research\/\d+$/.test(pathname)
   );
 }

@@ -97,6 +97,17 @@ class ResearcherAuthorizationHardeningTest extends TestCase
             ->assertJsonPath('data.submission_status', 'draft')
             ->assertJsonPath('data.section_id', $section->id)
             ->assertJsonPath('data.can_update_metadata', true);
+        $this->as($researcher)->getJson('/api/research/'.$assigned->id.'/folders')
+            ->assertOk()
+            ->assertExactJson(['data' => [
+                'Chapter 1',
+                'Chapter 2',
+                'Chapter 3',
+                'Chapter 4',
+                'Chapter 5',
+                'Chapter 6',
+                'Full Manuscript',
+            ]]);
         $this->as($researcher)
             ->patchJson('/api/research/'.$assigned->id, ['title' => 'Assigned folder title'], $this->origin())
             ->assertOk()

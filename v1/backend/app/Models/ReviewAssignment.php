@@ -12,7 +12,16 @@ class ReviewAssignment extends Model
 
     protected $table = 'research_review_assignments';
 
-    protected $fillable = ['research_document_id', 'reviewer_id', 'assigned_by', 'review_role', 'is_active', 'status', 'designation'];
+    protected $fillable = [
+        'research_document_id',
+        'defense_type',
+        'reviewer_id',
+        'assigned_by',
+        'review_role',
+        'is_active',
+        'status',
+        'designation',
+    ];
 
     protected function casts(): array
     {

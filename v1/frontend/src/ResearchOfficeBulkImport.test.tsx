@@ -217,6 +217,9 @@ describe("ResearchOfficeBulkImport", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Extract Metadata" }));
     await screen.findAllByLabelText("Institute");
+    fireEvent.click(
+      screen.getAllByRole("checkbox", { name: /Quality Education/i })[0],
+    );
 
     fireEvent.click(
       screen.getByRole("button", { name: "Upload Selected Manuscripts" }),
@@ -230,6 +233,7 @@ describe("ResearchOfficeBulkImport", () => {
     expect(JSON.parse(imported[0].metadata)).toMatchObject({
       ...extractedMetadata,
       institute: "Institute of Computer Studies",
+      sdg_ids: [4],
     });
     await waitFor(() =>
       expect(screen.queryByText("Selected files")).not.toBeInTheDocument(),

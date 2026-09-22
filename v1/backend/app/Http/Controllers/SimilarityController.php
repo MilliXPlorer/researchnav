@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\ContentUploadSimilarityRequest;
 use App\Http\Requests\PublicRepositorySimilarityRequest;
 use App\Http\Requests\RunSimilarityCheckRequest;
 use App\Http\Resources\PublicRepositorySimilarityResource;
@@ -14,6 +15,8 @@ use App\Services\PublicRepositorySimilarityService;
 use App\Services\SimilarityProcessException;
 use App\Services\SimilarityService;
 use App\Services\SimilarityUnavailableException;
+use App\Services\UploadedContentSimilarityService;
+use App\Services\UploadedContentUnreadableException;
 use Illuminate\Http\Request;
 
 class SimilarityController extends DomainController
@@ -74,6 +77,25 @@ class SimilarityController extends DomainController
             return PublicRepositorySimilarityResource::collection(
                 $service->compareContent($request->string('q')->toString())
             );
+        } catch (SimilarityUnavailableException) {
+            return response()->json(['error' => 'SIMILARITY_UNAVAILABLE'], 503);
+        } catch (SimilarityProcessException) {
+            return response()->json(['error' => 'SIMILARITY_PROCESS_FAILED'], 502);
+        }
+    }
+
+    public function contentUpload(ContentUploadSimilarityRequest $request, UploadedContentSimilarityService $service)
+    {
+        try {
+            return PublicRepositorySimilarityResource::collection(
+                $service->compare($request->file('file'))
+            );
+        } catch (UploadedContentUnreadableException) {
+            return response()->json(['error' => 'CONTENT_UPLOAD_UNREADABLE'], 422);
+        } catch (PublicRepositorySimilarityCapacityException) {
+            return response()->json(['error' => 'SIMILARITY_CAPACITY_EXCEEDED'], 503);
+        } catch (PublicRepositorySimilarityCatalogChangedException) {
+            return response()->json(['error' => 'SIMILARITY_CATALOG_CHANGED'], 409);
         } catch (SimilarityUnavailableException) {
             return response()->json(['error' => 'SIMILARITY_UNAVAILABLE'], 503);
         } catch (SimilarityProcessException) {

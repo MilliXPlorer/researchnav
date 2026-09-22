@@ -1,5 +1,5 @@
-import type { CSSProperties, ReactNode } from "react";
-import { ArrowRight, Search, X } from "lucide-react";
+import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
+import { ArrowRight, CircleAlert, CircleCheck, Search, X } from "lucide-react";
 import {
   classificationLabel,
   type SimilarityClassification,
@@ -35,6 +35,51 @@ export function Button({
     <button className={`button button-${variant} ${className}`} {...props}>
       {children}
     </button>
+  );
+}
+
+export function ToastNotification({
+  message,
+  type = "success",
+  duration = 3000,
+  onDismiss,
+}: {
+  message: string;
+  type?: "success" | "error";
+  duration?: number;
+  onDismiss: () => void;
+}) {
+  const dismissRef = useRef(onDismiss);
+
+  useEffect(() => {
+    dismissRef.current = onDismiss;
+  }, [onDismiss]);
+
+  useEffect(() => {
+    if (duration <= 0) return;
+    const timeoutId = window.setTimeout(() => dismissRef.current(), duration);
+    return () => window.clearTimeout(timeoutId);
+  }, [duration, message]);
+
+  return (
+    <div
+      className={`toast toast-notification${type === "error" ? " is-error" : ""}`}
+      role={type === "error" ? "alert" : "status"}
+      aria-live={type === "error" ? "assertive" : "polite"}
+    >
+      <span className="toast-status-icon" aria-hidden="true">
+        {type === "error" ? <CircleAlert /> : <CircleCheck />}
+      </span>
+      <p>{message}</p>
+      <button
+        type="button"
+        className="toast-dismiss"
+        aria-label="Dismiss notification"
+        onClick={onDismiss}
+      >
+        <X />
+      </button>
+    </div>
   );
 }
 

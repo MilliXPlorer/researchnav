@@ -16,6 +16,21 @@ class ResearchDocumentPolicy
             || ($research->submission_status === 'archived' && $research->archive_status === 'archived' && in_array($research->visibility, ['registered_only', 'public'], true));
     }
 
+    public function updateMetadata(User $user, ResearchDocument $research): bool
+    {
+        if ($research->import_source_sha256 !== null && $research->submission_status === 'archived') {
+            return DomainAuthorization::isOffice($user);
+        }
+
+        return (DomainAuthorization::isResearcherParticipant($user, $research)
+                || DomainAuthorization::isActiveAdministrator($user))
+            && in_array(
+                $research->submission_status,
+                ['draft', 'submitted', 'under_review', 'revision_required'],
+                true
+            );
+    }
+
     public function update(User $user, ResearchDocument $research): bool
     {
         if ($research->import_source_sha256 !== null && $research->submission_status === 'archived') {

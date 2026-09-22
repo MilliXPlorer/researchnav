@@ -16,12 +16,14 @@ import {
 } from "lucide-react";
 import {
   ApiError,
-  checkContentQuerySimilarity,
+  checkContentUploadSimilarity,
   checkTitleQuerySimilarity,
   createCoordinatorSchedule,
   createInstructorSection,
   getCoordinatorProgramReport,
   getInstructorProjectTeam,
+  getInternalResearch,
+  getResearchPeople,
   getInstitutionalReport,
   listAdviserAdvisees,
   listAdviserMonitoring,
@@ -100,7 +102,6 @@ import {
   type DefenseScheduleResource,
   type DocumentFileResource,
   type InstructorSectionDocumentItem,
-  type InstructorAssignedSubmissionItem,
   type InstructorSectionResource,
   type InstructorStudentResource,
   type InstructorMonitoringEntry,
@@ -110,9 +111,16 @@ import {
   type MetadataStandardsItem,
   type PanelAssignmentResource,
   type ResearchDocumentSummaryResource,
+  type ResearchPeopleResource,
   type StatisticianQueueItem,
 } from "./api";
-import { Button, Pagination, SortableHeader } from "./components";
+import ManuscriptFilePicker from "./ManuscriptFilePicker";
+import {
+  Button,
+  Pagination,
+  SortableHeader,
+  ToastNotification,
+} from "./components";
 import {
   AcademicYearSelect,
   DatePickerInput,
@@ -122,19 +130,18 @@ import { instituteNames, programsByInstitute, roleConfigs } from "./data";
 import { ConfirmDialog, Modal } from "./Modal";
 import ResearchActivity from "./ResearchActivity";
 import ResearchFolderRow from "./ResearchFolderRow";
-import InstructorResearchReview from "./InstructorResearchReview";
 import SimilarityResults from "./SimilarityResults";
 import AssignedResearchFolders from "./AssignedResearchFolders";
 import StudyWorkspace from "./StudyWorkspace";
 import ResearchProgressUpdates from "./ResearchProgressUpdates";
 import PublicResearchMetadataDialog from "./PublicResearchMetadataDialog";
-import ManuscriptFilePicker from "./ManuscriptFilePicker";
 import { classificationLabel, formatSimilarityPercentage } from "./similarity";
 import type { ResearchRecord, Role } from "./types";
 import { useLiveFilters } from "./useLiveFilters";
 import { filterUserRows } from "./userManagement";
 import { useClientSorting } from "./useClientSorting";
 import { matchesStudySearch } from "./studySearch";
+import { SdgSelector } from "./SdgMetadata";
 
 const roles: AdminRole[] = [
   "admin",
@@ -267,7 +274,11 @@ export default function RoleSidebarPage({
         case "Title Proposals":
         case "Title Review":
           return (
-            <InstructorAssignedSubmissions role={role} stage="title_proposal" />
+            <InstructorAssignedSubmissions
+              role={role}
+              navigate={navigate}
+              stage="title_proposal"
+            />
           );
         case "My Sections":
           return (
@@ -282,13 +293,21 @@ export default function RoleSidebarPage({
         case "Assigned Submissions":
         case "Manuscript Review":
           return (
-            <InstructorAssignedSubmissions role={role} stage="manuscript" />
+            <InstructorAssignedSubmissions
+              role={role}
+              navigate={navigate}
+              stage="manuscript"
+            />
           );
         case "Assigned Research":
           return <AssignedResearchFolders role={role} actorKey={actorKey} />;
         case "Review Submissions":
           return (
-            <InstructorAssignedSubmissions role={role} stage="manuscript" />
+            <InstructorAssignedSubmissions
+              role={role}
+              navigate={navigate}
+              stage="manuscript"
+            />
           );
         case "Research Progress Updates":
           return <ResearchProgressUpdates role={role} />;
@@ -385,7 +404,13 @@ export default function RoleSidebarPage({
           return <AssignedResearchFolders role={role} actorKey={actorKey} />;
 
         case "Similarity Check":
-          return <ResearcherSimilarityCheck role={role} showModePicker />;
+          return (
+            <ResearcherSimilarityCheck
+              key={similarityMode}
+              role={role}
+              initialMode={similarityMode}
+            />
+          );
         case "Upload Manuscript":
           return <ResearchOfficeBulkImport />;
 
@@ -718,7 +743,7 @@ function RolePageHeader({
   description,
   action,
 }: {
-  role: Role;
+  role?: Role;
   title: string;
   description: string;
   action?: React.ReactNode;
@@ -726,9 +751,11 @@ function RolePageHeader({
   return (
     <header className="workspace-header">
       <div>
-        <p className="eyebrow">
-          {roleConfigs.find((config) => config.id === role)?.label}
-        </p>
+        {role && role !== "researcher" && (
+          <p className="eyebrow">
+            {roleConfigs.find((config) => config.id === role)?.label}
+          </p>
+        )}
         <h1>{title}</h1>
         <p>{description}</p>
       </div>
@@ -1559,7 +1586,6 @@ function CreateSectionDialog({
   return (
     <Modal label="Create class section" onClose={onClose} busy={busy}>
       <div className="create-section-card">
-        <p className="eyebrow">Instructor</p>
         <h2>Create a class section</h2>
         <p>
           Add a class section to organize the student researchers and research
@@ -1569,7 +1595,7 @@ function CreateSectionDialog({
           onSubmit={submit}
           className="admin-inline-form section-dialog-form"
         >
-          <label>
+          <label className="section-dialog-name">
             Section name
             <input
               value={name}
@@ -1685,9 +1711,11 @@ function ProjectAccountOptions({
 
 function InstructorAssignedSubmissions({
   role,
+  navigate,
   stage,
 }: {
   role: Role;
+  navigate: (path: string) => void;
   stage: "title_proposal" | "manuscript";
 }) {
   const [attempt, reload] = useAttempt();
@@ -1695,10 +1723,7 @@ function InstructorAssignedSubmissions({
     () => listInstructorAssignedSubmissions(stage),
     attempt,
   );
-  const [selected, setSelected] =
-    useState<InstructorAssignedSubmissionItem | null>(null);
   const [statusFilter, setStatusFilter] = useState("");
-  const [reviewBusy, setReviewBusy] = useState(false);
   const titleOnly = stage === "title_proposal";
   const filteredSubmissions =
     state.status === "ready"
@@ -1742,7 +1767,11 @@ function InstructorAssignedSubmissions({
               >
                 <option value="">All statuses</option>
                 {Array.from(
-                  new Set(state.data.map((item) => item.submission_status)),
+                  new Set(
+                    state.data
+                      .map((item) => item.submission_status)
+                      .filter(Boolean),
+                  ),
                 ).map((status) => (
                   <option key={status} value={status}>
                     {label(status)}
@@ -1795,7 +1824,11 @@ function InstructorAssignedSubmissions({
                         <td>
                           <Button
                             variant="secondary"
-                            onClick={() => setSelected(item)}
+                            onClick={() =>
+                              navigate(
+                                `/research/${item.research_document_id}?tab=documents`,
+                              )
+                            }
                           >
                             Open review
                           </Button>
@@ -1808,20 +1841,6 @@ function InstructorAssignedSubmissions({
             </section>
           )}
         </div>
-      )}
-      {selected && (
-        <Modal
-          label={`Review assigned research: ${selected.title}`}
-          onClose={() => setSelected(null)}
-          size="large"
-          busy={reviewBusy}
-        >
-          <InstructorResearchReview
-            submission={selected}
-            onUpdated={reload}
-            onBusyChange={setReviewBusy}
-          />
-        </Modal>
       )}
     </div>
   );
@@ -2283,7 +2302,6 @@ function InstructorSections({
     matchesStudySearch(studySearch, [
       studentName(student),
       student.email,
-      student.student_employee_id,
     ]),
   );
   const {
@@ -2294,7 +2312,6 @@ function InstructorSections({
   } = useClientSorting(visibleStudents, {
     student: (student) => studentName(student),
     email: (student) => student.email,
-    student_id: (student) => student.student_employee_id,
     added: (student) =>
       student.added_at ? Date.parse(student.added_at) : null,
   });
@@ -2308,19 +2325,26 @@ function InstructorSections({
     {},
   );
   const [studentBusy, setStudentBusy] = useState<Record<number, boolean>>({});
+  const [projectTeam, setProjectTeam] =
+  useState<InstructorProjectTeam | null>(null);
   const [selectedDocument, setSelectedDocument] =
     useState<InstructorSectionDocumentItem | null>(null);
+  const [selectedResearch, setSelectedResearch] =
+  useState<ResearchDocumentSummaryResource | null>(null);
+  const [documentPeople, setDocumentPeople] =
+    useState<ResearchPeopleResource | null>(null);
   const [documentMembers, setDocumentMembers] = useState<
     InstructorStudentResource[]
   >([]);
-  const [projectTeam, setProjectTeam] = useState<InstructorProjectTeam | null>(
-    null,
-  );
+  const [managedDefenseStage, setManagedDefenseStage] = useState<
+    "proposal" | "final"
+  >("proposal");
   const [teamCandidates, setTeamCandidates] = useState<
     Record<string, ProjectTeamPerson[]>
   >({});
   const [teamSearches, setTeamSearches] = useState<Record<string, string>>({});
   const [teamDraft, setTeamDraft] = useState({
+    researcher_ids: [] as string[],
     adviser_id: "",
     research_office_representative_id: "",
     chair_id: "",
@@ -2389,10 +2413,18 @@ function InstructorSections({
     ? (documentsFor[openSection.id] ?? [])
     : [];
   const studyStages = Array.from(
-    new Set(sectionDocuments.map((document) => document.research_stage)),
+    new Set(
+      sectionDocuments
+        .map((document) => document.research_stage)
+        .filter(Boolean),
+    ),
   ).sort();
   const studyStatuses = Array.from(
-    new Set(sectionDocuments.map((document) => document.submission_status)),
+    new Set(
+      sectionDocuments
+        .map((document) => document.submission_status)
+        .filter(Boolean),
+    ),
   ).sort();
   const visibleDocuments = sectionDocuments.filter(
     (document) =>
@@ -2493,8 +2525,11 @@ function InstructorSections({
     const requestId = ++teamRequestRef.current;
     setDocumentMembers([]);
     setProjectTeam(null);
+    setSelectedResearch(null);
+    setDocumentPeople(null);
     setTeamCandidates({});
     setTeamDraft({
+      researcher_ids: [],
       adviser_id: "",
       research_office_representative_id: "",
       chair_id: "",
@@ -2507,10 +2542,24 @@ function InstructorSections({
     setSelectedDocument(document);
     setTeamLoading(true);
     try {
-      const [members, team, advisers, officePersonnel, chairs, panelists] =
-        await Promise.allSettled([
+        const [
+          fullResearch,
+          members,
+          team,
+          people,
+          advisers,
+          officePersonnel,
+          chairs,
+          panelists,
+        ] = await Promise.allSettled([
+          getInternalResearch(document.research_document_id),
           listSectionDocumentMembers(sectionId, document.research_document_id),
-          getInstructorProjectTeam(sectionId, document.research_document_id),
+          getInstructorProjectTeam(
+            sectionId,
+            document.research_document_id,
+            "proposal",
+          ),
+          getResearchPeople(document.research_document_id),
           listInstructorProjectTeamCandidates(
             sectionId,
             document.research_document_id,
@@ -2539,10 +2588,27 @@ function InstructorSections({
           ),
         ]);
       if (requestId !== teamRequestRef.current) return;
-      if (members.status === "fulfilled") setDocumentMembers(members.value);
+
+      if (fullResearch.status === "fulfilled") {
+        setSelectedResearch(fullResearch.value);
+      } else {
+        setSelectedResearch(null);
+      }
+
+      if (members.status === "fulfilled") {
+        setDocumentMembers(members.value);
+      }
+      if (people.status === "fulfilled") {
+        setDocumentPeople(people.value);
+      } else {
+        setDocumentPeople(null);
+      }
       if (team.status === "fulfilled") {
         setProjectTeam(team.value);
         setTeamDraft({
+          researcher_ids: team.value.researchers.map(
+            (member) => member.user_id,
+          ),
           adviser_id: team.value.adviser?.user_id ?? "",
           research_office_representative_id:
             team.value.research_office_representative?.user_id ?? "",
@@ -2560,6 +2626,7 @@ function InstructorSections({
         panel_member: panelists.status === "fulfilled" ? panelists.value : [],
       });
       const failedRequest = [
+        fullResearch,
         members,
         team,
         advisers,
@@ -2593,6 +2660,8 @@ function InstructorSections({
     setSelectedDocument(null);
     setDocumentMembers([]);
     setProjectTeam(null);
+    setSelectedResearch(null);
+    setDocumentPeople(null);
     setProjectManageOpen(false);
     resetProjectDisclosures();
     if (openSection) navigate(`/app/instructor/sections/${openSection.id}`);
@@ -2603,10 +2672,46 @@ function InstructorSections({
     navigate("/app/instructor/sections");
   }
 
-  async function saveProjectTeamRole(
-    role: "adviser" | "researchOffice" | "chair" | "panelMembers",
+    async function loadProjectTeamStage(
+    stage: "proposal" | "final",
+    options?: { openModal?: boolean; resetDisclosures?: boolean },
   ) {
     if (!openSection || !selectedDocument) return;
+    setManagedDefenseStage(stage);
+    if (options?.resetDisclosures) {
+      resetProjectDisclosures();
+    } else {
+      setDetailsNotice("");
+    }
+    setTeamLoading(true);
+    try {
+      const team = await getInstructorProjectTeam(
+        openSection.id,
+        selectedDocument.research_document_id,
+        stage,
+      );
+      setProjectTeam(team);
+      setTeamDraft({
+        researcher_ids: team.researchers.map((member) => member.user_id),
+        adviser_id: team.adviser?.user_id ?? "",
+        research_office_representative_id:
+          team.research_office_representative?.user_id ?? "",
+        chair_id: team.chair?.user_id ?? "",
+        panel_member_ids: team.panel_members.map((member) => member.user_id),
+      });
+      if (options?.openModal) setProjectManageOpen(true);
+    } catch (error) {
+      setDetailsNotice(
+        friendlyError(error, "The selected defense team could not be loaded"),
+      );
+    } finally {
+      setTeamLoading(false);
+    }
+  }
+
+  async function saveProjectTeamRole(
+    role: "adviser" | "researchOffice" | "chair" | "panelMembers",
+  ) {    if (!openSection || !selectedDocument) return;
     const requestId = teamRequestRef.current;
     setTeamBusy(true);
     setDetailsNotice("");
@@ -2622,6 +2727,9 @@ function InstructorSections({
           openSection.id,
           selectedDocument.research_document_id,
           {
+            defense_type: managedDefenseStage,
+            researcher_ids:
+              projectTeam?.researchers.map((member) => member.user_id) ?? [],
             adviser_id: projectTeam?.adviser?.user_id ?? null,
             research_office_representative_id:
               projectTeam?.research_office_representative?.user_id ?? null,
@@ -2629,8 +2737,7 @@ function InstructorSections({
             panel_member_ids:
               role === "panelMembers"
                 ? teamDraft.panel_member_ids
-                : (projectTeam?.panel_members.map((member) => member.user_id) ??
-                  []),
+                : (projectTeam?.panel_members.map((member) => member.user_id) ?? []),
           },
         );
         if (requestId !== teamRequestRef.current) return;
@@ -2645,6 +2752,7 @@ function InstructorSections({
         const team = await replaceInstructorProjectTeamRole(
           openSection.id,
           selectedDocument.research_document_id,
+          managedDefenseStage,
           teamRole,
           teamDraft[field] || null,
         );
@@ -2991,13 +3099,13 @@ function InstructorSections({
   }
 
   return (
-    <div className="workspace-content admin-sidebar-page">
+    <div className="workspace-content admin-sidebar-page my-sections-page">
       {!openSection && (
         <>
           <RolePageHeader
             role={role}
             title="My sections"
-            description="Class sections you own and the research assigned to each."
+            description="Manage your class sections."
             action={
               <span className="row-actions">
                 <Button variant="secondary" onClick={reload}>
@@ -3010,19 +3118,14 @@ function InstructorSections({
             }
           />
           {pageNotice && (
-            <p
-              role="status"
-              className={
-                pageNotice.includes("could not")
-                  ? "admin-error"
-                  : "admin-success"
-              }
-            >
-              {pageNotice}
-            </p>
+            <ToastNotification
+              message={pageNotice}
+              type={pageNotice.includes("could not") ? "error" : "success"}
+              onDismiss={() => setPageNotice("")}
+            />
           )}
           {state.status === "ready" && (
-            <div className="study-list-controls">
+            <div className="study-list-controls my-sections-controls">
               <label className="study-list-search">
                 <span>Search sections or studies</span>
                 <input
@@ -3082,9 +3185,11 @@ function InstructorSections({
           ) : state.status === "error" ? (
             <InlineError message={state.message} retry={reload} />
           ) : state.data.length === 0 ? (
-            <p className="admin-empty">No class sections have been created.</p>
+            <p className="admin-empty my-sections-empty">
+              No class sections have been created.
+            </p>
           ) : visibleSections.length === 0 ? (
-            <p className="admin-empty">
+            <p className="admin-empty my-sections-empty">
               No sections or studies match your search.
             </p>
           ) : (
@@ -3101,11 +3206,20 @@ function InstructorSections({
                     <Folder />
                   </span>
                   <span className="folder-card-copy">
-                    <strong>{section.name}</strong>
+                    <span className="folder-card-heading">
+                      <strong>{section.name}</strong>
+                      <span
+                        className={
+                          section.is_active
+                            ? "badge badge-active"
+                            : "badge badge-inactive"
+                        }
+                      >
+                        {section.is_active ? "Active" : "Inactive"}
+                      </span>
+                    </span>
                     <small>
-                      {section.section_code ?? "Section code not set"}
-                    </small>
-                    <small>
+                      {section.section_code ?? "Section code not set"} ·{" "}
                       {section.academic_year ?? "Academic year not set"}
                     </small>
                     <span>
@@ -3114,15 +3228,6 @@ function InstructorSections({
                       {section.members_count} student
                       {section.members_count === 1 ? "" : "s"}
                     </span>
-                  </span>
-                  <span
-                    className={
-                      section.is_active
-                        ? "badge badge-active"
-                        : "badge badge-inactive"
-                    }
-                  >
-                    {section.is_active ? "Active" : "Inactive"}
                   </span>
                 </button>
               ))}
@@ -3146,48 +3251,96 @@ function InstructorSections({
           aria-label={`Section details: ${openSection.name}`}
         >
           <div className="section-page-toolbar">
-            <Button variant="quiet" onClick={closeSectionDetails}>
-              Back to Sections
+            <Button
+              variant="secondary"
+              className="icon-button"
+              aria-label="Back to sections"
+              title="Back to sections"
+              onClick={closeSectionDetails}
+            >
+              <ArrowLeft />
             </Button>
           </div>
           <div className="section-details section-details-redesigned">
             <div className="section-details-header">
-              <div>
-                <p className="eyebrow">Instructor workspace / Class section</p>
+              <div className="section-details-heading-copy">
                 <h2>{openSection.name}</h2>
-                <p className="section-details-intro">
+                <p className="sr-only">
                   Manage enrolled researchers and the studies connected to this
                   section.
                 </p>
+                <div className="section-details-meta">
+                  <span
+                    className={
+                      openSection.is_active
+                        ? "badge badge-active"
+                        : "badge badge-inactive"
+                    }
+                  >
+                    {openSection.is_active ? "Active" : "Inactive"}
+                  </span>
+                  <span>{openSection.academic_year ?? "No academic year"}</span>
+                  <span>
+                    {openSection.documents_count} project
+                    {openSection.documents_count === 1 ? "" : "s"}
+                  </span>
+                  <span>
+                    {openSection.members_count} student
+                    {openSection.members_count === 1 ? "" : "s"}
+                  </span>
+                </div>
               </div>
-              <span
-                className={
-                  openSection.is_active
-                    ? "badge badge-active"
-                    : "badge badge-inactive"
-                }
-              >
-                {openSection.is_active ? "Active section" : "Inactive section"}
-              </span>
+              <div className="section-details-header-actions">
+                <div className="section-details-actions">
+                  <Button
+                    variant="secondary"
+                    className="icon-button"
+                    aria-label={
+                      openSection.is_active
+                        ? "Deactivate section"
+                        : "Activate section"
+                    }
+                    title={
+                      openSection.is_active
+                        ? "Deactivate section"
+                        : "Activate section"
+                    }
+                    onClick={() => void toggleActive(openSection)}
+                  >
+                    <Power />
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    className="icon-button"
+                    aria-label="Edit section"
+                    title="Edit section"
+                    onClick={() => {
+                      setEditName(openSection.name);
+                      setEditSectionCode(openSection.section_code ?? "");
+                      setEditYear(openSection.academic_year ?? "");
+                      setEditing(true);
+                    }}
+                  >
+                    <Pencil />
+                  </Button>
+                </div>
+              </div>
             </div>
-            <div className="section-details-meta">
-              <span>{openSection.academic_year ?? "No academic year"}</span>
-              <span>
-                {openSection.documents_count} document
-                {openSection.documents_count === 1 ? "" : "s"}
-              </span>
-              <span>
-                {openSection.members_count} student
-                {openSection.members_count === 1 ? "" : "s"}
-              </span>
-            </div>
+            {detailsNotice && (
+              <ToastNotification
+                message={detailsNotice}
+                type={detailsNotice.includes("could not") ? "error" : "success"}
+                onDismiss={() => setDetailsNotice("")}
+              />
+            )}
             <div className="study-list-controls section-study-controls">
               <label className="study-list-search">
-                <span>Search studies or researchers</span>
+                <span>Search</span>
                 <input
                   type="search"
+                  aria-label="Search studies or researchers"
                   value={studySearch}
-                  placeholder="Search studies or researchers..."
+                  placeholder="Search projects or students..."
                   onChange={(event) => setStudySearch(event.target.value)}
                 />
               </label>
@@ -3234,51 +3387,6 @@ function InstructorSections({
                 </Button>
               )}
             </div>
-            {detailsNotice && (
-              <p
-                role="status"
-                className={
-                  detailsNotice.includes("could not")
-                    ? "admin-error"
-                    : "admin-success"
-                }
-              >
-                {detailsNotice}
-              </p>
-            )}
-            <div className="section-details-actions">
-              <Button
-                variant="secondary"
-                className="icon-button"
-                aria-label={
-                  openSection.is_active
-                    ? "Deactivate section"
-                    : "Activate section"
-                }
-                title={
-                  openSection.is_active
-                    ? "Deactivate section"
-                    : "Activate section"
-                }
-                onClick={() => void toggleActive(openSection)}
-              >
-                <Power />
-              </Button>
-              <Button
-                variant="secondary"
-                className="icon-button"
-                aria-label="Edit section"
-                title="Edit section"
-                onClick={() => {
-                  setEditName(openSection.name);
-                  setEditSectionCode(openSection.section_code ?? "");
-                  setEditYear(openSection.academic_year ?? "");
-                  setEditing(true);
-                }}
-              >
-                <Pencil />
-              </Button>
-            </div>
             {editing && (
               <Modal
                 label="Edit section"
@@ -3290,7 +3398,7 @@ function InstructorSections({
                   className="admin-inline-form section-edit-form section-dialog-form"
                 >
                   <h2>Edit section</h2>
-                  <label>
+                  <label className="section-dialog-name">
                     Section name
                     <input
                       value={editName}
@@ -3318,6 +3426,14 @@ function InstructorSections({
                     />
                   </label>
                   <div className="modal-actions">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => setEditing(false)}
+                      disabled={editBusy}
+                    >
+                      Cancel
+                    </Button>
                     <Button type="submit" disabled={editBusy}>
                       {editBusy ? "Saving…" : "Save changes"}
                     </Button>
@@ -3325,25 +3441,23 @@ function InstructorSections({
                 </form>
               </Modal>
             )}
-            <section className="section-detail-block">
+            <section className="section-detail-block research-folder-surface">
               <div className="section-block-heading">
                 <div>
-                  <p className="eyebrow">Research records</p>
                   <h3>Research projects</h3>
                 </div>
-                <span>{openSection.documents_count}</span>
-              </div>
-              <div className="section-block-actions">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className="icon-button"
-                  aria-label="Add Research Project"
-                  title="Add research project"
-                  onClick={() => setAddProjectOpen(true)}
-                >
-                  <Plus />
-                </Button>
+                <div className="section-block-heading-actions">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="icon-button"
+                    aria-label="Add Research Project"
+                    title="Add research project"
+                    onClick={() => setAddProjectOpen(true)}
+                  >
+                    <Plus />
+                  </Button>
+                </div>
               </div>
               {addProjectOpen && (
                 <Modal
@@ -3371,6 +3485,14 @@ function InstructorSections({
                       />
                     </label>
                     <div className="modal-actions">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => setAddProjectOpen(false)}
+                        disabled={newProjectBusy}
+                      >
+                        Cancel
+                      </Button>
                       <Button type="submit" disabled={newProjectBusy}>
                         {newProjectBusy ? "Creating…" : "Create project"}
                       </Button>
@@ -3392,17 +3514,14 @@ function InstructorSections({
                 </p>
               ) : sectionDocuments.length === 0 ? (
                 <div className="section-empty-folder-state">
-                  <p className="admin-empty">No research-title folders yet.</p>
-                  <p>
-                    Create a research project to add its folder to this section.
-                  </p>
+                  <p className="admin-empty">No research projects yet.</p>
                 </div>
               ) : visibleDocuments.length === 0 ? (
                 <p className="admin-empty">
                   No studies match your search and filters.
                 </p>
               ) : (
-                <div className="research-title-folders">
+                <div className="research-title-folders research-folder-list">
                   {visibleDocuments.map((document) => (
                     <ResearchFolderRow
                       key={document.research_document_id}
@@ -3428,22 +3547,20 @@ function InstructorSections({
             <section className="section-detail-block">
               <div className="section-block-heading">
                 <div>
-                  <p className="eyebrow">Section roster</p>
-                  <h3>Student researchers</h3>
+                  <h3>Students</h3>
                 </div>
-                <span>{openSection.members_count}</span>
-              </div>
-              <div className="section-block-actions">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className="icon-button"
-                  aria-label="Add student"
-                  title="Add student"
-                  onClick={() => setAddStudentOpen(true)}
-                >
-                  <UserPlus />
-                </Button>
+                <div className="section-block-heading-actions">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="icon-button"
+                    aria-label="Add student"
+                    title="Add student"
+                    onClick={() => setAddStudentOpen(true)}
+                  >
+                    <UserPlus />
+                  </Button>
+                </div>
               </div>
               {studentsState[openSection.id] === "loading" ? (
                 <p className="section-documents-loading">Loading students…</p>
@@ -3467,11 +3584,13 @@ function InstructorSections({
                   </Button>
                 </p>
               ) : (studentsFor[openSection.id] ?? []).length === 0 ? (
-                <p className="admin-empty">
-                  No student researchers are enrolled in this section.
+                <p className="admin-empty section-block-empty">
+                  No students enrolled.
                 </p>
               ) : sortedStudents.length === 0 ? (
-                <p className="admin-empty">No researchers match your search.</p>
+                <p className="admin-empty section-block-empty">
+                  No researchers match your search.
+                </p>
               ) : (
                 <div className="admin-table-wrap">
                   <table>
@@ -3486,8 +3605,7 @@ function InstructorSections({
                           direction={studentSortDirection}
                           onSort={(key) =>
                             changeStudentSort(
-                              key as
-                                "student" | "email" | "student_id" | "added",
+                              key as "student" | "email" | "added",
                             )
                           }
                         >
@@ -3499,25 +3617,11 @@ function InstructorSections({
                           direction={studentSortDirection}
                           onSort={(key) =>
                             changeStudentSort(
-                              key as
-                                "student" | "email" | "student_id" | "added",
+                              key as "student" | "email" | "added",
                             )
                           }
                         >
                           Email
-                        </SortableHeader>
-                        <SortableHeader
-                          sortKey="student_id"
-                          activeSort={studentSort}
-                          direction={studentSortDirection}
-                          onSort={(key) =>
-                            changeStudentSort(
-                              key as
-                                "student" | "email" | "student_id" | "added",
-                            )
-                          }
-                        >
-                          Student ID
                         </SortableHeader>
                         <SortableHeader
                           sortKey="added"
@@ -3525,8 +3629,7 @@ function InstructorSections({
                           direction={studentSortDirection}
                           onSort={(key) =>
                             changeStudentSort(
-                              key as
-                                "student" | "email" | "student_id" | "added",
+                              key as "student" | "email" | "added",
                             )
                           }
                         >
@@ -3540,7 +3643,6 @@ function InstructorSections({
                         <tr key={member.id}>
                           <td>{studentName(member)}</td>
                           <td>{member.email}</td>
-                          <td>{member.student_employee_id ?? "—"}</td>
                           <td>{displayDate(member.added_at)}</td>
                           <td>
                             <Button
@@ -3572,7 +3674,7 @@ function InstructorSections({
                   busy={studentBusy[openSection.id]}
                 >
                   <div className="student-add-form">
-                    <h3>Add a student researcher</h3>
+                    <h2>Add a student researcher</h2>
                     <label>
                       Search students
                       <input
@@ -3580,7 +3682,7 @@ function InstructorSections({
                         onChange={(event) =>
                           changeStudentQuery(openSection.id, event.target.value)
                         }
-                        placeholder="Name, email, or student ID"
+                        placeholder="Name or email"
                       />
                     </label>
                     <ul className="student-candidates">
@@ -3603,18 +3705,21 @@ function InstructorSections({
                           )
                           .map((candidate) => (
                             <li key={candidate.id}>
-                              <span>
-                                <strong>{studentName(candidate)}</strong> (
-                                {candidate.email})
+                              <span className="student-candidate-copy">
+                                <strong>{studentName(candidate)}</strong>
+                                <small>{candidate.email}</small>
                               </span>
                               <Button
                                 variant="secondary"
+                                className="icon-button"
+                                aria-label={`Add ${studentName(candidate)}`}
+                                title={`Add ${studentName(candidate)}`}
                                 disabled={studentBusy[openSection.id]}
                                 onClick={() =>
                                   void addStudent(openSection.id, candidate.id)
                                 }
                               >
-                                Add
+                                <Plus />
                               </Button>
                             </li>
                           ))
@@ -3661,7 +3766,9 @@ function InstructorSections({
               name: studentName(member),
               email: member.email,
             }))}
+            sdgs={selectedResearch?.sdgs ?? []}
             projectTeam={projectTeam}
+            people={documentPeople}
             teamLoading={teamLoading}
             canPostFeedback
             monitoringReadOnly={false}
@@ -3673,10 +3780,15 @@ function InstructorSections({
               onDeleteProject: () => setConfirmProjectDelete(true),
               onManageAssignments: teamLoading
                 ? undefined
-                : () => {
-                    resetProjectDisclosures();
-                    setProjectManageOpen(true);
+                : (stage) => {
+                    void loadProjectTeamStage(stage, {
+                      openModal: true,
+                      resetDisclosures: true,
+                    });
                   },
+              onDefenseTeamStageChange: (stage) => {
+                void loadProjectTeamStage(stage);
+              },
               onRemoveResearcher: teamLoading
                 ? undefined
                 : (researcher) => {
@@ -3734,6 +3846,30 @@ function InstructorSections({
                 aria-label="Project assignments"
               >
                 <h2>Manage project assignments</h2>
+                <div className="project-team-stage-control project-assignment-stage-control">
+                  <label>
+                    Defense stage
+                    <select
+                      aria-label="Assignment defense stage"
+                      value={managedDefenseStage}
+                      disabled={teamLoading || teamBusy}
+                      onChange={(event) => {
+                        void loadProjectTeamStage(
+                          event.target.value as "proposal" | "final",
+                          { resetDisclosures: true },
+                        );
+                      }}
+                    >
+                      <option value="proposal">Proposal Defense</option>
+                      <option value="final">Final Defense</option>
+                    </select>
+                  </label>
+                  <p className="project-picker-note">
+                    {managedDefenseStage === "proposal"
+                      ? "Assignments saved here apply to the proposal defense only."
+                      : "Assignments saved here apply to the final defense only."}
+                  </p>
+                </div>
                 <div className="project-assignment-control">
                   <span>
                     <strong>Student researchers</strong>
@@ -3804,7 +3940,7 @@ function InstructorSections({
                             .toLocaleLowerCase();
                           return (
                             query === "" ||
-                            `${studentName(candidate)} ${candidate.email} ${candidate.student_employee_id ?? ""}`
+                            `${studentName(candidate)} ${candidate.email}`
                               .toLocaleLowerCase()
                               .includes(query)
                           );
@@ -7611,6 +7747,43 @@ function OfficeReports({ role }: { role: Role }) {
               </table>
             </div>
           </section>
+          <section className="panel-card admin-data-card">
+            <div className="admin-card-heading">
+              <div>
+                <h2>By Sustainable Development Goal</h2>
+                <p>Research alignments across the 17 UN goals.</p>
+              </div>
+            </div>
+            <div className="admin-table-wrap">
+              <table>
+                <caption className="sr-only">
+                  By Sustainable Development Goal
+                </caption>
+                <thead>
+                  <tr>
+                    <th>Goal</th>
+                    <th>Records</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(state.data.by_sdg ?? []).map((row) => (
+                    <tr key={row.id}>
+                      <td>
+                        <span
+                          className="report-sdg-number"
+                          style={{ backgroundColor: row.color_hex }}
+                        >
+                          {row.id}
+                        </span>{" "}
+                        {row.title}
+                      </td>
+                      <td>{row.total}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
         </>
       )}
     </div>
@@ -7618,68 +7791,6 @@ function OfficeReports({ role }: { role: Role }) {
 }
 
 /* ---------------------------------- Researcher ---------------------------------- */
-
-function ResearcherWorkflowGuide() {
-  return (
-    <section
-      className="researcher-workflow-guide"
-      aria-labelledby="researcher-workflow-title"
-    >
-      <div className="researcher-workflow-intro">
-        <p className="eyebrow">How My Research works</p>
-        <h2 id="researcher-workflow-title">One folder, two kinds of updates</h2>
-        <p>
-          Use the research folder for the manuscript workflow. Research Progress
-          Updates are separate informal updates inside that same folder and do
-          not submit your manuscript for review or complete an official defense
-          form.
-        </p>
-      </div>
-      <ol className="researcher-workflow-steps">
-        <li>
-          <span>1</span>
-          <div>
-            <strong>Open your assigned folder</strong>
-            <small>
-              Select Manage folder to view files, revisions, Research Progress
-              Updates, and feedback.
-            </small>
-          </div>
-        </li>
-        <li>
-          <span>2</span>
-          <div>
-            <strong>Prepare and submit research</strong>
-            <small>
-              Edit the details, upload the manuscript, then submit the draft for
-              review.
-            </small>
-          </div>
-        </li>
-        <li>
-          <span>3</span>
-          <div>
-            <strong>Report Research Progress Updates</strong>
-            <small>
-              Use Research Progress Updates inside the folder to report
-              accomplishments or blockers without changing submission status.
-            </small>
-          </div>
-        </li>
-        <li>
-          <span>4</span>
-          <div>
-            <strong>Respond to review</strong>
-            <small>
-              When revision is required, update the record and upload the
-              revised manuscript.
-            </small>
-          </div>
-        </li>
-      </ol>
-    </section>
-  );
-}
 
 function ResearcherSubmissions({
   role,
@@ -7689,9 +7800,6 @@ function ResearcherSubmissions({
   navigate: (path: string) => void;
 }) {
   const [page, setPage] = useState(1);
-  const [statusFilter, setStatusFilter] = useState<
-    ResearchDocumentSummaryResource["submission_status"] | ""
-  >("");
   const [result, setResult] =
     useState<LaravelPaginatedResponse<ResearchDocumentSummaryResource> | null>(
       null,
@@ -7701,6 +7809,9 @@ function ResearcherSubmissions({
   const [error, setError] = useState("");
   const [editing, setEditing] =
     useState<ResearchDocumentSummaryResource | null>(null);
+  const editingMetadataOnly =
+  editing !== null &&
+  ["submitted", "under_review"].includes(editing.submission_status);
   const [activityFor, setActivityFor] =
     useState<ResearchDocumentSummaryResource | null>(null);
   const [editDirty, setEditDirty] = useState(false);
@@ -7723,7 +7834,6 @@ function ResearcherSubmissions({
     let cancelled = false;
     void listResearchDocuments({
       mine: true,
-      submission_status: statusFilter || undefined,
       page,
       per_page: 25,
     })
@@ -7743,10 +7853,13 @@ function ResearcherSubmissions({
         setActivityFor(null);
         setLoading(false);
       });
+    const editingMetadataOnly =
+    editing !== null &&
+    ["submitted", "under_review"].includes(editing.submission_status);
     return () => {
       cancelled = true;
     };
-  }, [attempt, page, statusFilter]);
+  }, [attempt, page]);
 
   async function submit(document: ResearchDocumentSummaryResource) {
     setNotice("");
@@ -7767,16 +7880,9 @@ function ResearcherSubmissions({
   return (
     <div className="workspace-content admin-sidebar-page">
       <RolePageHeader
-        role={role}
         title="My research"
         description="Research folders assigned to you by your Research Instructor."
-        action={
-          <Button variant="secondary" onClick={refresh}>
-            <RefreshCw /> Refresh
-          </Button>
-        }
       />
-      <ResearcherWorkflowGuide />
       {notice && (
         <p
           role="status"
@@ -7801,37 +7907,6 @@ function ResearcherSubmissions({
           </Button>
         </section>
       )}
-      <div className="admin-filters">
-        <label>
-          Research status
-          <select
-            aria-label="Research status"
-            value={statusFilter}
-            onChange={(event) => {
-              beginLoad();
-              setStatusFilter(
-                event.target.value as
-                  ResearchDocumentSummaryResource["submission_status"] | "",
-              );
-              setPage(1);
-            }}
-          >
-            <option value="">All statuses</option>
-            {[
-              "draft",
-              "submitted",
-              "under_review",
-              "revision_required",
-              "approved",
-              "archived",
-            ].map((status) => (
-              <option key={status} value={status}>
-                {label(status)}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
       {error ? (
         <InlineError message={error} retry={refresh} />
       ) : loading || result === null ? (
@@ -7846,8 +7921,8 @@ function ResearcherSubmissions({
           </p>
         </section>
       ) : (
-        <section className="panel-card research-folder-collection">
-          <div className="research-title-folders">
+        <section className="panel-card research-folder-collection research-folder-surface">
+          <div className="research-title-folders research-folder-list">
             {result.data.map((document) => (
               <ResearchFolderRow
                 key={document.id}
@@ -7877,31 +7952,40 @@ function ResearcherSubmissions({
                         <MessageSquareText size={17} aria-hidden="true" />
                       </button>
                     )}
-                    {source === "live" && !loading && (
-                      <Button
-                        variant="secondary"
-                        onClick={() => navigate(`/research/${document.id}`)}
-                      >
-                        <ExternalLink size={16} aria-hidden="true" /> Manage
-                        folder
-                      </Button>
-                    )}
                     {source === "live" &&
                       !loading &&
-                      ["draft", "revision_required"].includes(
+                      ["draft", "revision_required", "submitted", "under_review"].includes(
                         document.submission_status,
                       ) && (
                         <>
-                          <Button
-                            variant="secondary"
-                            onClick={() => {
-                              setEditDirty(false);
-                              setEditing(document);
-                            }}
-                            disabled={submitting === String(document.id)}
-                          >
-                            <Pencil size={16} aria-hidden="true" /> Edit
-                          </Button>
+                          {["submitted", "under_review"].includes(
+                            document.submission_status,
+                          ) ? (
+                            <button
+                              className="icon-button"
+                              aria-label="Edit metadata"
+                              title="Edit metadata"
+                              onClick={() => {
+                                setEditDirty(false);
+                                setEditing(document);
+                              }}
+                              disabled={submitting === String(document.id)}
+                            >
+                              <Pencil size={17} aria-hidden="true" />
+                            </button>
+                          ) : (
+                            <Button
+                              variant="secondary"
+                              onClick={() => {
+                                setEditDirty(false);
+                                setEditing(document);
+                              }}
+                              disabled={submitting === String(document.id)}
+                            >
+                              <Pencil size={16} aria-hidden="true" /> Edit
+                            </Button>
+                          )}
+
                           {document.submission_status === "draft" && (
                             <Button
                               onClick={() => void submit(document)}
@@ -7915,6 +7999,7 @@ function ResearcherSubmissions({
                           )}
                         </>
                       )}
+
                   </span>
                 }
               />
@@ -7945,7 +8030,11 @@ function ResearcherSubmissions({
       )}
       {editing && source === "live" && !loading && (
         <Modal
-          label={`Edit ${editing.title}`}
+          label={
+            editingMetadataOnly
+              ? `Edit metadata for ${editing.title}`
+              : `Edit ${editing.title}`
+          }
           onClose={() => setEditing(null)}
           dirty={editDirty}
           size="large"
@@ -7955,12 +8044,15 @@ function ResearcherSubmissions({
             role={role}
             draft={editing}
             embedded
+            metadataOnly={editingMetadataOnly}
             onDirtyChange={setEditDirty}
             onCancel={() => setEditing(null)}
             onSaved={(document, submitted) => {
               setNotice(
                 submitted
                   ? `"${document.title}" has been submitted.`
+                  : editingMetadataOnly
+                  ? `Metadata for "${document.title}" has been updated.`
                   : `Draft "${document.title}" has been updated.`,
               );
               setEditing(null);
@@ -7995,6 +8087,7 @@ export function ResearcherNewSubmission({
   role,
   draft,
   embedded = false,
+  metadataOnly = false,
   onSaved,
   onCancel,
   onDirtyChange,
@@ -8002,6 +8095,7 @@ export function ResearcherNewSubmission({
   role: Role;
   draft: ResearchDocumentSummaryResource;
   embedded?: boolean;
+  metadataOnly?: boolean;
   onSaved?: (
     document: ResearchDocumentSummaryResource,
     submitted: boolean,
@@ -8030,6 +8124,9 @@ export function ResearcherNewSubmission({
   const [degreeProgram, setDegreeProgram] = useState(
     draft?.degree_program ?? "",
   );
+  const [sdgIds, setSdgIds] = useState(
+    () => draft.sdgs?.map((sdg) => sdg.id) ?? [],
+  );
   const [authors, setAuthors] = useState<AuthorDraft[]>(initialAuthors);
   const [documentType, setDocumentType] = useState<
     DocumentFileResource["document_type"]
@@ -8052,6 +8149,7 @@ export function ResearcherNewSubmission({
     researchStage: draft?.research_stage ?? "title_proposal",
     institute: draft?.institute ?? "",
     degreeProgram: draft?.degree_program ?? "",
+    sdgIds: draft.sdgs?.map((sdg) => sdg.id) ?? [],
     authors: initialAuthors,
   });
   const currentSnapshot = JSON.stringify({
@@ -8062,6 +8160,7 @@ export function ResearcherNewSubmission({
     researchStage,
     institute,
     degreeProgram,
+    sdgIds,
     authors,
   });
   const dirty = manuscript !== null || currentSnapshot !== initialSnapshot;
@@ -8106,6 +8205,7 @@ export function ResearcherNewSubmission({
     setResearchStage("title_proposal");
     setInstitute("");
     setDegreeProgram("");
+    setSdgIds([]);
     setAuthors([
       { author_name: "", user_id: "", is_corresponding_author: false },
     ]);
@@ -8136,7 +8236,9 @@ export function ResearcherNewSubmission({
     const submitter = (event.nativeEvent as SubmitEvent)
       .submitter as HTMLButtonElement | null;
     const submitAfterSave =
-      !isRevisionRequired && submitter?.value === "submit";
+      !metadataOnly &&
+      !isRevisionRequired &&
+      submitter?.value === "submit";
     if (authors.some((author) => !author.author_name.trim())) {
       setError("Every author must have a name.");
       return;
@@ -8167,13 +8269,18 @@ export function ResearcherNewSubmission({
         abstract: abstract.trim() || null,
         keywords: keywords.trim() || null,
         publication_year: publicationYear ? Number(publicationYear) : null,
+        sdg_ids: sdgIds,
         research_stage: researchStage as
           "title_proposal" | "ongoing" | "completed",
-        authors: authors.map((author) => ({
-          author_name: author.author_name.trim(),
-          user_id: author.user_id.trim() || null,
-          is_corresponding_author: author.is_corresponding_author,
-        })),
+        ...(!metadataOnly
+          ? {
+              authors: authors.map((author) => ({
+                author_name: author.author_name.trim(),
+                user_id: author.user_id.trim() || null,
+                is_corresponding_author: author.is_corresponding_author,
+              })),
+            }
+          : {}),
       };
       if (!saved) throw new Error("An assigned research folder is required.");
       saved = await updateResearchDraft(saved.id, input);
@@ -8234,15 +8341,27 @@ export function ResearcherNewSubmission({
       {embedded ? (
         <header className="workspace-header">
           <div>
-            <p className="eyebrow">Researcher / Draft</p>
-            <h2>{draft ? "Edit submission" : "New submission"}</h2>
-            <p>
-              {draft
+          <p className="eyebrow">
+            {metadataOnly ? "Researcher / Metadata" : "Researcher / Draft"}
+          </p>
+
+          <h2>
+            {metadataOnly
+              ? "Edit metadata"
+              : draft
+                ? "Edit submission"
+                : "New submission"}
+          </h2>
+
+          <p>
+            {metadataOnly
+              ? "Update the research details associated with this manuscript."
+              : draft
                 ? isRevisionRequired
                   ? "Update metadata, authors, and revised manuscript files before resubmitting the requested revision."
                   : "Update metadata, authors, and manuscript files before submission."
                 : "Create a research draft, add its authors, and optionally attach a manuscript."}
-            </p>
+          </p>
           </div>
         </header>
       ) : (
@@ -8255,18 +8374,42 @@ export function ResearcherNewSubmission({
       <section className="panel-card admin-provision-card">
         <form
           onSubmit={saveSubmission}
-          className="admin-inline-form submission-form"
+          className={`admin-inline-form submission-form ${
+            metadataOnly ? "metadata-edit-form" : ""
+          }`}
           aria-label="Research submission"
         >
-          <label className="submission-title-field">
-            Title
-            <input
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              required
-              maxLength={500}
-            />
-          </label>
+          <div className="metadata-primary-row">
+            <label className="submission-title-field">
+              Title
+              <input
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                required
+                maxLength={500}
+              />
+            </label>
+          {metadataOnly && (
+            <label className="metadata-year-field">
+              Publication year
+              <select
+                value={publicationYear}
+                onChange={(event) => setPublicationYear(event.target.value)}
+              >
+                <option value="">Select year</option>
+                {Array.from(
+                  { length: new Date().getFullYear() - 1900 },
+                  (_, index) => new Date().getFullYear() - index,
+                ).map((year) => (
+                  <option key={year} value={year}>
+                    {year}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          </div>
+
           <label className="submission-abstract-field">
             Abstract
             <textarea
@@ -8276,6 +8419,7 @@ export function ResearcherNewSubmission({
               maxLength={50000}
             />
           </label>
+
           <label className="submission-keywords-field">
             Keywords
             <input
@@ -8285,14 +8429,109 @@ export function ResearcherNewSubmission({
               placeholder="Comma separated"
             />
           </label>
+
           <div className="score-grid submission-metadata-fields">
-            <label>
-              Publication year
-              <PublicationYearInput
-                value={publicationYear}
-                onChange={(event) => setPublicationYear(event.target.value)}
-              />
-            </label>
+            {!metadataOnly && (
+              <label>
+                Publication year
+                <PublicationYearInput
+                  value={publicationYear}
+                  onChange={(event) => setPublicationYear(event.target.value)}
+                />
+              </label>
+            )}
+
+            {metadataOnly ? (
+              <>
+                <label>
+                  Institute
+                  <select
+                    value={institute}
+                    onChange={(event) => {
+                      setInstitute(event.target.value);
+                      setDegreeProgram("");
+                    }}
+                  >
+                    <option value="">Select institute</option>
+                    {instituteNames.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label>
+                  Program
+                  <select
+                    value={degreeProgram}
+                    disabled={!institute}
+                    onChange={(event) => setDegreeProgram(event.target.value)}
+                  >
+                    <option value="">
+                      {institute ? "Select program" : "Select institute first"}
+                    </option>
+
+                    {(
+                      programsByInstitute[
+                        institute as keyof typeof programsByInstitute
+                      ] ?? []
+                    ).map((program) => (
+                      <option key={program} value={program}>
+                        {program}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </>
+            ) : (
+              <>
+                <label>
+                  Institute
+                  <input
+                    list="submission-institutes"
+                    value={institute}
+                    placeholder="Search institutes"
+                    onChange={(event) => {
+                      setInstitute(event.target.value);
+                      setDegreeProgram("");
+                    }}
+                  />
+                  <datalist id="submission-institutes">
+                    {instituteNames.map((name) => (
+                      <option key={name} value={name} />
+                    ))}
+                  </datalist>
+                </label>
+
+                <label>
+                  Program
+                  <input
+                    list="submission-programs"
+                    value={degreeProgram}
+                    placeholder={
+                      institute ? "Search programs" : "Choose an institute first"
+                    }
+                    disabled={
+                      !instituteNames.includes(
+                        institute as (typeof instituteNames)[number],
+                      )
+                    }
+                    onChange={(event) => setDegreeProgram(event.target.value)}
+                  />
+                  <datalist id="submission-programs">
+                    {(
+                      programsByInstitute[
+                        institute as keyof typeof programsByInstitute
+                      ] ?? []
+                    ).map((program) => (
+                      <option key={program} value={program} />
+                    ))}
+                  </datalist>
+                </label>
+              </>
+            )}
+
             <label>
               Research stage
               <select
@@ -8311,49 +8550,17 @@ export function ResearcherNewSubmission({
                 ))}
               </select>
             </label>
-            <label>
-              Institute
-              <input
-                list="submission-institutes"
-                value={institute}
-                placeholder="Search institutes"
-                onChange={(event) => {
-                  setInstitute(event.target.value);
-                  setDegreeProgram("");
-                }}
-              />
-              <datalist id="submission-institutes">
-                {instituteNames.map((name) => (
-                  <option key={name} value={name} />
-                ))}
-              </datalist>
-            </label>
-            <label>
-              Program
-              <input
-                list="submission-programs"
-                value={degreeProgram}
-                placeholder={
-                  institute ? "Search programs" : "Choose an institute first"
-                }
-                disabled={
-                  !instituteNames.includes(
-                    institute as (typeof instituteNames)[number],
-                  )
-                }
-                onChange={(event) => setDegreeProgram(event.target.value)}
-              />
-              <datalist id="submission-programs">
-                {(
-                  programsByInstitute[
-                    institute as keyof typeof programsByInstitute
-                  ] ?? []
-                ).map((program) => (
-                  <option key={program} value={program} />
-                ))}
-              </datalist>
-            </label>
           </div>
+
+          {metadataOnly ? (
+            <div className="metadata-sdg">
+              <SdgSelector selectedIds={sdgIds} onChange={setSdgIds} />
+            </div>
+          ) : (
+            <SdgSelector selectedIds={sdgIds} onChange={setSdgIds} />
+          )}
+
+          {!metadataOnly && (
           <fieldset className="author-editor submission-authors">
             <legend>Authors</legend>
             {authors.map((author, index) => (
@@ -8382,6 +8589,8 @@ export function ResearcherNewSubmission({
               Add author
             </Button>
           </fieldset>
+          )}
+          {!metadataOnly && (
           <fieldset className="author-editor submission-file">
             <legend>Manuscript file (optional)</legend>
             <div className="score-grid">
@@ -8424,6 +8633,8 @@ export function ResearcherNewSubmission({
               />
             </div>
           </fieldset>
+          )}
+
           <div className="modal-actions submission-actions">
             <Button
               type="button"
@@ -8440,19 +8651,21 @@ export function ResearcherNewSubmission({
               {onCancel ? "Cancel" : "Reset"}
             </Button>
             <Button type="submit" value="draft" disabled={saving}>
-              {saving
-                ? "Saving…"
+            {saving
+              ? "Saving…"
+              : metadataOnly
+                ? "Save metadata"
                 : isRevisionRequired
                   ? "Save changes"
                   : draft
                     ? "Update draft"
                     : "Save draft"}
             </Button>
-            {!isRevisionRequired && (
-              <Button type="submit" value="submit" disabled={saving}>
-                {saving ? "Working…" : "Save and submit"}
-              </Button>
-            )}
+          {!metadataOnly && !isRevisionRequired && (
+            <Button type="submit" value="submit" disabled={saving}>
+              {saving ? "Working…" : "Save and submit"}
+            </Button>
+          )}
           </div>
         </form>
         {notice && (
@@ -8480,6 +8693,9 @@ export function ResearcherNewSubmission({
 }
 
 const MAX_SIMILARITY_QUERY_LENGTH = 200;
+const MAX_CONTENT_UPLOAD_BYTES = 25 * 1024 * 1024;
+const CONTENT_UPLOAD_ACCEPT =
+  ".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 /**
  * Pre-submission duplicate check.
@@ -8491,14 +8707,14 @@ const MAX_SIMILARITY_QUERY_LENGTH = 200;
 function ResearcherSimilarityCheck({
   role,
   initialMode = "title",
-  showModePicker = false,
 }: {
   role: Role;
   initialMode?: "title" | "content";
-  showModePicker?: boolean;
 }) {
-  const [mode, setMode] = useState(initialMode);
+  const mode = initialMode;
   const [draft, setDraft] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [fileError, setFileError] = useState("");
   const [submitted, setSubmitted] = useState("");
   const [state, setState] = useState<
     | { status: "idle" }
@@ -8513,24 +8729,25 @@ function ResearcherSimilarityCheck({
   const trimmed = draft.trim();
   const tooShort = trimmed.length > 0 && trimmed.length < 2;
   const canCheck =
-    trimmed.length >= 2 &&
-    trimmed.length <= MAX_SIMILARITY_QUERY_LENGTH &&
-    state.status !== "checking";
+    state.status !== "checking" &&
+    (mode === "title"
+      ? trimmed.length >= 2 && trimmed.length <= MAX_SIMILARITY_QUERY_LENGTH
+      : file !== null && fileError === "");
 
   function runCheck() {
     if (!canCheck) return;
-    setSubmitted(trimmed);
+    setSubmitted(mode === "title" ? trimmed : (file?.name ?? "manuscript"));
     setState({ status: "checking" });
     const request =
       mode === "title"
         ? checkTitleQuerySimilarity(trimmed)
-        : checkContentQuerySimilarity(trimmed);
+        : checkContentUploadSimilarity(file as File);
     void request
       .then((matches) => setState({ status: "ready", matches }))
       .catch((requestError: unknown) =>
         setState({
           status: "error",
-          message: similarityQueryError(requestError),
+          message: similarityQueryError(requestError, mode),
         }),
       );
   }
@@ -8558,32 +8775,9 @@ function ResearcherSimilarityCheck({
         description={
           mode === "title"
             ? "Compare a proposed title or keywords only with archived research titles."
-            : "Search your keywords only against cached archived manuscript content."
+            : "Upload a manuscript to compare its extracted text with archived research."
         }
       />
-
-      {showModePicker && (
-        <div className="similarity-mode-picker" aria-label="Similarity mode">
-          <Button
-            variant={mode === "title" ? "primary" : "secondary"}
-            onClick={() => {
-              setMode("title");
-              setState({ status: "idle" });
-            }}
-          >
-            Title checker
-          </Button>
-          <Button
-            variant={mode === "content" ? "primary" : "secondary"}
-            onClick={() => {
-              setMode("content");
-              setState({ status: "idle" });
-            }}
-          >
-            Content checker
-          </Button>
-        </div>
-      )}
 
       <section className="panel-card admin-provision-card">
         <form
@@ -8594,27 +8788,76 @@ function ResearcherSimilarityCheck({
             runCheck();
           }}
         >
-          <label className="full-field" htmlFor="similarity-query">
-            {mode === "title"
-              ? "Proposed title or keywords"
-              : "Content keywords"}
-            <input
-              id="similarity-query"
-              type="search"
-              value={draft}
-              maxLength={MAX_SIMILARITY_QUERY_LENGTH}
-              placeholder={
-                mode === "title"
-                  ? "e.g. web-based inventory management system for small business"
-                  : "e.g. machine learning student performance prediction"
-              }
-              onChange={(event) => setDraft(event.target.value)}
-            />
-          </label>
+          {mode === "title" ? (
+            <label className="full-field" htmlFor="similarity-query">
+              Proposed title or keywords
+              <input
+                id="similarity-query"
+                type="search"
+                value={draft}
+                maxLength={MAX_SIMILARITY_QUERY_LENGTH}
+                placeholder="e.g. web-based inventory management system for small business"
+                onChange={(event) => setDraft(event.target.value)}
+              />
+            </label>
+          ) : (
+            <>
+              <ManuscriptFilePicker
+                label="Manuscript file"
+                help="PDF or DOCX · Maximum 25 MiB"
+                accept={CONTENT_UPLOAD_ACCEPT}
+                file={file}
+                disabled={state.status === "checking"}
+                onChange={(event) => {
+                  const selected = event.target.files?.[0] ?? null;
+                  setState({ status: "idle" });
+                  setSubmitted("");
+                  if (!selected) {
+                    setFile(null);
+                    setFileError("");
+                    return;
+                  }
+                  const extension = selected.name
+                    .split(".")
+                    .pop()
+                    ?.toLowerCase();
+                  if (!extension || !["pdf", "docx"].includes(extension)) {
+                    setFile(null);
+                    setFileError("Choose one PDF or DOCX file.");
+                    return;
+                  }
+                  if (selected.size > MAX_CONTENT_UPLOAD_BYTES) {
+                    setFile(null);
+                    setFileError("Choose a file no larger than 25 MiB.");
+                    return;
+                  }
+                  setFile(selected);
+                  setFileError("");
+                }}
+              />
+              <div className="content-upload-guidance" id="content-upload-help">
+                <p>
+                  Scanned or image-only PDFs are not supported because this
+                  checker can only read selectable text.
+                </p>
+                <p>
+                  Your uploaded file is used only for this check and is not
+                  retained.
+                </p>
+              </div>
+              {fileError && (
+                <p className="admin-error" role="alert">
+                  {fileError}
+                </p>
+              )}
+            </>
+          )}
           <div className="similarity-query-actions">
-            <span className="similarity-query-count">
-              {trimmed.length}/{MAX_SIMILARITY_QUERY_LENGTH}
-            </span>
+            {mode === "title" && (
+              <span className="similarity-query-count">
+                {trimmed.length}/{MAX_SIMILARITY_QUERY_LENGTH}
+              </span>
+            )}
             <Button type="submit" disabled={!canCheck}>
               {state.status === "checking"
                 ? "Checking…"
@@ -8624,7 +8867,7 @@ function ResearcherSimilarityCheck({
             </Button>
           </div>
         </form>
-        {tooShort && (
+        {mode === "title" && tooShort && (
           <p className="admin-empty">Enter at least two characters to check.</p>
         )}
       </section>
@@ -8650,7 +8893,9 @@ function ResearcherSimilarityCheck({
               </h2>
               <p>
                 {scored.length === 0
-                  ? "No archived study shares any terms with these keywords."
+                  ? mode === "title"
+                    ? "No archived study shares any terms with these keywords."
+                    : `No archived study shares extracted terms with “${submitted}”.`
                   : reviewRequired.length > 0
                     ? `${reviewRequired.length} archived ${reviewRequired.length === 1 ? "study requires" : "studies require"} adviser review. Discuss these results with your adviser before proceeding.`
                     : "No archived study requires adviser review."}
@@ -8795,12 +9040,16 @@ function ResearcherSimilarityCheck({
   );
 }
 
-function similarityQueryError(error: unknown) {
+function similarityQueryError(error: unknown, mode: "title" | "content") {
   if (error instanceof ApiError) {
+    if (error.code === "CONTENT_UPLOAD_UNREADABLE")
+      return "We could not read text from this file. Use a text-based PDF or DOCX; scanned or image-only PDFs are not supported.";
     if (error.status === 429)
       return "Too many checks in a short time. Wait a moment and try again.";
     if (error.status === 422)
-      return "Enter between 2 and 200 characters to check a title.";
+      return mode === "title"
+        ? "Enter between 2 and 200 characters to check a title."
+        : "Choose one PDF or DOCX file no larger than 25 MiB.";
     if (error.code === "SIMILARITY_UNAVAILABLE")
       return "The similarity engine is not available right now.";
     if (error.code === "SIMILARITY_PROCESS_FAILED")

@@ -76,10 +76,13 @@ function stubQuery(
   );
 }
 
-function renderCheck(mode: "title" | "content" = "title") {
+function renderCheck(
+  mode: "title" | "content" = "title",
+  role: "researcher" | "research-office" = "researcher",
+) {
   render(
     <RoleSidebarPage
-      role="researcher"
+      role={role}
       selectedNav="Similarity Check"
       similarityMode={mode}
       navigate={vi.fn()}
@@ -88,6 +91,16 @@ function renderCheck(mode: "title" | "content" = "title") {
 }
 
 describe("researcher similarity check", () => {
+  it("uses the same mode-specific interface for Research Office", () => {
+    renderCheck("content", "research-office");
+
+    expect(
+      screen.getByRole("heading", { name: "Content checker" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Similarity mode")).not.toBeInTheDocument();
+    expect(screen.getByText("Choose manuscript file")).toBeInTheDocument();
+  });
+
   it("compares the typed keywords rather than an existing submission", async () => {
     let sent: unknown = null;
     stubQuery(
@@ -271,16 +284,16 @@ describe("researcher similarity check", () => {
     );
   });
 
-  it("checks typed keywords only against cached archived manuscript content", async () => {
+  it("uploads a manuscript for comparison with cached archived content", async () => {
     let contentRequest = "";
-    let contentBody: unknown;
+    let contentBody: FormData | null = null;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const path = String(input);
-        if (path === "/api/similarity/content-query") {
+        if (path === "/api/similarity/content-upload") {
           contentRequest = path;
-          contentBody = JSON.parse(String(init?.body));
+          contentBody = init?.body as FormData;
           return new Response(
             JSON.stringify({
               data: [archived(1, "ARCHIVED MANUSCRIPT", "0.120000")],
@@ -296,18 +309,41 @@ describe("researcher similarity check", () => {
       screen.getByRole("heading", { name: "Content checker" }),
     ).toBeInTheDocument();
     expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Content keywords"), {
-      target: { value: "machine learning" },
+    const file = new File(["manuscript"], "machine-learning.docx", {
+      type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+    fireEvent.change(screen.getByLabelText("Manuscript file"), {
+      target: { files: [file] },
     });
     fireEvent.click(screen.getByRole("button", { name: "Check content" }));
 
     await waitFor(() =>
-      expect(contentRequest).toBe("/api/similarity/content-query"),
+      expect(contentRequest).toBe("/api/similarity/content-upload"),
     );
-    expect(contentBody).toEqual({ q: "machine learning" });
+    const submittedBody = contentBody as FormData | null;
+    expect(submittedBody).toBeInstanceOf(FormData);
+    expect(submittedBody?.get("file")).toBe(file);
     expect(
-      await screen.findByText("Content results for “machine learning”"),
+      await screen.findByText("Content results for “machine-learning.docx”"),
     ).toBeInTheDocument();
     expect(screen.getByText("Content similarity")).toBeInTheDocument();
+  });
+
+  it("rejects unsupported content files before making a request", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    renderCheck("content");
+
+    fireEvent.change(screen.getByLabelText("Manuscript file"), {
+      target: { files: [new File(["notes"], "notes.txt")] },
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Choose one PDF or DOCX file.",
+    );
+    expect(
+      screen.getByRole("button", { name: "Check content" }),
+    ).toBeDisabled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

@@ -32,6 +32,7 @@ class PublicRepositorySimilarityResource extends JsonResource
                 ->contains(fn ($file): bool => $file->is_current && $file->document_type === 'final_manuscript'),
             'authors' => PublicResearchAuthorResource::collection($this->resource['research']->authors),
             'category' => new CategoryResource($this->resource['research']->category),
+            'sdgs' => SdgResource::collection($this->resource['research']->sdgs),
             'title_similarity_score' => $this->resource['title_similarity_score'],
             'title_similarity_percentage' => $this->resource['title_similarity_percentage'],
             'title_weight' => $this->resource['title_weight'],

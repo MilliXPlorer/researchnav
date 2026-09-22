@@ -182,6 +182,41 @@ describe("SSR gateway", () => {
     });
   });
 
+  it("uses the longer timeout only for content uploads", async () => {
+    const apiOrigin = await upstream((_request, response) => {
+      setTimeout(() => {
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify({ data: [] }));
+      }, 150);
+    });
+    const app = await createApp({
+      production: true,
+      publicOrigin: "https://researchnav.example.test",
+      apiOrigin,
+      apiTimeoutMs: 100,
+      contentUploadTimeoutMs: 1_000,
+      template,
+      renderer: {
+        render: async () => ({
+          appHtml: "",
+          serializedState: "{}",
+          statusCode: 200,
+          setCookies: [],
+        }),
+      },
+    });
+    const origin = await listen(app);
+
+    const response = await fetch(`${origin}/api/similarity/content-upload`, {
+      method: "POST",
+      headers: { "content-type": "multipart/form-data; boundary=test" },
+      body: "--test--\r\n",
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ data: [] });
+  });
+
   it("returns JSON 502 when the API upstream is unavailable", async () => {
     const unavailable = http.createServer();
     const apiOrigin = await listen(unavailable);
@@ -276,6 +311,43 @@ describe("SSR gateway", () => {
       expect(response.status).toBe(413);
     }
     expect(proxied).toBe(false);
+  });
+
+  it("allows annotation JSON above the generic limit", async () => {
+    let proxied = false;
+    const apiOrigin = await upstream((request, response) => {
+      proxied = true;
+      request.resume();
+      response.setHeader("content-type", "application/json");
+      response.end('{"data":[]}');
+    });
+    const app = await createApp({
+      production: true,
+      publicOrigin: "https://researchnav.example.test",
+      apiOrigin,
+      template,
+      renderer: {
+        render: async () => ({
+          appHtml: "",
+          serializedState: "{}",
+          statusCode: 200,
+          setCookies: [],
+        }),
+      },
+    });
+    const origin = await listen(app);
+
+    const response = await fetch(
+      `${origin}/api/research/42/files/7/annotations`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ value: "x".repeat(40 * 1024) }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(proxied).toBe(true);
   });
 
   it("keeps security headers on SSR failures", async () => {

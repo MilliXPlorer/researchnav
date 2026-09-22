@@ -143,6 +143,37 @@ class PublicRepositoryTest extends TestCase
             ->assertJsonPath('data.0.id', $match->id);
     }
 
+    public function test_sdgs_are_canonical_serialized_and_filterable(): void
+    {
+        $category = $this->category('Sustainability');
+        $combined = $this->document($category, ['title' => 'Education and Climate']);
+        $combined->sdgs()->sync([4, 13]);
+        $educationOnly = $this->document($category, ['title' => 'Education Only']);
+        $educationOnly->sdgs()->sync([4]);
+        $this->document($category, ['title' => 'No SDG']);
+
+        $this->getJson('/api/sdgs')
+            ->assertOk()
+            ->assertJsonCount(17, 'data')
+            ->assertJsonPath('data.0.code', 'SDG 1')
+            ->assertJsonPath('data.16.title', 'Partnerships for the Goals');
+
+        $this->getJson('/api/repository?sdg_ids[]=4&sdg_ids[]=13')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $combined->id)
+            ->assertJsonPath('data.0.sdgs.0.id', 4)
+            ->assertJsonPath('data.0.sdgs.1.id', 13);
+
+        $this->getJson('/api/repository?sdg_ids[]=4')
+            ->assertOk()
+            ->assertJsonCount(2, 'data');
+
+        $this->getJson('/api/repository?sdg_ids[]=99')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['sdg_ids.0']);
+    }
+
     public function test_index_orders_and_paginates_by_year_then_title(): void
     {
         $category = $this->category('Ordering');

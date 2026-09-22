@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -141,3 +142,58 @@ def test_cli_rejects_duplicate_identifiers_and_unexpected_protocol_keys() -> Non
 
         assert completed.returncode == 2
         assert json.loads(completed.stdout) == {"error": {"code": "INVALID_INPUT"}}
+
+
+def test_cli_keeps_typed_queries_bounded_and_accepts_uploaded_content() -> None:
+    cli = Path(__file__).resolve().parents[1] / "cli.py"
+    environment = os.environ | {"SIMILARITY_MAXIMUM_CONTENT_CHARACTERS": "10"}
+
+    accepted = subprocess.run(
+        [sys.executable, str(cli)],
+        input=json.dumps(
+            {
+                "uploaded_content": "abcdefghij",
+                "candidates": [{"id": 2, "title": "Candidate", "content": "abcdefghij"}],
+            }
+        ),
+        capture_output=True,
+        text=True,
+        check=False,
+        env=environment,
+    )
+    assert accepted.returncode == 0
+    assert json.loads(accepted.stdout)["results"][0]["content_similarity_score"] == "1.000000000000"
+
+    for payload in (
+        {"query": "x" * 201, "candidates": []},
+        {"uploaded_content": "x" * 11, "candidates": []},
+        {"uploaded_content": "valid", "query": "also present", "candidates": []},
+    ):
+        rejected = subprocess.run(
+            [sys.executable, str(cli)],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            check=False,
+            env=environment,
+        )
+        assert rejected.returncode == 2
+        assert json.loads(rejected.stdout) == {"error": {"code": "INVALID_INPUT"}}
+
+
+def test_cli_enforces_the_default_uploaded_content_character_boundary() -> None:
+    cli = Path(__file__).resolve().parents[1] / "cli.py"
+
+    for length, expected_code in ((1_000_000, 0), (1_000_001, 2)):
+        completed = subprocess.run(
+            [sys.executable, str(cli)],
+            input=json.dumps({"uploaded_content": "x" * length, "candidates": []}),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert completed.returncode == expected_code
+        if expected_code == 0:
+            assert json.loads(completed.stdout) == {"results": []}
+        else:
+            assert json.loads(completed.stdout) == {"error": {"code": "INVALID_INPUT"}}

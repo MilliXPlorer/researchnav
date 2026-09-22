@@ -182,8 +182,16 @@ class InstructorController extends DomainController
             return $denied;
         }
 
-        return response()->json(['data' => $teams->get($classSection, $researchDocument), 'schema_version' => 1])
-            ->header('Cache-Control', 'private, no-store');
+        $input = $this->validated($request, [
+            'defense_type' => ['nullable', 'in:proposal,final'],
+        ], true);
+
+        $defenseType = $input['defense_type'] ?? 'proposal';
+
+        return response()->json([
+            'data' => $teams->get($classSection, $researchDocument, $defenseType),
+            'schema_version' => 1,
+        ])->header('Cache-Control', 'private, no-store');
     }
 
     public function documentTeamCandidates(Request $request, ClassSection $classSection, ResearchDocument $researchDocument, ResearchProjectTeamService $teams): JsonResponse
@@ -192,7 +200,7 @@ class InstructorController extends DomainController
             return $denied;
         }
         $input = $this->validated($request, [
-            'team_role' => ['required', 'in:adviser,research_office_representative,chair,panel_member'],
+            'team_role' => ['required', 'in:researcher,adviser,research_office_representative,chair,panel_member'],
             'search' => ['nullable', 'string', 'max:100'],
         ], true);
 
@@ -205,7 +213,11 @@ class InstructorController extends DomainController
         if ($denied = $this->authorizeSectionAccess($request, $classSection)) {
             return $denied;
         }
+
         $input = $this->validated($request, [
+            'defense_type' => ['required', 'in:proposal,final'],
+            'researcher_ids' => ['nullable', 'array'],
+            'researcher_ids.*' => ['string', 'distinct', 'exists:users,id'],
             'adviser_id' => ['nullable', 'string', 'exists:users,id'],
             'research_office_representative_id' => ['nullable', 'string', 'exists:users,id'],
             'chair_id' => ['nullable', 'string', 'exists:users,id'],
@@ -213,8 +225,17 @@ class InstructorController extends DomainController
             'panel_member_ids.*' => ['string', 'distinct', 'exists:users,id'],
         ]);
 
-        return response()->json(['data' => $teams->replace($this->actor($request), $classSection, $researchDocument, $input, $request), 'schema_version' => 1])
-            ->header('Cache-Control', 'private, no-store');
+        return response()->json([
+            'data' => $teams->replace(
+                $this->actor($request),
+                $classSection,
+                $researchDocument,
+                $input['defense_type'],
+                $input,
+                $request
+            ),
+            'schema_version' => 1,
+        ])->header('Cache-Control', 'private, no-store');
     }
 
     public function replaceDocumentTeamRole(Request $request, ClassSection $classSection, ResearchDocument $researchDocument, ResearchProjectTeamService $teams): JsonResponse
@@ -222,13 +243,25 @@ class InstructorController extends DomainController
         if ($denied = $this->authorizeSectionAccess($request, $classSection)) {
             return $denied;
         }
+
         $input = $this->validated($request, [
-            'team_role' => ['required', 'in:adviser,research_office_representative,chair,panel_member'],
+            'defense_type' => ['required', 'in:proposal,final'],
+            'team_role' => ['required', 'in:researcher,adviser,research_office_representative,chair,panel_member'],
             'user_id' => ['nullable', 'string', 'exists:users,id'],
         ]);
 
-        return response()->json(['data' => $teams->replaceRole($this->actor($request), $classSection, $researchDocument, $input['team_role'], $input['user_id'] ?? null, $request), 'schema_version' => 1])
-            ->header('Cache-Control', 'private, no-store');
+        return response()->json([
+            'data' => $teams->replaceRole(
+                $this->actor($request),
+                $classSection,
+                $researchDocument,
+                $input['defense_type'],
+                $input['team_role'],
+                $input['user_id'] ?? null,
+                $request
+            ),
+            'schema_version' => 1,
+        ])->header('Cache-Control', 'private, no-store');
     }
 
     public function createSectionProject(Request $request, ClassSection $classSection, ClassSectionService $sections): JsonResponse

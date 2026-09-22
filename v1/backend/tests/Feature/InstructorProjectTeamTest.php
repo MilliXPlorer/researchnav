@@ -27,6 +27,7 @@ class InstructorProjectTeamTest extends TestCase
         $panel3 = $this->user(['role' => 'panel']);
 
         $this->as($instructor)->putJson($this->teamUrl($section, $document), [
+            'defense_type' => 'proposal',
             'adviser_id' => $adviser->id,
             'research_office_representative_id' => $representative->id,
             'chair_id' => $chair->id,
@@ -64,6 +65,37 @@ class InstructorProjectTeamTest extends TestCase
         }
     }
 
+    public function test_proposal_and_final_defense_teams_are_managed_independently(): void
+    {
+        $instructor = $this->user(['role' => 'instructor']);
+        $section = ClassSection::query()->create(['instructor_id' => $instructor->id, 'name' => 'Thesis 2']);
+        $document = ResearchDocument::factory()->create(['section_id' => $section->id]);
+        $proposalAdviser = $this->user(['role' => 'adviser']);
+        $finalAdviser = $this->user(['role' => 'adviser']);
+
+        $this->as($instructor)->putJson($this->teamUrl($section, $document), [
+            'defense_type' => 'proposal',
+            'adviser_id' => $proposalAdviser->id,
+        ], $this->origin())->assertOk()
+            ->assertJsonPath('data.adviser.user_id', $proposalAdviser->id);
+
+        $this->as($instructor)->putJson($this->teamUrl($section, $document), [
+            'defense_type' => 'final',
+            'adviser_id' => $finalAdviser->id,
+        ], $this->origin())->assertOk()
+            ->assertJsonPath('data.adviser.user_id', $finalAdviser->id);
+
+        $this->assertDatabaseCount('research_project_team_members', 2);
+
+        $this->as($instructor)->getJson($this->teamUrl($section, $document).'?defense_type=proposal')
+            ->assertOk()
+            ->assertJsonPath('data.adviser.user_id', $proposalAdviser->id);
+
+        $this->as($instructor)->getJson($this->teamUrl($section, $document).'?defense_type=final')
+            ->assertOk()
+            ->assertJsonPath('data.adviser.user_id', $finalAdviser->id);
+    }
+
     public function test_project_team_rejects_more_than_three_panel_members(): void
     {
         $instructor = $this->user(['role' => 'instructor']);
@@ -88,6 +120,7 @@ class InstructorProjectTeamTest extends TestCase
 
         // A partial team (only an adviser) is accepted.
         $this->as($instructor)->putJson($this->teamUrl($section, $document), [
+            'defense_type' => 'proposal',
             'adviser_id' => $adviser->id,
         ], $this->origin())->assertOk()
             ->assertJsonPath('data.adviser.user_id', $adviser->id)
@@ -96,6 +129,7 @@ class InstructorProjectTeamTest extends TestCase
 
         // A single role can be replaced without resending the whole team.
         $this->as($instructor)->putJson($this->roleUrl($section, $document), [
+            'defense_type' => 'proposal',
             'team_role' => 'research_office_representative',
             'user_id' => $representative->id,
         ], $this->origin())->assertOk()
@@ -105,6 +139,7 @@ class InstructorProjectTeamTest extends TestCase
 
         // Clearing a role works through the same endpoint.
         $this->as($instructor)->putJson($this->roleUrl($section, $document), [
+            'defense_type' => 'proposal',
             'team_role' => 'research_office_representative',
             'user_id' => null,
         ], $this->origin())->assertOk()
@@ -159,6 +194,7 @@ class InstructorProjectTeamTest extends TestCase
         $adviser->update(['role' => 'adviser']);
 
         $this->as($instructor)->putJson($this->roleUrl($section, $document), [
+            'defense_type' => 'proposal',
             'team_role' => 'adviser',
             'user_id' => $adviser->id,
         ], $this->origin())->assertOk()
@@ -230,6 +266,37 @@ class InstructorProjectTeamTest extends TestCase
             'user_id' => $student->id,
         ]);
         $this->assertDatabaseCount('class_section_members', 1);
+    }
+
+    public function test_researcher_account_can_only_be_assigned_to_one_study(): void
+    {
+        $instructor = $this->user(['role' => 'instructor']);
+        $section = ClassSection::query()->create(['instructor_id' => $instructor->id, 'name' => 'Thesis 2']);
+        $firstDocument = ResearchDocument::factory()->create(['section_id' => $section->id]);
+        $secondDocument = ResearchDocument::factory()->create(['section_id' => $section->id]);
+        $student = $this->user(['role' => 'researcher']);
+
+        $this->as($instructor)->putJson("/api/instructor/sections/{$section->id}/members", [
+            'user_ids' => [$student->id],
+        ], $this->origin())->assertOk();
+
+        $firstAssignmentUrl = "/api/instructor/sections/{$section->id}/documents/{$firstDocument->id}/members/{$student->id}";
+        $this->as($instructor)->putJson($firstAssignmentUrl, [], $this->origin())->assertOk();
+        $this->as($instructor)->putJson($firstAssignmentUrl, [], $this->origin())->assertOk();
+
+        $this->as($instructor)
+            ->putJson("/api/instructor/sections/{$section->id}/documents/{$secondDocument->id}/members/{$student->id}", [], $this->origin())
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.user_id.0', 'This researcher account is already assigned to another study.');
+
+        $this->assertDatabaseHas('class_section_members', [
+            'research_document_id' => $firstDocument->id,
+            'user_id' => $student->id,
+        ]);
+        $this->assertDatabaseMissing('class_section_members', [
+            'research_document_id' => $secondDocument->id,
+            'user_id' => $student->id,
+        ]);
     }
 
     public function test_instructor_cannot_delete_another_sections_or_an_existing_project(): void

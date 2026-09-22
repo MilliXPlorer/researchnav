@@ -12,18 +12,29 @@ use App\Notifications\ResearchActivityNotification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class ResearchProjectTeamService
 {
     public function __construct(private readonly AuditService $audit) {}
 
+    private function teamHasDefenseType(): bool
+    {
+        return Schema::hasColumn('research_project_team_members', 'defense_type');
+    }
+
+    private function reviewHasDefenseType(): bool
+    {
+        return Schema::hasColumn((new ReviewAssignment)->getTable(), 'defense_type');
+    }
+
     private const ELIGIBLE_ROLES = [
+        'researcher' => 'researcher',
         'adviser' => 'adviser',
         'research_office_representative' => 'research-office',
         'chair' => 'panel',
         'panel_member' => 'panel',
     ];
-
     private const SUPPORT_ROLES = ['statistician', 'librarian', 'research_editor'];
 
     public function candidates(ClassSection $section, ResearchDocument $document, string $teamRole, ?string $search): array
@@ -48,14 +59,23 @@ class ResearchProjectTeamService
             ->map(fn (User $user) => $this->person($user, $teamRole))->values()->all();
     }
 
-    public function get(ClassSection $section, ResearchDocument $document): array
+    public function get(
+        ClassSection $section,
+        ResearchDocument $document,
+        string $defenseType = 'proposal'
+    ): array
     {
         $this->assertNested($section, $document);
-        $members = ResearchProjectTeamMember::query()->with('user')->where('research_document_id', $document->id)
-            ->orderBy('position')->orderBy('id')->get();
+        $members = ResearchProjectTeamMember::query()
+            ->with('user')
+            ->where('research_document_id', $document->id)
+            ->when($this->teamHasDefenseType(), fn ($query) => $query->where('defense_type', $defenseType))
+            ->orderBy('position')
+            ->orderBy('id')
+            ->get();
         $section->loadMissing('instructor');
 
-        $support = $this->currentSupportAssignments($document);
+        $support = $this->currentSupportAssignments($document, $defenseType);
         $panelCount = $members->where('team_role', 'panel_member')->count();
         $hasPreDefenseActors = $members->firstWhere('team_role', 'adviser') !== null
             && $this->supportAccepted($support->get('research_editor'))
@@ -71,7 +91,13 @@ class ResearchProjectTeamService
         return [
             'section_id' => $section->id,
             'research_document_id' => $document->id,
+            'defense_type' => $defenseType,
             'instructor' => $section->instructor === null ? null : $this->person($section->instructor, 'instructor'),
+            'researchers' => $members
+                ->where('team_role', 'researcher')
+                ->map(fn ($member) => $this->member($member))
+                ->values()
+                ->all(),
             'adviser' => $this->member($members->firstWhere('team_role', 'adviser')),
             'research_office_representative' => $this->member($members->firstWhere('team_role', 'research_office_representative')),
             'chair' => $this->member($members->firstWhere('team_role', 'chair')),
@@ -88,10 +114,18 @@ class ResearchProjectTeamService
         ];
     }
 
-    public function replace(User $actor, ClassSection $section, ResearchDocument $document, array $input, ?Request $request = null): array
+    public function replace(
+        User $actor,
+        ClassSection $section,
+        ResearchDocument $document,
+        string $defenseType,
+        array $input,
+        ?Request $request = null
+    ): array
     {
         $this->assertNested($section, $document);
         $slots = [
+            'researcher' => array_values(array_filter($input['researcher_ids'] ?? [])),
             'adviser' => array_values(array_filter([$input['adviser_id'] ?? null])),
             'research_office_representative' => array_values(array_filter([$input['research_office_representative_id'] ?? null])),
             'chair' => array_values(array_filter([$input['chair_id'] ?? null])),
@@ -106,10 +140,14 @@ class ResearchProjectTeamService
             throw new ApiValidationException(['team' => ['Each person may only hold one project role.']]);
         }
 
-        DB::transaction(function () use ($actor, $section, $document, $slots, $allIds, $request): void {
+        DB::transaction(function () use ($actor, $section, $document, $defenseType, $slots, $allIds, $request): void {
             ResearchDocument::query()->lockForUpdate()->findOrFail($document->id);
-            $before = ResearchProjectTeamMember::query()->where('research_document_id', $document->id)
-                ->get()->groupBy('team_role')->map(fn (Collection $items) => $items->pluck('user_id')->values()->all());
+                $before = ResearchProjectTeamMember::query()
+                    ->where('research_document_id', $document->id)
+                    ->when($this->teamHasDefenseType(), fn ($query) => $query->where('defense_type', $defenseType))
+                    ->get()
+                    ->groupBy('team_role')
+                    ->map(fn (Collection $items) => $items->pluck('user_id')->values()->all());
             $users = User::query()->whereIn('id', $allIds)->lockForUpdate()->get()->keyBy('id');
             foreach ($slots as $teamRole => $ids) {
                 foreach ($ids as $id) {
@@ -121,7 +159,10 @@ class ResearchProjectTeamService
                 }
             }
 
-            ResearchProjectTeamMember::query()->where('research_document_id', $document->id)->delete();
+        ResearchProjectTeamMember::query()
+            ->where('research_document_id', $document->id)
+            ->when($this->teamHasDefenseType(), fn ($query) => $query->where('defense_type', $defenseType))
+            ->delete();
             foreach ($slots as $teamRole => $ids) {
                 foreach (array_values($ids) as $index => $id) {
                     ResearchProjectTeamMember::query()->create([
@@ -130,47 +171,101 @@ class ResearchProjectTeamService
                         'team_role' => $teamRole,
                         'position' => $teamRole === 'panel_member' ? $index + 1 : null,
                         'assigned_by' => $actor->id,
-                    ]);
+                    ] + ($this->teamHasDefenseType() ? ['defense_type' => $defenseType] : []));
                 }
             }
 
-            $this->syncCoreReviewAssignments($actor, $section, $document, $slots);
+            $this->syncCoreReviewAssignments(
+                $actor,
+                $section,
+                $document,
+                $defenseType,
+                $slots
+            );
             $this->notifyNewAssignments($document, $users, $slots, $before);
             $this->audit->log($actor, 'PROJECT_TEAM_UPDATED', $document, 'Updated the research project actor assignments.', $request);
         });
 
-        return $this->get($section, $document);
+        return $this->get($section, $document, $defenseType);
     }
 
-    public function replaceRole(User $actor, ClassSection $section, ResearchDocument $document, string $teamRole, ?string $userId, ?Request $request = null): array
-    {
+    public function replaceRole(
+        User $actor,
+        ClassSection $section,
+        ResearchDocument $document,
+        string $defenseType,
+        string $teamRole,
+        ?string $userId,
+        ?Request $request = null
+    ): array {
         $this->assertNested($section, $document);
+
         if (! array_key_exists($teamRole, self::ELIGIBLE_ROLES)) {
-            throw new ApiValidationException(['team_role' => ['Unknown project role.']]);
+            throw new ApiValidationException([
+                'team_role' => ['Unknown project role.'],
+            ]);
         }
 
-        DB::transaction(function () use ($actor, $section, $document, $teamRole, $userId, $request): void {
-            ResearchDocument::query()->lockForUpdate()->findOrFail($document->id);
-            $existing = ResearchProjectTeamMember::query()->where('research_document_id', $document->id)
-                ->where('team_role', $teamRole)->lockForUpdate()->get();
+        DB::transaction(function () use (
+            $actor,
+            $section,
+            $document,
+            $defenseType,
+            $teamRole,
+            $userId,
+            $request
+        ): void {
+            ResearchDocument::query()
+                ->lockForUpdate()
+                ->findOrFail($document->id);
+
+            $existing = ResearchProjectTeamMember::query()
+                ->where('research_document_id', $document->id)
+                ->when($this->teamHasDefenseType(), fn ($query) => $query->where('defense_type', $defenseType))
+                ->where('team_role', $teamRole)
+                ->lockForUpdate()
+                ->get();
+
             if ($userId !== null && $userId !== '') {
-                $user = User::query()->lockForUpdate()->findOrFail($userId);
-                if ($user->role !== self::ELIGIBLE_ROLES[$teamRole]
-                    || $user->access_status !== 'active' || $user->account_status !== 'active') {
-                    throw new ApiValidationException([$teamRole => ['The selected account is not eligible for this role.']]);
+                $user = User::query()
+                    ->lockForUpdate()
+                    ->findOrFail($userId);
+
+                if (
+                    $user->role !== self::ELIGIBLE_ROLES[$teamRole]
+                    || $user->access_status !== 'active'
+                    || $user->account_status !== 'active'
+                ) {
+                    throw new ApiValidationException([
+                        $teamRole => ['The selected account is not eligible for this role.'],
+                    ]);
                 }
-                $conflicting = ResearchProjectTeamMember::query()->where('research_document_id', $document->id)
-                    ->where('user_id', $userId)->where('team_role', '!=', $teamRole)->lockForUpdate()->get();
+
+                $conflicting = ResearchProjectTeamMember::query()
+                    ->where('research_document_id', $document->id)
+                    ->when($this->teamHasDefenseType(), fn ($query) => $query->where('defense_type', $defenseType))
+                    ->where('user_id', $userId)
+                    ->where('team_role', '!=', $teamRole)
+                    ->lockForUpdate()
+                    ->get();
+
                 foreach ($conflicting as $member) {
                     if (self::ELIGIBLE_ROLES[$member->team_role] === $user->role) {
-                        throw new ApiValidationException([$teamRole => ['Each person may only hold one project role.']]);
+                        throw new ApiValidationException([
+                            $teamRole => ['Each person may only hold one project role.'],
+                        ]);
                     }
+
                     $member->delete();
                 }
             }
 
-            ResearchProjectTeamMember::query()->where('research_document_id', $document->id)
-                ->where('team_role', $teamRole)->delete();
+            ResearchProjectTeamMember::query()
+                ->where('research_document_id', $document->id)
+                ->when($this->teamHasDefenseType(), fn ($query) => $query->where('defense_type', $defenseType))
+                ->where('team_role', $teamRole)
+                ->delete();
+
             if ($userId !== null && $userId !== '') {
                 ResearchProjectTeamMember::query()->create([
                     'research_document_id' => $document->id,
@@ -178,20 +273,55 @@ class ResearchProjectTeamService
                     'team_role' => $teamRole,
                     'position' => $teamRole === 'panel_member' ? 1 : null,
                     'assigned_by' => $actor->id,
-                ]);
+                ] + ($this->teamHasDefenseType() ? ['defense_type' => $defenseType] : []));
             }
 
-            $members = ResearchProjectTeamMember::query()->where('research_document_id', $document->id)->get();
-            $slots = [
-                'adviser' => $members->where('team_role', 'adviser')->pluck('user_id')->values()->all(),
-                'research_office_representative' => $members->where('team_role', 'research_office_representative')->pluck('user_id')->values()->all(),
-                'chair' => $members->where('team_role', 'chair')->pluck('user_id')->values()->all(),
-                'panel_member' => $members->where('team_role', 'panel_member')->pluck('user_id')->values()->all(),
-            ];
-            $this->syncCoreReviewAssignments($actor, $section, $document, $slots);
+            $members = ResearchProjectTeamMember::query()
+                ->where('research_document_id', $document->id)
+                ->when($this->teamHasDefenseType(), fn ($query) => $query->where('defense_type', $defenseType))
+                ->get();
 
-            if ($userId !== null && $userId !== '' && ! $existing->pluck('user_id')->contains($userId)) {
+            $slots = [
+                'adviser' => $members
+                    ->where('team_role', 'adviser')
+                    ->pluck('user_id')
+                    ->values()
+                    ->all(),
+
+                'research_office_representative' => $members
+                    ->where('team_role', 'research_office_representative')
+                    ->pluck('user_id')
+                    ->values()
+                    ->all(),
+
+                'chair' => $members
+                    ->where('team_role', 'chair')
+                    ->pluck('user_id')
+                    ->values()
+                    ->all(),
+
+                'panel_member' => $members
+                    ->where('team_role', 'panel_member')
+                    ->pluck('user_id')
+                    ->values()
+                    ->all(),
+            ];
+
+            $this->syncCoreReviewAssignments(
+                $actor,
+                $section,
+                $document,
+                $defenseType,
+                $slots
+            );
+
+            if (
+                $userId !== null
+                && $userId !== ''
+                && ! $existing->pluck('user_id')->contains($userId)
+            ) {
                 $user = User::query()->find($userId);
+
                 $user?->notify(new ResearchActivityNotification(
                     $document,
                     'RESEARCH_PROJECT_ACTOR_ASSIGNED',
@@ -200,13 +330,26 @@ class ResearchProjectTeamService
                     '/research/'.$document->id,
                 ));
             }
-            $this->audit->log($actor, 'PROJECT_TEAM_UPDATED', $document, "Updated the {$teamRole} assignment for a research project.", $request);
+
+            $this->audit->log(
+                $actor,
+                'PROJECT_TEAM_UPDATED',
+                $document,
+                "Updated the {$teamRole} assignment for a research project.",
+                $request
+            );
         });
 
-        return $this->get($section, $document);
+        return $this->get($section, $document, $defenseType);
     }
 
-    private function syncCoreReviewAssignments(User $actor, ClassSection $section, ResearchDocument $document, array $slots): void
+    private function syncCoreReviewAssignments(
+        User $actor,
+        ClassSection $section,
+        ResearchDocument $document,
+        string $defenseType,
+        array $slots
+    ): void
     {
         if (! ReviewAssignment::identityCompatible()) {
             return;
@@ -230,8 +373,11 @@ class ResearchProjectTeamService
 
         $wantedKeys = collect($desired)->map(fn ($item) => $item['user_id'].'|'.$item['review_role'])->all();
         $coreRoles = ['adviser', 'instructor', 'panel', 'research-office'];
-        $existing = ReviewAssignment::query()->where('research_document_id', $document->id)
-            ->whereIn(ReviewAssignment::column('review_role'), $coreRoles)->get();
+        $existing = ReviewAssignment::query()
+            ->where('research_document_id', $document->id)
+            ->when($this->reviewHasDefenseType(), fn ($query) => $query->where('defense_type', $defenseType))
+            ->whereIn(ReviewAssignment::column('review_role'), $coreRoles)
+            ->get();
         foreach ($existing as $assignment) {
             $key = $assignment->reviewer_id.'|'.$assignment->review_role;
             if (! in_array($key, $wantedKeys, true)) {
@@ -242,11 +388,16 @@ class ResearchProjectTeamService
         }
 
         foreach ($desired as $item) {
-            $assignment = ReviewAssignment::query()->where('research_document_id', $document->id)
+            $assignment = ReviewAssignment::query()
+                ->where('research_document_id', $document->id)
+                ->when($this->reviewHasDefenseType(), fn ($query) => $query->where('defense_type', $defenseType))
                 ->where(ReviewAssignment::column('reviewer_id'), $item['user_id'])
                 ->where(ReviewAssignment::column('review_role'), $item['review_role'])
                 ->first() ?? new ReviewAssignment;
             $assignment->research_document_id = $document->id;
+            if ($this->reviewHasDefenseType()) {
+                $assignment->defense_type = $defenseType;
+            }
             $assignment->reviewer_id = $item['user_id'];
             $assignment->review_role = $item['review_role'];
             $assignment->assigned_by = $actor->id;
@@ -276,19 +427,32 @@ class ResearchProjectTeamService
         }
     }
 
-    private function currentSupportAssignments(ResearchDocument $document): Collection
-    {
+    private function currentSupportAssignments(
+        ResearchDocument $document,
+        string $defenseType
+    ): Collection {
         if (! ReviewAssignment::identityCompatible()) {
             return collect();
         }
 
         $active = ReviewAssignment::column('is_active');
 
-        return ReviewAssignment::query()->where('research_document_id', $document->id)
+        return ReviewAssignment::query()
+            ->where('research_document_id', $document->id)
+            ->when($this->reviewHasDefenseType(), fn ($query) => $query->where('defense_type', $defenseType))
             ->whereIn(ReviewAssignment::column('review_role'), self::SUPPORT_ROLES)
-            ->when($active === 'status', fn ($query) => $query->whereIn($active, ['requested', 'pending', 'accepted', 'confirmed', 'active']))
-            ->with('reviewer')->latest('id')->get()
-            ->unique('review_role')->keyBy('review_role');
+            ->when(
+                $active === 'status',
+                fn ($query) => $query->whereIn(
+                    $active,
+                    ['requested', 'pending', 'accepted', 'confirmed', 'active']
+                )
+            )
+            ->with('reviewer')
+            ->latest('id')
+            ->get()
+            ->unique('review_role')
+            ->keyBy('review_role');
     }
 
     private function supportAccepted(?ReviewAssignment $assignment): bool
@@ -329,6 +493,7 @@ class ResearchProjectTeamService
     private function roleLabel(string $teamRole): string
     {
         return match ($teamRole) {
+            'researcher' => 'Student Researcher',
             'adviser' => 'Research Adviser',
             'research_office_representative' => 'Research Office Representative',
             'chair' => 'Panel Chair',
