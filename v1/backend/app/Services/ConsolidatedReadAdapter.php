@@ -104,9 +104,16 @@ class ConsolidatedReadAdapter
     }
 
     /** @return Collection<int, FeedbackComment> */
-    public function feedbackForDocument(int $documentId): Collection
+    public function feedbackForDocument(int $documentId, ?string $actorId = null): Collection
     {
-        $rows = $this->reviewsForDocument($documentId, 'feedback');
+        $query = DB::table('research_review_records')
+            ->where('research_document_id', $documentId)
+            ->where('review_type', 'feedback')
+            ->orderByDesc('created_at');
+        if ($actorId !== null) {
+            $query->where('actor_id', $actorId);
+        }
+        $rows = $query->get();
         $users = User::query()->whereIn('id', $rows->pluck('actor_id')->filter()->unique())->get()->keyBy('id');
 
         return $rows->map(function (object $row) use ($users): FeedbackComment {

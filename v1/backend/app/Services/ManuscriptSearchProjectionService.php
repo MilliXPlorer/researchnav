@@ -204,7 +204,8 @@ class ManuscriptSearchProjectionService
             || $file->file_size === null
             || ! is_string($file->file_path)
             || $file->file_path === ''
-            || basename($file->file_path) !== $file->stored_filename) {
+            || basename($file->file_path) !== $file->stored_filename
+            || ($document->import_source_sha256 === null && ! str_starts_with($file->file_path, 'research/'.$document->id.'/'))) {
             return null;
         }
         $path = $this->privatePath($file->file_path);

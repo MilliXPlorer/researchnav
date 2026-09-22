@@ -94,9 +94,24 @@ class PublicRepositorySimilarityService
     /** @return array<int, array<string, mixed>> */
     public function compareContent(string $query): array
     {
+        return $this->compareStandaloneContent($query, false);
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public function compareUploadedContent(string $uploadedContent): array
+    {
+        return $this->compareStandaloneContent($uploadedContent, true);
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    private function compareStandaloneContent(string $content, bool $uploaded): array
+    {
+        $this->configureMemoryLimit();
         $candidates = $this->eligibleCandidates(min(250, max(1, (int) config('researchnav.similarity.maximum_candidates'))));
         $results = array_values(array_filter(
-            $this->process->runContentTextQuery($query, $candidates),
+            $uploaded
+                ? $this->process->runUploadedContentQuery($content, $candidates)
+                : $this->process->runContentTextQuery($content, $candidates),
             fn (array $result): bool => $result['content_similarity_score'] !== null
                 && $result['content_similarity_score'] !== '0.000000000000',
         ));
@@ -175,7 +190,7 @@ class PublicRepositorySimilarityService
     /** @return array<int, string> */
     private function candidateRelations(): array
     {
-        $relations = ['authors', 'category', 'files'];
+        $relations = ['authors', 'category', 'sdgs', 'files'];
         if (Schema::hasTable('manuscript_search_documents')) {
             $relations[] = 'manuscriptSearchDocument';
         }

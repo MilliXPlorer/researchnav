@@ -83,6 +83,10 @@ class PrivateDocumentFileResolver
         if (! is_string($path) || $path === '' || str_contains($path, "\0") || str_starts_with($path, '/') || str_contains($path, '\\') || str_contains($path, '..')) {
             throw new NotFoundHttpException;
         }
+        $researchPrefix = 'research/'.$research->id.'/';
+        if ($research->import_source_sha256 === null && ! str_starts_with($path, $researchPrefix)) {
+            throw new NotFoundHttpException;
+        }
 
         return $path;
     }

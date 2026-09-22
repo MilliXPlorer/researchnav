@@ -5,8 +5,10 @@ import {
   getRoleDashboard,
   getInternalResearch,
   archiveInternalResearch,
+  checkContentUploadSimilarity,
   checkTitleQuerySimilarity,
   createFeedback,
+  createPdfAnnotation,
   deleteAdminUser,
   deleteOwnProfilePhoto,
   getOwnProfile,
@@ -16,6 +18,7 @@ import {
   listAdminUsers,
   listUserLogs,
   listFeedback,
+  listPdfAnnotations,
   listMonitoringLogs,
   listAdviserPendingReviews,
   listInstructorAssignedSubmissions,
@@ -99,6 +102,15 @@ const resource = (id: number, authorName: string, authorOrder = 1) => ({
   institute: "Example Unit",
   degree_program: "Example Program",
   category: { name: "Example Category" },
+  sdgs: [
+    {
+      id: 4,
+      code: "SDG 4",
+      title: "Quality Education",
+      short_title: "Quality Education",
+      color_hex: "#C5192D",
+    },
+  ],
   abstract: "Public abstract.",
   keywords: ["public"],
   research_stage: "completed",
@@ -158,6 +170,9 @@ describe("public repository API", () => {
     const record = toResearchRecord(resource(1, "First Author"));
     expect(record.authors).toBe("First Author, Second Author");
     expect(record.fastTextSupportScore).toBe("0.812345");
+    expect(record.sdgs).toEqual([
+      expect.objectContaining({ id: 4, code: "SDG 4" }),
+    ]);
     expect(record).not.toHaveProperty("sourceFilename");
   });
 
@@ -220,6 +235,7 @@ describe("public repository API", () => {
         author: "Dela Cruz",
         keywords: "inventory",
         category: "Web-based",
+        sdgIds: [4, 13],
         year: 2024,
       }),
     ).resolves.toMatchObject([{ id: "1" }]);
@@ -229,6 +245,7 @@ describe("public repository API", () => {
     expect(requested.searchParams.get("author")).toBe("Dela Cruz");
     expect(requested.searchParams.get("keywords")).toBe("inventory");
     expect(requested.searchParams.get("category")).toBe("Web-based");
+    expect(requested.searchParams.getAll("sdg_ids[]")).toEqual(["4", "13"]);
     expect(requested.searchParams.get("year")).toBe("2024");
   });
 
@@ -622,10 +639,7 @@ describe("specialist workspace API routes", () => {
     );
 
     await expect(
-      listRepositoryCatalog(
-        { sort: "title", direction: "asc" },
-        fetchMock,
-      ),
+      listRepositoryCatalog({ sort: "title", direction: "asc" }, fetchMock),
     ).resolves.toEqual(normalized);
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/librarian/catalog?sort=title&direction=asc",
@@ -987,6 +1001,8 @@ describe("administrator internal research API", () => {
           42,
           new File(["pdf"], "study.pdf", { type: "application/pdf" }),
           documentType,
+          null,
+          "revision",
           fetchMock,
         ),
       ).resolves.toEqual(document);
@@ -1060,6 +1076,9 @@ describe("administrator internal research API", () => {
           "attachment",
         ][index],
       );
+      expect(
+        ((init as RequestInit).body as FormData).get("upload_purpose"),
+      ).toBe("revision");
     });
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/research/42/feedback/4",
@@ -1169,6 +1188,32 @@ describe("similarity API", () => {
     expect(body).not.toHaveProperty("overall_similarity_score");
     expect(body).not.toHaveProperty("classification");
     expect(body).not.toHaveProperty("overall_flagged");
+  });
+
+  it("posts a manuscript as multipart content without setting its content type", async () => {
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        void input;
+        void init;
+        return new Response(JSON.stringify({ data: [] }));
+      },
+    );
+    const file = new File(["manuscript"], "draft.pdf", {
+      type: "application/pdf",
+    });
+
+    await expect(
+      checkContentUploadSimilarity(file, fetchMock),
+    ).resolves.toEqual([]);
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/similarity/content-upload",
+      expect.objectContaining({ method: "POST", credentials: "include" }),
+    );
+    expect(init?.body).toBeInstanceOf(FormData);
+    expect((init?.body as FormData).get("file")).toBe(file);
+    expect(init?.headers).not.toHaveProperty("Content-Type");
   });
 });
 
@@ -1360,6 +1405,63 @@ describe("instructor section member API", () => {
       3,
       "/api/instructor/sections/7/documents/42/members/student-id",
       expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it("lists and creates annotations through the exact nested PDF file endpoint", async () => {
+    const annotation = {
+      id: 9,
+      research_document_id: 42,
+      document_file_id: 7,
+      document_file_version: 2,
+      author_name: "Reviewer",
+      author_role: "Research Adviser",
+      kind: "comment" as const,
+      body: "Clarify this paragraph.",
+      anchor: {
+        schema_version: 1 as const,
+        page_number: 1,
+        exact: "Selected paragraph",
+        rects: [{ x: 0.1, y: 0.2, width: 0.4, height: 0.04 }],
+      },
+      created_at: null,
+    };
+    const fetchMock = vi.fn(
+      async (_path: URL | RequestInfo, init?: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            data: init?.method === "POST" ? annotation : [annotation],
+          }),
+        ),
+    );
+
+    await expect(listPdfAnnotations(42, 7, fetchMock)).resolves.toEqual([
+      annotation,
+    ]);
+    await expect(
+      createPdfAnnotation(
+        42,
+        7,
+        { kind: "comment", body: annotation.body, anchor: annotation.anchor },
+        fetchMock,
+      ),
+    ).resolves.toEqual(annotation);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/research/42/files/7/annotations",
+      expect.objectContaining({ credentials: "include" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/research/42/files/7/annotations",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          kind: "comment",
+          body: annotation.body,
+          anchor: annotation.anchor,
+        }),
+      }),
     );
   });
 });

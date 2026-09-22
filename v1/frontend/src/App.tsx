@@ -5,6 +5,7 @@ import GoogleSignInDialog from "./GoogleSignInDialog";
 import LandingPage from "./LandingPage";
 import { getCurrentSession, listPublicResearch, logout } from "./api";
 import { isProtectedRoute } from "./paths";
+import { parseResearchWorkspaceDestination } from "./researchWorkspaceRoute";
 import { createBrowserInitialState, type InitialState } from "./ssr";
 import type { ResearchRecord, UserSession } from "./types";
 
@@ -34,8 +35,12 @@ export default function App({ initialState }: { initialState?: InitialState }) {
     /^\/app\/researcher\/(submissions|similarity|related-studies)(?:\/(title|content))?$/,
   )?.[1];
   const researcherSimilarityMode = path.match(
-    /^\/app\/researcher\/similarity\/(title|content)$/,
+    /^\/app\/(?:researcher|research-office)\/similarity\/(title|content)$/,
   )?.[1] as "title" | "content" | undefined;
+  const similarityRoute =
+    /^\/app\/(?:researcher|research-office)\/similarity(?:\/(?:title|content))?$/.test(
+      path,
+    );
   const instructorSectionRoute = path.match(
     /^\/app\/instructor\/sections\/(\d+)(?:\/projects\/(\d+))?$/,
   );
@@ -144,6 +149,9 @@ export default function App({ initialState }: { initialState?: InitialState }) {
           onSessionChange={setSession}
           navigate={navigate}
           researchDocumentId={selectedResearchDocumentId}
+          researchWorkspaceDestination={parseResearchWorkspaceDestination(
+            location.search,
+          )}
           instructorSectionsRoute={
             instructorSectionRoute !== null ||
             path === "/app/instructor/sections"
@@ -153,7 +161,7 @@ export default function App({ initialState }: { initialState?: InitialState }) {
           initialNav={
             researcherSection === "submissions"
               ? "My Research"
-              : researcherSection === "similarity"
+              : researcherSection === "similarity" || similarityRoute
                 ? "Similarity Check"
                 : instructorSectionRoute || path === "/app/instructor/sections"
                   ? "My Sections"

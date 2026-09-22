@@ -29,6 +29,8 @@ import { classificationLabel, formatSimilarityPercentage } from "./similarity";
 import type { SimilarityClassification } from "./similarity";
 import type { ResearchRecord, UserSession } from "./types";
 import { useDialogFocus } from "./useDialogFocus";
+import { SdgBadges } from "./SdgMetadata";
+import { sustainableDevelopmentGoals } from "./sdgs";
 
 type SimilaritySearchResponse =
   | {
@@ -82,13 +84,25 @@ export default function CatalogPage({
   const yearTo = searchParams.get("year_to") ?? exactYear;
   const category = searchParams.get("category") ?? "all";
   const institute = searchParams.get("institute") ?? "all";
+  const sdgFilter = searchParams.get("sdgs") ?? "";
+  const sdgIds = useMemo(
+    () =>
+      sdgFilter
+        .split(",")
+        .map(Number)
+        .filter((id) => id >= 1 && id <= 17),
+    [sdgFilter],
+  );
   const hasServerFilters =
-    Boolean(yearFrom || yearTo) || category !== "all" || institute !== "all";
+    Boolean(yearFrom || yearTo || sdgIds.length) ||
+    category !== "all" ||
+    institute !== "all";
   const serverFilterKey = JSON.stringify({
     yearFrom,
     yearTo,
     category,
     institute,
+    sdgIds,
   });
   const [serverFiltered, setServerFiltered] = useState<{
     key: string;
@@ -111,6 +125,7 @@ export default function CatalogPage({
       {
         category: category === "all" ? undefined : category,
         institute: institute === "all" ? undefined : institute,
+        sdgIds,
         yearFrom: yearFrom || undefined,
         yearTo: yearTo || undefined,
       },
@@ -142,6 +157,7 @@ export default function CatalogPage({
     category,
     hasServerFilters,
     institute,
+    sdgIds,
     serverFilterKey,
     yearFrom,
     yearTo,
@@ -262,6 +278,13 @@ export default function CatalogPage({
     );
   };
 
+  const toggleSdg = (id: number) => {
+    const nextIds = sdgIds.includes(id)
+      ? sdgIds.filter((selected) => selected !== id)
+      : [...sdgIds, id].sort((a, b) => a - b);
+    updateParam("sdgs", nextIds.join(","));
+  };
+
   const submitSearch = () => {
     const submittedQuery = query.trim();
     if (import.meta.env.DEV && import.meta.env.MODE !== "test") {
@@ -317,6 +340,25 @@ export default function CatalogPage({
             <FileText /> Open metadata
           </span>
         </div>
+        <details className="catalog-sdg-filter" open={sdgIds.length > 0}>
+          <summary>
+            Sustainable Development Goals
+            {sdgIds.length > 0 && <span>{sdgIds.length} selected</span>}
+          </summary>
+          <div className="catalog-sdg-options">
+            {sustainableDevelopmentGoals.map((sdg) => (
+              <label key={sdg.id}>
+                <input
+                  type="checkbox"
+                  checked={sdgIds.includes(sdg.id)}
+                  onChange={() => toggleSdg(sdg.id)}
+                />
+                <b style={{ backgroundColor: sdg.color_hex }}>{sdg.id}</b>
+                {sdg.short_title}
+              </label>
+            ))}
+          </div>
+        </details>
         <SearchBox value={query} onChange={setQuery} onSubmit={submitSearch} />
         <div className="catalog-toolbar">
           <div className="filter-label">
@@ -400,20 +442,22 @@ export default function CatalogPage({
           <section className="result-list" aria-label="Research results">
             {hasActiveSimilarityQuery && similarityLoading ? (
               <div className="empty-state">
-              <div style={{ width: 110, height: 110, margin: "0 auto 12px" }}>
-                <video
-                  src={searchLoading}
-                  autoPlay
-                  loop
-                  muted
-                  playsInline
-                  aria-hidden="true"
-                  style={{ width: "100%", height: "100%" }}
-                />
-              </div>
+                <div style={{ width: 110, height: 110, margin: "0 auto 12px" }}>
+                  <video
+                    src={searchLoading}
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    aria-hidden="true"
+                    style={{ width: "100%", height: "100%" }}
+                  />
+                </div>
 
                 <h3>Calculating similarity results</h3>
-                <p>Ranking public research studies for your submitted search…</p>
+                <p>
+                  Ranking public research studies for your submitted search…
+                </p>
               </div>
             ) : hasActiveSimilarityQuery && similarityError ? (
               <div role="alert">
@@ -470,6 +514,9 @@ export default function CatalogPage({
                     {record.authors} · {record.year} · {record.program}
                   </p>
                   <p className="result-abstract">{record.abstract}</p>
+                  {(record.sdgs?.length ?? 0) > 0 && (
+                    <SdgBadges sdgs={record.sdgs ?? []} limit={4} />
+                  )}
                   {hasActiveSimilarityQuery ? (
                     <OverallSimilarityScore record={record} />
                   ) : (
@@ -623,6 +670,9 @@ function MetadataDialog({
           <h3>Abstract</h3>
           <p>{record.abstract}</p>
         </div>
+        {(record.sdgs?.length ?? 0) > 0 && (
+          <SdgBadges sdgs={record.sdgs ?? []} />
+        )}
         <div className="keyword-list">
           {record.keywords.map((keyword) => (
             <span key={keyword}>{keyword}</span>

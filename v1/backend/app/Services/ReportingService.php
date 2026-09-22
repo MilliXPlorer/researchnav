@@ -147,6 +147,19 @@ class ReportingService
             'by_status' => collect(ResearchDocument::SUBMISSION_STATUSES)
                 ->map(fn (string $status) => ['status' => $status, 'total' => (clone $documents)->where('submission_status', $status)->count()])
                 ->all(),
+            'by_sdg' => DB::table('sdgs')
+                ->leftJoin('research_document_sdgs', 'research_document_sdgs.sdg_id', '=', 'sdgs.id')
+                ->leftJoin('research_documents', function ($join): void {
+                    $join->on('research_documents.id', '=', 'research_document_sdgs.research_document_id')
+                        ->whereNull('research_documents.deleted_at');
+                })
+                ->select(['sdgs.id', 'sdgs.code', 'sdgs.title', 'sdgs.color_hex'])
+                ->selectRaw('count(research_documents.id) as total')
+                ->groupBy('sdgs.id', 'sdgs.code', 'sdgs.title', 'sdgs.color_hex')
+                ->orderBy('sdgs.id')
+                ->get()
+                ->map(fn ($row) => ['id' => (int) $row->id, 'code' => $row->code, 'title' => $row->title, 'color_hex' => $row->color_hex, 'total' => (int) $row->total])
+                ->all(),
         ];
     }
 }

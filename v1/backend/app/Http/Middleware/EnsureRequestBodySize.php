@@ -12,10 +12,32 @@ class EnsureRequestBodySize
 
     private const MAX_PROFILE_PHOTO_REQUEST_BYTES = 3 * 1024 * 1024;
 
+    private const MAX_CONTENT_UPLOAD_REQUEST_BYTES = 27 * 1024 * 1024;
+
+    private const MAX_ANNOTATION_REQUEST_BYTES = 160 * 1024;
+
     public function handle(Request $request, Closure $next): Response
     {
         if ($request->isMethod('POST') && $request->is('api/profile/photo')) {
             if ((int) $request->header('Content-Length', 0) > self::MAX_PROFILE_PHOTO_REQUEST_BYTES) {
+                return response()->json(['error' => 'PAYLOAD_TOO_LARGE'], 413);
+            }
+
+            return $next($request);
+        }
+
+        if ($request->isMethod('POST') && $request->is('api/similarity/content-upload')) {
+            if ((int) $request->header('Content-Length', 0) > self::MAX_CONTENT_UPLOAD_REQUEST_BYTES) {
+                return response()->json(['error' => 'PAYLOAD_TOO_LARGE'], 413);
+            }
+
+            return $next($request);
+        }
+
+        if ($request->isMethod('POST') && $request->is('api/research/*/files/*/annotations')) {
+            $contentLength = (int) $request->header('Content-Length', 0);
+            $rawContentLength = strlen($request->getContent());
+            if ($contentLength > self::MAX_ANNOTATION_REQUEST_BYTES || $rawContentLength > self::MAX_ANNOTATION_REQUEST_BYTES) {
                 return response()->json(['error' => 'PAYLOAD_TOO_LARGE'], 413);
             }
 

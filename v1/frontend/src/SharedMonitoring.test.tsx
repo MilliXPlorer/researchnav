@@ -111,6 +111,65 @@ const monitoring = {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("shared monitoring", () => {
+  it.each([
+    "adviser",
+    "panel",
+    "statistician",
+    "research_editor",
+    "librarian",
+    "research-office",
+  ] as const)(
+    "exposes server-authorized monitoring actions for %s",
+    async (role) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response(JSON.stringify({ data: monitoring }))),
+      );
+
+      render(<SharedMonitoring role={role} researchDocumentId={42} embedded />);
+
+      expect(
+        await screen.findByRole("button", {
+          name: "Print defense monitoring form",
+        }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Update my latest entry" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", {
+          name: "Add new defense monitoring entry",
+        }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", {
+          name: "Remove defense monitoring entry",
+        }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Verify completed form" }),
+      ).not.toBeInTheDocument();
+    },
+  );
+
+  it("does not expose completed-form verification to instructors", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ data: monitoring }))),
+    );
+
+    render(
+      <SharedMonitoring role="instructor" researchDocumentId={42} embedded />,
+    );
+
+    await screen.findByRole("button", {
+      name: "Print defense monitoring form",
+    });
+    expect(
+      screen.queryByRole("button", { name: "Verify completed form" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("uses plain-language headings and lets an assigned panelist sign", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const path = String(input);

@@ -15,6 +15,7 @@ use App\Http\Controllers\LibrarianController;
 use App\Http\Controllers\MonitoringController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\PanelController;
+use App\Http\Controllers\PdfAnnotationController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PublicRepositoryController;
 use App\Http\Controllers\ResearchController;
@@ -22,17 +23,18 @@ use App\Http\Controllers\ResearchOfficeBulkImportController;
 use App\Http\Controllers\ResearchOfficeController;
 use App\Http\Controllers\ReviewAssignmentController;
 use App\Http\Controllers\RevisionController;
+use App\Http\Controllers\SdgController;
 use App\Http\Controllers\SharedMonitoringController;
 use App\Http\Controllers\SimilarityController;
 use App\Http\Controllers\StatisticianController;
 use App\Http\Controllers\SupportAssignmentController;
 use App\Http\Controllers\TitleValidationController;
+use App\Http\Controllers\UserLogController;
 use App\Http\Middleware\AddApiSecurityHeaders;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
-use App\Http\Controllers\UserLogController;
 
 Route::prefix('api')
     ->middleware([AddApiSecurityHeaders::class, 'api.bodylimit'])
@@ -218,6 +220,7 @@ Route::prefix('api')
         // browser session for repository visitors.
         Route::middleware([])->withoutMiddleware([StartSession::class, ShareErrorsFromSession::class, PreventRequestForgery::class])->group(function (): void {
             Route::get('categories', [CategoryController::class, 'index']);
+            Route::get('sdgs', [SdgController::class, 'index']);
             Route::get('repository', [PublicRepositoryController::class, 'index'])->middleware('throttle:public-search');
             Route::get('repository/{researchDocument}', [PublicRepositoryController::class, 'show']);
         });
@@ -259,6 +262,9 @@ Route::prefix('api')
             Route::post('research/{researchDocument}/files', [DocumentFileController::class, 'store'])->middleware(['origin.allowed', 'throttle:research-upload']);
             Route::get('research/{researchDocument}/files/{documentFile}/download', [DocumentFileController::class, 'download'])->middleware('throttle:research-file-access');
             Route::get('research/{researchDocument}/files/{documentFile}/preview', [DocumentFileController::class, 'preview'])->middleware('throttle:research-file-access');
+            Route::get('research/{researchDocument}/files/{documentFile}/preview-content', [DocumentFileController::class, 'previewContent'])->middleware('throttle:research-file-access');
+            Route::get('research/{researchDocument}/files/{documentFile}/annotations', [PdfAnnotationController::class, 'index'])->middleware('throttle:research-file-access');
+            Route::post('research/{researchDocument}/files/{documentFile}/annotations', [PdfAnnotationController::class, 'store'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::patch('research/{researchDocument}/files/{documentFile}', [DocumentFileController::class, 'update'])->middleware(['origin.allowed', 'throttle:researcher-file-mutations']);
             Route::delete('research/{researchDocument}/files/{documentFile}', [DocumentFileController::class, 'destroy'])->middleware(['origin.allowed', 'throttle:researcher-file-mutations']);
 
@@ -268,6 +274,7 @@ Route::prefix('api')
             // needs no research record and writes nothing.
             Route::post('similarity/query', [SimilarityController::class, 'query'])->middleware(['origin.allowed', 'throttle:similarity-query']);
             Route::post('similarity/content-query', [SimilarityController::class, 'contentQuery'])->middleware(['origin.allowed', 'throttle:similarity-query']);
+            Route::post('similarity/content-upload', [SimilarityController::class, 'contentUpload'])->middleware(['origin.allowed', 'throttle:similarity-content-upload']);
 
             Route::get('research/{researchDocument}/feedback', [FeedbackController::class, 'index']);
             Route::post('research/{researchDocument}/feedback', [FeedbackController::class, 'store'])->middleware(['origin.allowed', 'throttle:domain-mutations']);

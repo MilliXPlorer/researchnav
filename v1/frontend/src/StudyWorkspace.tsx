@@ -2,38 +2,41 @@ import { type ReactNode, useEffect, useState } from "react";
 import {
   CheckCircle2,
   Download,
-  Eye,
   FileText,
   Folder,
   MessageSquareText,
   Pencil,
-  Send,
   Trash2,
   UsersRound,
 } from "lucide-react";
 import {
-  createFeedback,
-  listFeedback,
   listResearchFiles,
   listResearchFolders,
   researchFileDownloadUrl,
-  researchFilePreviewUrl,
   type DocumentFileResource,
-  type FeedbackResource,
   type InstructorProjectTeam,
   type ResearchPeopleResource,
+  type SdgResource,
 } from "./api";
 import { Button } from "./components";
+import { Modal } from "./Modal";
 import DefenseMonitoringMenu, {
   type DefenseType,
 } from "./DefenseMonitoringMenu";
 import SharedMonitoring from "./SharedMonitoring";
-import ResearchActivity from "./ResearchActivity";
+import PdfAnnotationWorkspace from "./PdfAnnotationWorkspace";
+import DocumentFeedbackPanel from "./DocumentFeedbackPanel";
+import DocxPreviewWorkspace from "./DocxPreviewWorkspace";
 import { formatPhilippineDateTime } from "./dateTime";
+import { withStandardResearchFolders } from "./researchFolders";
+import type {
+  ResearchWorkspaceDestination,
+  ResearchWorkspaceTab,
+} from "./researchWorkspaceRoute";
 import type { Role } from "./types";
+import { SdgBadges } from "./SdgMetadata";
 
-type WorkspaceTab =
-  "overview" | "team" | "documents" | "feedback" | "monitoring";
+type WorkspaceTab = ResearchWorkspaceTab;
 
 export interface StudyWorkspaceResearcher {
   id: string;
@@ -44,7 +47,8 @@ export interface StudyWorkspaceResearcher {
 export interface StudyWorkspaceControls {
   onEditTitle?: () => void;
   onDeleteProject?: () => void;
-  onManageAssignments?: () => void;
+  onManageAssignments?: (stage: "proposal" | "final") => void;
+  onDefenseTeamStageChange?: (stage: "proposal" | "final") => void;
   onRemoveResearcher?: (researcher: StudyWorkspaceResearcher) => void;
   researcherActionsDisabled?: boolean;
 }
@@ -77,11 +81,12 @@ export default function StudyWorkspace({
   teamLoading = false,
   badgeLabel = "Central record",
   summary,
+  sdgs = [],
   controls,
   actorExtension,
   canPostFeedback = false,
   monitoringReadOnly = false,
-  showExtendedActivity = false,
+  destination,
 }: {
   role: Role;
   researchDocumentId: string | number;
@@ -93,27 +98,27 @@ export default function StudyWorkspace({
   teamLoading?: boolean;
   badgeLabel?: string;
   summary?: string | null;
+  sdgs?: SdgResource[];
   controls?: StudyWorkspaceControls;
   actorExtension?: ReactNode;
   canPostFeedback?: boolean;
   monitoringReadOnly?: boolean;
-  showExtendedActivity?: boolean;
+  destination?: ResearchWorkspaceDestination;
 }) {
-  const [tab, setTab] = useState<WorkspaceTab>("overview");
+  const [tab, setTab] = useState<WorkspaceTab>(destination?.tab ?? "overview");
   const [defenseType, setDefenseType] = useState<DefenseType>("proposal");
   const [files, setFiles] = useState<DocumentFileResource[]>([]);
   const [folders, setFolders] = useState<string[]>([]);
-  const [feedback, setFeedback] = useState<FeedbackResource[]>([]);
+  const [feedbackFile, setFeedbackFile] = useState<DocumentFileResource | null>(
+    null,
+  );
+  const [commentFile, setCommentFile] = useState<DocumentFileResource | null>(
+    null,
+  );
   const [activeFolder, setActiveFolder] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [attempt, setAttempt] = useState(0);
-  const [feedbackText, setFeedbackText] = useState("");
-  const [feedbackType, setFeedbackType] =
-    useState<FeedbackResource["feedback_type"]>("comment");
-  const [feedbackFileId, setFeedbackFileId] = useState("");
-  const [feedbackBusy, setFeedbackBusy] = useState(false);
-  const [feedbackError, setFeedbackError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -121,30 +126,43 @@ export default function StudyWorkspace({
     void Promise.allSettled([
       listResearchFiles(researchDocumentId),
       listResearchFolders(researchDocumentId),
-      listFeedback(researchDocumentId),
-    ]).then(([filesResult, foldersResult, feedbackResult]) => {
+    ]).then(([filesResult, foldersResult]) => {
       if (cancelled) return;
       const loadedFiles =
         filesResult.status === "fulfilled" ? filesResult.value : [];
-      const loadedFolders =
+      const loadedFolders = withStandardResearchFolders(
         foldersResult.status === "fulfilled"
           ? foldersResult.value
           : (Array.from(
               new Set(
                 loadedFiles.map((file) => file.relative_path).filter(Boolean),
               ),
-            ) as string[]);
+            ) as string[]),
+      );
       setFiles(loadedFiles);
       setFolders(loadedFolders);
-      setFeedback(
-        feedbackResult.status === "fulfilled" ? feedbackResult.value : [],
+      setTab(destination?.tab ?? "overview");
+      const targetFile = loadedFiles.find(
+        (file) => file.id === destination?.fileId,
       );
-      setActiveFolder(
-        loadedFolders[0] ??
-          (loadedFiles.some((file) => !file.relative_path) ? "Unfiled" : ""),
+      const availableFolders = [
+        ...loadedFolders,
+        ...(loadedFiles.some((file) => !file.relative_path) ? ["Unfiled"] : []),
+      ];
+      const targetFolder = targetFile
+        ? (targetFile.relative_path ?? "Unfiled")
+        : destination?.folder && availableFolders.includes(destination.folder)
+          ? destination.folder
+          : (availableFolders[0] ?? "");
+      setActiveFolder(targetFolder);
+      setFeedbackFile(
+        targetFile && destination?.panel === "annotations" ? targetFile : null,
+      );
+      setCommentFile(
+        targetFile && destination?.panel === "feedback" ? targetFile : null,
       );
       setLoadError(
-        [filesResult, foldersResult, feedbackResult].some(
+        [filesResult, foldersResult].some(
           (result) => result.status === "rejected",
         )
           ? "Some study workspace data could not be loaded."
@@ -156,59 +174,50 @@ export default function StudyWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [researchDocumentId, attempt]);
-
-  async function submitFeedback(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!feedbackText.trim()) return;
-    setFeedbackBusy(true);
-    setFeedbackError("");
-    try {
-      await createFeedback(researchDocumentId, {
-        comment: feedbackText.trim(),
-        feedback_type: feedbackType,
-        document_file_id: feedbackFileId ? Number(feedbackFileId) : null,
-      });
-      setFeedbackText("");
-      setFeedbackFileId("");
-      try {
-        setFeedback(await listFeedback(researchDocumentId));
-      } catch {
-        setFeedbackError(
-          "Feedback was posted, but the conversation could not be refreshed.",
-        );
-      }
-    } catch {
-      setFeedbackError("Feedback could not be posted. Please try again.");
-    } finally {
-      setFeedbackBusy(false);
-    }
-  }
-
+  }, [
+    researchDocumentId,
+    attempt,
+    destination?.tab,
+    destination?.folder,
+    destination?.fileId,
+    destination?.panel,
+  ]);
+  const [defenseTeamStage, setDefenseTeamStage] = useState<
+    "proposal" | "final"
+  >("proposal");
+  // Review-assignment contacts describe the proposal-stage setup. Once a
+  // stage-specific team is loaded, the final defense view must reflect only
+  // what was actually assigned for final (Unassigned until the instructor
+  // assigns it) instead of mirroring the proposal contacts.
+  const fallbackPeople =
+    projectTeam != null && defenseTeamStage === "final" ? undefined : people;
   const instructorName =
-    projectTeam?.instructor?.name ?? people?.section?.instructor_name ?? null;
+    projectTeam?.instructor?.name ??
+    fallbackPeople?.section?.instructor_name ??
+    null;
   const adviserName =
-    projectTeam?.adviser?.name ?? reviewerName(people, "adviser");
+    projectTeam?.adviser?.name ?? reviewerName(fallbackPeople, "adviser");
   const editorName =
     projectTeam?.support_assignments.editor?.name ??
-    reviewerName(people, "research_editor") ??
-    reviewerName(people, "editor");
+    reviewerName(fallbackPeople, "research_editor") ??
+    reviewerName(fallbackPeople, "editor");
   const statisticianName =
     projectTeam?.support_assignments.statistician?.name ??
-    reviewerName(people, "statistician");
+    reviewerName(fallbackPeople, "statistician");
   const librarianName =
     projectTeam?.support_assignments.librarian?.name ??
-    reviewerName(people, "librarian");
+    reviewerName(fallbackPeople, "librarian");
   const panelNames =
     projectTeam?.panel_members.map((member) => member.name) ??
-    people?.reviewers
+    fallbackPeople?.reviewers
       .filter((reviewer) => reviewer.review_role === "panel")
       .map((reviewer) => reviewer.name) ??
     [];
   const representativeName =
     projectTeam?.research_office_representative?.name ??
-    reviewerName(people, "research_office_representative");
-  const chairName = projectTeam?.chair?.name ?? reviewerName(people, "chair");
+    reviewerName(fallbackPeople, "research_office_representative");
+  const chairName =
+    projectTeam?.chair?.name ?? reviewerName(fallbackPeople, "chair");
   const readinessAvailable = projectTeam != null;
   const folderOptions = [
     ...folders,
@@ -281,9 +290,8 @@ export default function StudyWorkspace({
         {(
           [
             ["overview", "Overview", FileText],
-            ["team", "Research actors", UsersRound],
+            ["team", "Research Team", UsersRound],
             ["documents", "Documents", Folder],
-            ["feedback", "Feedback", MessageSquareText],
           ] as const
         ).map(([item, itemLabel, Icon]) => (
           <button
@@ -343,8 +351,8 @@ export default function StudyWorkspace({
                 <dd>{files.length}</dd>
               </div>
               <div>
-                <dt>Feedback</dt>
-                <dd>{feedback.length}</dd>
+                <dt>Folders</dt>
+                <dd>{folderOptions.length}</dd>
               </div>
               <div>
                 <dt>Document folders</dt>
@@ -352,6 +360,15 @@ export default function StudyWorkspace({
               </div>
             </dl>
             {summary && <p>{summary}</p>}
+            <div className="project-sdg-summary">
+              <strong>Sustainable Development Goals</strong>
+
+              {sdgs.length > 0 ? (
+                <SdgBadges sdgs={sdgs} />
+              ) : (
+                <small>No SDGs assigned to this research yet.</small>
+              )}
+            </div>
             <div className="project-readiness-list">
               <div>
                 <CheckCircle2 aria-hidden="true" />
@@ -360,8 +377,8 @@ export default function StudyWorkspace({
                   <small>
                     {readinessAvailable
                       ? projectTeam.pre_defense_ready
-                        ? "Required actors are assigned and accepted."
-                        : "Waiting for one or more required actor assignments."
+                        ? "Required team members are assigned and accepted."
+                        : "Waiting for one or more required team assignments."
                       : "Assignment status is managed by the Research Instructor."}
                   </small>
                 </span>
@@ -374,7 +391,7 @@ export default function StudyWorkspace({
                     {readinessAvailable
                       ? projectTeam.post_defense_ready
                         ? "Adviser, editor, librarian, three panels, Research Rep, and Chair are ready."
-                        : "Post-defense actor list is not complete yet."
+                        : "The post-defense team is not complete yet."
                       : "Assignment status is managed by the Research Instructor."}
                   </small>
                 </span>
@@ -478,17 +495,17 @@ export default function StudyWorkspace({
         <div className="project-workspace-section">
           <div className="project-section-heading">
             <div>
-              <p className="eyebrow">Research actors</p>
+              <p className="eyebrow">Research Team</p>
               <h4>People assigned to this study</h4>
               <p>
                 Role-specific controls remain available only to authorized
-                research actors.
+                members of the research team.
               </p>
             </div>
             {controls?.onManageAssignments && (
               <Button
                 variant="secondary"
-                onClick={controls.onManageAssignments}
+                onClick={() => controls.onManageAssignments?.(defenseTeamStage)}
               >
                 <UsersRound /> Manage assignments
               </Button>
@@ -534,89 +551,227 @@ export default function StudyWorkspace({
           </section>
           {teamLoading ? (
             <p className="section-documents-loading">
-              Loading current actor assignments…
+              Loading current team assignments…
             </p>
           ) : (
+            <>
+              <div className="project-team-stage-control">
+                <label>
+                  Defense team
+                  <select
+                    value={defenseTeamStage}
+                    onChange={(event) => {
+                      const stage = event.target.value as "proposal" | "final";
+                      setDefenseTeamStage(stage);
+                      controls?.onDefenseTeamStageChange?.(stage);
+                    }}
+                  >
+                    <option value="proposal">Proposal Defense</option>
+                    <option value="final">Final Defense</option>
+                  </select>
+                </label>
+              </div>
+
             <div className="project-stage-columns">
-              <section className="project-team-block">
-                <div className="project-team-block-heading">
-                  <div>
-                    <p className="eyebrow">Before Proposal Defense</p>
-                    <h5>Pre-defense actors</h5>
-                  </div>
-                  {readinessAvailable && (
-                    <span
-                      className={
-                        projectTeam.pre_defense_ready
-                          ? "status-dot is-ready"
-                          : "status-dot"
-                      }
-                    >
-                      {projectTeam.pre_defense_ready ? "Ready" : "Incomplete"}
-                    </span>
-                  )}
-                </div>
-                <div className="project-actor-grid">
-                  {actorRows(
-                    [
-                      [
-                        "Research Instructor",
-                        instructorName,
-                        "Automatically assigned",
-                      ],
-                      ["Research Adviser", adviserName, "Instructor assigned"],
-                      ["Editor", editorName, "Researcher assigned"],
-                      ["Statistician", statisticianName, "Researcher assigned"],
-                      ["Librarian", librarianName, "Researcher assigned"],
-                    ],
-                    "pre",
-                  )}
-                </div>
-              </section>
-              <section className="project-team-block">
-                <div className="project-team-block-heading">
-                  <div>
-                    <p className="eyebrow">After Proposal Defense</p>
-                    <h5>Post-defense actors</h5>
-                  </div>
-                  {readinessAvailable && (
-                    <span
-                      className={
-                        projectTeam.post_defense_ready
-                          ? "status-dot is-ready"
-                          : "status-dot"
-                      }
-                    >
-                      {projectTeam.post_defense_ready ? "Ready" : "Incomplete"}
-                    </span>
-                  )}
-                </div>
-                <div className="project-actor-grid">
-                  {actorRows(
-                    [
-                      [
-                        "Research Instructor",
-                        instructorName,
-                        "Automatically assigned",
-                      ],
-                      ["Research Adviser", adviserName, "Instructor assigned"],
-                      ["Editor", editorName, "Researcher assigned"],
-                      ["Librarian", librarianName, "Researcher assigned"],
-                      ["Panel 1", panelNames[0], "Instructor assigned"],
-                      ["Panel 2", panelNames[1], "Instructor assigned"],
-                      ["Panel 3", panelNames[2], "Instructor assigned"],
-                      [
-                        "Research Rep",
-                        representativeName,
-                        "Research Office personnel",
-                      ],
-                      ["Chair", chairName, "Panel chair"],
-                    ],
-                    "post",
-                  )}
-                </div>
-              </section>
+              {defenseTeamStage === "proposal" ? (
+                <>
+                  <section className="project-team-block">
+                    <div className="project-team-block-heading">
+                      <div>
+                        <p className="eyebrow">Before Proposal Defense</p>
+                        <h5>Pre-defense team</h5>
+                      </div>
+
+                      {readinessAvailable && (
+                        <span
+                          className={
+                            projectTeam.pre_defense_ready
+                              ? "status-dot is-ready"
+                              : "status-dot"
+                          }
+                        >
+                          {projectTeam.pre_defense_ready ? "Ready" : "Incomplete"}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="project-actor-grid">
+                      {actorRows(
+                        [
+                          [
+                            "Research Instructor",
+                            instructorName,
+                            "Automatically assigned",
+                          ],
+                          [
+                            "Research Adviser",
+                            adviserName,
+                            "Instructor assigned",
+                          ],
+                          ["Editor", editorName, "Researcher assigned"],
+                          [
+                            "Statistician",
+                            statisticianName,
+                            "Researcher assigned",
+                          ],
+                          ["Librarian", librarianName, "Researcher assigned"],
+                        ],
+                        "pre",
+                      )}
+                    </div>
+                  </section>
+
+                  <section className="project-team-block">
+                    <div className="project-team-block-heading">
+                      <div>
+                        <p className="eyebrow">After Proposal Defense</p>
+                        <h5>Post-defense team</h5>
+                      </div>
+
+                      {readinessAvailable && (
+                        <span
+                          className={
+                            projectTeam.post_defense_ready
+                              ? "status-dot is-ready"
+                              : "status-dot"
+                          }
+                        >
+                          {projectTeam.post_defense_ready ? "Ready" : "Incomplete"}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="project-actor-grid">
+                      {actorRows(
+                        [
+                          [
+                            "Research Instructor",
+                            instructorName,
+                            "Automatically assigned",
+                          ],
+                          [
+                            "Research Adviser",
+                            adviserName,
+                            "Instructor assigned",
+                          ],
+                          ["Editor", editorName, "Researcher assigned"],
+                          ["Librarian", librarianName, "Researcher assigned"],
+                          ["Panel 1", panelNames[0], "Instructor assigned"],
+                          ["Panel 2", panelNames[1], "Instructor assigned"],
+                          ["Panel 3", panelNames[2], "Instructor assigned"],
+                          [
+                            "Research Rep",
+                            representativeName,
+                            "Research Office personnel",
+                          ],
+                          ["Chair", chairName, "Panel chair"],
+                        ],
+                        "post",
+                      )}
+                    </div>
+                  </section>
+                </>
+              ) : (
+                <>
+                  <section className="project-team-block">
+                    <div className="project-team-block-heading">
+                      <div>
+                        <p className="eyebrow">Before Final Defense</p>
+                        <h5>Pre-defense team</h5>
+                      </div>
+
+                      {readinessAvailable && (
+                        <span
+                          className={
+                            projectTeam.pre_defense_ready
+                              ? "status-dot is-ready"
+                              : "status-dot"
+                          }
+                        >
+                          {projectTeam.pre_defense_ready ? "Ready" : "Incomplete"}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="project-actor-grid">
+                      {actorRows(
+                        [
+                          [
+                            "Research Instructor",
+                            instructorName,
+                            "Automatically assigned",
+                          ],
+                          [
+                            "Research Adviser",
+                            adviserName,
+                            "Instructor assigned",
+                          ],
+                          ["Editor", editorName, "Researcher assigned"],
+                          [
+                            "Statistician",
+                            statisticianName,
+                            "Researcher assigned",
+                          ],
+                          ["Librarian", librarianName, "Researcher assigned"],
+                        ],
+                        "pre",
+                      )}
+                    </div>
+                  </section>
+
+                  <section className="project-team-block">
+                    <div className="project-team-block-heading">
+                      <div>
+                        <p className="eyebrow">After Final Defense</p>
+                        <h5>Post-defense team</h5>
+                      </div>
+
+                      {readinessAvailable && (
+                        <span
+                          className={
+                            projectTeam.post_defense_ready
+                              ? "status-dot is-ready"
+                              : "status-dot"
+                          }
+                        >
+                          {projectTeam.post_defense_ready ? "Ready" : "Incomplete"}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="project-actor-grid">
+                      {actorRows(
+                        [
+                          [
+                            "Research Instructor",
+                            instructorName,
+                            "Automatically assigned",
+                          ],
+                          [
+                            "Research Adviser",
+                            adviserName,
+                            "Instructor assigned",
+                          ],
+                          ["Editor", editorName, "Researcher assigned"],
+                          ["Librarian", librarianName, "Researcher assigned"],
+                          ["Panel 1", panelNames[0], "Instructor assigned"],
+                          ["Panel 2", panelNames[1], "Instructor assigned"],
+                          ["Panel 3", panelNames[2], "Instructor assigned"],
+                          [
+                            "Research Rep",
+                            representativeName,
+                            "Research Office personnel",
+                          ],
+                          ["Chair", chairName, "Panel chair"],
+                        ],
+                        "post",
+                      )}
+                    </div>
+                  </section>
+                </>
+              )}
             </div>
+            </>
           )}
           {actorExtension}
         </div>
@@ -640,7 +795,10 @@ export default function StudyWorkspace({
                   type="button"
                   key={folder}
                   className={activeFolder === folder ? "is-active" : ""}
-                  onClick={() => setActiveFolder(folder)}
+                  onClick={() => {
+                    setActiveFolder(folder);
+                    setFeedbackFile(null);
+                  }}
                 >
                   <Folder aria-hidden="true" />
                   <span>{folder}</span>
@@ -693,7 +851,14 @@ export default function StudyWorkspace({
                   )
                   .sort((a, b) => b.version_number - a.version_number)
                   .map((file) => (
-                    <article className="project-document-row" key={file.id}>
+                    <article
+                      className={
+                        file.id === destination?.fileId
+                          ? "project-document-row is-targeted"
+                          : "project-document-row"
+                      }
+                      key={file.id}
+                    >
                       <div className="project-document-icon" aria-hidden="true">
                         <FileText />
                       </div>
@@ -712,26 +877,26 @@ export default function StudyWorkspace({
                           </span>
                         </div>
                         <small>
-                          {label(file.document_type)} ·{" "}
+                          {label(file.upload_purpose ?? "initial_submission")} ·{" "}
                           {file.uploader_name ?? "Researcher"} ·{" "}
                           {formatPhilippineDateTime(file.uploaded_at)}
                         </small>
                       </div>
                       <div className="project-document-actions">
-                        {file.mime_type === "application/pdf" && (
-                          <a
-                            className="icon-link-button"
-                            href={researchFilePreviewUrl(
-                              researchDocumentId,
-                              file.id,
-                            )}
-                            target="_blank"
-                            rel="noreferrer"
-                            aria-label={`Preview ${file.original_filename}`}
-                            title="Preview PDF"
+                        <Button
+                          variant="secondary"
+                          onClick={() => setFeedbackFile(file)}
+                        >
+                          Open document
+                        </Button>
+                        {canPostFeedback && (
+                          <Button
+                            variant="quiet"
+                            onClick={() => setCommentFile(file)}
                           >
-                            <Eye />
-                          </a>
+                            <MessageSquareText aria-hidden="true" />
+                            File feedback
+                          </Button>
                         )}
                         <a
                           className="icon-link-button"
@@ -749,145 +914,52 @@ export default function StudyWorkspace({
                   ))}
               </div>
             )}
-          </section>
-        </div>
-      )}
-
-      {tab === "feedback" && (
-        <div className="project-workspace-section project-feedback-layout">
-          <section className="project-feedback-thread">
-            <div className="project-section-heading">
-              <div>
-                <p className="eyebrow">Review conversation</p>
-                <h4>Feedback and comments</h4>
-                <p>
-                  Comments stay attached to this study and can optionally
-                  reference a specific file.
-                </p>
-              </div>
-              <span>
-                {feedback.length} comment{feedback.length === 1 ? "" : "s"}
-              </span>
-            </div>
-            {feedback.length === 0 ? (
-              <div className="project-empty-folder">
-                <MessageSquareText aria-hidden="true" />
-                <strong>No feedback yet.</strong>
-                <span>
-                  Review comments from assigned research actors will appear
-                  here.
-                </span>
-              </div>
-            ) : (
-              <div className="project-comment-list">
-                {feedback.map((item) => {
-                  const linkedFile = files.find(
-                    (file) => file.id === item.document_file_id,
-                  );
-                  return (
-                    <article className="project-comment" key={item.id}>
-                      <span
-                        className="project-person-avatar"
-                        aria-hidden="true"
-                      >
-                        {(item.reviewer_name ?? "R").slice(0, 1).toUpperCase()}
-                      </span>
-                      <div className="project-comment-body">
-                        <div className="project-comment-meta">
-                          <span>
-                            <strong>
-                              {item.reviewer_name ?? "Assigned reviewer"}
-                            </strong>
-                            <small>
-                              {item.reviewer_role ?? "Research actor"}
-                            </small>
-                          </span>
-                          <time>
-                            {formatPhilippineDateTime(item.created_at)}
-                          </time>
-                        </div>
-                        <p>{item.comment}</p>
-                        <div className="project-comment-footer">
-                          <span>{label(item.feedback_type)}</span>
-                          <span>{label(item.feedback_status)}</span>
-                          {linkedFile && (
-                            <span>{linkedFile.original_filename}</span>
-                          )}
-                        </div>
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
+            {feedbackFile && (
+              <>
+                {feedbackFile.mime_type === "application/pdf" ? (
+                  <PdfAnnotationWorkspace
+                    key={feedbackFile.id}
+                    researchDocumentId={researchDocumentId}
+                    file={feedbackFile}
+                    canAnnotate={canPostFeedback}
+                    onClose={() => setFeedbackFile(null)}
+                  />
+                ) : (
+                  <DocxPreviewWorkspace
+                    key={feedbackFile.id}
+                    researchDocumentId={researchDocumentId}
+                    file={feedbackFile}
+                    onClose={() => setFeedbackFile(null)}
+                  />
+                )}
+                <DocumentFeedbackPanel
+                  key={`document-review-${feedbackFile.id}`}
+                  researchDocumentId={researchDocumentId}
+                  file={feedbackFile}
+                  canPostFeedback={canPostFeedback}
+                  showClose={false}
+                  onClose={() => setFeedbackFile(null)}
+                />
+              </>
+            )}
+            {commentFile && (
+              <Modal
+                label={`File feedback for ${commentFile.original_filename}`}
+                onClose={() => setCommentFile(null)}
+                size="large"
+                className="modal-panel-feedback"
+                showClose={false}
+              >
+                <DocumentFeedbackPanel
+                  key={`feedback-${commentFile.id}`}
+                  researchDocumentId={researchDocumentId}
+                  file={commentFile}
+                  canPostFeedback={canPostFeedback}
+                  onClose={() => setCommentFile(null)}
+                />
+              </Modal>
             )}
           </section>
-          {canPostFeedback && (
-            <aside className="project-feedback-composer">
-              <form onSubmit={submitFeedback}>
-                <div>
-                  <p className="eyebrow">Add review note</p>
-                  <h4>New feedback</h4>
-                </div>
-                {feedbackError && (
-                  <p className="admin-error" role="alert">
-                    {feedbackError}
-                  </p>
-                )}
-                <label>
-                  Feedback type
-                  <select
-                    value={feedbackType}
-                    onChange={(event) =>
-                      setFeedbackType(
-                        event.target.value as FeedbackResource["feedback_type"],
-                      )
-                    }
-                  >
-                    <option value="comment">Comment</option>
-                    <option value="suggestion">Suggestion</option>
-                    <option value="revision_request">Revision request</option>
-                    <option value="approval_remark">Approval remark</option>
-                    <option value="general_feedback">General feedback</option>
-                  </select>
-                </label>
-                <label>
-                  Related document
-                  <select
-                    value={feedbackFileId}
-                    onChange={(event) => setFeedbackFileId(event.target.value)}
-                  >
-                    <option value="">Whole study / no specific file</option>
-                    {files.map((file) => (
-                      <option key={file.id} value={file.id}>
-                        {file.relative_path ?? "Unfiled"} —{" "}
-                        {file.original_filename} (v{file.version_number})
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Comment
-                  <textarea
-                    required
-                    value={feedbackText}
-                    onChange={(event) => setFeedbackText(event.target.value)}
-                    placeholder="Write a clear review note for the researchers…"
-                  />
-                </label>
-                <Button disabled={feedbackBusy || !feedbackText.trim()}>
-                  <Send /> {feedbackBusy ? "Posting…" : "Post feedback"}
-                </Button>
-              </form>
-            </aside>
-          )}
-          {showExtendedActivity && (
-            <section className="project-feedback-thread">
-              <ResearchActivity
-                researchDocumentId={researchDocumentId}
-                hideFeedback
-              />
-            </section>
-          )}
         </div>
       )}
 

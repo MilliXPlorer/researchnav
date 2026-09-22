@@ -2,6 +2,7 @@ import { ChangeEvent, DragEvent, useMemo, useRef, useState } from "react";
 import { instituteNames } from "./data";
 import { Modal } from "./Modal";
 import { Pencil, RefreshCw, Save } from "lucide-react";
+import { SdgSelector } from "./SdgMetadata";
 
 type Metadata = {
   title: string | null;
@@ -11,6 +12,7 @@ type Metadata = {
   year: number | null;
   final_binding_date: string | null;
   institute: string | null;
+  sdg_ids: number[];
 };
 
 type ImportState = "idle" | "importing" | "imported" | "failed";
@@ -76,6 +78,7 @@ const emptyMetadata = (): Metadata => ({
   year: null,
   final_binding_date: null,
   institute: null,
+  sdg_ids: [],
 });
 
 const instituteOptions = [...instituteNames, "Unclassified"] as const;
@@ -99,6 +102,7 @@ function normalizeMetadata(metadata?: Partial<Metadata>): Metadata {
     ...metadata,
     researchers: metadata?.researchers ?? [],
     keywords: uniqueKeywords(metadata?.keywords ?? []),
+    sdg_ids: metadata?.sdg_ids ?? [],
   };
 }
 
@@ -1220,6 +1224,23 @@ export default function ResearchOfficeBulkImport({
         ? `Saved metadata for ${result.folder_name ?? result.file_name}.`
         : `Metadata still needs review for ${result.folder_name ?? result.file_name}.`,
     );
+  }
+
+  function updateSdgs(resultIndex: number, sdgIds: number[]) {
+    setResults((current) =>
+      current.map((result) =>
+        result.source_file_index === resultIndex
+          ? {
+              ...result,
+              metadata: { ...result.metadata, sdg_ids: sdgIds },
+              import_error: undefined,
+              import_state:
+                result.import_state === "failed" ? "idle" : result.import_state,
+            }
+          : result,
+      ),
+    );
+    setMetadataDirty((current) => ({ ...current, [resultIndex]: true }));
   }
 
   async function reextractMetadata(result: ImportResult) {
@@ -2583,6 +2604,16 @@ export default function ResearchOfficeBulkImport({
                             />
                           </div>
                         </div>
+                        <SdgSelector
+                          selectedIds={result.metadata.sdg_ids}
+                          onChange={(sdgIds) =>
+                            updateSdgs(originalIndex, sdgIds)
+                          }
+                          disabled={
+                            importing || result.import_state === "imported"
+                          }
+                          legend="Sustainable Development Goals (optional)"
+                        />
                       </div>
                     )}
                   </article>

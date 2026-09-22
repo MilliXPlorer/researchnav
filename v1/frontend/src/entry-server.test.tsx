@@ -80,7 +80,7 @@ describe("SSR entry", () => {
       fetcher,
     });
 
-    expect(result.appHtml).toContain("My research.");
+    expect(result.appHtml).toContain("My dashboard.");
     expect(result.appHtml).toContain("researcher@example.test");
     expect(result.appHtml).not.toContain("Loading ResearchNAV");
   });

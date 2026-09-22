@@ -10,6 +10,7 @@ use App\Notifications\ResearchActivityNotification;
 use App\Policies\FeedbackCommentPolicy;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 
 class FeedbackService
@@ -22,9 +23,10 @@ class FeedbackService
         return DB::transaction(function () use ($actor, $research, $data, $request): FeedbackComment {
             $locked = ResearchDocument::query()->whereKey($research->id)->lockForUpdate()->firstOrFail();
             $actor = $this->currentActor($actor);
-            if (! DomainAuthorization::canReview($actor, $locked)) {
+            if (! DocumentReviewAuthorization::canAuthor($actor, $locked)) {
                 throw $this->notAuthorized();
             }
+            $file = null;
             if (isset($data['document_file_id'])) {
                 $file = DocumentFile::query()->whereKey($data['document_file_id'])->lockForUpdate()->firstOrFail();
                 if ($file->research_document_id !== $locked->id) {
@@ -36,12 +38,21 @@ class FeedbackService
             if ((new FeedbackComment)->usesFinalStorage()) {
                 $feedbackData['reviewer_role'] = $actor->role;
                 $feedbackData['reviewed_at'] = now();
+                if (($data['feedback_type'] ?? null) === 'revision_request') {
+                    $feedbackData['required_action'] = $data['comment'];
+                }
             }
             $feedback = FeedbackComment::query()->create($feedbackData);
             $this->shadow->mirrorFeedback($feedback);
             $this->monitoring->log($locked, 'FEEDBACK_CREATED', $actor, 'Feedback created.', null, null, 'open');
             $this->audit->log($actor, 'FEEDBACK_CREATED', $feedback, 'Created feedback.', $request);
-            $locked->submitter?->notify(new ResearchActivityNotification($locked, 'FEEDBACK_CREATED', 'New feedback', 'New feedback was added to your research.'));
+            $actionUrl = '/research/'.$locked->id.'?'.http_build_query(array_filter([
+                'tab' => 'documents',
+                'folder' => $file?->relative_path ?? ($file ? 'Unfiled' : null),
+                'file' => $file?->id,
+                'panel' => $file ? 'feedback' : null,
+            ], static fn (mixed $value): bool => $value !== null), '', '&', PHP_QUERY_RFC3986);
+            $this->notifyResearcher($locked, new ResearchActivityNotification($locked, 'FEEDBACK_CREATED', 'New feedback', 'New feedback was added to your research.', $actionUrl));
 
             return $feedback->load(['user', 'documentFile']);
         });
@@ -57,16 +68,24 @@ class FeedbackService
             if (! (new FeedbackCommentPolicy)->update($actor, $lockedFeedback)) {
                 throw $this->notAuthorized();
             }
-            if (! in_array($status, ['acknowledged', 'resolved'], true)) {
-                throw ValidationException::withMessages(['feedback_status' => ['Feedback status must be acknowledged or resolved.']]);
+            if (! in_array($status, ['open', 'resolved'], true)) {
+                throw ValidationException::withMessages(['feedback_status' => ['Feedback status must be open or resolved.']]);
             }
 
             $previous = $lockedFeedback->feedback_status;
-            $lockedFeedback->update(['feedback_status' => $status]);
+            if ($previous === $status) {
+                return $lockedFeedback->fresh(['user', 'documentFile']);
+            }
+            $values = ['feedback_status' => $status];
+            if (Schema::hasColumn($lockedFeedback->getTable(), 'resolved_at')) {
+                $values['resolved_at'] = $status === 'resolved' ? now() : null;
+            }
+            $lockedFeedback->update($values);
             $this->shadow->mirrorFeedback($lockedFeedback->fresh());
             $this->monitoring->log($lockedResearch, 'FEEDBACK_'.$status, $actor, 'Feedback status updated.', $previous, $status, 'open');
             $this->audit->log($actor, 'FEEDBACK_STATUS_UPDATED', $lockedFeedback, "Feedback marked {$status}.", $request);
-            $lockedResearch->submitter?->notify(new ResearchActivityNotification($lockedResearch, 'FEEDBACK_STATUS_UPDATED', 'Feedback updated', "Feedback was marked {$status}."));
+            $lockedFeedback->loadMissing('documentFile');
+            $this->notifyResearcher($lockedResearch, new ResearchActivityNotification($lockedResearch, 'FEEDBACK_STATUS_UPDATED', 'Feedback updated', "Feedback was marked {$status}.", $this->feedbackUrl($lockedResearch, $lockedFeedback)));
 
             return $lockedFeedback->fresh(['user', 'documentFile']);
         });
@@ -82,9 +101,6 @@ class FeedbackService
             if (! DomainAuthorization::isResearcherParticipant($actor, $research)) {
                 throw $this->notAuthorized();
             }
-            if ($lockedFeedback->usesFinalStorage()) {
-                throw ValidationException::withMessages(['action' => ['The locked research_reviews table does not provide researcher acknowledgement fields.']]);
-            }
             $action = $data['action'];
             if (($action === 'acknowledge' && $lockedFeedback->researcher_acknowledged_at !== null)
                 || ($action === 'address' && $lockedFeedback->researcher_addressed_at !== null)) {
@@ -98,7 +114,11 @@ class FeedbackService
             $event = $action === 'acknowledge' ? 'FEEDBACK_ACKNOWLEDGED_BY_RESEARCHER' : 'FEEDBACK_ADDRESSED_BY_RESEARCHER';
             $this->monitoring->log($research, $event, $actor, $action === 'acknowledge' ? 'Researcher acknowledged feedback.' : 'Researcher marked feedback addressed.', null, null, 'open');
             $this->audit->log($actor, $event, $lockedFeedback, $action === 'acknowledge' ? 'Acknowledged reviewer feedback.' : 'Marked reviewer feedback addressed.', $request);
-            $lockedFeedback->user?->notify(new ResearchActivityNotification($research, $event, 'Feedback update', $action === 'acknowledge' ? 'The researcher acknowledged your feedback.' : 'The researcher marked your feedback addressed.'));
+            $lockedFeedback->loadMissing('documentFile');
+            $author = User::query()->find($lockedFeedback->user_id);
+            if ($author !== null && DocumentReviewAuthorization::canAuthor($author, $research)) {
+                $author->notify(new ResearchActivityNotification($research, $event, 'Feedback update', $action === 'acknowledge' ? 'The researcher acknowledged your feedback.' : 'The researcher marked your feedback addressed.', $this->feedbackUrl($research, $lockedFeedback)));
+            }
 
             return $lockedFeedback->fresh(['user', 'documentFile']);
         });
@@ -112,6 +132,26 @@ class FeedbackService
         }
 
         return $current;
+    }
+
+    private function notifyResearcher(ResearchDocument $research, ResearchActivityNotification $notification): void
+    {
+        $researcher = User::query()->find($research->submitted_by);
+        if ($researcher !== null && DomainAuthorization::isResearcherParticipant($researcher, $research)) {
+            $researcher->notify($notification);
+        }
+    }
+
+    private function feedbackUrl(ResearchDocument $research, FeedbackComment $feedback): string
+    {
+        $file = $feedback->documentFile;
+
+        return '/research/'.$research->id.'?'.http_build_query(array_filter([
+            'tab' => 'documents',
+            'folder' => $file?->relative_path ?? ($file ? 'Unfiled' : null),
+            'file' => $file?->id,
+            'panel' => $file ? 'feedback' : null,
+        ], static fn (mixed $value): bool => $value !== null), '', '&', PHP_QUERY_RFC3986);
     }
 
     private function notAuthorized(): ValidationException

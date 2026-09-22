@@ -11,6 +11,7 @@ export function Modal({
   dirty = false,
   size = "regular",
   showClose = true,
+  className = "",
   children,
 }: {
   label: string;
@@ -19,6 +20,7 @@ export function Modal({
   dirty?: boolean;
   size?: "regular" | "large";
   showClose?: boolean;
+  className?: string;
   children: ReactNode;
 }) {
   const [askDiscard, setAskDiscard] = useState(false);
@@ -50,7 +52,7 @@ export function Modal({
       }}
     >
       <section
-        className={`modal-panel modal-panel-${size}`}
+        className={`modal-panel modal-panel-${size}${className ? ` ${className}` : ""}`}
         ref={dialogRef}
         role="dialog"
         aria-modal="true"

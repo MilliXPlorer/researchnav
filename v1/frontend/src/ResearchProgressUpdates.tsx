@@ -66,9 +66,11 @@ export default function ResearchProgressUpdates({ role }: { role: Role }) {
     <div className="workspace-content admin-sidebar-page research-progress-updates">
       <header className="workspace-header">
         <div>
-          <p className="eyebrow">
-            {roleConfigs.find((config) => config.id === role)?.label}
-          </p>
+          {role !== "researcher" && (
+            <p className="eyebrow">
+              {roleConfigs.find((config) => config.id === role)?.label}
+            </p>
+          )}
           <h1>Research Progress Updates</h1>
           <p>
             Researcher-reported accomplishments and blockers by assigned folder.

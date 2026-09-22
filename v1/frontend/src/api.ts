@@ -258,6 +258,7 @@ export interface InternalResearchResource {
   visibility: "private" | "registered_only" | "public";
   is_imported?: boolean;
   can_update_metadata?: boolean;
+  sdgs?: SdgResource[];
 }
 
 export interface ResearchRevisionResource {
@@ -301,6 +302,7 @@ export interface ResearchMetadataInput {
   abstract: string | null;
   keywords: string | null;
   publication_year: number | null;
+  sdg_ids?: number[];
   institute?: string | null;
   degree_program?: string | null;
   manuscript_date_label?: string | null;
@@ -344,6 +346,11 @@ export interface DocumentFileResource {
     | "revised_manuscript"
     | "final_manuscript"
     | "attachment";
+  upload_purpose?:
+    | "initial_submission"
+    | "response_to_feedback"
+    | "revision"
+    | "final_revision";
   version_number: number;
   uploaded_by?: string | null;
   uploader_name?: string | null;
@@ -380,6 +387,7 @@ export interface FeedbackResource {
     | "approval_remark"
     | "general_feedback";
   feedback_status: "open" | "acknowledged" | "resolved";
+  resolved_at?: string | null;
   reviewer_name?: string | null;
   reviewer_role?: string | null;
   researcher_acknowledged_at?: string | null;
@@ -388,10 +396,56 @@ export interface FeedbackResource {
   created_at: string | null;
 }
 
+export interface DocxPreviewResource {
+  schema_version: 1;
+  research_document_id: number;
+  document_file_id: number;
+  document_file_version: number;
+  filename: string;
+  mime_type: string;
+  paragraphs: Array<{ index: number; text: string; truncated: boolean }>;
+  truncated: boolean;
+}
+
 export interface FeedbackInput {
   comment: string;
   feedback_type: FeedbackResource["feedback_type"];
   document_file_id?: number | null;
+}
+
+export interface PdfAnnotationRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface PdfAnnotationAnchor {
+  schema_version: 1;
+  page_number: number;
+  exact: string;
+  prefix?: string | null;
+  suffix?: string | null;
+  rects: PdfAnnotationRect[];
+}
+
+export interface PdfAnnotationResource {
+  id: number;
+  research_document_id: number;
+  document_file_id: number;
+  document_file_version: number;
+  author_name: string;
+  author_role: string;
+  kind: "highlight" | "comment";
+  body: string | null;
+  anchor: PdfAnnotationAnchor;
+  created_at: string | null;
+}
+
+export interface PdfAnnotationInput {
+  kind: "highlight" | "comment";
+  body?: string | null;
+  anchor: PdfAnnotationAnchor;
 }
 
 export interface MonitoringLogResource {
@@ -826,6 +880,20 @@ export function researchFilePreviewUrl(
   return `${researchPath(researchDocumentId)}/files/${encodeURIComponent(String(fileId))}/preview`;
 }
 
+export async function getDocxPreview(
+  researchDocumentId: string | number,
+  fileId: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<DocxPreviewResource> {
+  return (
+    await apiRequest<{ data: DocxPreviewResource }>(
+      `${researchPath(researchDocumentId)}/files/${encodeURIComponent(String(fileId))}/preview-content`,
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
 export function repositoryDownloadUrl(researchDocumentId: string | number) {
   return `/api/repository/${encodeURIComponent(String(researchDocumentId))}/download`;
 }
@@ -835,6 +903,7 @@ export async function uploadResearchFile(
   file: File,
   documentType: DocumentFileResource["document_type"],
   relativePathOrFetcher?: string | null | ApiFetch,
+  uploadPurpose?: DocumentFileResource["upload_purpose"],
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<DocumentFileResource> {
   const relativePath =
@@ -847,6 +916,7 @@ export async function uploadResearchFile(
   body.append("file", file);
   body.append("document_type", documentType);
   if (relativePath?.trim()) body.append("relative_path", relativePath.trim());
+  if (uploadPurpose) body.append("upload_purpose", uploadPurpose);
   return (
     await apiRequest<{ data: DocumentFileResource }>(
       `${researchPath(researchDocumentId)}/files`,
@@ -913,10 +983,39 @@ export async function createFeedback(
   ).data;
 }
 
+export async function listPdfAnnotations(
+  researchDocumentId: string | number,
+  fileId: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<PdfAnnotationResource[]> {
+  return (
+    await apiRequest<{ data: PdfAnnotationResource[] }>(
+      `${researchPath(researchDocumentId)}/files/${encodeURIComponent(String(fileId))}/annotations`,
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export async function createPdfAnnotation(
+  researchDocumentId: string | number,
+  fileId: string | number,
+  input: PdfAnnotationInput,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<PdfAnnotationResource> {
+  return (
+    await apiRequest<{ data: PdfAnnotationResource }>(
+      `${researchPath(researchDocumentId)}/files/${encodeURIComponent(String(fileId))}/annotations`,
+      { method: "POST", body: JSON.stringify(input) },
+      fetcher,
+    )
+  ).data;
+}
+
 export async function updateFeedbackStatus(
   researchDocumentId: string | number,
   feedbackId: string | number,
-  feedback_status: "acknowledged" | "resolved",
+  feedback_status: "open" | "resolved",
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<FeedbackResource> {
   return (
@@ -1196,6 +1295,7 @@ export interface PublicResearchResource {
   institute?: string;
   degree_program?: string;
   category?: { name?: string } | string | null;
+  sdgs?: SdgResource[];
   abstract?: string;
   keywords?: string[] | string | null;
   research_stage?: string;
@@ -1334,6 +1434,7 @@ export function toResearchRecord(
     degreeProgram,
     program: degreeProgram,
     category: toCategory(resource.category),
+    sdgs: resource.sdgs ?? [],
     abstract: resource.abstract ?? "",
     keywords: toKeywords(resource.keywords),
     researchStage: toResearchStage(resource.research_stage),
@@ -1416,6 +1517,7 @@ export type PublicResearchFilters = {
   keywords?: string;
   category?: string;
   institute?: string;
+  sdgIds?: number[];
   year?: string | number;
   yearFrom?: string | number;
   yearTo?: string | number;
@@ -1439,6 +1541,7 @@ export async function searchPublicResearch(
   append("keywords", filters.keywords);
   append("category", filters.category);
   append("institute", filters.institute);
+  filters.sdgIds?.forEach((id) => params.append("sdg_ids[]", String(id)));
   append("year", filters.year);
   append("year_from", filters.yearFrom);
   append("year_to", filters.yearTo);
@@ -1518,6 +1621,21 @@ export async function checkContentQuerySimilarity(
   return (response.data ?? []).map(toResearchRecord);
 }
 
+export async function checkContentUploadSimilarity(
+  file: File,
+  fetcher: ApiFetch = globalThis.fetch,
+  signal?: AbortSignal,
+): Promise<ResearchRecord[]> {
+  const body = new FormData();
+  body.append("file", file);
+  const response = await apiRequest<PublicRepositorySimilarityResponse>(
+    "/api/similarity/content-upload",
+    { method: "POST", body, signal },
+    fetcher,
+  );
+  return (response.data ?? []).map(toResearchRecord);
+}
+
 export async function listPersistedSimilarityResults(
   researchDocumentId: string | number,
   fetcher: ApiFetch = globalThis.fetch,
@@ -1566,6 +1684,14 @@ export interface CategoryResource {
   is_active: boolean;
 }
 
+export interface SdgResource {
+  id: number;
+  code: string;
+  title: string;
+  short_title: string;
+  color_hex: string;
+}
+
 /** The exact fields returned by ResearchDocumentResource for authenticated actors. */
 export interface ResearchDocumentSummaryResource {
   id: number;
@@ -1594,10 +1720,12 @@ export interface ResearchDocumentSummaryResource {
   archived_at: string | null;
   authors: ResearchAuthorResource[];
   category: CategoryResource | null;
+  sdgs?: SdgResource[];
 }
 
 export interface ResearchDraftInput {
   category_id?: number | null;
+  sdg_ids?: number[];
   institute?: string | null;
   degree_program?: string | null;
   title: string;
@@ -1902,6 +2030,7 @@ export interface InstructorStudentResource {
 
 export type ProjectTeamRole =
   | "instructor"
+  | "researcher"
   | "adviser"
   | "research_office_representative"
   | "chair"
@@ -1925,7 +2054,9 @@ export interface ProjectSupportActor {
 export interface InstructorProjectTeam {
   section_id: number;
   research_document_id: number;
+  defense_type: "proposal" | "final";
   instructor: ProjectTeamPerson | null;
+  researchers: ProjectTeamPerson[];
   adviser: ProjectTeamPerson | null;
   research_office_representative: ProjectTeamPerson | null;
   chair: ProjectTeamPerson | null;
@@ -1941,6 +2072,8 @@ export interface InstructorProjectTeam {
 }
 
 export interface InstructorProjectTeamInput {
+  defense_type: "proposal" | "final";
+  researcher_ids: string[];
   adviser_id: string | null;
   research_office_representative_id: string | null;
   chair_id: string | null;
@@ -1948,16 +2081,17 @@ export interface InstructorProjectTeamInput {
 }
 
 export type InstructorProjectTeamRoleKey =
-  "adviser" | "researchOffice" | "chair" | "panelMembers";
+  "researcher" | "adviser" | "researchOffice" | "chair" | "panelMembers";
 
 export async function getInstructorProjectTeam(
   sectionId: string | number,
   researchDocumentId: string | number,
+  defenseType: "proposal" | "final" = "proposal",
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<InstructorProjectTeam> {
   return (
     await apiRequest<{ data: InstructorProjectTeam }>(
-      `/api/instructor/sections/${encodeURIComponent(String(sectionId))}/documents/${encodeURIComponent(String(researchDocumentId))}/team`,
+      `/api/instructor/sections/${encodeURIComponent(String(sectionId))}/documents/${encodeURIComponent(String(researchDocumentId))}/team?defense_type=${encodeURIComponent(defenseType)}`,
       undefined,
       fetcher,
     )
@@ -1997,6 +2131,7 @@ export async function replaceInstructorProjectTeam(
 export async function replaceInstructorProjectTeamRole(
   sectionId: string | number,
   researchDocumentId: string | number,
+  defenseType: "proposal" | "final",
   teamRole: ProjectTeamRole,
   userId: string | null,
   fetcher: ApiFetch = globalThis.fetch,
@@ -2006,7 +2141,11 @@ export async function replaceInstructorProjectTeamRole(
       `/api/instructor/sections/${encodeURIComponent(String(sectionId))}/documents/${encodeURIComponent(String(researchDocumentId))}/team/role`,
       {
         method: "PUT",
-        body: JSON.stringify({ team_role: teamRole, user_id: userId }),
+        body: JSON.stringify({
+          defense_type: defenseType,
+          team_role: teamRole,
+          user_id: userId,
+        }),
       },
       fetcher,
     )
@@ -3215,11 +3354,7 @@ export async function listRepositoryCatalog(
           next_page_url: string | null;
         };
       }
-  >(
-    adminQuery("/api/librarian/catalog", input),
-    undefined,
-    fetcher,
-  );
+  >(adminQuery("/api/librarian/catalog", input), undefined, fetcher);
 
   if ("meta" in response) return response;
 
@@ -3355,12 +3490,20 @@ export interface InstitutionalReport {
   };
   by_institute: Array<{ institute: string; total: number }>;
   by_status: Array<{ status: string; total: number }>;
+  by_sdg?: Array<{
+    id: number;
+    code: string;
+    title: string;
+    color_hex: string;
+    total: number;
+  }>;
 }
 
 export interface OfficeInstituteStudy {
   id: number;
   year: string;
   title: string;
+  sdgs?: SdgResource[];
 }
 
 export async function listComplianceQueue(
@@ -3542,7 +3685,7 @@ export async function createResearchDraft(
 
 export async function updateResearchDraft(
   researchDocumentId: string | number,
-  input: ResearchDraftInput,
+  input: ResearchDraftInput | ResearchMetadataInput,
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<ResearchDocumentSummaryResource> {
   return (
@@ -3576,6 +3719,14 @@ export async function listCategories(
       undefined,
       fetcher,
     )
+  ).data;
+}
+
+export async function listSdgs(
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<SdgResource[]> {
+  return (
+    await apiRequest<{ data: SdgResource[] }>("/api/sdgs", undefined, fetcher)
   ).data;
 }
 

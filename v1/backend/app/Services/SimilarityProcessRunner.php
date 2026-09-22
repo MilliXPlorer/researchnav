@@ -138,10 +138,34 @@ class SimilarityProcessRunner implements SimilarityProcess
      */
     public function runContentTextQuery(string $query, Collection $candidates): array
     {
-        $decoded = $this->execute([
+        return $this->runStandaloneContentQuery([
             'query' => $query,
             'candidates' => $candidates->map(fn (ResearchDocument $candidate): array => $this->queryRecord($candidate))->values()->all(),
-        ]);
+        ], $candidates);
+    }
+
+    /**
+     * Compare extracted upload text with trusted cached candidate content.
+     *
+     * @param  Collection<int, ResearchDocument>  $candidates
+     * @return array<int, array<string, mixed>>
+     */
+    public function runUploadedContentQuery(string $uploadedContent, Collection $candidates): array
+    {
+        return $this->runStandaloneContentQuery([
+            'uploaded_content' => $uploadedContent,
+            'candidates' => $candidates->map(fn (ResearchDocument $candidate): array => $this->queryRecord($candidate))->values()->all(),
+        ], $candidates);
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @param  Collection<int, ResearchDocument>  $candidates
+     * @return array<int, array<string, mixed>>
+     */
+    private function runStandaloneContentQuery(array $payload, Collection $candidates): array
+    {
+        $decoded = $this->execute($payload);
         $policy = $this->policy ?? app(SimilarityScorePolicy::class);
 
         return collect($this->validateQueryOutput($decoded, $candidates))

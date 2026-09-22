@@ -140,12 +140,14 @@ class ResearchOfficeController extends DomainController
     {
         $input = $this->validated($request, [
             'user_id' => ['nullable', 'string', 'exists:users,id'],
+            'defense_type' => ['nullable', 'in:proposal,final'],
         ]);
         $section = $researchDocument->section()->firstOrFail();
         $team = $teams->replaceRole(
             $this->actor($request),
             $section,
             $researchDocument,
+            $input['defense_type'] ?? 'proposal',
             'research_office_representative',
             $input['user_id'] ?? null,
             $request,
@@ -169,6 +171,7 @@ class ResearchOfficeController extends DomainController
         $fullName = self::INSTITUTE_CODES[strtoupper($institute)] ?? $institute;
 
         $documents = ResearchDocument::query()
+            ->with('sdgs')
             ->where('submission_status', 'archived')
             ->where('archive_status', 'archived')
             ->where('institute', $fullName)
@@ -180,6 +183,7 @@ class ResearchOfficeController extends DomainController
             'year' => (string) $d->publication_year,
             'title' => $d->title,
             'id' => $d->id,
+            'sdgs' => $d->sdgs->map(fn ($sdg) => ['id' => $sdg->id, 'code' => $sdg->code, 'title' => $sdg->title, 'short_title' => $sdg->short_title, 'color_hex' => $sdg->color_hex])->all(),
         ])->all();
 
         return response()->json(['data' => $studies])

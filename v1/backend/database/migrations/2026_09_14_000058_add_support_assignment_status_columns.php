@@ -8,6 +8,10 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (! Schema::hasTable('research_review_assignments')) {
+            return;
+        }
+
         Schema::table('research_review_assignments', function (Blueprint $table): void {
             if (! Schema::hasColumn('research_review_assignments', 'status')) {
                 $table->string('status', 20)->nullable()->after('is_active');
@@ -20,6 +24,10 @@ return new class extends Migration
 
     public function down(): void
     {
+        if (! Schema::hasTable('research_review_assignments')) {
+            return;
+        }
+
         Schema::table('research_review_assignments', function (Blueprint $table): void {
             if (Schema::hasColumn('research_review_assignments', 'designation')) {
                 $table->dropColumn('designation');

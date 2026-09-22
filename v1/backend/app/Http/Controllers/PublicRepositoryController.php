@@ -32,6 +32,8 @@ class PublicRepositoryController extends Controller
             'category_id' => ['nullable', 'integer', 'exists:categories,id'],
             'category' => ['nullable', 'string', 'max:180'],
             'institute' => ['nullable', 'string', 'max:255'],
+            'sdg_ids' => ['nullable', 'array', 'max:17'],
+            'sdg_ids.*' => ['integer', 'distinct', 'exists:sdgs,id'],
             'publication_year' => ['nullable', 'integer', 'between:1901,2155'],
             'year' => ['nullable', 'integer', 'between:1901,2155'],
             'year_from' => ['nullable', 'integer', 'between:1901,2155'],

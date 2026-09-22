@@ -32,6 +32,13 @@ export interface ResearchRecord {
   /** @deprecated Use degreeProgram. Kept for existing workspace layouts. */
   program: string;
   category: string;
+  sdgs?: Array<{
+    id: number;
+    code: string;
+    title: string;
+    short_title: string;
+    color_hex: string;
+  }>;
   abstract: string;
   keywords: string[];
   researchStage: string;

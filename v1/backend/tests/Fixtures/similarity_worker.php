@@ -2,7 +2,7 @@
 
 $payload = json_decode(stream_get_contents(STDIN), true, 512, JSON_THROW_ON_ERROR);
 $secretWasPassed = getenv('TEST_SECRET') !== false;
-if (array_key_exists('query', $payload)) {
+if (array_key_exists('query', $payload) || array_key_exists('uploaded_content', $payload)) {
     $score = $secretWasPassed ? '1.000000000000' : '0.000000000000';
     echo json_encode(['results' => array_map(static fn (array $candidate): array => [
         'matched_research_id' => $candidate['id'],

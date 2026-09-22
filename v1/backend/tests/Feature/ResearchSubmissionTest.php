@@ -40,6 +40,7 @@ class ResearchSubmissionTest extends TestCase
             'abstract' => 'The researcher updated this abstract.',
             'keywords' => 'repository, ownership, editing',
             'publication_year' => 2026,
+            'sdg_ids' => [4, 9],
             'research_stage' => 'ongoing',
             'authors' => [
                 [
@@ -59,6 +60,8 @@ class ResearchSubmissionTest extends TestCase
             ->assertJsonPath('data.keywords', 'repository, ownership, editing')
             ->assertJsonPath('data.publication_year', 2026)
             ->assertJsonPath('data.research_stage', 'ongoing')
+            ->assertJsonPath('data.sdgs.0.id', 4)
+            ->assertJsonPath('data.sdgs.1.id', 9)
             ->assertJsonPath('data.category.id', $updatedCategory->id)
             ->assertJsonPath('data.authors.0.author_name', 'Research Owner')
             ->assertJsonPath('data.authors.1.author_name', 'Research Collaborator');
@@ -73,6 +76,7 @@ class ResearchSubmissionTest extends TestCase
         $this->assertSame($updatedCategory->id, $draft->category_id);
         $this->assertSame('draft', $draft->submission_status);
         $this->assertSame('private', $draft->visibility);
+        $this->assertSame([4, 9], $draft->sdgs()->pluck('sdgs.id')->all());
         $this->assertDatabaseMissing('research_authors', [
             'research_document_id' => $draft->id,
             'author_name' => 'Original Author',

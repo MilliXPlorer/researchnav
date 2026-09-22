@@ -896,12 +896,13 @@ describe("role workspace pages", () => {
 
     await screen.findByRole("heading", { name: "My research" });
     expect(
-      screen.getByRole("heading", { name: "One folder, two kinds of updates" }),
-    ).toBeInTheDocument();
+      screen.queryByText("Researcher", { selector: ".eyebrow" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("How My Research works")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Research status")).not.toBeInTheDocument();
     expect(
-      screen.getByText(/do not submit your manuscript for review/i),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Refresh" })).toBeInTheDocument();
+      screen.queryByRole("button", { name: "Refresh" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "No assigned research folders" }),
     ).toBeInTheDocument();
@@ -1198,7 +1199,11 @@ describe("role workspace pages", () => {
     expect(
       screen.queryByRole("button", { name: "Submit" }),
     ).not.toBeInTheDocument();
-    expect(screen.getAllByText("Submitted")).toHaveLength(1);
+    expect(
+      screen.getByRole("button", {
+        name: "Open research folder My study title",
+      }),
+    ).toHaveTextContent("Submitted");
   });
 
   it("opens and edits a revision-required submission without offering the draft submit action", async () => {
@@ -1745,7 +1750,7 @@ describe("role workspace pages", () => {
     );
     expect(await screen.findByText("CS-101")).toBeInTheDocument();
     expect(await screen.findByText("juan@example.edu")).toBeInTheDocument();
-    expect(screen.getByText("2023-0001")).toBeInTheDocument();
+    expect(screen.queryByText("2023-0001")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Add student" }));
     expect(
       screen.getByRole("heading", { name: "Add a student researcher" }),
@@ -1765,7 +1770,7 @@ describe("role workspace pages", () => {
         expect.anything(),
       ),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Maria Santos" }));
     expect(
       await screen.findByText("Student researcher added to the section."),
     ).toBeInTheDocument();
@@ -1783,7 +1788,9 @@ describe("role workspace pages", () => {
       await screen.findByText("Student researcher removed from the section."),
     ).toBeInTheDocument();
     await waitFor(() =>
-      expect(screen.queryByText("maria@example.edu")).not.toBeInTheDocument(),
+      expect(
+        screen.queryByRole("button", { name: "Remove Maria Santos" }),
+      ).not.toBeInTheDocument(),
     );
   });
 
@@ -2180,12 +2187,11 @@ describe("role workspace pages", () => {
     expect(
       [
         "Overview",
-        "Research actors",
+        "Research Team",
         "Documents",
-        "Feedback",
         "Defense Monitoring Forms",
       ].map((name) => within(workspace).getByRole("button", { name })),
-    ).toHaveLength(5);
+    ).toHaveLength(4);
     fireEvent.click(
       screen.getByRole("button", { name: "Delete research project" }),
     );
@@ -2200,7 +2206,7 @@ describe("role workspace pages", () => {
       screen.getByRole("button", { name: "Remove student" }),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    fireEvent.click(screen.getByRole("button", { name: "Research actors" }));
+    fireEvent.click(screen.getByRole("button", { name: "Research Team" }));
     fireEvent.click(screen.getByRole("button", { name: "Manage assignments" }));
     expect(
       screen.getByRole("dialog", { name: "Manage project assignments" }),

@@ -55,6 +55,7 @@ import { Modal } from "./Modal";
 import ProfileDialog, { ProfileAvatar } from "./ProfileDialog";
 import RoleSidebarPage from "./RoleSidebarPages";
 import RoleWorkspace, { type RoleDashboardLoadState } from "./RoleWorkspaces";
+import type { ResearchWorkspaceDestination } from "./researchWorkspaceRoute";
 import type { Role, UserSession } from "./types";
 import { useDialogFocus } from "./useDialogFocus";
 
@@ -117,6 +118,7 @@ export default function Dashboard({
   onSessionChange = ignoreSessionChange,
   onLogout,
   researchDocumentId,
+  researchWorkspaceDestination,
   instructorSectionsRoute = false,
   instructorSectionId,
   instructorProjectDocumentId,
@@ -128,6 +130,7 @@ export default function Dashboard({
   onSessionChange?: (session: UserSession) => void;
   onLogout?: () => Promise<void> | void;
   researchDocumentId?: string | number;
+  researchWorkspaceDestination?: ResearchWorkspaceDestination;
   instructorSectionsRoute?: boolean;
   instructorSectionId?: string | number;
   instructorProjectDocumentId?: string | number;
@@ -191,6 +194,8 @@ export default function Dashboard({
         "instructor",
         "panel",
         "statistician",
+        "librarian",
+        "research_editor",
         "research-office",
       ] as Role[]
     ).includes(role);
@@ -215,7 +220,7 @@ export default function Dashboard({
   function selectSimilarityMode(mode: "title" | "content") {
     setSimilarityMenuOpen(true);
     selectNavigation("Similarity Check");
-    navigate(`/app/researcher/similarity/${mode}`);
+    navigate(`/app/${role}/similarity/${mode}`);
   }
   const scopedDashboardState: RoleDashboardLoadState =
     dashboardState.scope === dashboardScope
@@ -425,7 +430,10 @@ export default function Dashboard({
           {config.nav.map((item) => {
             const Icon = getNavIcon(item);
             const active = item === selectedNav;
-            if (role === "researcher" && item === "Similarity Check") {
+            if (
+              ["researcher", "research-office"].includes(role) &&
+              item === "Similarity Check"
+            ) {
               return (
                 <div className="sidebar-nav-group" key={item}>
                   <button
@@ -532,6 +540,7 @@ export default function Dashboard({
               setDashboardAttempt((attempt) => attempt + 1);
             }}
             researchDocumentId={researchDocumentId}
+            researchWorkspaceDestination={researchWorkspaceDestination}
           />
         ) : role === "admin" ? (
           <AdminSidebarPage selectedNav={selectedNav} />
@@ -561,7 +570,10 @@ export default function Dashboard({
             {config.nav.map((item) => {
               const Icon = getNavIcon(item);
               const active = item === selectedNav;
-              if (role === "researcher" && item === "Similarity Check") {
+              if (
+                ["researcher", "research-office"].includes(role) &&
+                item === "Similarity Check"
+              ) {
                 return (
                   <div className="sidebar-nav-group" key={item}>
                     <button

@@ -293,6 +293,8 @@ class ResearchOfficeBulkImportController extends Controller
             'metadata.year' => ['required', 'integer', 'between:1901,2155'],
             'metadata.final_binding_date' => ['required', 'string', 'max:50'],
             'metadata.institute' => ['required', 'string', 'in:'.implode(',', self::INSTITUTES)],
+            'metadata.sdg_ids' => ['sometimes', 'array', 'max:17'],
+            'metadata.sdg_ids.*' => ['integer', 'distinct', 'exists:sdgs,id'],
         ]);
 
         if ($validator->fails()) {

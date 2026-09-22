@@ -91,8 +91,9 @@ function installApi(
       updated_at: "2026-08-03T10:00:00.000Z",
     },
   ],
+  loadedResearch = research,
 ) {
-  let currentResearch = research;
+  let currentResearch = loadedResearch;
   const fetchMock = vi.fn(
     async (input: string | URL | Request, init?: RequestInit) => {
       const path = String(input);
@@ -114,6 +115,9 @@ function installApi(
           "Chapter 1",
           "Chapter 2",
           "Chapter 3",
+          "Chapter 4",
+          "Chapter 5",
+          "Chapter 6",
           "Full Manuscript",
         ]);
       }
@@ -187,6 +191,7 @@ function installApi(
         path === "/api/research/42/monitoring"
       )
         return response([]);
+      if (path === "/api/research/42/files/10/annotations") return response([]);
       if (path === "/api/research/42/similarity") return response([]);
       if (path === "/api/research/42/monitoring" && init?.method === "POST")
         return response({});
@@ -204,7 +209,7 @@ function installApi(
 afterEach(() => vi.unstubAllGlobals());
 
 describe("researcher research workspace", () => {
-  it("opens an owned deep-linked record with revision, file, validation, activity, and similarity panels", async () => {
+  it("opens an owned deep-linked record without researcher review panels", async () => {
     installApi();
     render(
       <RoleWorkspace
@@ -224,31 +229,43 @@ describe("researcher research workspace", () => {
     expect(
       await screen.findByRole("heading", { name: "Revision-ready study" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Revision history")).toBeInTheDocument();
-    expect(screen.getByText("Title review decisions")).toBeInTheDocument();
-    expect(screen.getByText("Similarity results")).toBeInTheDocument();
+    expect(screen.queryByText("Revision history")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Title review decisions"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Similarity results")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("tab", { name: "Feedback" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Request title validation" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByText("revision-v2.pdf")).toBeInTheDocument();
-    expect(screen.getByText("final.pdf")).toBeInTheDocument();
-    expect(screen.getByText("RN-2026-AB12CD34")).toBeInTheDocument();
-    expect(screen.getByText(/Instructor: Ina Structor/)).toBeInTheDocument();
-    expect(screen.getByText(/Adviser: Ada Viser/)).toBeInTheDocument();
+    expect(screen.getAllByText("RN-2026-AB12CD34").length).toBeGreaterThan(0);
+    expect(screen.getByText("Ina Structor")).toBeInTheDocument();
+    expect(screen.getByText("Ada Viser")).toBeInTheDocument();
+    expect(screen.getByText("Research workspace")).toBeInTheDocument();
+    expect(screen.getByText("Study members")).toBeInTheDocument();
+    expect(screen.getByText("Latest documents")).toBeInTheDocument();
+    expect(screen.queryByText("Submission timeline")).not.toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "Report your current progress" }),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Submitting research")).toBeInTheDocument();
-    expect(screen.getByText("Reporting progress")).toBeInTheDocument();
+      screen.queryByRole("heading", { name: "Research progress" }),
+    ).not.toBeInTheDocument();
     expect(
-      screen.getByText(/progress update does not submit or approve/i),
-    ).toBeInTheDocument();
+      screen.queryByText(/continue toward approval/i),
+    ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("group", {
-        name: "How is the research progressing?",
-      }),
+      screen.queryByRole("heading", { name: "Report your current progress" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Documents" }));
+    expect(
+      screen.getByRole("complementary", { name: "Document folders" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: /On track/ })).toBeChecked();
+    for (const chapter of ["Chapter 4", "Chapter 5", "Chapter 6"]) {
+      expect(screen.getAllByText(chapter).length).toBeGreaterThan(0);
+    }
+    fireEvent.click(screen.getByRole("button", { name: /^Chapter 2/ }));
+    expect(screen.getAllByText("revision-v2.pdf").length).toBeGreaterThan(0);
     expect(
       screen.getAllByRole("link", { name: "Download" })[0],
     ).toHaveAttribute("href", "/api/research/42/files/10/download");
@@ -256,12 +273,24 @@ describe("researcher research workspace", () => {
       screen.getByRole("button", { name: "Rename revision-v2.pdf" }),
     ).toBeEnabled();
     expect(
+      screen.getByRole("button", { name: "Open document" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open document" }));
+    expect(
+      (await screen.findAllByRole("heading", { name: "revision-v2.pdf" }))
+        .length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getByText(/consolidated view includes all reviewer annotations/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Save annotation" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Full Manuscript/ }));
+    expect(screen.getAllByText("final.pdf").length).toBeGreaterThan(0);
+    expect(
       screen.queryByRole("button", { name: "Rename final.pdf" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Preview PDF/ })).toHaveAttribute(
-      "href",
-      "/api/research/42/files/10/preview",
-    );
   });
 
   it("does not expose legacy pending title-validation requests", async () => {
@@ -294,11 +323,75 @@ describe("researcher research workspace", () => {
     );
 
     expect(
-      await screen.findByText("No title review decisions have been recorded."),
+      await screen.findByRole("heading", { name: "Revision-ready study" }),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Title review decisions"),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByText("Pending request should not be shown."),
     ).not.toBeInTheDocument();
+  });
+
+  it("uploads submitted-study files directly to the active folder", async () => {
+    const fetchMock = installApi(files, [], {
+      ...research,
+      submission_status: "submitted",
+    });
+    render(
+      <RoleWorkspace
+        role="researcher"
+        navigate={vi.fn()}
+        selectNav={vi.fn()}
+        dashboardScope="researcher:researcher@example.test"
+        dashboardState={{
+          status: "loading",
+          scope: "researcher:researcher@example.test",
+        }}
+        onRetry={vi.fn()}
+        researchDocumentId="42"
+      />,
+    );
+
+    await screen.findByRole("heading", { name: "Revision-ready study" });
+    fireEvent.click(screen.getByRole("button", { name: "Documents" }));
+
+    expect(
+      screen.getByRole("heading", { name: "Upload a document" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Document type")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Document folder")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Upload purpose")).toHaveValue(
+      "initial_submission",
+    );
+    expect(
+      screen.getByText(/saved directly to Chapter 1/i),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Full Manuscript/ }));
+    fireEvent.change(screen.getByLabelText("Manuscript file"), {
+      target: {
+        files: [
+          new File(["manuscript"], "full-manuscript.pdf", {
+            type: "application/pdf",
+          }),
+        ],
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Upload document" }));
+
+    await waitFor(() => {
+      const uploadCall = fetchMock.mock.calls.find(
+        ([path, init]) =>
+          String(path) === "/api/research/42/files" && init?.method === "POST",
+      );
+      expect((uploadCall?.[1]?.body as FormData).get("relative_path")).toBe(
+        "Full Manuscript",
+      );
+      expect((uploadCall?.[1]?.body as FormData).get("document_type")).toBe(
+        "chapter",
+      );
+    });
   });
 
   it("updates the owned study abstract and related metadata", async () => {
@@ -320,7 +413,7 @@ describe("researcher research workspace", () => {
 
     await screen.findByRole("heading", { name: "Revision-ready study" });
     fireEvent.click(
-      screen.getByRole("button", { name: "Edit metadata and authors" }),
+      screen.getByRole("button", { name: "Edit research details" }),
     );
     await screen.findByRole("heading", { name: "Edit submission" });
     expect(screen.getByLabelText("Author name")).toHaveValue("Ada Lovelace");
@@ -338,6 +431,7 @@ describe("researcher research workspace", () => {
     fireEvent.change(screen.getByLabelText("Research stage"), {
       target: { value: "completed" },
     });
+    fireEvent.click(screen.getByRole("checkbox", { name: /Climate Action/i }));
     fireEvent.change(screen.getByLabelText("Author name"), {
       target: { value: "Ada Lovelace and Research Team" },
     });
@@ -355,6 +449,7 @@ describe("researcher research workspace", () => {
             abstract: "An abstract updated by the research owner.",
             keywords: "ownership, metadata, revision",
             publication_year: 2025,
+            sdg_ids: [13],
             research_stage: "completed",
             authors: [
               {
@@ -391,12 +486,12 @@ describe("researcher research workspace", () => {
 
     await screen.findByRole("heading", { name: "Revision-ready study" });
     fireEvent.click(
-      screen.getByRole("button", { name: "Edit metadata and authors" }),
+      screen.getByRole("button", { name: "Edit research details" }),
     );
     expect(
       await screen.findByRole("heading", { name: "Edit submission" }),
     ).toBeInTheDocument();
-    expect(screen.getAllByLabelText("Document type")[1]).toHaveValue(
+    expect(screen.getByLabelText("Document type")).toHaveValue(
       "revised_manuscript",
     );
     expect(
@@ -473,19 +568,26 @@ describe("researcher research workspace", () => {
 
     await screen.findByRole("heading", { name: "Revision-ready study" });
     expect(screen.getByText("Ed Itor")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Documents" }));
     expect(screen.getAllByText("Chapter 2").length).toBeGreaterThan(0);
+    for (const chapter of ["Chapter 4", "Chapter 5", "Chapter 6"]) {
+      expect(
+        screen.getByRole("button", { name: new RegExp(`^${chapter}`) }),
+      ).toBeInTheDocument();
+    }
 
-    fireEvent.change(screen.getByLabelText("Document folder"), {
-      target: { value: "Chapter 2" },
+    fireEvent.click(screen.getByRole("button", { name: /^Chapter 2/ }));
+    fireEvent.change(screen.getByLabelText("Upload purpose"), {
+      target: { value: "response_to_feedback" },
     });
-    fireEvent.change(screen.getByLabelText("New file or replacement"), {
+    fireEvent.change(screen.getByLabelText("Manuscript file"), {
       target: {
         files: [
           new File(["updated"], "chapter-two.pdf", { type: "application/pdf" }),
         ],
       },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Upload file" }));
+    fireEvent.click(screen.getByRole("button", { name: "Upload document" }));
 
     await waitFor(() => {
       const uploadCall = fetchMock.mock.calls.find(
@@ -496,8 +598,15 @@ describe("researcher research workspace", () => {
       expect((uploadCall?.[1]?.body as FormData).get("relative_path")).toBe(
         "Chapter 2",
       );
+      expect((uploadCall?.[1]?.body as FormData).get("document_type")).toBe(
+        "revised_manuscript",
+      );
+      expect((uploadCall?.[1]?.body as FormData).get("upload_purpose")).toBe(
+        "response_to_feedback",
+      );
     });
 
+    fireEvent.click(screen.getByRole("button", { name: "Research Team" }));
     fireEvent.click(screen.getByRole("button", { name: "Change Editor" }));
     await screen.findByRole("heading", { name: "Change Editor" });
     fireEvent.change(screen.getByLabelText("Select Editor"), {
@@ -595,7 +704,7 @@ describe("researcher research workspace", () => {
       "Some research sections are unavailable: Files",
     );
     expect(
-      screen.getByText("No files have been uploaded."),
+      screen.getByText("No documents in this folder yet."),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("link", { name: "Download" }),
@@ -605,14 +714,12 @@ describe("researcher research workspace", () => {
         name: /Rename/,
       }),
     ).not.toBeInTheDocument();
-    expect(
-      screen.queryByLabelText("New file or replacement"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Manuscript file")).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /Resubmit revision 2/ }),
     ).toBeDisabled();
     expect(
-      screen.getByRole("button", { name: "Edit metadata and authors" }),
+      screen.getByRole("button", { name: "Edit research details" }),
     ).toBeEnabled();
   });
 

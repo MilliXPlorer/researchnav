@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -98,6 +99,11 @@ class ResearchDocument extends Model
         return $this->belongsTo(Category::class);
     }
 
+    public function sdgs(): BelongsToMany
+    {
+        return $this->belongsToMany(Sdg::class, 'research_document_sdgs')->orderBy('sdgs.id');
+    }
+
     public function section(): BelongsTo
     {
         return $this->belongsTo(ClassSection::class, 'section_id');
@@ -121,6 +127,11 @@ class ResearchDocument extends Model
     public function feedbackComments(): HasMany
     {
         return $this->hasMany(FeedbackComment::class);
+    }
+
+    public function pdfAnnotations(): HasMany
+    {
+        return $this->hasMany(PdfAnnotation::class);
     }
 
     public function revisions(): HasMany

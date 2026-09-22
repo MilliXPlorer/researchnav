@@ -11,7 +11,7 @@ class PublicRepositoryService
     /** @param array<string, mixed> $filters */
     public function search(array $filters)
     {
-        $query = $this->publicScope()->select('research_documents.*')->with(['authors', 'category'])->withExists(['files as has_downloadable_manuscript' => fn ($files) => $files->current()->where('document_type', 'final_manuscript')]);
+        $query = $this->publicScope()->select('research_documents.*')->with(['authors', 'category', 'sdgs'])->withExists(['files as has_downloadable_manuscript' => fn ($files) => $files->current()->where('document_type', 'final_manuscript')]);
         if ($term = $filters['q'] ?? null) {
             $like = $this->like($term);
             $metadataMatch = fn (Builder $q) => $q->whereRaw("research_documents.title LIKE ? ESCAPE '!'", [$like])
@@ -55,6 +55,9 @@ class PublicRepositoryService
         if ($institute = $filters['institute'] ?? null) {
             $query->where('institute', $institute);
         }
+        foreach ($filters['sdg_ids'] ?? [] as $sdgId) {
+            $query->whereHas('sdgs', fn (Builder $sdgs) => $sdgs->where('sdgs.id', $sdgId));
+        }
         if ($year = $filters['publication_year'] ?? $filters['year'] ?? null) {
             $query->where('publication_year', $year);
         } else {
@@ -76,7 +79,7 @@ class PublicRepositoryService
 
     public function find(int $id): ResearchDocument
     {
-        return $this->publicScope()->select('research_documents.*')->with(['authors', 'category'])->withExists(['files as has_downloadable_manuscript' => fn ($files) => $files->current()->where('document_type', 'final_manuscript')])->findOrFail($id);
+        return $this->publicScope()->select('research_documents.*')->with(['authors', 'category', 'sdgs'])->withExists(['files as has_downloadable_manuscript' => fn ($files) => $files->current()->where('document_type', 'final_manuscript')])->findOrFail($id);
     }
 
     private function publicScope(): Builder

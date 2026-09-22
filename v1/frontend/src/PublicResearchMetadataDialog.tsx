@@ -4,6 +4,7 @@ import { getPublicResearch, repositoryDownloadUrl } from "./api";
 import { Button } from "./components";
 import type { ResearchRecord } from "./types";
 import { useDialogFocus } from "./useDialogFocus";
+import { SdgBadges } from "./SdgMetadata";
 
 export default function PublicResearchMetadataDialog({
   researchDocumentId,
@@ -79,6 +80,9 @@ export default function PublicResearchMetadataDialog({
               <h3>Abstract</h3>
               <p>{record.abstract}</p>
             </div>
+            {(record.sdgs?.length ?? 0) > 0 && (
+              <SdgBadges sdgs={record.sdgs ?? []} />
+            )}
             <div className="keyword-list">
               {record.keywords.map((keyword) => (
                 <span key={keyword}>{keyword}</span>

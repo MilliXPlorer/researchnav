@@ -113,6 +113,32 @@ def _query_payload(raw: str) -> tuple[str, list[dict[str, Any]]]:
     return query, candidates
 
 
+def _uploaded_content_payload(raw: str) -> tuple[str, list[dict[str, Any]]]:
+    value = json.loads(raw)
+    if not isinstance(value, dict) or set(value) != {"uploaded_content", "candidates"}:
+        raise InvalidWorkerInput("Invalid uploaded content payload.")
+    uploaded_content = value["uploaded_content"]
+    if (
+        not isinstance(uploaded_content, str)
+        or not uploaded_content.strip()
+        or len(uploaded_content) > MAX_CONTENT_LENGTH
+    ):
+        raise InvalidWorkerInput("Invalid uploaded content.")
+    if (
+        not isinstance(value["candidates"], list)
+        or len(value["candidates"]) > MAX_CANDIDATES
+    ):
+        raise InvalidWorkerInput("Invalid candidates.")
+    candidates = [
+        _record(candidate, "candidate", optional_content=True)
+        for candidate in value["candidates"]
+    ]
+    ids = [candidate["id"] for candidate in candidates]
+    if len(ids) != len(set(ids)):
+        raise InvalidWorkerInput("Candidate identifiers must be distinct.")
+    return uploaded_content, candidates
+
+
 def _optional_fasttext_model() -> Any | None:
     """Load contextual support for search without making it a dependency."""
     model_path = os.environ.get("SIMILARITY_FASTTEXT_MODEL_PATH", "")
@@ -138,6 +164,9 @@ def main() -> None:
         value = json.loads(raw)
         if isinstance(value, dict) and set(value) == {"query", "candidates"}:
             query, candidates = _query_payload(raw)
+            is_public_query = True
+        elif isinstance(value, dict) and set(value) == {"uploaded_content", "candidates"}:
+            query, candidates = _uploaded_content_payload(raw)
             is_public_query = True
         else:
             source, candidates = _payload(raw)
