@@ -2374,7 +2374,7 @@ function InstructorSections({
   const [confirmDocumentRemove, setConfirmDocumentRemove] =
     useState<InstructorStudentResource | null>(null);
   const [confirmTeamSave, setConfirmTeamSave] = useState<
-    "students" | "adviser" | "researchOffice" | "chair" | "panelMembers" | null
+    "adviser" | "researchOffice" | "chair" | "panelMembers" | null
   >(null);
   const teamRequestRef = useRef(0);
   const [addProjectOpen, setAddProjectOpen] = useState(false);
