@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { X } from "lucide-react";
+import { ArrowUp, X } from "lucide-react";
 import { Button } from "./components";
 import { useDialogFocus } from "./useDialogFocus";
 
@@ -24,6 +24,7 @@ export function Modal({
   children: ReactNode;
 }) {
   const [askDiscard, setAskDiscard] = useState(false);
+  const [showScrollTop, setShowScrollTop] = useState(false);
   const [dialogRef, handleDialogKeyDown] =
     useDialogFocus<HTMLElement>(requestClose);
 
@@ -34,6 +35,14 @@ export function Modal({
       document.body.style.overflow = previous;
     };
   }, []);
+
+  useEffect(() => {
+    const panel = dialogRef.current;
+    if (!panel) return;
+    const onScroll = () => setShowScrollTop(panel.scrollTop > 240);
+    panel.addEventListener("scroll", onScroll, { passive: true });
+    return () => panel.removeEventListener("scroll", onScroll);
+  }, [dialogRef]);
 
   function requestClose() {
     if (busy) return;
@@ -71,6 +80,19 @@ export function Modal({
           </button>
         )}
         {children}
+        {showScrollTop && (
+          <button
+            type="button"
+            className="modal-scroll-top"
+            aria-label="Back to top"
+            title="Back to top"
+            onClick={() =>
+              dialogRef.current?.scrollTo({ top: 0, behavior: "smooth" })
+            }
+          >
+            <ArrowUp aria-hidden="true" />
+          </button>
+        )}
         {askDiscard && (
           <div className="modal-discard" role="alertdialog">
             <p>You have unsaved changes. Discard them and close?</p>

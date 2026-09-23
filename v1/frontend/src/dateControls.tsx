@@ -13,6 +13,7 @@ const currentYear = philippineYear();
 const years = Array.from({ length: currentYear - 1901 + 1 }, (_, index) =>
   String(currentYear - index),
 );
+const rangeYears = years.slice(0, 9);
 
 function preventDateTyping(event: KeyboardEvent<HTMLInputElement>) {
   if (
@@ -58,6 +59,43 @@ export function PublicationYearInput(props: PublicationYearInputProps) {
         ))}
       </datalist>
     </>
+  );
+}
+
+type YearRangeSelectProps = Omit<ComponentProps<"select">, "children"> & {
+  bound: "from" | "to";
+  otherValue?: string;
+  emptyLabel?: string;
+};
+
+export function YearRangeSelect({
+  bound,
+  otherValue,
+  emptyLabel = "Any year",
+  ...props
+}: YearRangeSelectProps) {
+  const selectedValue = String(props.value ?? props.defaultValue ?? "");
+  const other = Number(otherValue);
+  const hasOther =
+    otherValue !== undefined && otherValue !== "" && Number.isInteger(other);
+  const selectable = rangeYears.filter((year) => {
+    const value = Number(year);
+    if (!hasOther) return true;
+    return bound === "from" ? value <= other : value >= other;
+  });
+
+  return (
+    <select {...props}>
+      <option value="">{emptyLabel}</option>
+      {selectedValue && !selectable.includes(selectedValue) && (
+        <option value={selectedValue}>{selectedValue}</option>
+      )}
+      {selectable.map((year) => (
+        <option key={year} value={year}>
+          {year}
+        </option>
+      ))}
+    </select>
   );
 }
 

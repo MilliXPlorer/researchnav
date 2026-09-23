@@ -84,9 +84,14 @@ export default function ResearchProgressUpdates({ role }: { role: Role }) {
       </header>
 
       {state.status === "loading" ? (
-        <p className="admin-empty" aria-busy="true">
-          Loading research progress updates…
-        </p>
+        <section
+          className="panel-card dashboard-loading"
+          role="region"
+          aria-label="Loading research progress updates"
+          aria-busy="true"
+        >
+          <p>Loading research progress updates…</p>
+        </section>
       ) : state.status === "error" ? (
         <section className="panel-card dashboard-error" role="alert">
           <p>{state.message}</p>

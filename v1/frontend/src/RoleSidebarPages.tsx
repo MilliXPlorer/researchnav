@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+﻿import { useEffect, useRef, useState } from "react";
 import { formatPhilippineDateTime, philippineDateToday } from "./dateTime";
 import {
   ArrowLeft,
   ExternalLink,
   Eye,
   Folder,
+  GraduationCap,
   MessageSquareText,
   Pencil,
   Plus,
@@ -12,13 +13,15 @@ import {
   RefreshCw,
   Send,
   Trash2,
+  User,
+  UserCog,
   UserPlus,
+  Users,
 } from "lucide-react";
 import {
   ApiError,
   checkContentUploadSimilarity,
   checkTitleQuerySimilarity,
-  createCoordinatorSchedule,
   createInstructorSection,
   getCoordinatorProgramReport,
   getInstructorProjectTeam,
@@ -31,7 +34,6 @@ import {
   listAdviserFeedbackHistory,
   listAdviserSimilarityAlerts,
   listCategories,
-  listCoordinatorSchedules,
   listDuplicateFlags,
   listAdviserLoad,
   listInstructorClassReports,
@@ -90,7 +92,6 @@ import {
   submitResearchDocument,
   verifyInstructorMonitoring,
   updateResearchDraft,
-  updateCoordinatorSchedule,
   updateInstructorSection,
   updateOfficeUserAccess,
   uploadResearchFile,
@@ -159,7 +160,6 @@ import ResearchOfficeBulkImport from "./ResearchOfficeBulkImport";
 
 const accessStatuses: AccessStatus[] = ["active", "invited", "blocked"];
 const researchStages = ["title_proposal", "ongoing", "completed"];
-const scheduleStatuses = ["scheduled", "completed", "cancelled"] as const;
 
 type LoadState<T> =
   | { status: "loading" }
@@ -362,8 +362,6 @@ export default function RoleSidebarPage({
       }
     case "coordinator":
       switch (selectedNav) {
-        case "Schedules":
-          return <CoordinatorSchedules role={role} />;
         case "Duplicate Flags":
           return <CoordinatorDuplicateFlags role={role} />;
         case "Adviser Load":
@@ -2251,6 +2249,17 @@ function InstructorMonitoring({ role }: { role: Role }) {
   );
 }
 
+const PROJECT_ROLE_FIELDS = [
+  ["adviser", "Assign research adviser", "Research adviser", "adviser_id"],
+  [
+    "researchOffice",
+    "Assign Research Office representative",
+    "Research Office representative",
+    "research_office_representative_id",
+  ],
+  ["chair", "Assign panel chair", "Panel chair", "chair_id"],
+] as const;
+
 function InstructorSections({
   role,
   navigate,
@@ -2391,8 +2400,6 @@ function InstructorSections({
     selectedDocument !== null &&
     projectDocumentId !== undefined &&
     String(selectedDocument.research_document_id) === String(projectDocumentId);
-  const projectAssignmentEditing =
-    Object.values(projectDisclosures).some(Boolean);
   const sections = state.status === "ready" ? state.data : [];
   const academicYears = Array.from(
     new Set(sections.map((section) => section.academic_year).filter(Boolean)),
@@ -3501,17 +3508,12 @@ function InstructorSections({
                 </Modal>
               )}
               {documentsState[openSection.id] === "loading" ? (
-                <p className="section-documents-loading">Loading documents…</p>
+                <Loading label="Loading documents" />
               ) : documentsState[openSection.id] === "error" ? (
-                <p className="section-documents-loading">
-                  <span>Section documents could not be loaded.</span>{" "}
-                  <Button
-                    variant="secondary"
-                    onClick={() => void loadDocuments(openSection.id)}
-                  >
-                    Retry
-                  </Button>
-                </p>
+                <InlineError
+                  message="Section documents could not be loaded."
+                  retry={() => void loadDocuments(openSection.id)}
+                />
               ) : sectionDocuments.length === 0 ? (
                 <div className="section-empty-folder-state">
                   <p className="admin-empty">No research projects yet.</p>
@@ -3563,26 +3565,21 @@ function InstructorSections({
                 </div>
               </div>
               {studentsState[openSection.id] === "loading" ? (
-                <p className="section-documents-loading">Loading students…</p>
+                <Loading label="Loading students" />
               ) : studentsState[openSection.id] === "error" ? (
-                <p className="section-documents-loading">
-                  <span>Section students could not be loaded.</span>{" "}
-                  <Button
-                    variant="secondary"
-                    onClick={() => {
-                      setStudentsState((current) => ({
-                        ...current,
-                        [openSection.id]: "loading",
-                      }));
-                      void loadStudents(
-                        openSection.id,
-                        studentQueries[openSection.id] ?? "",
-                      );
-                    }}
-                  >
-                    Retry
-                  </Button>
-                </p>
+                <InlineError
+                  message="Section students could not be loaded."
+                  retry={() => {
+                    setStudentsState((current) => ({
+                      ...current,
+                      [openSection.id]: "loading",
+                    }));
+                    void loadStudents(
+                      openSection.id,
+                      studentQueries[openSection.id] ?? "",
+                    );
+                  }}
+                />
               ) : (studentsFor[openSection.id] ?? []).length === 0 ? (
                 <p className="admin-empty section-block-empty">
                   No students enrolled.
@@ -3835,6 +3832,7 @@ function InstructorSections({
           {projectManageOpen && (
             <Modal
               label="Manage project assignments"
+              className="modal-panel-manage-assignments"
               onClose={() => {
                 resetProjectDisclosures();
                 setProjectManageOpen(false);
@@ -3842,7 +3840,7 @@ function InstructorSections({
               busy={teamBusy}
             >
               <div
-                className={`project-disclosures project-assignment-modal${projectAssignmentEditing ? " is-editing" : ""}`}
+                className="project-disclosures project-assignment-modal"
                 aria-label="Project assignments"
               >
                 <h2>Manage project assignments</h2>
@@ -3870,140 +3868,61 @@ function InstructorSections({
                       : "Assignments saved here apply to the final defense only."}
                   </p>
                 </div>
-                <div className="project-assignment-control">
-                  <span>
-                    <strong>Student researchers</strong>
-                    <small>Add students enrolled in this section.</small>
-                  </span>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    className="icon-button"
-                    aria-label="Add students"
-                    title="Add students"
-                    aria-expanded={projectDisclosures.students}
-                    aria-controls={
-                      projectDisclosures.students
-                        ? "project-students-editor"
-                        : undefined
-                    }
-                    onClick={() =>
-                      setProjectDisclosures({
-                        students: !projectDisclosures.students,
-                        adviser: false,
-                        researchOffice: false,
-                        chair: false,
-                        panelMembers: false,
-                      })
-                    }
-                  >
-                    <UserPlus />
-                  </Button>
-                </div>
-                {projectDisclosures.students && (
-                  <div
-                    id="project-students-editor"
-                    className="title-member-picker"
-                  >
-                    <div className="project-editor-heading">
-                      <p className="eyebrow">Project assignment</p>
-                      <h3>Student researchers</h3>
-                    </div>
-                    <label>
-                      Search students
-                      <input
-                        value={studentQueries[openSection.id] ?? ""}
-                        onChange={(event) =>
-                          setStudentQueries((current) => ({
-                            ...current,
-                            [openSection.id]: event.target.value,
-                          }))
-                        }
-                        placeholder="Search this section roster"
-                      />
-                    </label>
-                    <p className="project-picker-note">
-                      Only students already enrolled in this section can be
-                      assigned to the study.
-                    </p>
-                    <ul className="student-candidates">
-                      {(studentsFor[openSection.id] ?? [])
-                        .filter(
-                          (candidate) =>
-                            !documentMembers.some(
-                              (member) => member.id === candidate.id,
-                            ),
-                        )
-                        .filter((candidate) => {
-                          const query = (studentQueries[openSection.id] ?? "")
-                            .trim()
-                            .toLocaleLowerCase();
-                          return (
-                            query === "" ||
-                            `${studentName(candidate)} ${candidate.email}`
-                              .toLocaleLowerCase()
-                              .includes(query)
-                          );
+                <div
+                  className="project-assignment-divider"
+                  aria-hidden="true"
+                />
+                <div key="students">
+                  <div className="project-assignment-control">
+                    <span className="project-assignment-icon" aria-hidden="true">
+                      <GraduationCap />
+                    </span>
+                    <span>
+                      <strong>Student researchers</strong>
+                      <small>Add students enrolled in this section.</small>
+                    </span>
+                    <Button
+                      type="button"
+                      aria-label="Add students"
+                      title="Add students"
+                      aria-expanded={projectDisclosures.students}
+                      aria-controls={
+                        projectDisclosures.students
+                          ? "project-students-editor"
+                          : undefined
+                      }
+                      onClick={() =>
+                        setProjectDisclosures({
+                          students: !projectDisclosures.students,
+                          adviser: false,
+                          researchOffice: false,
+                          chair: false,
+                          panelMembers: false,
                         })
-                        .map((candidate) => (
-                          <li key={candidate.id}>
-                            <span>
-                              {studentName(candidate)} ({candidate.email})
-                            </span>
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              disabled={studentBusy[openSection.id]}
-                              onClick={() =>
-                                void addStudentToDocument(candidate.id)
-                              }
-                            >
-                              Add
-                            </Button>
-                          </li>
-                        ))}
-                    </ul>
+                      }
+                    >
+                      <UserPlus /> Add
+                    </Button>
                   </div>
-                )}
-                {(
-                  [
-                    [
-                      "adviser",
-                      "Assign research adviser",
-                      "Research adviser",
-                      "adviser_id",
-                    ],
-                    [
-                      "researchOffice",
-                      "Assign Research Office representative",
-                      "Research Office representative",
-                      "research_office_representative_id",
-                    ],
-                    ["chair", "Assign panel chair", "Panel chair", "chair_id"],
-                  ] as const
-                ).map(([disclosure, buttonLabel, fieldLabel, field]) => {
-                  const candidateKey =
-                    disclosure === "researchOffice"
-                      ? "research_office_representative"
-                      : disclosure;
-                  const candidates = teamCandidates[candidateKey] ?? [];
-                  const searchQuery = (teamSearches[disclosure] ?? "")
-                    .trim()
-                    .toLocaleLowerCase();
-                  const matchingCandidates = candidates.filter(
-                    (person) =>
-                      searchQuery === "" ||
-                      `${person.name} ${person.email}`
-                        .toLocaleLowerCase()
-                        .includes(searchQuery),
-                  );
-
-                  return (
+                </div>
+                {PROJECT_ROLE_FIELDS.map(
+                  ([disclosure, buttonLabel, fieldLabel]) => (
                     <div key={disclosure}>
                       <div className="project-assignment-control">
+                        <span
+                          className="project-assignment-icon"
+                          aria-hidden="true"
+                        >
+                          {disclosure === "chair" ? (
+                            <UserCog />
+                          ) : disclosure === "researchOffice" ? (
+                            <Users />
+                          ) : (
+                            <User />
+                          )}
+                        </span>
                         <span>
                           <strong>{fieldLabel}</strong>
-                          <small>View or change the current assignment.</small>
                         </span>
                         <Button
                           type="button"
@@ -4043,122 +3962,17 @@ function InstructorSections({
                           )}
                         </Button>
                       </div>
-                      {projectDisclosures[disclosure] && (
-                        <div
-                          id={`project-${disclosure}-editor`}
-                          className="project-role-editor"
-                        >
-                          <div className="project-editor-heading">
-                            <p className="eyebrow">Project assignment</p>
-                            <h3>{fieldLabel}</h3>
-                          </div>
-                          <p>
-                            <strong>Current:</strong>{" "}
-                            {projectTeam?.[
-                              disclosure === "researchOffice"
-                                ? "research_office_representative"
-                                : disclosure
-                            ]?.name ?? "Unassigned"}
-                          </p>
-                          <label>
-                            Search and select {fieldLabel.toLowerCase()}
-                            <input
-                              type="search"
-                              value={teamSearches[disclosure] ?? ""}
-                              placeholder="Search by name or email"
-                              autoComplete="off"
-                              onChange={(event) =>
-                                setTeamSearches((current) => ({
-                                  ...current,
-                                  [disclosure]: event.target.value,
-                                }))
-                              }
-                            />
-                          </label>
-                          <fieldset>
-                            <legend>{fieldLabel}</legend>
-                            {teamLoading ? (
-                              <p
-                                className="project-assignment-empty"
-                                role="status"
-                              >
-                                Loading eligible accounts…
-                              </p>
-                            ) : candidates.length === 0 ? (
-                              <p className="project-assignment-empty">
-                                No eligible {fieldLabel.toLowerCase()} account
-                                is available. Ask the Coordinator or
-                                Administrator to activate the required account
-                                first.
-                              </p>
-                            ) : matchingCandidates.length === 0 ? (
-                              <p
-                                className="project-assignment-empty"
-                                role="status"
-                              >
-                                No accounts match “
-                                {teamSearches[disclosure]?.trim()}”.
-                              </p>
-                            ) : (
-                              <ProjectAccountOptions
-                                candidates={matchingCandidates}
-                                selectedIds={
-                                  teamDraft[field] ? [teamDraft[field]] : []
-                                }
-                                mode="single"
-                                groupName={`project-${disclosure}-selection`}
-                                onClear={() =>
-                                  setTeamDraft((current) => ({
-                                    ...current,
-                                    [field]: "",
-                                  }))
-                                }
-                                disabledIds={
-                                  disclosure === "chair"
-                                    ? teamDraft.panel_member_ids
-                                    : []
-                                }
-                                disabledLabel={
-                                  disclosure === "chair"
-                                    ? "Panel member"
-                                    : undefined
-                                }
-                                onToggle={(person, selected) =>
-                                  setTeamDraft((current) => ({
-                                    ...current,
-                                    [field]: selected ? person.user_id : "",
-                                  }))
-                                }
-                              />
-                            )}
-                          </fieldset>
-                          <div className="project-role-actions">
-                            <span>
-                              {teamDraft[field]
-                                ? "1 account selected"
-                                : "No account selected"}
-                            </span>
-                            <Button
-                              type="button"
-                              disabled={
-                                teamBusy ||
-                                teamLoading ||
-                                !projectTeamRoleChanged(disclosure)
-                              }
-                              onClick={() => requestProjectTeamSave(disclosure)}
-                            >
-                              {teamBusy
-                                ? "Saving…"
-                                : projectTeamRoleAction(disclosure)}
-                            </Button>
-                          </div>
-                        </div>
-                      )}
                     </div>
-                  );
-                })}
+                  ),
+                )}
                 <div>
                   <div className="project-assignment-control">
+                    <span
+                      className="project-assignment-icon"
+                      aria-hidden="true"
+                    >
+                      <Users />
+                    </span>
                     <span>
                       <strong>Panel members</strong>
                       <small>Select the project evaluation panel.</small>
@@ -4196,109 +4010,355 @@ function InstructorSections({
                       )}
                     </Button>
                   </div>
-                  {projectDisclosures.panelMembers && (
-                    <div
-                      id="project-panel-members-editor"
-                      className="project-role-editor"
-                    >
-                      <div className="project-editor-heading">
-                        <p className="eyebrow">Project assignment</p>
-                        <h3>Panel members</h3>
-                      </div>
-                      <p>
-                        <strong>Current:</strong>{" "}
-                        {projectTeam?.panel_members
-                          .map((member) => member.name)
-                          .join(", ") || "None"}
-                      </p>
-                      <label>
-                        Search and select panel members
-                        <input
-                          type="search"
-                          value={teamSearches.panelMembers ?? ""}
-                          placeholder="Search by name or email"
-                          onChange={(event) =>
-                            setTeamSearches((current) => ({
-                              ...current,
-                              panelMembers: event.target.value,
-                            }))
-                          }
-                        />
-                      </label>
-                      <fieldset>
-                        <legend>Panel members</legend>
-                        {teamLoading ? (
-                          <p className="project-assignment-empty" role="status">
-                            Loading eligible panel members…
-                          </p>
-                        ) : (teamCandidates.panel_member ?? []).length === 0 ? (
-                          <p className="project-assignment-empty">
-                            No eligible panel accounts are available. Ask the
-                            Coordinator or Administrator to activate a Panel
-                            account first.
-                          </p>
-                        ) : matchingPanelCandidates.length === 0 ? (
-                          <p className="project-assignment-empty" role="status">
-                            No panel accounts match “
-                            {teamSearches.panelMembers?.trim()}”.
-                          </p>
-                        ) : (
-                          <ProjectAccountOptions
-                            candidates={matchingPanelCandidates}
-                            selectedIds={teamDraft.panel_member_ids}
-                            disabledIds={
-                              teamDraft.chair_id ? [teamDraft.chair_id] : []
-                            }
-                            disabledLabel="Panel chair"
-                            onToggle={(person, selected) =>
-                              setTeamDraft((current) => {
-                                if (
-                                  selected &&
-                                  current.panel_member_ids.length >= 3 &&
-                                  !current.panel_member_ids.includes(
-                                    person.user_id,
-                                  )
-                                ) {
-                                  return current;
-                                }
-                                return {
-                                  ...current,
-                                  panel_member_ids: selected
-                                    ? Array.from(
-                                        new Set([
-                                          ...current.panel_member_ids,
-                                          person.user_id,
-                                        ]),
-                                      ).slice(0, 3)
-                                    : current.panel_member_ids.filter(
-                                        (id) => id !== person.user_id,
-                                      ),
-                                };
-                              })
-                            }
-                          />
-                        )}
-                      </fieldset>
-                      <div className="project-role-actions">
+                </div>
+                <div className="project-assignment-footer">
+                  <Button
+                    type="button"
+                    disabled={teamBusy}
+                    onClick={() => {
+                      resetProjectDisclosures();
+                      setProjectManageOpen(false);
+                    }}
+                  >
+                    Done
+                  </Button>
+                </div>
+              </div>
+            </Modal>
+          )}
+          {projectManageOpen && projectDisclosures.students && (
+            <Modal
+              label="Student researchers"
+              onClose={() => resetProjectDisclosures()}
+              busy={teamBusy}
+            >
+              <div id="project-students-editor" className="title-member-picker">
+                <div className="project-editor-back">
+                  <Button
+                    type="button"
+                    variant="quiet"
+                    onClick={() => resetProjectDisclosures()}
+                  >
+                    <ArrowLeft aria-hidden="true" /> Back
+                  </Button>
+                </div>
+                <div className="project-editor-heading">
+                  <p className="eyebrow">
+                    {managedDefenseStage === "proposal"
+                      ? "Proposal defense"
+                      : "Final defense"}
+                  </p>
+                  <h3>Student researchers</h3>
+                </div>
+                <label>
+                  Search students
+                  <input
+                    value={studentQueries[openSection.id] ?? ""}
+                    onChange={(event) =>
+                      setStudentQueries((current) => ({
+                        ...current,
+                        [openSection.id]: event.target.value,
+                      }))
+                    }
+                    placeholder="Search this section roster"
+                  />
+                </label>
+                <p className="project-picker-note">
+                  Only students already enrolled in this section can be
+                  assigned to the study.
+                </p>
+                <ul className="student-candidates">
+                  {(studentsFor[openSection.id] ?? [])
+                    .filter(
+                      (candidate) =>
+                        !documentMembers.some(
+                          (member) => member.id === candidate.id,
+                        ),
+                    )
+                    .filter((candidate) => {
+                      const query = (studentQueries[openSection.id] ?? "")
+                        .trim()
+                        .toLocaleLowerCase();
+                      return (
+                        query === "" ||
+                        `${studentName(candidate)} ${candidate.email}`
+                          .toLocaleLowerCase()
+                          .includes(query)
+                      );
+                    })
+                    .map((candidate) => (
+                      <li key={candidate.id}>
                         <span>
-                          {teamDraft.panel_member_ids.length} / 3 selected
+                          {studentName(candidate)} ({candidate.email})
                         </span>
                         <Button
                           type="button"
-                          disabled={
-                            teamBusy ||
-                            teamLoading ||
-                            !projectTeamRoleChanged("panelMembers")
+                          variant="secondary"
+                          disabled={studentBusy[openSection.id]}
+                          onClick={() =>
+                            void addStudentToDocument(candidate.id)
                           }
-                          onClick={() => requestProjectTeamSave("panelMembers")}
                         >
-                          {teamBusy
-                            ? "Saving…"
-                            : projectTeamRoleAction("panelMembers")}
+                          Add
                         </Button>
-                      </div>
+                      </li>
+                    ))}
+                </ul>
+              </div>
+            </Modal>
+          )}
+          {projectManageOpen &&
+            PROJECT_ROLE_FIELDS.map(([disclosure, , fieldLabel, field]) => {
+              if (!projectDisclosures[disclosure]) return null;
+              const candidateKey =
+                disclosure === "researchOffice"
+                  ? "research_office_representative"
+                  : disclosure;
+              const candidates = teamCandidates[candidateKey] ?? [];
+              const searchQuery = (teamSearches[disclosure] ?? "")
+                .trim()
+                .toLocaleLowerCase();
+              const matchingCandidates = candidates.filter(
+                (person) =>
+                  searchQuery === "" ||
+                  `${person.name} ${person.email}`
+                    .toLocaleLowerCase()
+                    .includes(searchQuery),
+              );
+              return (
+                <Modal
+                  label={fieldLabel}
+                  onClose={() => resetProjectDisclosures()}
+                  busy={teamBusy}
+                >
+                  <div
+                    id={`project-${disclosure}-editor`}
+                    className="project-role-editor"
+                  >
+                    <div className="project-editor-back">
+                      <Button
+                        type="button"
+                        variant="quiet"
+                        onClick={() => resetProjectDisclosures()}
+                      >
+                        <ArrowLeft aria-hidden="true" /> Back
+                      </Button>
                     </div>
+                    <div className="project-editor-heading">
+                      <p className="eyebrow">
+                        {managedDefenseStage === "proposal"
+                          ? "Proposal defense"
+                          : "Final defense"}
+                      </p>
+                      <h3>{fieldLabel}</h3>
+                    </div>
+                    <p>
+                      <strong>Current:</strong>{" "}
+                      {projectTeam?.[
+                        disclosure === "researchOffice"
+                          ? "research_office_representative"
+                          : disclosure
+                      ]?.name ?? "Unassigned"}
+                    </p>
+                    <label>
+                      Search and select {fieldLabel.toLowerCase()}
+                      <input
+                        type="search"
+                        value={teamSearches[disclosure] ?? ""}
+                        placeholder="Search by name or email"
+                        autoComplete="off"
+                        onChange={(event) =>
+                          setTeamSearches((current) => ({
+                            ...current,
+                            [disclosure]: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <fieldset>
+                      <legend className="sr-only">{fieldLabel}</legend>
+                      {teamLoading ? (
+                        <p className="project-assignment-empty" role="status">
+                          Loading eligible accounts…
+                        </p>
+                      ) : candidates.length === 0 ? (
+                        <p className="project-assignment-empty">
+                          No eligible {fieldLabel.toLowerCase()} account is
+                          available. Ask the Coordinator or Administrator to
+                          activate the required account first.
+                        </p>
+                      ) : matchingCandidates.length === 0 ? (
+                        <p className="project-assignment-empty" role="status">
+                          No accounts match “
+                          {teamSearches[disclosure]?.trim()}”.
+                        </p>
+                      ) : (
+                        <ProjectAccountOptions
+                          candidates={matchingCandidates}
+                          selectedIds={
+                            teamDraft[field] ? [teamDraft[field]] : []
+                          }
+                          mode="single"
+                          groupName={`project-${disclosure}-selection`}
+                          onClear={() =>
+                            setTeamDraft((current) => ({
+                              ...current,
+                              [field]: "",
+                            }))
+                          }
+                          disabledIds={
+                            disclosure === "chair"
+                              ? teamDraft.panel_member_ids
+                              : []
+                          }
+                          disabledLabel={
+                            disclosure === "chair" ? "Panel member" : undefined
+                          }
+                          onToggle={(person, selected) =>
+                            setTeamDraft((current) => ({
+                              ...current,
+                              [field]: selected ? person.user_id : "",
+                            }))
+                          }
+                        />
+                      )}
+                    </fieldset>
+                    <div className="project-role-actions">
+                      <span>
+                        {teamDraft[field]
+                          ? "1 account selected"
+                          : "No account selected"}
+                      </span>
+                      <Button
+                        type="button"
+                        disabled={
+                          teamBusy ||
+                          teamLoading ||
+                          !projectTeamRoleChanged(disclosure)
+                        }
+                        onClick={() => requestProjectTeamSave(disclosure)}
+                      >
+                        {teamBusy
+                          ? "Saving…"
+                          : projectTeamRoleAction(disclosure)}
+                      </Button>
+                    </div>
+                  </div>
+                </Modal>
+              );
+            })}
+          {projectManageOpen && projectDisclosures.panelMembers && (
+            <Modal
+              label="Panel members"
+              onClose={() => resetProjectDisclosures()}
+              busy={teamBusy}
+            >
+              <div
+                id="project-panel-members-editor"
+                className="project-role-editor"
+              >
+                <div className="project-editor-back">
+                  <Button
+                    type="button"
+                    variant="quiet"
+                    onClick={() => resetProjectDisclosures()}
+                  >
+                    <ArrowLeft aria-hidden="true" /> Back
+                  </Button>
+                </div>
+                <div className="project-editor-heading">
+                  <p className="eyebrow">
+                    {managedDefenseStage === "proposal"
+                      ? "Proposal defense"
+                      : "Final defense"}
+                  </p>
+                  <h3>Panel members</h3>
+                </div>
+                <p>
+                  <strong>Current:</strong>{" "}
+                  {projectTeam?.panel_members
+                    .map((member) => member.name)
+                    .join(", ") || "None"}
+                </p>
+                <label>
+                  Search and select panel members
+                  <input
+                    type="search"
+                    value={teamSearches.panelMembers ?? ""}
+                    placeholder="Search by name or email"
+                    onChange={(event) =>
+                      setTeamSearches((current) => ({
+                        ...current,
+                        panelMembers: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <fieldset>
+                  <legend className="sr-only">Panel members</legend>
+                  {teamLoading ? (
+                    <p className="project-assignment-empty" role="status">
+                      Loading eligible panel members…
+                    </p>
+                  ) : (teamCandidates.panel_member ?? []).length === 0 ? (
+                    <p className="project-assignment-empty">
+                      No eligible panel accounts are available. Ask the
+                      Coordinator or Administrator to activate a Panel account
+                      first.
+                    </p>
+                  ) : matchingPanelCandidates.length === 0 ? (
+                    <p className="project-assignment-empty" role="status">
+                      No panel accounts match “
+                      {teamSearches.panelMembers?.trim()}”.
+                    </p>
+                  ) : (
+                    <ProjectAccountOptions
+                      candidates={matchingPanelCandidates}
+                      selectedIds={teamDraft.panel_member_ids}
+                      disabledIds={teamDraft.chair_id ? [teamDraft.chair_id] : []}
+                      disabledLabel="Panel chair"
+                      onToggle={(person, selected) =>
+                        setTeamDraft((current) => {
+                          if (
+                            selected &&
+                            current.panel_member_ids.length >= 3 &&
+                            !current.panel_member_ids.includes(person.user_id)
+                          ) {
+                            return current;
+                          }
+                          return {
+                            ...current,
+                            panel_member_ids: selected
+                              ? Array.from(
+                                  new Set([
+                                    ...current.panel_member_ids,
+                                    person.user_id,
+                                  ]),
+                                ).slice(0, 3)
+                              : current.panel_member_ids.filter(
+                                  (id) => id !== person.user_id,
+                                ),
+                          };
+                        })
+                      }
+                    />
                   )}
+                </fieldset>
+                <div className="project-role-actions">
+                  <span>{teamDraft.panel_member_ids.length} / 3 selected</span>
+                  <Button
+                    type="button"
+                    disabled={
+                      teamBusy ||
+                      teamLoading ||
+                      !projectTeamRoleChanged("panelMembers")
+                    }
+                    onClick={() => requestProjectTeamSave("panelMembers")}
+                  >
+                    {teamBusy
+                      ? "Saving…"
+                      : projectTeamRoleAction("panelMembers")}
+                  </Button>
                 </div>
               </div>
             </Modal>
@@ -5234,183 +5294,6 @@ function StatisticianSignoffs({ role }: { role: Role }) {
 
 /* ---------------------------------- Coordinator ---------------------------------- */
 
-function CoordinatorSchedules({ role }: { role: Role }) {
-  const [attempt, reload] = useAttempt();
-  const state = useLoad(() => listCoordinatorSchedules(), attempt);
-  const [documentId, setDocumentId] = useState("");
-  const [scheduledAt, setScheduledAt] = useState("");
-  const [room, setRoom] = useState("");
-  const [notes, setNotes] = useState("");
-  const [busy, setBusy] = useState("");
-  const [notice, setNotice] = useState("");
-
-  async function createSchedule(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setNotice("");
-    setBusy("create");
-    try {
-      await createCoordinatorSchedule({
-        research_document_id: Number(documentId),
-        scheduled_at: new Date(scheduledAt).toISOString(),
-        room: room.trim() || null,
-        notes: notes.trim() || null,
-      });
-      setDocumentId("");
-      setScheduledAt("");
-      setRoom("");
-      setNotes("");
-      setNotice("Defense schedule created.");
-      reload();
-    } catch (error) {
-      setNotice(
-        friendlyError(error, "The defense schedule could not be created"),
-      );
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function updateStatus(
-    schedule: DefenseScheduleResource,
-    status: string,
-  ) {
-    setNotice("");
-    setBusy(String(schedule.id));
-    try {
-      await updateCoordinatorSchedule(schedule.id, {
-        status: status as (typeof scheduleStatuses)[number],
-      });
-      setNotice("Defense schedule updated.");
-      reload();
-    } catch (error) {
-      setNotice(
-        friendlyError(error, "The defense schedule could not be updated"),
-      );
-    } finally {
-      setBusy("");
-    }
-  }
-
-  return (
-    <div className="workspace-content admin-sidebar-page">
-      <RolePageHeader
-        role={role}
-        title="Defense schedules"
-        description="Create and manage proposal-defense schedules."
-        action={
-          <Button variant="secondary" onClick={reload}>
-            <RefreshCw /> Refresh
-          </Button>
-        }
-      />
-      <section className="panel-card admin-provision-card">
-        <h2>Schedule a defense</h2>
-        <form onSubmit={createSchedule} className="admin-inline-form">
-          <label>
-            Research document ID
-            <input
-              type="number"
-              value={documentId}
-              onChange={(event) => setDocumentId(event.target.value)}
-              required
-              min={1}
-            />
-          </label>
-          <label>
-            Scheduled at
-            <DatePickerInput
-              type="datetime-local"
-              value={scheduledAt}
-              onChange={(event) => setScheduledAt(event.target.value)}
-              required
-            />
-          </label>
-          <label>
-            Room
-            <input
-              value={room}
-              onChange={(event) => setRoom(event.target.value)}
-              maxLength={150}
-            />
-          </label>
-          <label>
-            Notes
-            <textarea
-              value={notes}
-              onChange={(event) => setNotes(event.target.value)}
-              rows={2}
-              maxLength={5000}
-            />
-          </label>
-          <Button type="submit" disabled={busy === "create"}>
-            {busy === "create" ? "Scheduling…" : "Create schedule"}
-          </Button>
-        </form>
-        {notice && (
-          <p
-            role="status"
-            className={
-              notice.includes("could not") ? "admin-error" : "admin-success"
-            }
-          >
-            {notice}
-          </p>
-        )}
-      </section>
-      {state.status === "loading" ? (
-        <Loading label="Loading schedules" />
-      ) : state.status === "error" ? (
-        <InlineError message={state.message} retry={reload} />
-      ) : state.data.length === 0 ? (
-        <p className="admin-empty">No defense schedules exist yet.</p>
-      ) : (
-        <section className="panel-card admin-data-card">
-          <div className="admin-table-wrap">
-            <table>
-              <caption className="sr-only">Defense schedules</caption>
-              <thead>
-                <tr>
-                  <th>Research title</th>
-                  <th>Scheduled</th>
-                  <th>Room</th>
-                  <th>Notes</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {state.data.map((schedule) => (
-                  <tr key={schedule.id}>
-                    <td>{schedule.title ?? "—"}</td>
-                    <td>{displayDate(schedule.scheduled_at)}</td>
-                    <td>{schedule.room ?? "—"}</td>
-                    <td>{schedule.notes ?? "—"}</td>
-                    <td>
-                      <select
-                        aria-label={`Status for schedule ${schedule.id}`}
-                        value={schedule.status}
-                        onChange={(event) =>
-                          void updateStatus(schedule, event.target.value)
-                        }
-                        disabled={busy === String(schedule.id)}
-                      >
-                        {scheduleStatuses.map((status) => (
-                          <option key={status} value={status}>
-                            {label(status)}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
-    </div>
-  );
-}
-
 function CoordinatorDuplicateFlags({ role }: { role: Role }) {
   const [attempt, reload] = useAttempt();
   const state = useLoad(() => listDuplicateFlags(), attempt);
@@ -5730,7 +5613,34 @@ function CoordinatorAccountRoles({ role }: { role: Role }) {
 
 function CoordinatorReports({ role }: { role: Role }) {
   const [attempt, reload] = useAttempt();
-  const state = useLoad(() => getCoordinatorProgramReport(), attempt);
+  const [instituteFilter, setInstituteFilter] = useState("");
+  const [programFilter, setProgramFilter] = useState("");
+  const state = useLoad(
+    () => getCoordinatorProgramReport(instituteFilter, programFilter),
+    attempt,
+  );
+  const appliedFilters = useRef({ institute: "", program: "" });
+  const reloadRef = useRef(reload);
+  useEffect(() => {
+    reloadRef.current = reload;
+  });
+  useEffect(() => {
+    if (
+      appliedFilters.current.institute !== instituteFilter ||
+      appliedFilters.current.program !== programFilter
+    ) {
+      appliedFilters.current = { institute: instituteFilter, program: programFilter };
+      reloadRef.current();
+    }
+  }, [instituteFilter, programFilter]);
+  const programOptions =
+    instituteFilter && instituteNames.includes(
+      instituteFilter as (typeof instituteNames)[number],
+    )
+      ? programsByInstitute[
+          instituteFilter as keyof typeof programsByInstitute
+        ]
+      : [];
   return (
     <div className="workspace-content admin-sidebar-page">
       <RolePageHeader
@@ -5743,6 +5653,48 @@ function CoordinatorReports({ role }: { role: Role }) {
           </Button>
         }
       />
+      <section className="panel-card admin-data-card">
+        <div className="admin-card-heading">
+          <div>
+            <h2>Filters</h2>
+            <p>Scope the report by institute and program.</p>
+          </div>
+        </div>
+        <div className="admin-filters">
+          <label>
+            Institute
+            <select
+              value={instituteFilter}
+              onChange={(event) => {
+                setInstituteFilter(event.target.value);
+                setProgramFilter("");
+              }}
+            >
+              <option value="">All institutes</option>
+              {instituteNames.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Program
+            <select
+              value={programFilter}
+              disabled={programOptions.length === 0}
+              onChange={(event) => setProgramFilter(event.target.value)}
+            >
+              <option value="">All programs</option>
+              {programOptions.map((program) => (
+                <option key={program} value={program}>
+                  {program}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </section>
       {state.status === "loading" ? (
         <Loading label="Loading program report" />
       ) : state.status === "error" ? (
@@ -5750,6 +5702,45 @@ function CoordinatorReports({ role }: { role: Role }) {
       ) : (
         <>
           <ProgramCounts report={state.data} />
+          <section className="panel-card admin-data-card">
+            <div className="admin-card-heading">
+              <div>
+                <h2>Research instructors</h2>
+                <p>
+                  {state.data.filters?.institute || state.data.filters?.program
+                    ? "Instructors handling sections with research in the selected scope."
+                    : "Instructors handling sections with research documents."}
+                </p>
+              </div>
+            </div>
+            {state.data.instructors.length === 0 ? (
+              <p className="admin-empty">
+                No instructors handle sections in this scope.
+              </p>
+            ) : (
+              <div className="admin-table-wrap">
+                <table>
+                  <caption className="sr-only">Research instructors</caption>
+                  <thead>
+                    <tr>
+                      <th>Instructor</th>
+                      <th>Email</th>
+                      <th>Sections</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {state.data.instructors.map((instructor) => (
+                      <tr key={instructor.user_id}>
+                        <td>{instructor.name || "—"}</td>
+                        <td>{instructor.email || "—"}</td>
+                        <td>{instructor.sections.join(", ")}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
           <section className="panel-card admin-data-card">
             <div className="admin-card-heading">
               <div>

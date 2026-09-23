@@ -3114,6 +3114,7 @@ export interface AdviserLoadItem {
 
 export interface CoordinatorProgramReport {
   schema_version: 1;
+  filters: { institute: string | null; program: string | null };
   counts: {
     active_instructors: number;
     active_advisers: number;
@@ -3131,7 +3132,15 @@ export interface CoordinatorProgramReport {
     methodology_signed_off: number;
   };
   by_section: Array<{ id: number; name: string; documents_count: number }>;
+  instructors: CoordinatorReportInstructor[];
   adviser_load: AdviserLoadItem[];
+}
+
+export interface CoordinatorReportInstructor {
+  user_id: string;
+  name: string;
+  email: string;
+  sections: string[];
 }
 
 export async function listCoordinatorSchedules(
@@ -3198,11 +3207,21 @@ export async function listAdviserLoad(
 }
 
 export async function getCoordinatorProgramReport(
+  institute?: string,
+  program?: string,
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<CoordinatorProgramReport> {
+  const params = new URLSearchParams();
+  if (institute && institute.trim() !== "") {
+    params.set("institute", institute.trim());
+  }
+  if (program && program.trim() !== "") {
+    params.set("program", program.trim());
+  }
+  const query = params.toString();
   return (
     await apiRequest<{ data: CoordinatorProgramReport }>(
-      "/api/coordinator/reports",
+      `/api/coordinator/reports${query ? `?${query}` : ""}`,
       undefined,
       fetcher,
     )

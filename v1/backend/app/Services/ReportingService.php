@@ -11,6 +11,7 @@ use App\Models\ResearchDocument;
 use App\Models\ReviewAssignment;
 use App\Models\SimilarityResult;
 use App\Models\User;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -25,16 +26,30 @@ class ReportingService
         'Institute of Arts and Sciences',
     ];
 
-    public function coordinatorProgram(): array
+    public function coordinatorProgram(?string $institute = null, ?string $program = null): array
     {
-        $documents = ResearchDocument::query();
+        $documents = ResearchDocument::query()
+            ->when($institute !== null && trim($institute) !== '', fn ($query) => $query->where('institute', trim($institute)))
+            ->when($program !== null && trim($program) !== '', fn ($query) => $query->where('degree_program', trim($program)));
+        $filtered = $institute !== null && trim($institute) !== ''
+            || $program !== null && trim($program) !== '';
 
         return [
             'schema_version' => 1,
+            'filters' => [
+                'institute' => $filtered ? ($institute !== null && trim($institute) !== '' ? trim($institute) : null) : null,
+                'program' => $program !== null && trim($program) !== '' ? trim($program) : null,
+            ],
             'counts' => [
                 'active_instructors' => User::query()->where('role', 'instructor')->where('access_status', 'active')->count(),
                 'active_advisers' => User::query()->where('role', 'adviser')->where('access_status', 'active')->count(),
-                'active_researchers' => User::query()->where('role', 'researcher')->where('access_status', 'active')->count(),
+                'active_researchers' => $filtered
+                    ? DB::table('research_authors')
+                        ->whereIn('research_document_id', (clone $documents)->select('id'))
+                        ->whereNotNull('user_id')
+                        ->distinct()
+                        ->count('user_id')
+                    : User::query()->where('role', 'researcher')->where('access_status', 'active')->count(),
                 'draft' => (clone $documents)->where('submission_status', 'draft')->count(),
                 'submitted' => (clone $documents)->where('submission_status', 'submitted')->count(),
                 'under_review' => (clone $documents)->where('submission_status', 'under_review')->count(),
@@ -57,15 +72,48 @@ class ReportingService
                     'documents_count' => $section->research_documents_count,
                 ])
                 ->all(),
+            'instructors' => $this->scopedInstructors($documents),
             'adviser_load' => $this->adviserLoad(),
         ];
     }
 
+    private function scopedInstructors($documents): array
+    {
+        $sectionIds = (clone $documents)
+            ->whereNotNull('section_id')
+            ->select('section_id');
+
+        return ClassSection::query()
+            ->whereIn('id', $sectionIds)
+            ->with('instructor:id,first_name,middle_name,last_name,email')
+            ->get()
+            ->filter(fn (ClassSection $section) => $section->instructor !== null)
+            ->groupBy(fn (ClassSection $section) => $section->instructor->id)
+            ->map(fn (Collection $sections, $instructorId) => [
+                'user_id' => (string) $instructorId,
+                'name' => $sections->first()->instructor->displayName(),
+                'email' => $sections->first()->instructor->email,
+                'sections' => $sections->pluck('name')->unique()->values()->all(),
+            ])
+            ->sortBy('name')
+            ->values()
+            ->all();
+    }
+
     public function adviserLoad(): array
     {
+        $active = ReviewAssignment::column('is_active');
+
         return ReviewAssignment::query()
-            ->where('review_role', 'adviser')
-            ->where('is_active', true)
+            ->where(ReviewAssignment::column('review_role'), 'adviser')
+            ->when(
+                $active === 'status',
+                fn ($query) => $query->where($active, 'active')
+            )
+            ->when(
+                $active === 'is_active',
+                fn ($query) => $query->where($active, true)
+            )
             ->with('reviewer:id,first_name,middle_name,last_name,email')
             ->get()
             ->groupBy('reviewer_id')

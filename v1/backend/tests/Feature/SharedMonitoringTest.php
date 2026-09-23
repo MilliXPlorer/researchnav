@@ -2,11 +2,14 @@
 
 namespace Tests\Feature;
 
+use App\Models\ClassSection;
 use App\Models\ResearchDocument;
 use App\Models\ResearchProjectTeamMember;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class SharedMonitoringTest extends TestCase
@@ -180,8 +183,62 @@ class SharedMonitoringTest extends TestCase
             ->assertJsonPath('data.stages.before_proposal_defense.sections.0.assigned_actor_name', $proposalAdviser->displayName());
     }
 
-    public function test_unassigned_role_does_not_gain_shared_monitoring_access(): void
+    /**
+     * @param string[] $expectedStages
+     */
+    #[DataProvider('monitoringEditorMatrix')]
+    public function test_every_involved_actor_can_edit_their_monitoring_stages(string $role, array $expectedStages): void
     {
+        $office = $this->user(['role' => 'research-office']);
+        $actor = $this->user(['role' => $role]);
+        $research = ResearchDocument::factory()->create();
+        if ($role === 'researcher') {
+            // Researchers cannot hold review assignments; they participate
+            // through section project membership (read-only monitoring).
+            $section = ClassSection::query()->create(['instructor_id' => $office->id, 'name' => 'Thesis 2']);
+            $research->update(['section_id' => $section->id]);
+            DB::table('class_section_members')->insert([
+                'class_section_id' => $section->id,
+                'research_document_id' => $research->id,
+                'user_id' => $actor->id,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        } else {
+            $research->reviewAssignments()->create([
+                'reviewer_id' => $actor->id,
+                'assigned_by' => $office->id,
+                'review_role' => $role,
+                'designation' => $role === 'panel' ? 'panel_1' : null,
+                'is_active' => true,
+            ]);
+        }
+
+        $this->as($actor)
+            ->getJson('/api/research/'.$research->id.'/shared-monitoring')
+            ->assertOk()
+            ->assertJsonPath('data.editable_stages', $expectedStages);
+    }
+
+    public static function monitoringEditorMatrix(): array
+    {
+        $all = ['before_proposal_defense', 'after_proposal_defense', 'before_final_defense', 'after_final_defense'];
+        $after = ['after_proposal_defense', 'after_final_defense'];
+        $before = ['before_proposal_defense', 'before_final_defense'];
+
+        return [
+            'adviser edits every stage' => ['adviser', $all],
+            'instructor edits every stage' => ['instructor', $all],
+            'research editor edits every stage' => ['research_editor', $all],
+            'librarian edits every stage' => ['librarian', $all],
+            'panel edits after-defense stages only' => ['panel', $after],
+            'statistician edits before-defense stages only' => ['statistician', $before],
+            'research office edits after-defense stages only' => ['research-office', $after],
+            'researcher edits no stage' => ['researcher', []],
+        ];
+    }
+
+    public function test_unassigned_role_does_not_gain_shared_monitoring_access(): void    {
         $research = ResearchDocument::factory()->create();
         $unassigned = $this->user(['role' => 'adviser']);
 

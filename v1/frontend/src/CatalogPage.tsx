@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUpDown,
+  ChevronDown,
   Download,
   FileText,
   Filter,
@@ -24,13 +25,13 @@ import {
 } from "./api";
 import ProfileDialog, { ProfileAvatar } from "./ProfileDialog";
 import { instituteNames } from "./data";
-import { PublicationYearInput } from "./dateControls";
+import { YearRangeSelect } from "./dateControls";
 import { classificationLabel, formatSimilarityPercentage } from "./similarity";
 import type { SimilarityClassification } from "./similarity";
 import type { ResearchRecord, UserSession } from "./types";
 import { useDialogFocus } from "./useDialogFocus";
 import { SdgBadges } from "./SdgMetadata";
-import { sustainableDevelopmentGoals } from "./sdgs";
+import SdgPickerModal from "./SdgPickerModal";
 
 type SimilaritySearchResponse =
   | {
@@ -79,6 +80,7 @@ export default function CatalogPage({
     null,
   );
   const [profileOpen, setProfileOpen] = useState(false);
+  const [sdgPickerOpen, setSdgPickerOpen] = useState(false);
   const exactYear = searchParams.get("year") ?? "";
   const yearFrom = searchParams.get("year_from") ?? exactYear;
   const yearTo = searchParams.get("year_to") ?? exactYear;
@@ -278,13 +280,6 @@ export default function CatalogPage({
     );
   };
 
-  const toggleSdg = (id: number) => {
-    const nextIds = sdgIds.includes(id)
-      ? sdgIds.filter((selected) => selected !== id)
-      : [...sdgIds, id].sort((a, b) => a - b);
-    updateParam("sdgs", nextIds.join(","));
-  };
-
   const submitSearch = () => {
     const submittedQuery = query.trim();
     if (import.meta.env.DEV && import.meta.env.MODE !== "test") {
@@ -340,25 +335,6 @@ export default function CatalogPage({
             <FileText /> Open metadata
           </span>
         </div>
-        <details className="catalog-sdg-filter" open={sdgIds.length > 0}>
-          <summary>
-            Sustainable Development Goals
-            {sdgIds.length > 0 && <span>{sdgIds.length} selected</span>}
-          </summary>
-          <div className="catalog-sdg-options">
-            {sustainableDevelopmentGoals.map((sdg) => (
-              <label key={sdg.id}>
-                <input
-                  type="checkbox"
-                  checked={sdgIds.includes(sdg.id)}
-                  onChange={() => toggleSdg(sdg.id)}
-                />
-                <b style={{ backgroundColor: sdg.color_hex }}>{sdg.id}</b>
-                {sdg.short_title}
-              </label>
-            ))}
-          </div>
-        </details>
         <SearchBox value={query} onChange={setQuery} onSubmit={submitSearch} />
         <div className="catalog-toolbar">
           <div className="filter-label">
@@ -366,38 +342,36 @@ export default function CatalogPage({
           </div>
           <label className="catalog-year-filter">
             From year
-            <PublicationYearInput
+            <YearRangeSelect
               aria-label="Filter from publication year"
+              bound="from"
+              otherValue={yearTo}
               value={yearFrom}
-              max={yearTo || undefined}
-              placeholder="From"
               onChange={(event) => updateParam("year_from", event.target.value)}
             />
           </label>
           <label className="catalog-year-filter">
             To year
-            <PublicationYearInput
+            <YearRangeSelect
               aria-label="Filter to publication year"
+              bound="to"
+              otherValue={yearFrom}
               value={yearTo}
-              min={yearFrom || undefined}
-              placeholder="To"
               onChange={(event) => updateParam("year_to", event.target.value)}
             />
           </label>
-          <label>
-            Category<span className="sr-only">Filter by category</span>
-            <select
-              value={category}
-              onChange={(event) => updateParam("category", event.target.value)}
+          <div className="catalog-sdg-filter-trigger">
+            <span>
+              SDG<span className="sr-only">Filter by SDG</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => setSdgPickerOpen(true)}
             >
-              <option value="all">All categories</option>
-              {[...new Set(records.map((record) => record.category))].map(
-                (value) => (
-                  <option key={value}>{value}</option>
-                ),
-              )}
-            </select>
-          </label>
+              {sdgIds.length > 0 ? `${sdgIds.length} selected` : "All SDGs"}
+              <ChevronDown />
+            </button>
+          </div>
           <label>
             Institute<span className="sr-only">Filter by institute</span>
             <select
@@ -586,6 +560,15 @@ export default function CatalogPage({
           onClose={() => setSelectedRecord(null)}
           onSignIn={onSignIn}
           authenticated={Boolean(session)}
+        />
+      )}
+      {sdgPickerOpen && (
+        <SdgPickerModal
+          onClose={() => setSdgPickerOpen(false)}
+          onApply={(ids) => {
+            setSdgPickerOpen(false);
+            updateParam("sdgs", ids.join(","));
+          }}
         />
       )}
       {session && profileOpen && onSessionChange && (

@@ -114,6 +114,7 @@ const programReport = () =>
     JSON.stringify({
       data: {
         schema_version: 1,
+        filters: { institute: null, program: null },
         counts: {
           active_instructors: 0,
           active_advisers: 0,
@@ -131,6 +132,7 @@ const programReport = () =>
           methodology_signed_off: 0,
         },
         by_section: [],
+        instructors: [],
         adviser_load: [],
       },
     }),
@@ -708,7 +710,6 @@ describe("role workspace pages", () => {
     {
       role: "coordinator",
       destinations: [
-        ["Schedules", "Defense schedules"],
         ["Duplicate Flags", "Duplicate flags"],
         ["Adviser Load", "Adviser load"],
         ["Account Roles", "Account roles"],
@@ -1635,45 +1636,6 @@ describe("role workspace pages", () => {
     ).toBeGreaterThanOrEqual(2);
   });
 
-  it("clears a failed schedules load while retrying and renders the authoritative response", async () => {
-    let requests = 0;
-    stubFetch([
-      [
-        /\/api\/coordinator\/schedules(\?|$)/,
-        () => {
-          requests += 1;
-          return requests === 1
-            ? new Response(JSON.stringify({ error: "SERVICE_UNAVAILABLE" }), {
-                status: 503,
-              })
-            : listData([
-                {
-                  id: 1,
-                  research_document_id: 7,
-                  title: "Panel defense",
-                  scheduled_at: "2026-08-20T09:00:00.000000Z",
-                  room: "Room 204",
-                  status: "scheduled",
-                  created_by: { id: "coordinator-id", name: "Coordinator" },
-                },
-              ]);
-        },
-      ],
-    ]);
-    const { unmount } = render(
-      <RoleSidebarPage
-        role="coordinator"
-        selectedNav="Schedules"
-        navigate={vi.fn()}
-      />,
-    );
-    expect(await screen.findByRole("alert")).toHaveTextContent("unavailable");
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    expect(await screen.findByText("Panel defense")).toBeInTheDocument();
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    unmount();
-  });
-
   it("enrolls and removes student researchers in a class section", async () => {
     const sections = [
       {
@@ -2199,6 +2161,7 @@ describe("role workspace pages", () => {
       screen.getByRole("heading", { name: "Delete research project" }),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Research Team" }));
     fireEvent.click(
       await screen.findByRole("button", { name: "Remove Student One" }),
     );

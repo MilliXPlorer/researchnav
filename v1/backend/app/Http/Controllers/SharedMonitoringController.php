@@ -353,7 +353,7 @@ class SharedMonitoringController extends DomainController
         // contacts still show when a role was never managed through the team UI.
         $fallback = fn (string $key) => $isFinal ? null : $reviewActors->get($key);
 
-        $actors = $reviewActors->only(['Instructor', 'Editor', 'Statistician', 'Librarian']);
+        $actors = $reviewActors->toBase()->only(['Instructor', 'Editor', 'Statistician', 'Librarian']);
         $actors->put('Adviser', $memberName('adviser') ?? $fallback('Adviser'));
         $actors->put('Research Rep', $memberName('research_office_representative') ?? $fallback('Research Rep'));
         $actors->put('Chair', $memberName('chair') ?? $fallback('Chair'));

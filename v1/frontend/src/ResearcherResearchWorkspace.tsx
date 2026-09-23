@@ -2,6 +2,8 @@ import { formatPhilippineDateTime } from "./dateTime";
 import {
   ArrowLeft,
   Download,
+  ExternalLink,
+  Eye,
   FileText,
   Folder,
   MessageSquareText,
@@ -24,6 +26,7 @@ import {
   deleteResearchFile,
   renameResearchFile,
   researchFileDownloadUrl,
+  researchFilePreviewUrl,
   requestResearchSupport,
   resubmitResearchRevision,
   uploadResearchFile,
@@ -967,13 +970,42 @@ export default function ResearcherResearchWorkspace({
                             </small>
                           </div>
                           <div className="project-document-actions">
+                            {filesAreLive &&
+                              (file.mime_type === "application/pdf" ? (
+                                <a
+                                  className="icon-link-button"
+                                  href={researchFilePreviewUrl(
+                                    research.id,
+                                    file.id,
+                                  )}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  aria-label="Open document"
+                                  title="Open PDF in a new tab"
+                                >
+                                  <ExternalLink aria-hidden="true" />
+                                </a>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="icon-button"
+                                  aria-label="Open document"
+                                  title="Open document"
+                                  onClick={() => setFeedbackFile(file)}
+                                >
+                                  <Eye aria-hidden="true" />
+                                </button>
+                              ))}
                             {filesAreLive && (
-                              <Button
-                                variant="secondary"
-                                onClick={() => setFeedbackFile(file)}
+                              <button
+                                type="button"
+                                className="icon-button"
+                                aria-label="File feedback"
+                                title="File feedback"
+                                onClick={() => setCommentFile(file)}
                               >
-                                Open document
-                              </Button>
+                                <MessageSquareText aria-hidden="true" />
+                              </button>
                             )}
                             {filesAreLive && (
                               <a
@@ -987,15 +1019,6 @@ export default function ResearcherResearchWorkspace({
                               >
                                 <Download />
                               </a>
-                            )}
-                            {filesAreLive && (
-                              <Button
-                                variant="quiet"
-                                onClick={() => setCommentFile(file)}
-                              >
-                                <MessageSquareText aria-hidden="true" />
-                                File feedback
-                              </Button>
                             )}
                             {(source === "mock" ||
                               mockSections.includes("files")) && (
@@ -1031,7 +1054,13 @@ export default function ResearcherResearchWorkspace({
                 </div>
               )}
               {feedbackFile && (
-                <>
+                <Modal
+                  label={`Preview of ${feedbackFile.original_filename}`}
+                  onClose={() => setFeedbackFile(null)}
+                  size="large"
+                  className="modal-panel-document"
+                  showClose={false}
+                >
                   {feedbackFile.mime_type === "application/pdf" ? (
                     <PdfAnnotationWorkspace
                       key={feedbackFile.id}
@@ -1048,15 +1077,7 @@ export default function ResearcherResearchWorkspace({
                       onClose={() => setFeedbackFile(null)}
                     />
                   )}
-                  <DocumentFeedbackPanel
-                    key={`document-review-${feedbackFile.id}`}
-                    researchDocumentId={research.id}
-                    file={feedbackFile}
-                    researcherActions
-                    showClose={false}
-                    onClose={() => setFeedbackFile(null)}
-                  />
-                </>
+                </Modal>
               )}
               {commentFile && (
                 <Modal

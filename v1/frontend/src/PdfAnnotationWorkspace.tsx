@@ -1,6 +1,7 @@
 import {
   ChevronLeft,
   ChevronRight,
+  ExternalLink,
   Highlighter,
   MessageSquareText,
   Minus,
@@ -56,15 +57,22 @@ export default function PdfAnnotationWorkspace({
   useEffect(() => {
     let cancelled = false;
     let loadingTask: PdfLoadingTask | null = null;
+    void listPdfAnnotations(researchDocumentId, file.id)
+      .then((items) => {
+        if (!cancelled) setAnnotations(items);
+      })
+      .catch(() => {
+        if (!cancelled)
+          setNotice("Saved annotations could not be loaded.");
+      });
     void Promise.all([
       import("pdfjs-dist"),
       fetch(researchFilePreviewUrl(researchDocumentId, file.id), {
         credentials: "include",
       }),
-      listPdfAnnotations(researchDocumentId, file.id),
     ])
-      .then(async ([pdfjs, response, items]) => {
-        if (!response.ok) throw new Error("PDF_PREVIEW_FAILED");
+      .then(async ([pdfjs, response]) => {
+        if (!response.ok) throw new Error("PDF_RETRIEVE_FAILED");
         pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
         const data = new Uint8Array(await response.arrayBuffer());
         loadingTask = pdfjs.getDocument({ data });
@@ -75,11 +83,16 @@ export default function PdfAnnotationWorkspace({
         }
         setDocument(loaded);
         setPageCount(loaded.numPages);
-        setAnnotations(items);
       })
-      .catch(() => {
-        if (!cancelled)
-          setError("The PDF annotation workspace could not be loaded.");
+      .catch((loadError: unknown) => {
+        if (cancelled) return;
+        console.error("[pdf-preview] failed to load document", loadError);
+        setError(
+          loadError instanceof Error &&
+            loadError.message === "PDF_RETRIEVE_FAILED"
+            ? "The PDF file could not be retrieved."
+            : "The PDF file could not be read.",
+        );
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -228,11 +241,6 @@ export default function PdfAnnotationWorkspace({
       <header className="pdf-annotation-header">
         <div>
           <p className="eyebrow">PDF annotations</p>
-          <h4>{file.original_filename}</h4>
-          <p>
-            Version {file.version_number} ·{" "}
-            {file.is_current ? "Current" : "Previous"}
-          </p>
         </div>
         <button
           type="button"
@@ -243,25 +251,18 @@ export default function PdfAnnotationWorkspace({
           <X />
         </button>
       </header>
-      <p className="pdf-annotation-version-note">
-        Annotations are attached only to this file version and do not carry
-        forward to newer uploads.
-      </p>
-      {canAnnotate ? (
-        <p className="pdf-annotation-privacy">
-          Your annotations are confidential from other reviewers. Researchers
-          can view the consolidated annotations for this file version.
-        </p>
-      ) : (
-        <p className="pdf-annotation-privacy">
-          This consolidated view includes all reviewer annotations for this
-          exact file version.
-        </p>
-      )}
       {error && (
-        <p className="admin-error" role="alert">
-          {error}
-        </p>
+        <div className="pdf-annotation-error" role="alert">
+          <p>{error}</p>
+          <a
+            className="button button-secondary"
+            href={researchFilePreviewUrl(researchDocumentId, file.id)}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <ExternalLink aria-hidden="true" /> Open original
+          </a>
+        </div>
       )}
       {notice && (
         <p className="pdf-annotation-notice" aria-live="polite">

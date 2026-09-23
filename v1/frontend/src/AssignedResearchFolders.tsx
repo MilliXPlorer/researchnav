@@ -26,6 +26,36 @@ function label(value: string) {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function FoldersLoading({ label }: { label: string }) {
+  return (
+    <section
+      className="panel-card dashboard-loading"
+      role="region"
+      aria-label={label}
+      aria-busy="true"
+    >
+      <p>{label}…</p>
+    </section>
+  );
+}
+
+function FoldersError({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <section className="panel-card dashboard-error" role="alert">
+      <p>{message}</p>
+      <Button variant="secondary" onClick={onRetry}>
+        Retry
+      </Button>
+    </section>
+  );
+}
+
 export default function AssignedResearchFolders(props: {
   role: Role;
   actorKey?: string;
@@ -264,11 +294,6 @@ function AssignedResearchFoldersContent({
 
   return (
     <div className="workspace-content admin-sidebar-page">
-      {error && (
-        <p className="admin-error" role="alert">
-          {error}
-        </p>
-      )}
       {!selected && (
         <>
           <header className="role-page-heading">
@@ -284,10 +309,11 @@ function AssignedResearchFoldersContent({
               <RefreshCw /> Refresh
             </Button>
           </header>
+          {error && (
+            <FoldersError message={error} onRetry={refreshFolders} />
+          )}
           {loading ? (
-            <p className="admin-empty" aria-busy="true">
-              Loading assigned studies…
-            </p>
+            <FoldersLoading label="Loading assigned studies" />
           ) : folders.length === 0 ? (
             <section className="panel-card submissions-empty-state">
               <Folder />
@@ -416,9 +442,7 @@ function AssignedResearchFoldersContent({
             </Button>
           </div>
           {!research || loadedId !== selected ? (
-            <p className="admin-empty" aria-busy="true">
-              Loading study details…
-            </p>
+            <FoldersLoading label="Loading study details" />
           ) : (
             <StudyWorkspace
               key={research.id}

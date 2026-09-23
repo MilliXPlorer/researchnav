@@ -1,11 +1,9 @@
 import {
-  Check,
+  CheckCheck,
   CheckCircle2,
   CircleDot,
   Clock,
-  FileText,
-  MessageSquareText,
-  PenLine,
+  Eye,
   RotateCcw,
   Send,
   Tag,
@@ -21,7 +19,6 @@ import {
   type DocumentFileResource,
   type FeedbackResource,
 } from "./api";
-import { Button } from "./components";
 import { formatPhilippineDateTime } from "./dateTime";
 
 function label(value: string) {
@@ -154,21 +151,14 @@ export default function DocumentFeedbackPanel({
       aria-labelledby={`document-feedback-title-${file.id}`}
     >
       <header className="document-feedback-header">
-        <span
-          className="document-feedback-file-icon"
-          aria-hidden="true"
-        >
-          <FileText />
-        </span>
         <div className="document-feedback-heading">
-          <p className="eyebrow">Document feedback</p>
           <h4 id={`document-feedback-title-${file.id}`}>
             {file.original_filename}
           </h4>
           <p className="document-feedback-subtitle">
             <span>{file.relative_path ?? "Unfiled"}</span>
             <span aria-hidden="true">·</span>
-            <span>Version {file.version_number}</span>
+            <span>v{file.version_number}</span>
             <span
               className={
                 file.is_current
@@ -201,20 +191,14 @@ export default function DocumentFeedbackPanel({
 
       <div className="document-feedback-body">
         {loading ? (
-          <p className="project-empty-copy">Loading document feedback…</p>
+          <p className="project-empty-copy">Loading…</p>
         ) : feedback.length === 0 ? (
           <div className="document-feedback-empty">
-            <span
-              className="document-feedback-empty-icon"
-              aria-hidden="true"
-            >
-              <MessageSquareText />
-            </span>
-            <strong>No feedback for this document yet.</strong>
+            <strong>No feedback yet.</strong>
             <span>
               {canPostFeedback
-                ? "Write the first review note below."
-                : "Review notes for this file will appear here."}
+                ? "Write the first note below."
+                : "Notes will appear here."}
             </span>
           </div>
         ) : (
@@ -239,13 +223,11 @@ export default function DocumentFeedbackPanel({
                     <div className="document-feedback-item-head">
                       <span className="document-feedback-reviewer">
                         <strong>
-                          {item.reviewer_name ?? "Assigned reviewer"}
+                          {item.reviewer_name ?? "Reviewer"}
                         </strong>
-                        <small>
-                          {item.reviewer_role
-                            ? label(item.reviewer_role)
-                            : "Research actor"}
-                        </small>
+                        {item.reviewer_role && (
+                          <small>{label(item.reviewer_role)}</small>
+                        )}
                       </span>
                       <time>
                         {formatPhilippineDateTime(item.created_at)}
@@ -271,7 +253,7 @@ export default function DocumentFeedbackPanel({
                         ) : (
                           <CircleDot aria-hidden="true" />
                         )}
-                        Feedback status: {label(item.feedback_status)}
+                        {label(item.feedback_status)}
                       </span>
                       <span className="document-feedback-pill">
                         {addressed || acknowledged ? (
@@ -279,25 +261,34 @@ export default function DocumentFeedbackPanel({
                         ) : (
                           <Clock aria-hidden="true" />
                         )}
-                        Researcher response:{" "}
                         {addressed
                           ? "Addressed"
                           : acknowledged
                             ? "Acknowledged"
-                            : "Awaiting response"}
+                            : "Pending"}
                       </span>
                     </div>
                     {item.researcher_action_remarks && (
                       <p className="project-comment-response">
-                        Researcher response:{" "}
                         {item.researcher_action_remarks}
                       </p>
                     )}
                     {(canPostFeedback || researcherActions) && (
                       <div className="document-feedback-item-actions">
                         {canPostFeedback && (
-                          <Button
-                            variant="secondary"
+                          <button
+                            type="button"
+                            className="feedback-icon-btn"
+                            aria-label={
+                              resolved
+                                ? "Reopen feedback"
+                                : "Resolve feedback"
+                            }
+                            title={
+                              resolved
+                                ? "Reopen feedback"
+                                : "Resolve feedback"
+                            }
                             disabled={busy}
                             onClick={() => void changeStatus(item)}
                           >
@@ -306,15 +297,27 @@ export default function DocumentFeedbackPanel({
                             ) : (
                               <CheckCircle2 aria-hidden="true" />
                             )}
-                            {resolved
-                              ? "Reopen feedback"
-                              : "Resolve feedback"}
-                          </Button>
+                          </button>
                         )}
                         {researcherActions && (
                           <>
-                            <Button
-                              variant="secondary"
+                            <button
+                              type="button"
+                              className={
+                                item.researcher_acknowledged_at != null
+                                  ? "feedback-icon-btn is-done"
+                                  : "feedback-icon-btn"
+                              }
+                              aria-label={
+                                item.researcher_acknowledged_at
+                                  ? "Acknowledged"
+                                  : "Acknowledge"
+                              }
+                              title={
+                                item.researcher_acknowledged_at
+                                  ? "Acknowledged"
+                                  : "Acknowledge"
+                              }
                               disabled={
                                 busy ||
                                 item.researcher_acknowledged_at != null
@@ -326,13 +329,25 @@ export default function DocumentFeedbackPanel({
                                 )
                               }
                             >
-                              <Check aria-hidden="true" />
-                              {item.researcher_acknowledged_at
-                                ? "Acknowledged"
-                                : "Acknowledge"}
-                            </Button>
-                            <Button
-                              variant="secondary"
+                              <Eye aria-hidden="true" />
+                            </button>
+                            <button
+                              type="button"
+                              className={
+                                item.researcher_addressed_at != null
+                                  ? "feedback-icon-btn is-done"
+                                  : "feedback-icon-btn"
+                              }
+                              aria-label={
+                                item.researcher_addressed_at
+                                  ? "Addressed"
+                                  : "Mark addressed"
+                              }
+                              title={
+                                item.researcher_addressed_at
+                                  ? "Addressed"
+                                  : "Mark addressed"
+                              }
                               disabled={
                                 busy ||
                                 item.researcher_addressed_at != null
@@ -341,11 +356,8 @@ export default function DocumentFeedbackPanel({
                                 void recordResearcherAction(item, "address")
                               }
                             >
-                              <CheckCircle2 aria-hidden="true" />
-                              {item.researcher_addressed_at
-                                ? "Addressed"
-                                : "Mark addressed"}
-                            </Button>
+                              <CheckCheck aria-hidden="true" />
+                            </button>
                           </>
                         )}
                       </div>
@@ -363,18 +375,17 @@ export default function DocumentFeedbackPanel({
           className="document-feedback-composer"
           onSubmit={submitFeedback}
         >
-          <div className="document-feedback-composer-head">
-            <span aria-hidden="true">
-              <PenLine />
-            </span>
-            <div>
-              <h5>Write a review note</h5>
-              <p>Keep it specific so the researcher can act on it.</p>
-            </div>
-          </div>
-          <label className="document-feedback-field">
-            Feedback type
+          <textarea
+            required
+            aria-label="Feedback"
+            value={feedbackText}
+            onChange={(event) => setFeedbackText(event.target.value)}
+            placeholder="Write a note…"
+            rows={3}
+          />
+          <div className="document-feedback-composer-footer">
             <select
+              aria-label="Type"
               value={feedbackType}
               onChange={(event) =>
                 setFeedbackType(
@@ -387,23 +398,15 @@ export default function DocumentFeedbackPanel({
               <option value="revision_request">Revision request</option>
               <option value="approval_remark">Approval remark</option>
             </select>
-          </label>
-          <label className="document-feedback-field">
-            Feedback
-            <textarea
-              required
-              value={feedbackText}
-              onChange={(event) => setFeedbackText(event.target.value)}
-              placeholder="Write a clear review note for this document…"
-              rows={4}
-            />
-          </label>
-          <div className="document-feedback-composer-footer">
-            <small>Notes are shared with the research team.</small>
-            <Button disabled={busy || !feedbackText.trim()}>
-              <Send aria-hidden="true" />{" "}
-              {busy ? "Posting…" : "Post feedback"}
-            </Button>
+            <button
+              type="submit"
+              className="feedback-send-btn"
+              aria-label="Post feedback"
+              title="Post feedback"
+              disabled={busy || !feedbackText.trim()}
+            >
+              <Send aria-hidden="true" />
+            </button>
           </div>
         </form>
       )}

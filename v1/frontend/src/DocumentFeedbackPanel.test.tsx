@@ -69,7 +69,9 @@ describe("DocumentFeedbackPanel", () => {
     expect(
       screen.queryByText("Feedback for another file."),
     ).not.toBeInTheDocument();
-    expect(screen.queryByText("Post feedback")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Post feedback" }),
+    ).not.toBeInTheDocument();
   });
 
   it("posts feedback with the selected document id", async () => {
@@ -101,7 +103,7 @@ describe("DocumentFeedbackPanel", () => {
       />,
     );
 
-    await screen.findByText("No feedback for this document yet.");
+    await screen.findByText("No feedback yet.");
     fireEvent.change(screen.getByRole("textbox", { name: "Feedback" }), {
       target: { value: "Revise the opening section." },
     });
@@ -242,7 +244,7 @@ describe("DocumentFeedbackPanel", () => {
       await screen.findByRole("button", { name: "Reopen feedback" }),
     );
     expect(
-      await screen.findByText("Feedback status: Open"),
+      await screen.findByText("Open", { selector: ".document-feedback-pill" }),
     ).toBeInTheDocument();
   });
 });

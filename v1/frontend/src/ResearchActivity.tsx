@@ -200,9 +200,14 @@ export default function ResearchActivity({
 
   if (displayedState.status === "loading") {
     return (
-      <p className="admin-empty" aria-busy="true">
-        Loading feedback, revisions, and workflow activity…
-      </p>
+      <section
+        className="panel-card dashboard-loading"
+        role="region"
+        aria-label="Loading feedback, revisions, and workflow activity"
+        aria-busy="true"
+      >
+        <p>Loading feedback, revisions, and workflow activity…</p>
+      </section>
     );
   }
 

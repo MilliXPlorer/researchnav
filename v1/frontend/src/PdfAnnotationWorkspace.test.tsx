@@ -108,11 +108,13 @@ describe("PdfAnnotationWorkspace", () => {
     expect(screen.getByText("Clarify this claim.")).toBeInTheDocument();
     expect(screen.getByText("Dr. Reviewer")).toBeInTheDocument();
     expect(screen.queryByLabelText("Comment")).not.toBeInTheDocument();
-    expect(screen.getByText(/do not carry forward/i)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "study.pdf" }),
+    ).not.toBeInTheDocument();
     expect(mocks.list).toHaveBeenCalledWith(42, 7);
   });
 
-  it("explains reviewer confidentiality and waits for a PDF selection", async () => {
+  it("waits for a PDF selection", async () => {
     mocks.list.mockResolvedValue([]);
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(
       {} as CanvasRenderingContext2D,
@@ -133,9 +135,6 @@ describe("PdfAnnotationWorkspace", () => {
 
     expect(
       await screen.findByRole("complementary", { name: "My annotations" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/confidential from other reviewers/i),
     ).toBeInTheDocument();
     await waitFor(() =>
       expect(

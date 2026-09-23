@@ -187,17 +187,25 @@ describe("CatalogPage public similarity search", () => {
     expect(toolbar?.nextElementSibling).toHaveTextContent("Search tip");
   });
 
-  it("shows a typeable year range, category, and institute metadata filters", () => {
+  it("shows a year range dropdown, category, and institute metadata filters", () => {
     renderCatalog();
 
+    const from = screen.getByLabelText(
+      "Filter from publication year",
+    ) as HTMLSelectElement;
+    const to = screen.getByLabelText(
+      "Filter to publication year",
+    ) as HTMLSelectElement;
+    expect(from.tagName).toBe("SELECT");
+    expect(to.tagName).toBe("SELECT");
     expect(
-      screen.getByLabelText("Filter from publication year"),
-    ).toHaveAttribute("list");
-    expect(screen.getByLabelText("Filter to publication year")).toHaveAttribute(
-      "list",
-    );
+      screen.getByRole("combobox", { name: /filter from publication year/i }),
+    ).toBeInTheDocument();
     expect(
-      screen.getByRole("combobox", { name: /filter by category/i }),
+      screen.getByRole("combobox", { name: /filter to publication year/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "All SDGs" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("combobox", { name: /filter by institute/i }),
@@ -235,14 +243,18 @@ describe("CatalogPage public similarity search", () => {
 
     expect(window.location.search).toContain("year_from=2022");
     expect(window.location.search).toContain("year_to=2024");
-    expect(from).toHaveAttribute("max", "2024");
-    expect(to).toHaveAttribute("min", "2022");
+    expect(
+      within(to).getAllByRole("option").map((option) => option.textContent),
+    ).not.toContain("2020");
+    expect(
+      within(from).getAllByRole("option").map((option) => option.textContent),
+    ).not.toContain("2026");
     expect(
       await screen.findByText("No studies match these filters"),
     ).toBeInTheDocument();
   });
 
-  it("requests category and institute filters from the repository", async () => {
+  it("requests institute filters from the repository", async () => {
     const fetchMock = vi.fn(
       async () =>
         new Response(JSON.stringify({ data: [], links: { next: null } })),
@@ -251,23 +263,15 @@ describe("CatalogPage public similarity search", () => {
     renderCatalog();
 
     fireEvent.change(
-      screen.getByRole("combobox", { name: /filter by category/i }),
-      { target: { value: "Example Category" } },
-    );
-    fireEvent.change(
       screen.getByRole("combobox", { name: /filter by institute/i }),
       { target: { value: "Institute of Teacher Education" } },
     );
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenLastCalledWith(
-        expect.stringContaining("category=Example+Category"),
+        expect.stringContaining("institute=Institute+of+Teacher+Education"),
         expect.objectContaining({ signal: expect.any(AbortSignal) }),
       ),
-    );
-    expect(fetchMock).toHaveBeenLastCalledWith(
-      expect.stringContaining("institute=Institute+of+Teacher+Education"),
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 
@@ -279,9 +283,11 @@ describe("CatalogPage public similarity search", () => {
     vi.stubGlobal("fetch", fetchMock);
     renderCatalog();
 
+    fireEvent.click(screen.getByRole("button", { name: "All SDGs" }));
     fireEvent.click(
-      screen.getByRole("checkbox", { name: /Quality Education/i }),
+      await screen.findByRole("button", { name: /Quality Education/i }),
     );
+    fireEvent.click(screen.getByRole("button", { name: /Apply \(1\)/ }));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenLastCalledWith(

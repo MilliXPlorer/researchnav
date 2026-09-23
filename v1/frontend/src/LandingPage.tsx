@@ -10,6 +10,7 @@ import {
   Search,
 } from "lucide-react";
 import { Button, Logo, SearchBox } from "./components";
+import SdgPickerModal from "./SdgPickerModal";
 import ProfileDialog, { ProfileAvatar } from "./ProfileDialog";
 import { instituteNames, roleConfigs } from "./data";
 import type { ResearchRecord, UserSession } from "./types";
@@ -35,6 +36,7 @@ export default function LandingPage({
 }) {
   const [query, setQuery] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
+  const [sdgPickerOpen, setSdgPickerOpen] = useState(false);
   const recent = records.slice(0, 3);
   const instituteCount = instituteNames.length;
   const earliestYear = records.length
@@ -138,26 +140,14 @@ export default function LandingPage({
                 </select>
                 <ChevronDown />
               </label>
-              <label>
-                <span className="sr-only">Browse by category</span>
-                <select
-                  defaultValue=""
-                  onChange={(event) =>
-                    event.target.value &&
-                    navigate(
-                      `/catalog?category=${encodeURIComponent(event.target.value)}`,
-                    )
-                  }
-                >
-                  <option value="">All categories</option>
-                  {[...new Set(records.map((record) => record.category))].map(
-                    (category) => (
-                      <option key={category}>{category}</option>
-                    ),
-                  )}
-                </select>
+              <button
+                type="button"
+                className="hero-filter-trigger"
+                onClick={() => setSdgPickerOpen(true)}
+              >
+                All SDGs
                 <ChevronDown />
-              </label>
+              </button>
               <label>
                 <span className="sr-only">Browse by institute</span>
                 <select
@@ -186,6 +176,17 @@ export default function LandingPage({
               </div>
             )}
           </div>
+          {sdgPickerOpen && (
+            <SdgPickerModal
+              onClose={() => setSdgPickerOpen(false)}
+              onApply={(ids) => {
+                setSdgPickerOpen(false);
+                if (ids.length > 0) {
+                  navigate(`/catalog?sdgs=${ids.join(",")}`);
+                }
+              }}
+            />
+          )}
           <div className="hero-index" aria-label="Repository statistics">
             <div>
               <strong>{records.length}</strong>

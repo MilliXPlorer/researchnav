@@ -449,11 +449,6 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
         description: "Instructors without active access.",
         destination: "Account Roles",
       },
-      schedules: {
-        title: "Schedules",
-        description: "Program scheduling information.",
-        destination: "Schedules",
-      },
       duplicate_flags: {
         title: "Duplicate flags",
         description: "Duplicate-review information.",

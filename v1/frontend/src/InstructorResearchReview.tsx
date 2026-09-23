@@ -192,18 +192,23 @@ export default function InstructorResearchReview({
 
   if (loading && !context)
     return (
-      <p className="admin-empty" aria-busy="true">
-        Loading assigned research…
-      </p>
+      <section
+        className="panel-card dashboard-loading"
+        role="region"
+        aria-label="Loading assigned research"
+        aria-busy="true"
+      >
+        <p>Loading assigned research…</p>
+      </section>
     );
   if (!context) {
     return (
-      <div className="dashboard-error" role="alert">
+      <section className="panel-card dashboard-error" role="alert">
         <p>{error}</p>
         <Button variant="secondary" onClick={() => void load()}>
           Retry
         </Button>
-      </div>
+      </section>
     );
   }
 

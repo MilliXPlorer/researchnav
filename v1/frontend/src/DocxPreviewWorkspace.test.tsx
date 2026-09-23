@@ -58,8 +58,8 @@ describe("DocxPreviewWorkspace", () => {
       await screen.findByText("Read this paragraph in the app."),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/Highlights and PDF page controls are not available/),
-    ).toBeInTheDocument();
+      screen.queryByRole("heading", { name: "chapter.docx" }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText("Save annotation")).not.toBeInTheDocument();
   });
 });

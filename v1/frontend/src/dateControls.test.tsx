@@ -5,6 +5,7 @@ import {
   AcademicYearSelect,
   DatePickerInput,
   PublicationYearInput,
+  YearRangeSelect,
 } from "./dateControls";
 
 describe("date controls", () => {
@@ -74,5 +75,36 @@ describe("date controls", () => {
     );
 
     expect(screen.getByLabelText("Academic year")).toHaveValue("AY 2025-2026");
+  });
+
+  it("narrows the opposite year bound in the range dropdown", () => {
+    render(
+      <>
+        <YearRangeSelect
+          aria-label="From year"
+          bound="from"
+          otherValue="2024"
+          value=""
+        />
+        <YearRangeSelect
+          aria-label="To year"
+          bound="to"
+          otherValue="2022"
+          value=""
+        />
+      </>,
+    );
+
+    const from = screen.getByLabelText("From year") as HTMLSelectElement;
+    const to = screen.getByLabelText("To year") as HTMLSelectElement;
+    const fromYears = Array.from(from.options).map((option) => option.value);
+    const toYears = Array.from(to.options).map((option) => option.value);
+
+    expect(fromYears[0]).toBe("");
+    expect(toYears[0]).toBe("");
+    expect(fromYears).not.toContain("2026");
+    expect(fromYears).toContain("2024");
+    expect(toYears).not.toContain("1901");
+    expect(toYears).toContain("2022");
   });
 });

@@ -42,12 +42,7 @@ export default function DocxPreviewWorkspace({
     <section className="docx-preview-workspace" aria-busy={!preview && !error}>
       <header className="pdf-annotation-header">
         <div>
-          <p className="eyebrow">DOCX · Read-only extracted text</p>
-          <h4>{file.original_filename}</h4>
-          <p>
-            Version {file.version_number} ·{" "}
-            {file.is_current ? "Current" : "Previous"}
-          </p>
+          <p className="eyebrow">DOCX preview</p>
         </div>
         <button
           type="button"
@@ -58,10 +53,6 @@ export default function DocxPreviewWorkspace({
           <X />
         </button>
       </header>
-      <p className="pdf-annotation-version-note">
-        Feedback applies only to this file version. Highlights and PDF page
-        controls are not available for DOCX files.
-      </p>
       {error ? (
         <div className="dashboard-error panel-card" role="alert">
           <p>{error}</p>

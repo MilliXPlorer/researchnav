@@ -92,7 +92,6 @@ const navIcons: Record<string, LucideIcon> = {
   "Statistical Review": ChartNoAxesCombined,
   "Editorial Review": FileText,
   "Program Overview": LayoutDashboard,
-  Schedules: CalendarDays,
   "Duplicate Flags": Flag,
   "Adviser Load": Users,
   "Account Roles": UserCog,

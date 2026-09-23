@@ -58,7 +58,7 @@ class Revision extends ConsolidatedReviewModel
 
     protected function casts(): array
     {
-        return ['revision_number' => 'integer', 'sequence_number' => 'integer', 'requested_at' => 'datetime', 'submitted_at' => 'datetime', 'resolved_at' => 'datetime'];
+        return ['revision_number' => 'integer', 'sequence_number' => 'integer', 'requested_at' => 'datetime', 'submitted_at' => 'datetime', 'resolved_at' => 'datetime', 'reviewed_at' => 'datetime'];
     }
 
     public function researchDocument(): BelongsTo

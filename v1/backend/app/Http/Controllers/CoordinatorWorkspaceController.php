@@ -62,10 +62,22 @@ class CoordinatorWorkspaceController extends DomainController
             ->header('Cache-Control', 'private, no-store');
     }
 
-    public function reports(ReportingService $reports): JsonResponse
+    public function reports(Request $request, ReportingService $reports): JsonResponse
     {
+        $validator = Validator::make($request->query(), [
+            'institute' => ['nullable', 'string', 'max:255'],
+            'program' => ['nullable', 'string', 'max:255'],
+        ]);
+        if ($validator->fails()) {
+            throw new ApiValidationException($validator->errors()->toArray());
+        }
+        $validated = $validator->validated();
+
         return response()
-            ->json(['data' => $reports->coordinatorProgram()])
+            ->json(['data' => $reports->coordinatorProgram(
+                $validated['institute'] ?? null,
+                $validated['program'] ?? null,
+            )])
             ->header('Cache-Control', 'private, no-store');
     }
 

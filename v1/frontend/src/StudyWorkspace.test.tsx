@@ -80,7 +80,7 @@ describe("StudyWorkspace", () => {
       container.querySelector(".project-document-row.is-targeted"),
     ).toHaveTextContent("chapter-one.pdf");
     expect(
-      await screen.findByText("No feedback for this document yet."),
+      await screen.findByText("No feedback yet."),
     ).toBeInTheDocument();
   });
 

@@ -192,6 +192,24 @@ function installApi(
       )
         return response([]);
       if (path === "/api/research/42/files/10/annotations") return response([]);
+      if (path === "/api/research/42/files/11/preview-content")
+        return response({
+          schema_version: 1,
+          research_document_id: 42,
+          document_file_id: 11,
+          document_file_version: 1,
+          filename: "chapter-two.docx",
+          mime_type:
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          paragraphs: [
+            {
+              index: 0,
+              text: "Read this paragraph in the app.",
+              truncated: false,
+            },
+          ],
+          truncated: false,
+        });
       if (path === "/api/research/42/similarity") return response([]);
       if (path === "/api/research/42/monitoring" && init?.method === "POST")
         return response({});
@@ -273,16 +291,12 @@ describe("researcher research workspace", () => {
       screen.getByRole("button", { name: "Rename revision-v2.pdf" }),
     ).toBeEnabled();
     expect(
-      screen.getByRole("button", { name: "Open document" }),
-    ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Open document" }));
-    expect(
-      (await screen.findAllByRole("heading", { name: "revision-v2.pdf" }))
-        .length,
-    ).toBeGreaterThan(0);
-    expect(
-      screen.getByText(/consolidated view includes all reviewer annotations/i),
-    ).toBeInTheDocument();
+      screen.getByRole("link", { name: "Open document" }),
+    ).toHaveAttribute("href", "/api/research/42/files/10/preview");
+    expect(screen.getByRole("link", { name: "Open document" })).toHaveAttribute(
+      "target",
+      "_blank",
+    );
     expect(
       screen.queryByRole("button", { name: "Save annotation" }),
     ).not.toBeInTheDocument();
@@ -291,6 +305,55 @@ describe("researcher research workspace", () => {
     expect(
       screen.queryByRole("button", { name: "Rename final.pdf" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("opens a DOCX file in a preview pop-up window", async () => {
+    installApi([
+      {
+        id: 11,
+        research_document_id: 42,
+        document_type: "revised_manuscript",
+        version_number: 1,
+        original_filename: "chapter-two.docx",
+        file_extension: "docx",
+        mime_type:
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        file_size: 512,
+        is_current: true,
+        relative_path: "Chapter 2",
+        uploaded_at: "2026-08-02T10:00:01.000Z",
+      },
+    ]);
+    render(
+      <RoleWorkspace
+        role="researcher"
+        navigate={vi.fn()}
+        selectNav={vi.fn()}
+        dashboardScope="researcher:researcher@example.test"
+        dashboardState={{
+          status: "loading",
+          scope: "researcher:researcher@example.test",
+        }}
+        onRetry={vi.fn()}
+        researchDocumentId="42"
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Revision-ready study" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Documents" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Chapter 2/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Open document" }));
+
+    expect(
+      await screen.findByRole("dialog", {
+        name: "Preview of chapter-two.docx",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByText("Read this paragraph in the app."),
+    ).toBeInTheDocument();
   });
 
   it("does not expose legacy pending title-validation requests", async () => {

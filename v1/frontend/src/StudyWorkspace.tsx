@@ -1,7 +1,8 @@
 import { type ReactNode, useEffect, useState } from "react";
 import {
-  CheckCircle2,
   Download,
+  ExternalLink,
+  Eye,
   FileText,
   Folder,
   MessageSquareText,
@@ -13,6 +14,7 @@ import {
   listResearchFiles,
   listResearchFolders,
   researchFileDownloadUrl,
+  researchFilePreviewUrl,
   type DocumentFileResource,
   type InstructorProjectTeam,
   type ResearchPeopleResource,
@@ -67,6 +69,38 @@ function reviewerName(
   return (
     people?.reviewers.find((reviewer) => reviewer.review_role === role)?.name ??
     null
+  );
+}
+
+function WorkspaceLoading({ label }: { label: string }) {
+  return (
+    <section
+      className="panel-card dashboard-loading"
+      role="region"
+      aria-label={label}
+      aria-busy="true"
+    >
+      <p>{label}…</p>
+    </section>
+  );
+}
+
+function WorkspaceError({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry?: () => void;
+}) {
+  return (
+    <section className="panel-card dashboard-error" role="alert">
+      <p>{message}</p>
+      {onRetry && (
+        <Button variant="secondary" onClick={onRetry}>
+          Retry
+        </Button>
+      )}
+    </section>
   );
 }
 
@@ -225,14 +259,13 @@ export default function StudyWorkspace({
   ].filter((folder, index, values) => values.indexOf(folder) === index);
 
   const actorRows = (
-    rows: Array<[string, string | null | undefined, string]>,
+    rows: Array<[string, string | null | undefined]>,
     prefix: string,
   ) =>
-    rows.map(([actorLabel, actorName, note]) => (
+    rows.map(([actorLabel, actorName]) => (
       <div className="project-actor-row" key={`${prefix}-${actorLabel}`}>
         <span>
           <strong>{actorLabel}</strong>
-          <small>{note}</small>
         </span>
         <span className={actorName ? "actor-name" : "actor-name is-empty"}>
           {actorName || "Unassigned"}
@@ -316,19 +349,12 @@ export default function StudyWorkspace({
         />
       </nav>
 
-      {loading && (
-        <p className="section-documents-loading">Loading study workspace…</p>
-      )}
+      {loading && <WorkspaceLoading label="Loading study workspace" />}
       {loadError && (
-        <div className="dashboard-error panel-card" role="alert">
-          <p>{loadError}</p>
-          <Button
-            variant="secondary"
-            onClick={() => setAttempt((current) => current + 1)}
-          >
-            Retry
-          </Button>
-        </div>
+        <WorkspaceError
+          message={loadError}
+          onRetry={() => setAttempt((current) => current + 1)}
+        />
       )}
 
       {tab === "overview" && (
@@ -369,34 +395,6 @@ export default function StudyWorkspace({
                 <small>No SDGs assigned to this research yet.</small>
               )}
             </div>
-            <div className="project-readiness-list">
-              <div>
-                <CheckCircle2 aria-hidden="true" />
-                <span>
-                  <strong>Before Proposal Defense</strong>
-                  <small>
-                    {readinessAvailable
-                      ? projectTeam.pre_defense_ready
-                        ? "Required team members are assigned and accepted."
-                        : "Waiting for one or more required team assignments."
-                      : "Assignment status is managed by the Research Instructor."}
-                  </small>
-                </span>
-              </div>
-              <div>
-                <CheckCircle2 aria-hidden="true" />
-                <span>
-                  <strong>After Proposal Defense</strong>
-                  <small>
-                    {readinessAvailable
-                      ? projectTeam.post_defense_ready
-                        ? "Adviser, editor, librarian, three panels, Research Rep, and Chair are ready."
-                        : "The post-defense team is not complete yet."
-                      : "Assignment status is managed by the Research Instructor."}
-                  </small>
-                </span>
-              </div>
-            </div>
           </section>
           <section className="project-overview-card">
             <div className="project-card-heading">
@@ -427,20 +425,6 @@ export default function StudyWorkspace({
                       <strong>{researcher.name}</strong>
                       <small>{researcher.email ?? "Student researcher"}</small>
                     </span>
-                    {controls?.onRemoveResearcher && (
-                      <button
-                        type="button"
-                        className="icon-button button-quiet"
-                        aria-label={`Remove ${researcher.name}`}
-                        title="Remove researcher"
-                        disabled={controls.researcherActionsDisabled}
-                        onClick={() =>
-                          controls.onRemoveResearcher?.(researcher)
-                        }
-                      >
-                        <Trash2 />
-                      </button>
-                    )}
                   </li>
                 ))}
               </ul>
@@ -497,10 +481,6 @@ export default function StudyWorkspace({
             <div>
               <p className="eyebrow">Research Team</p>
               <h4>People assigned to this study</h4>
-              <p>
-                Role-specific controls remain available only to authorized
-                members of the research team.
-              </p>
             </div>
             {controls?.onManageAssignments && (
               <Button
@@ -550,9 +530,7 @@ export default function StudyWorkspace({
             )}
           </section>
           {teamLoading ? (
-            <p className="section-documents-loading">
-              Loading current team assignments…
-            </p>
+            <WorkspaceLoading label="Loading current team assignments" />
           ) : (
             <>
               <div className="project-team-stage-control">
@@ -598,23 +576,11 @@ export default function StudyWorkspace({
                     <div className="project-actor-grid">
                       {actorRows(
                         [
-                          [
-                            "Research Instructor",
-                            instructorName,
-                            "Automatically assigned",
-                          ],
-                          [
-                            "Research Adviser",
-                            adviserName,
-                            "Instructor assigned",
-                          ],
-                          ["Editor", editorName, "Researcher assigned"],
-                          [
-                            "Statistician",
-                            statisticianName,
-                            "Researcher assigned",
-                          ],
-                          ["Librarian", librarianName, "Researcher assigned"],
+                          ["Research Instructor", instructorName],
+                          ["Research Adviser", adviserName],
+                          ["Editor", editorName],
+                          ["Statistician", statisticianName],
+                          ["Librarian", librarianName],
                         ],
                         "pre",
                       )}
@@ -644,27 +610,15 @@ export default function StudyWorkspace({
                     <div className="project-actor-grid">
                       {actorRows(
                         [
-                          [
-                            "Research Instructor",
-                            instructorName,
-                            "Automatically assigned",
-                          ],
-                          [
-                            "Research Adviser",
-                            adviserName,
-                            "Instructor assigned",
-                          ],
-                          ["Editor", editorName, "Researcher assigned"],
-                          ["Librarian", librarianName, "Researcher assigned"],
-                          ["Panel 1", panelNames[0], "Instructor assigned"],
-                          ["Panel 2", panelNames[1], "Instructor assigned"],
-                          ["Panel 3", panelNames[2], "Instructor assigned"],
-                          [
-                            "Research Rep",
-                            representativeName,
-                            "Research Office personnel",
-                          ],
-                          ["Chair", chairName, "Panel chair"],
+                          ["Research Instructor", instructorName],
+                          ["Research Adviser", adviserName],
+                          ["Editor", editorName],
+                          ["Librarian", librarianName],
+                          ["Panel 1", panelNames[0]],
+                          ["Panel 2", panelNames[1]],
+                          ["Panel 3", panelNames[2]],
+                          ["Research Rep", representativeName],
+                          ["Chair", chairName],
                         ],
                         "post",
                       )}
@@ -696,23 +650,11 @@ export default function StudyWorkspace({
                     <div className="project-actor-grid">
                       {actorRows(
                         [
-                          [
-                            "Research Instructor",
-                            instructorName,
-                            "Automatically assigned",
-                          ],
-                          [
-                            "Research Adviser",
-                            adviserName,
-                            "Instructor assigned",
-                          ],
-                          ["Editor", editorName, "Researcher assigned"],
-                          [
-                            "Statistician",
-                            statisticianName,
-                            "Researcher assigned",
-                          ],
-                          ["Librarian", librarianName, "Researcher assigned"],
+                          ["Research Instructor", instructorName],
+                          ["Research Adviser", adviserName],
+                          ["Editor", editorName],
+                          ["Statistician", statisticianName],
+                          ["Librarian", librarianName],
                         ],
                         "pre",
                       )}
@@ -742,27 +684,15 @@ export default function StudyWorkspace({
                     <div className="project-actor-grid">
                       {actorRows(
                         [
-                          [
-                            "Research Instructor",
-                            instructorName,
-                            "Automatically assigned",
-                          ],
-                          [
-                            "Research Adviser",
-                            adviserName,
-                            "Instructor assigned",
-                          ],
-                          ["Editor", editorName, "Researcher assigned"],
-                          ["Librarian", librarianName, "Researcher assigned"],
-                          ["Panel 1", panelNames[0], "Instructor assigned"],
-                          ["Panel 2", panelNames[1], "Instructor assigned"],
-                          ["Panel 3", panelNames[2], "Instructor assigned"],
-                          [
-                            "Research Rep",
-                            representativeName,
-                            "Research Office personnel",
-                          ],
-                          ["Chair", chairName, "Panel chair"],
+                          ["Research Instructor", instructorName],
+                          ["Research Adviser", adviserName],
+                          ["Editor", editorName],
+                          ["Librarian", librarianName],
+                          ["Panel 1", panelNames[0]],
+                          ["Panel 2", panelNames[1]],
+                          ["Panel 3", panelNames[2]],
+                          ["Research Rep", representativeName],
+                          ["Chair", chairName],
                         ],
                         "post",
                       )}
@@ -883,20 +813,41 @@ export default function StudyWorkspace({
                         </small>
                       </div>
                       <div className="project-document-actions">
-                        <Button
-                          variant="secondary"
-                          onClick={() => setFeedbackFile(file)}
-                        >
-                          Open document
-                        </Button>
+                        {file.mime_type === "application/pdf" ? (
+                          <a
+                            className="icon-link-button"
+                            href={researchFilePreviewUrl(
+                              researchDocumentId,
+                              file.id,
+                            )}
+                            target="_blank"
+                            rel="noreferrer"
+                            aria-label="Open document"
+                            title="Open PDF in a new tab"
+                          >
+                            <ExternalLink aria-hidden="true" />
+                          </a>
+                        ) : (
+                          <button
+                            type="button"
+                            className="icon-button"
+                            aria-label="Open document"
+                            title="Open document"
+                            onClick={() => setFeedbackFile(file)}
+                          >
+                            <Eye aria-hidden="true" />
+                          </button>
+                        )}
                         {canPostFeedback && (
-                          <Button
-                            variant="quiet"
+                          <button
+                            type="button"
+                            className="icon-button"
+                            aria-label="File feedback"
+                            title="File feedback"
                             onClick={() => setCommentFile(file)}
                           >
                             <MessageSquareText aria-hidden="true" />
-                            File feedback
-                          </Button>
+                          </button>
                         )}
                         <a
                           className="icon-link-button"
@@ -915,7 +866,13 @@ export default function StudyWorkspace({
               </div>
             )}
             {feedbackFile && (
-              <>
+              <Modal
+                label={`Preview of ${feedbackFile.original_filename}`}
+                onClose={() => setFeedbackFile(null)}
+                size="large"
+                className="modal-panel-document"
+                showClose={false}
+              >
                 {feedbackFile.mime_type === "application/pdf" ? (
                   <PdfAnnotationWorkspace
                     key={feedbackFile.id}
@@ -932,15 +889,7 @@ export default function StudyWorkspace({
                     onClose={() => setFeedbackFile(null)}
                   />
                 )}
-                <DocumentFeedbackPanel
-                  key={`document-review-${feedbackFile.id}`}
-                  researchDocumentId={researchDocumentId}
-                  file={feedbackFile}
-                  canPostFeedback={canPostFeedback}
-                  showClose={false}
-                  onClose={() => setFeedbackFile(null)}
-                />
-              </>
+              </Modal>
             )}
             {commentFile && (
               <Modal

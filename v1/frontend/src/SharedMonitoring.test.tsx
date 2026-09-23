@@ -197,7 +197,10 @@ describe("shared monitoring", () => {
     expect(screen.getAllByText("Proposal review")).toHaveLength(3);
     expect(screen.getAllByText("Revision review")).toHaveLength(3);
     expect(screen.getAllByText("Assigned Panelist")).toHaveLength(2);
-    expect(screen.getAllByText("2026-09-13 14:25:36")).toHaveLength(3);
+    // Sheet overlays use the compact date (no seconds) so the Date column
+    // fits in print; only the accessible summary keeps full precision.
+    expect(screen.getAllByText("2026-09-13 14:25")).not.toHaveLength(0);
+    expect(screen.getAllByText("2026-09-13 14:25:36")).toHaveLength(1);
     expect(screen.queryByText("Research actor")).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Print defense monitoring form" }),
@@ -366,5 +369,34 @@ describe("shared monitoring", () => {
     expect(
       screen.getByRole("tab", { name: "Before Proposal Defense" }),
     ).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("renders compact sheet dates that fit the printed Date column", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ data: monitoring }))),
+    );
+
+    render(
+      <SharedMonitoring role="instructor" researchDocumentId={42} embedded />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("tab", { name: "After Proposal Defense" }),
+    );
+    await waitFor(() =>
+      expect(screen.getAllByText("2026-09-13 14:25")).not.toHaveLength(0),
+    );
+
+    // Screen sheet + print duplicate share the overlay; every Date cell must
+    // fit without the seconds that overflowed the printed column.
+    const dates = Array.from(
+      document.querySelectorAll(".official-monitoring-date"),
+    ).map((element) => element.textContent ?? "");
+    expect(dates.length).toBeGreaterThan(0);
+    for (const text of dates) {
+      expect(text.length).toBeLessThanOrEqual(16);
+    }
+    expect(dates.some((text) => text.includes("14:25:36"))).toBe(false);
   });
 });
