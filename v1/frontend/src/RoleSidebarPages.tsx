@@ -7974,28 +7974,30 @@ function ResearcherSubmissions({
                               <Pencil size={17} aria-hidden="true" />
                             </button>
                           ) : (
-                            <Button
-                              variant="secondary"
-                              onClick={() => {
-                                setEditDirty(false);
-                                setEditing(document);
-                              }}
-                              disabled={submitting === String(document.id)}
-                            >
-                              <Pencil size={16} aria-hidden="true" /> Edit
-                            </Button>
+                          <button
+                            className="icon-button"
+                            aria-label="Edit submission"
+                            title="Edit submission"
+                            onClick={() => {
+                              setEditDirty(false);
+                              setEditing(document);
+                            }}
+                            disabled={submitting === String(document.id)}
+                          >
+                            <Pencil size={17} aria-hidden="true" />
+                          </button>
                           )}
 
                           {document.submission_status === "draft" && (
-                            <Button
+                            <button
+                              className="icon-button"
+                              aria-label="Submit research"
+                              title="Submit research"
                               onClick={() => void submit(document)}
                               disabled={submitting === String(document.id)}
                             >
-                              <Send size={16} aria-hidden="true" />
-                              {submitting === String(document.id)
-                                ? "Submitting…"
-                                : "Submit"}
-                            </Button>
+                              <Send size={17} aria-hidden="true" />
+                            </button>
                           )}
                         </>
                       )}
