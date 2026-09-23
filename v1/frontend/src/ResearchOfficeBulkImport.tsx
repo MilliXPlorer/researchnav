@@ -167,10 +167,6 @@ const styles = {
     fontFamily: '"Inter", Arial, sans-serif',
   },
 
-  pageHeader: {
-    marginBottom: "24px",
-  },
-
   eyebrow: {
     margin: "0 0 5px",
     fontSize: "12px",
@@ -178,23 +174,6 @@ const styles = {
     textTransform: "uppercase" as const,
     letterSpacing: "0.08em",
     color: "#5b6660",
-  },
-
-  pageTitle: {
-    margin: 0,
-    fontSize: "27px",
-    lineHeight: 1.25,
-    color: "#10331f",
-    fontWeight: 700,
-    fontFamily: '"Source Serif 4", Georgia, serif',
-  },
-
-  pageDescription: {
-    maxWidth: "720px",
-    margin: "8px 0 0",
-    color: "#5b6660",
-    fontSize: "14px",
-    lineHeight: 1.6,
   },
 
   section: {
@@ -1873,16 +1852,16 @@ export default function ResearchOfficeBulkImport({
           </div>
         </Modal>
       )}
-      <div style={styles.pageHeader}>
-        <p style={styles.eyebrow}>{contextLabel}</p>
-
-        <h1 style={styles.pageTitle}>Upload Manuscript</h1>
-
-        <p style={styles.pageDescription}>
-          Upload finalized research manuscripts and review the extracted
-          information before they are added to ResearchNAV.
-        </p>
-      </div>
+      <header className="workspace-header">
+        <div>
+          <p className="eyebrow">{contextLabel}</p>
+          <h1>Upload Manuscript</h1>
+          <p>
+            Upload finalized research manuscripts and review the extracted
+            information before they are added to ResearchNAV.
+          </p>
+        </div>
+      </header>
 
       <section style={styles.section}>
         <div style={styles.sectionHeading}>

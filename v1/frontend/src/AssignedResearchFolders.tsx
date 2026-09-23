@@ -296,7 +296,7 @@ function AssignedResearchFoldersContent({
     <div className="workspace-content admin-sidebar-page">
       {!selected && (
         <>
-          <header className="role-page-heading">
+          <header className="workspace-header">
             <div>
               <p className="eyebrow">Assigned research</p>
               <h1>Assigned Research</h1>

@@ -2,14 +2,20 @@
 import { formatPhilippineDateTime, philippineDateToday } from "./dateTime";
 import {
   ArrowLeft,
+  Building2,
+  ClipboardList,
+  Download,
   ExternalLink,
   Eye,
+  FileText,
   Folder,
   GraduationCap,
+  Globe2,
   MessageSquareText,
   Pencil,
   Plus,
   Power,
+  Printer,
   RefreshCw,
   Send,
   Trash2,
@@ -34,7 +40,6 @@ import {
   listAdviserFeedbackHistory,
   listAdviserSimilarityAlerts,
   listCategories,
-  listDuplicateFlags,
   listAdviserLoad,
   listInstructorClassReports,
   listInstructorMonitoring,
@@ -100,6 +105,7 @@ import {
   type AdminRole,
   type OfficeUserRow,
   type CoordinatorProgramReport,
+  type AdviserLoadItem,
   type DefenseScheduleResource,
   type DocumentFileResource,
   type InstructorSectionDocumentItem,
@@ -107,6 +113,7 @@ import {
   type InstructorStudentResource,
   type InstructorMonitoringEntry,
   type InstructorProjectTeam,
+  type InstitutionalReport,
   type ProjectTeamPerson,
   type LaravelPaginatedResponse,
   type MetadataStandardsItem,
@@ -143,6 +150,11 @@ import { filterUserRows } from "./userManagement";
 import { useClientSorting } from "./useClientSorting";
 import { matchesStudySearch } from "./studySearch";
 import { SdgSelector } from "./SdgMetadata";
+import {
+  buildOfficeReportCsv,
+  officeReportOptions,
+  type OfficeReportSection,
+} from "./officeReportExport";
 
 const roles: AdminRole[] = [
   "admin",
@@ -362,8 +374,6 @@ export default function RoleSidebarPage({
       }
     case "coordinator":
       switch (selectedNav) {
-        case "Duplicate Flags":
-          return <CoordinatorDuplicateFlags role={role} />;
         case "Adviser Load":
           return <CoordinatorAdviserLoad role={role} />;
         case "Account Roles":
@@ -792,12 +802,87 @@ function InlineError({
   );
 }
 
-function Stat({ label, value }: { label: string; value: number | null }) {
+function Stat({
+  label,
+  value,
+  onSelect,
+}: {
+  label: string;
+  value: number | null;
+  onSelect?: () => void;
+}) {
+  if (!onSelect) {
+    return (
+      <section className="panel-card admin-stat">
+        <strong>{value === null ? "—" : value.toLocaleString()}</strong>
+        <span>{label}</span>
+      </section>
+    );
+  }
   return (
-    <section className="panel-card admin-stat">
+    <button
+      type="button"
+      className="panel-card admin-stat admin-stat-button"
+      onClick={onSelect}
+      aria-label={`View ${label}`}
+      title={`View ${label}`}
+    >
       <strong>{value === null ? "—" : value.toLocaleString()}</strong>
       <span>{label}</span>
-    </section>
+    </button>
+  );
+}
+
+type ReportSpotlight = {
+  title: string;
+  description: string;
+  columns: string[];
+  rows: string[][];
+};
+
+function SpotlightModal({
+  spotlight,
+  onClose,
+}: {
+  spotlight: ReportSpotlight;
+  onClose: () => void;
+}) {
+  return (
+    <Modal label={spotlight.title} onClose={onClose} size="large">
+      <section className="panel-card admin-data-card">
+        <div className="admin-card-heading">
+          <div>
+            <h2>{spotlight.title}</h2>
+            <p>{spotlight.description}</p>
+          </div>
+        </div>
+        {spotlight.rows.length === 0 ? (
+          <p className="admin-empty">No records in this scope.</p>
+        ) : (
+          <div className="admin-table-wrap">
+            <table>
+              <caption className="sr-only">{spotlight.title}</caption>
+              <thead>
+                <tr>
+                  {spotlight.columns.map((column) => (
+                    <th key={column}>{column}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {spotlight.rows.map((row, index) => (
+                  <tr key={index}>
+                    {row.map((cell, cellIndex) => (
+                      <td key={cellIndex}>{cell}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </Modal>
   );
 }
 
@@ -5294,69 +5379,9 @@ function StatisticianSignoffs({ role }: { role: Role }) {
 
 /* ---------------------------------- Coordinator ---------------------------------- */
 
-function CoordinatorDuplicateFlags({ role }: { role: Role }) {
-  const [attempt, reload] = useAttempt();
-  const state = useLoad(() => listDuplicateFlags(), attempt);
-  return (
-    <div className="workspace-content admin-sidebar-page">
-      <RolePageHeader
-        role={role}
-        title="Duplicate flags"
-        description="Research pairs flagged for possible title duplication."
-        action={
-          <Button variant="secondary" onClick={reload}>
-            <RefreshCw /> Refresh
-          </Button>
-        }
-      />
-      {state.status === "loading" ? (
-        <Loading label="Loading duplicate flags" />
-      ) : state.status === "error" ? (
-        <InlineError message={state.message} retry={reload} />
-      ) : state.data.length === 0 ? (
-        <p className="admin-empty">
-          No duplicate flags are currently recorded.
-        </p>
-      ) : (
-        <section className="panel-card admin-data-card">
-          <div className="admin-table-wrap">
-            <table>
-              <caption className="sr-only">Duplicate flags</caption>
-              <thead>
-                <tr>
-                  <th>Source title</th>
-                  <th>Matched title</th>
-                  <th>Score</th>
-                  <th>Classification</th>
-                  <th>Analyzed</th>
-                </tr>
-              </thead>
-              <tbody>
-                {state.data.map((flag) => (
-                  <tr key={flag.id}>
-                    <td>{flag.source.title ?? "—"}</td>
-                    <td>{flag.matched.title ?? "—"}</td>
-                    <td>
-                      <ScoreCell value={flag.overall_similarity_score} />
-                    </td>
-                    <td>
-                      {classificationLabel(flag.classification) ??
-                        "Unavailable"}
-                    </td>
-                    <td>{displayDate(flag.analyzed_at)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
-    </div>
-  );
-}
-
 function CoordinatorAdviserLoad({ role }: { role: Role }) {
   const [attempt, reload] = useAttempt();
+  const [spotlight, setSpotlight] = useState<ReportSpotlight | null>(null);
   const state = useLoad(() => listAdviserLoad(), attempt);
   const { sortedRows, sort, direction, changeSort } = useClientSorting(
     state.status === "ready" ? state.data : [],
@@ -5426,7 +5451,15 @@ function CoordinatorAdviserLoad({ role }: { role: Role }) {
               <tbody>
                 {sortedRows.map((item) => (
                   <tr key={item.user_id}>
-                    <td>{item.name ?? "—"}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="coordinator-report-link"
+                        onClick={() => setSpotlight(adviserSpotlight(item))}
+                      >
+                        {item.name ?? "—"}
+                      </button>
+                    </td>
                     <td>{item.email ?? "—"}</td>
                     <td>{item.active_assignments}</td>
                   </tr>
@@ -5436,6 +5469,7 @@ function CoordinatorAdviserLoad({ role }: { role: Role }) {
           </div>
         </section>
       )}
+      {spotlight && <SpotlightModal spotlight={spotlight} onClose={() => setSpotlight(null)} />}
     </div>
   );
 }
@@ -5487,13 +5521,13 @@ function CoordinatorAccountRoles({ role }: { role: Role }) {
     try {
       await provisionAccount("/api/coordinator/instructors", email.trim());
       setEmail("");
-      setNotice("Instructor account provisioned.");
+      setNotice("Instructor account added.");
       reload();
     } catch (requestError) {
       setNotice(
         friendlyError(
           requestError,
-          "The instructor account could not be provisioned",
+          "The instructor account could not be added",
         ),
       );
     } finally {
@@ -5506,10 +5540,10 @@ function CoordinatorAccountRoles({ role }: { role: Role }) {
       <RolePageHeader
         role={role}
         title="Account roles"
-        description="Provision and review Research Instructor accounts."
+        description="Add and review Research Instructor accounts."
       />
       <section className="panel-card admin-provision-card">
-        <h2>Provision instructor</h2>
+        <h2>Add instructor account</h2>
         <form onSubmit={submit} className="admin-inline-form">
           <label>
             Instructor email
@@ -5522,14 +5556,16 @@ function CoordinatorAccountRoles({ role }: { role: Role }) {
             />
           </label>
           <Button type="submit" disabled={provisioning}>
-            {provisioning ? "Provisioning…" : "Provision account"}
+            {provisioning ? "Adding…" : "Add instructor"}
           </Button>
         </form>
         {notice && (
           <p
             role="status"
             className={
-              notice.includes("provisioned") ? "admin-success" : "admin-error"
+              notice === "Instructor account added."
+                ? "admin-success"
+                : "admin-error"
             }
           >
             {notice}
@@ -5539,7 +5575,7 @@ function CoordinatorAccountRoles({ role }: { role: Role }) {
       <section className="panel-card admin-data-card">
         <div className="admin-card-heading">
           <div>
-            <h2>Provisioned instructors</h2>
+            <h2>Instructor accounts</h2>
             <p>Only role and account-access information is listed.</p>
           </div>
           <Button variant="secondary" onClick={reload}>
@@ -5552,13 +5588,13 @@ function CoordinatorAccountRoles({ role }: { role: Role }) {
           <Loading label="Loading instructor accounts" />
         ) : users.length === 0 ? (
           <p className="admin-empty">
-            No instructor accounts have been provisioned.
+            No instructor accounts yet.
           </p>
         ) : (
           <div className="admin-table-wrap">
             <table>
               <caption className="sr-only">
-                Provisioned instructor accounts
+                Instructor accounts
               </caption>
               <thead>
                 <tr>
@@ -5611,10 +5647,37 @@ function CoordinatorAccountRoles({ role }: { role: Role }) {
   );
 }
 
+function useReportPrint() {
+  const [printReady, setPrintReady] = useState(false);
+  useEffect(() => {
+    if (!printReady) return;
+    // Wait until the print layout has been committed to the DOM.
+    const finishPrint = () => setPrintReady(false);
+    window.addEventListener("afterprint", finishPrint);
+    const frame = window.requestAnimationFrame(() => {
+      try {
+        window.print();
+      } catch {
+        setPrintReady(false);
+      }
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("afterprint", finishPrint);
+    };
+  }, [printReady]);
+  return [printReady, () => setPrintReady(true)] as const;
+}
+
 function CoordinatorReports({ role }: { role: Role }) {
   const [attempt, reload] = useAttempt();
   const [instituteFilter, setInstituteFilter] = useState("");
   const [programFilter, setProgramFilter] = useState("");
+  const [reportSection, setReportSection] = useState<
+    "overview" | "instructors" | "sections" | "advisers"
+  >("overview");
+  const [spotlight, setSpotlight] = useState<ReportSpotlight | null>(null);
+  const [printReady, beginPrint] = useReportPrint();
   const state = useLoad(
     () => getCoordinatorProgramReport(instituteFilter, programFilter),
     attempt,
@@ -5633,6 +5696,9 @@ function CoordinatorReports({ role }: { role: Role }) {
       reloadRef.current();
     }
   }, [instituteFilter, programFilter]);
+  const reportIsCurrent = state.status === "ready" &&
+    (state.data.filters?.institute ?? "") === instituteFilter &&
+    (state.data.filters?.program ?? "") === programFilter;
   const programOptions =
     instituteFilter && instituteNames.includes(
       instituteFilter as (typeof instituteNames)[number],
@@ -5642,15 +5708,24 @@ function CoordinatorReports({ role }: { role: Role }) {
         ]
       : [];
   return (
-    <div className="workspace-content admin-sidebar-page">
+    <div className="workspace-content admin-sidebar-page coordinator-report-page">
       <RolePageHeader
         role={role}
         title="Program reports"
         description="Live program counts, sections, and adviser workload."
         action={
-          <Button variant="secondary" onClick={reload}>
-            <RefreshCw /> Refresh
-          </Button>
+          <div className="row-actions">
+            <Button
+              variant="secondary"
+              disabled={!reportIsCurrent || printReady}
+              onClick={() => { setSpotlight(null); beginPrint(); }}
+            >
+              <Printer aria-hidden="true" /> Print report
+            </Button>
+            <Button variant="secondary" onClick={() => { setSpotlight(null); reload(); }}>
+              <RefreshCw /> Refresh
+            </Button>
+          </div>
         }
       />
       <section className="panel-card admin-data-card">
@@ -5666,6 +5741,7 @@ function CoordinatorReports({ role }: { role: Role }) {
             <select
               value={instituteFilter}
               onChange={(event) => {
+                setSpotlight(null);
                 setInstituteFilter(event.target.value);
                 setProgramFilter("");
               }}
@@ -5683,7 +5759,7 @@ function CoordinatorReports({ role }: { role: Role }) {
             <select
               value={programFilter}
               disabled={programOptions.length === 0}
-              onChange={(event) => setProgramFilter(event.target.value)}
+              onChange={(event) => { setSpotlight(null); setProgramFilter(event.target.value); }}
             >
               <option value="">All programs</option>
               {programOptions.map((program) => (
@@ -5701,7 +5777,29 @@ function CoordinatorReports({ role }: { role: Role }) {
         <InlineError message={state.message} retry={reload} />
       ) : (
         <>
-          <ProgramCounts report={state.data} />
+          <nav className="project-workspace-tabs coordinator-report-switcher" aria-label="Report sections">
+            {([
+              ["overview", "Overview", FileText],
+              ["instructors", "Research instructors", GraduationCap],
+              ["sections", "Class sections", Folder],
+              ["advisers", "Adviser load", Users],
+            ] as const).map(([section, title, Icon]) => (
+              <button
+                key={section}
+                type="button"
+                className={reportSection === section ? "is-active" : ""}
+                aria-pressed={reportSection === section}
+                onClick={() => { setReportSection(section); setSpotlight(null); }}
+              >
+                <Icon aria-hidden="true" />
+                <span>{title}</span>
+              </button>
+            ))}
+          </nav>
+          {reportSection === "overview" && (
+            <ProgramCounts report={state.data} onSelect={setSpotlight} />
+          )}
+          {reportSection === "instructors" && (
           <section className="panel-card admin-data-card">
             <div className="admin-card-heading">
               <div>
@@ -5731,7 +5829,14 @@ function CoordinatorReports({ role }: { role: Role }) {
                   <tbody>
                     {state.data.instructors.map((instructor) => (
                       <tr key={instructor.user_id}>
-                        <td>{instructor.name || "—"}</td>
+                        <td>
+                          <button type="button" className="coordinator-report-link" onClick={() => setSpotlight({
+                            title: instructor.name || "Research instructor",
+                            description: "Sections handled in the selected scope.",
+                            columns: ["Section"],
+                            rows: instructor.sections.map((name) => [name]),
+                          })}>{instructor.name || "—"}</button>
+                        </td>
                         <td>{instructor.email || "—"}</td>
                         <td>{instructor.sections.join(", ")}</td>
                       </tr>
@@ -5741,6 +5846,8 @@ function CoordinatorReports({ role }: { role: Role }) {
               </div>
             )}
           </section>
+          )}
+          {reportSection === "sections" && (
           <section className="panel-card admin-data-card">
             <div className="admin-card-heading">
               <div>
@@ -5763,7 +5870,14 @@ function CoordinatorReports({ role }: { role: Role }) {
                   <tbody>
                     {state.data.by_section.map((section) => (
                       <tr key={section.id}>
-                        <td>{section.name}</td>
+                        <td>
+                          <button type="button" className="coordinator-report-link" onClick={() => setSpotlight({
+                            title: section.name,
+                            description: "Recent studies in this section within the selected scope.",
+                            columns: ["Study", "Status", "Last updated"],
+                            rows: (state.data.studies ?? []).filter((study) => study.section === section.name).map((study) => [study.title || "—", label(study.submission_status || "Unknown"), displayDate(study.updated_at)]),
+                          })}>{section.name}</button>
+                        </td>
                         <td>{section.documents_count}</td>
                       </tr>
                     ))}
@@ -5772,6 +5886,8 @@ function CoordinatorReports({ role }: { role: Role }) {
               </div>
             )}
           </section>
+          )}
+          {reportSection === "advisers" && (
           <section className="panel-card admin-data-card">
             <div className="admin-card-heading">
               <div>
@@ -5797,7 +5913,9 @@ function CoordinatorReports({ role }: { role: Role }) {
                   <tbody>
                     {state.data.adviser_load.map((item) => (
                       <tr key={item.user_id}>
-                        <td>{item.name ?? "—"}</td>
+                        <td>
+                          <button type="button" className="coordinator-report-link" onClick={() => setSpotlight(adviserSpotlight(item))}>{item.name ?? "—"}</button>
+                        </td>
                         <td>{item.email ?? "—"}</td>
                         <td>{item.active_assignments}</td>
                       </tr>
@@ -5807,38 +5925,174 @@ function CoordinatorReports({ role }: { role: Role }) {
               </div>
             )}
           </section>
+          )}
         </>
+      )}
+      {spotlight && <SpotlightModal spotlight={spotlight} onClose={() => setSpotlight(null)} />}
+      {printReady && state.status === "ready" && (
+        <CoordinatorPrintableReport report={state.data} />
       )}
     </div>
   );
 }
 
-function ProgramCounts({ report }: { report: CoordinatorProgramReport }) {
+function ProgramCounts({ report, onSelect }: { report: CoordinatorProgramReport; onSelect: (spotlight: ReportSpotlight) => void }) {
   const counts = report.counts;
+  const open = (name: string) => onSelect(countSpotlight(report, name));
   return (
     <section className="admin-stat-grid" aria-label="Program counts">
-      <Stat label="Active instructors" value={counts.active_instructors} />
-      <Stat label="Active advisers" value={counts.active_advisers} />
-      <Stat label="Active researchers" value={counts.active_researchers} />
-      <Stat label="Drafts" value={counts.draft} />
-      <Stat label="Submitted" value={counts.submitted} />
-      <Stat label="Under review" value={counts.under_review} />
-      <Stat label="Revision required" value={counts.revision_required} />
-      <Stat label="Approved" value={counts.approved} />
-      <Stat label="Archived" value={counts.archived} />
+      <Stat label="Active instructors" value={counts.active_instructors} onSelect={() => open("Active instructors")} />
+      <Stat label="Active advisers" value={counts.active_advisers} onSelect={() => open("Active advisers")} />
+      <Stat label="Active researchers" value={counts.active_researchers} onSelect={() => open("Active researchers")} />
+      <Stat label="Drafts" value={counts.draft} onSelect={() => open("Drafts")} />
+      <Stat label="Submitted" value={counts.submitted} onSelect={() => open("Submitted")} />
+      <Stat label="Under review" value={counts.under_review} onSelect={() => open("Under review")} />
+      <Stat label="Revision required" value={counts.revision_required} onSelect={() => open("Revision required")} />
+      <Stat label="Approved" value={counts.approved} onSelect={() => open("Approved")} />
+      <Stat label="Archived" value={counts.archived} onSelect={() => open("Archived")} />
       <Stat label="Flagged similarity" value={counts.flagged_similarity} />
-      <Stat label="Defenses scheduled" value={counts.defenses_scheduled} />
-      <Stat label="Defenses completed" value={counts.defenses_completed} />
+      <Stat label="Defenses scheduled" value={counts.defenses_scheduled} onSelect={() => open("Defenses scheduled")} />
+      <Stat label="Defenses completed" value={counts.defenses_completed} onSelect={() => open("Defenses completed")} />
       <Stat
         label="Evaluations submitted"
         value={counts.evaluations_submitted}
+        onSelect={() => open("Evaluations submitted")}
       />
       <Stat
         label="Methodology signed off"
         value={counts.methodology_signed_off}
+        onSelect={() => open("Methodology signed off")}
       />
     </section>
   );
+}
+
+function CoordinatorPrintableReport({ report }: { report: CoordinatorProgramReport }) {
+  const totals = [
+    ["Active instructors", report.counts.active_instructors],
+    ["Active advisers", report.counts.active_advisers],
+    ["Active researchers", report.counts.active_researchers],
+    ["Drafts", report.counts.draft],
+    ["Submitted", report.counts.submitted],
+    ["Under review", report.counts.under_review],
+    ["Revision required", report.counts.revision_required],
+    ["Approved", report.counts.approved],
+    ["Archived", report.counts.archived],
+    ["Flagged similarity", report.counts.flagged_similarity],
+    ["Defenses scheduled", report.counts.defenses_scheduled],
+    ["Defenses completed", report.counts.defenses_completed],
+    ["Evaluations submitted", report.counts.evaluations_submitted],
+    ["Methodology signed off", report.counts.methodology_signed_off],
+  ] as const;
+
+  return (
+    <article className="coordinator-print-area" aria-hidden="true">
+      <header className="coordinator-print-heading">
+        <span>ResearchNAV · Research Coordinator</span>
+        <h1>Program report</h1>
+        <p>
+          Institute: {report.filters?.institute || "All institutes"} · Program: {report.filters?.program || "All programs"}
+        </p>
+        <small>Printed {formatPhilippineDateTime(new Date().toISOString())}</small>
+      </header>
+      <section>
+        <h2>Overview</h2>
+        <dl className="coordinator-print-counts">
+          {totals.map(([name, count]) => (
+            <div key={name}><dt>{name}</dt><dd>{count.toLocaleString()}</dd></div>
+          ))}
+        </dl>
+      </section>
+      <section>
+        <h2>Research instructors</h2>
+        <table>
+          <thead><tr><th>Instructor</th><th>Email</th><th>Sections</th></tr></thead>
+          <tbody>
+            {report.instructors.map((instructor) => (
+              <tr key={instructor.user_id}>
+                <td>{instructor.name || "—"}</td>
+                <td>{instructor.email || "—"}</td>
+                <td>{instructor.sections.join(", ") || "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {report.instructors.length === 0 && <p>No instructors in this scope.</p>}
+      </section>
+      <section>
+        <h2>Class sections</h2>
+        <table>
+          <thead><tr><th>Section</th><th>Documents</th></tr></thead>
+          <tbody>
+            {report.by_section.map((section) => (
+              <tr key={section.id}><td>{section.name}</td><td>{section.documents_count}</td></tr>
+            ))}
+          </tbody>
+        </table>
+        {report.by_section.length === 0 && <p>No class sections in this scope.</p>}
+      </section>
+      <section>
+        <h2>Adviser load</h2>
+        <table>
+          <thead><tr><th>Adviser</th><th>Email</th><th>Active assignments</th></tr></thead>
+          <tbody>
+            {report.adviser_load.map((adviser) => (
+              <tr key={adviser.user_id}>
+                <td>{adviser.name || "—"}</td>
+                <td>{adviser.email || "—"}</td>
+                <td>{adviser.active_assignments}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {report.adviser_load.length === 0 && <p>No advisers have active assignments.</p>}
+      </section>
+    </article>
+  );
+}
+
+function adviserSpotlight(adviser: AdviserLoadItem): ReportSpotlight {
+  return {
+    title: adviser.name || "Research adviser",
+    description: `${adviser.active_assignments} active assignment${adviser.active_assignments === 1 ? "" : "s"} · ${adviser.email || "Email unavailable"}`,
+    columns: ["Study", "Stage", "Status"],
+    rows: (adviser.studies ?? []).map((study) => [
+      study.title || "—",
+      label(study.research_stage || "Unknown"),
+      label(study.submission_status || "Unknown"),
+    ]),
+  };
+}
+
+function countSpotlight(report: CoordinatorProgramReport, name: string): ReportSpotlight {
+  const description = "Most recently updated studies in this status (up to 300 shown). The count includes all matching studies.";
+  const studies = report.studies ?? [];
+  const status = ({ Drafts: "draft", Submitted: "submitted", "Under review": "under_review", "Revision required": "revision_required", Approved: "approved", Archived: "archived" } as Record<string, string>)[name];
+  if (status) {
+    return {
+      title: name,
+      description,
+      columns: ["Study", "Section", "Program", "Last updated"],
+      rows: studies.filter((study) => study.submission_status === status).map((study) => [
+        study.title || "—", study.section || "—", study.degree_program || "—", displayDate(study.updated_at),
+      ]),
+    };
+  }
+  if (name === "Active instructors" || name === "Active advisers") {
+    const people = name === "Active instructors" ? report.active_instructors_list ?? [] : report.active_advisers_list ?? [];
+    return { title: name, description: "Active accounts across the institution (up to 300 shown).", columns: ["Name", "Email"], rows: people.map((person) => [person.name, person.email]) };
+  }
+  if (name === "Active researchers") {
+    return { title: name, description: "Researchers authoring studies in the selected scope (up to 300 shown). The unfiltered count includes all active researcher accounts.", columns: ["Researcher", "Email", "Studies"], rows: (report.researchers ?? []).map((person) => [person.name || "—", person.email || "—", String(person.documents_count)]) };
+  }
+  if (name === "Defenses scheduled" || name === "Defenses completed") {
+    const status = name === "Defenses scheduled" ? "scheduled" : "completed";
+    return { title: name, description: "Recent defense schedules across the institution (up to 200 shown).", columns: ["Study", "Date", "Room"], rows: (report.defense_schedules ?? []).filter((schedule) => schedule.status === status).map((schedule) => [schedule.title || "—", displayDate(schedule.scheduled_at), schedule.room || "—"]) };
+  }
+  if (name === "Evaluations submitted") {
+    return { title: name, description: "Recent panel evaluations across the institution (up to 200 shown).", columns: ["Study", "Panelist", "Originality", "Methodology", "Clarity", "Submitted"], rows: (report.evaluations ?? []).map((evaluation) => [evaluation.title || "—", evaluation.panelist || "—", String(evaluation.originality ?? "—"), String(evaluation.methodology ?? "—"), String(evaluation.clarity ?? "—"), displayDate(evaluation.submitted_at)]) };
+  }
+  return { title: name, description: "Recent methodology sign-offs across the institution (up to 200 shown).", columns: ["Study", "Statistician", "Signed off"], rows: (report.methodology_reviews ?? []).map((review) => [review.title || "—", review.statistician || "—", displayDate(review.signed_off_at)]) };
 }
 
 /* ---------------------------------- Librarian ---------------------------------- */
@@ -7661,13 +7915,40 @@ function OfficeUsers({ role }: { role: Role }) {
 
 function OfficeReports({ role }: { role: Role }) {
   const [attempt, reload] = useAttempt();
+  const [activeReport, setActiveReport] = useState<OfficeReportSection>("academic_units");
+  const [printReady, beginPrint] = useReportPrint();
   const state = useLoad(() => getInstitutionalReport(), attempt);
+
+  function exportCurrentCsv() {
+    if (state.status !== "ready") return;
+    const csv = buildOfficeReportCsv(state.data, new Set([activeReport]));
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `researchnav-${activeReport.replaceAll("_", "-")}-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  const reportActions = (
+    <div className="row-actions office-report-actions">
+      <Button type="button" disabled={printReady} onClick={beginPrint}>
+        <Printer aria-hidden="true" /> Print report
+      </Button>
+      <Button type="button" variant="secondary" disabled={printReady} onClick={exportCurrentCsv}>
+        <Download aria-hidden="true" /> Export CSV
+      </Button>
+    </div>
+  );
+
   return (
-    <div className="workspace-content admin-sidebar-page">
+    <div className="workspace-content admin-sidebar-page office-report-page">
       <RolePageHeader
         role={role}
         title="Reports & exports"
-        description="Institutional breakdowns by academic unit and submission status."
+        description="Institutional breakdowns by academic unit, submission status, and development goal."
         action={
           <Button variant="secondary" onClick={reload}>
             <RefreshCw /> Refresh
@@ -7680,12 +7961,36 @@ function OfficeReports({ role }: { role: Role }) {
         <InlineError message={state.message} retry={reload} />
       ) : (
         <>
+          <nav className="project-workspace-tabs office-report-switcher" aria-label="Report sections">
+            {officeReportOptions.map((option) => {
+              const Icon = {
+                academic_units: Building2,
+                submission_status: ClipboardList,
+                sdgs: Globe2,
+              }[option.key];
+              return (
+                <button
+                  key={option.key}
+                  type="button"
+                  className={activeReport === option.key ? "is-active" : ""}
+                  aria-pressed={activeReport === option.key}
+                  disabled={printReady}
+                  onClick={() => setActiveReport(option.key)}
+                >
+                  <Icon aria-hidden="true" />
+                  <span>{option.label}</span>
+                </button>
+              );
+            })}
+          </nav>
+          {activeReport === "academic_units" && (
           <section className="panel-card admin-data-card">
             <div className="admin-card-heading">
               <div>
                 <h2>By academic unit</h2>
                 <p>Research records per academic unit.</p>
               </div>
+              {reportActions}
             </div>
             {state.data.by_institute.length === 0 ? (
               <p className="admin-empty">No academic units are recorded.</p>
@@ -7711,12 +8016,15 @@ function OfficeReports({ role }: { role: Role }) {
               </div>
             )}
           </section>
+          )}
+          {activeReport === "submission_status" && (
           <section className="panel-card admin-data-card">
             <div className="admin-card-heading">
               <div>
                 <h2>By submission status</h2>
                 <p>Research records per submission status.</p>
               </div>
+              {reportActions}
             </div>
             <div className="admin-table-wrap">
               <table>
@@ -7738,12 +8046,15 @@ function OfficeReports({ role }: { role: Role }) {
               </table>
             </div>
           </section>
+          )}
+          {activeReport === "sdgs" && (
           <section className="panel-card admin-data-card">
             <div className="admin-card-heading">
               <div>
                 <h2>By Sustainable Development Goal</h2>
                 <p>Research alignments across the 17 UN goals.</p>
               </div>
+              {reportActions}
             </div>
             <div className="admin-table-wrap">
               <table>
@@ -7775,9 +8086,67 @@ function OfficeReports({ role }: { role: Role }) {
               </table>
             </div>
           </section>
+          )}
         </>
       )}
+      {printReady && state.status === "ready" && (
+        <OfficePrintableReport report={state.data} section={activeReport} />
+      )}
     </div>
+  );
+}
+
+function OfficePrintableReport({
+  report,
+  section,
+}: {
+  report: InstitutionalReport;
+  section: OfficeReportSection;
+}) {
+  return (
+    <article className="coordinator-print-area office-report-print-area" aria-hidden="true">
+      <header className="coordinator-print-heading">
+        <span>ResearchNAV · Research Office</span>
+        <h1>{officeReportOptions.find((option) => option.key === section)?.label}</h1>
+        <small>Printed {formatPhilippineDateTime(new Date().toISOString())}</small>
+      </header>
+      {section === "academic_units" && (
+        <section>
+          <h2>By academic unit</h2>
+          <table>
+            <thead><tr><th>Academic unit</th><th>Records</th></tr></thead>
+            <tbody>{report.by_institute.map((unit) => (
+              <tr key={unit.institute}><td>{unit.institute}</td><td>{unit.total}</td></tr>
+            ))}</tbody>
+          </table>
+          {report.by_institute.length === 0 && <p>No academic units are recorded.</p>}
+        </section>
+      )}
+      {section === "submission_status" && (
+        <section>
+          <h2>By submission status</h2>
+          <table>
+            <thead><tr><th>Status</th><th>Records</th></tr></thead>
+            <tbody>{report.by_status.map((row) => (
+              <tr key={row.status}><td>{label(row.status)}</td><td>{row.total}</td></tr>
+            ))}</tbody>
+          </table>
+          {report.by_status.length === 0 && <p>No submission statuses are recorded.</p>}
+        </section>
+      )}
+      {section === "sdgs" && (
+        <section>
+          <h2>By Sustainable Development Goal</h2>
+          <table>
+            <thead><tr><th>Goal</th><th>Records</th></tr></thead>
+            <tbody>{(report.by_sdg ?? []).map((row) => (
+              <tr key={row.id}><td>{row.code} · {row.title}</td><td>{row.total}</td></tr>
+            ))}</tbody>
+          </table>
+          {(report.by_sdg ?? []).length === 0 && <p>No Sustainable Development Goals are recorded.</p>}
+        </section>
+      )}
+    </article>
   );
 }
 

@@ -101,6 +101,8 @@ export default function ResearchActivity({
 }) {
   const [state, setState] = useState<ActivityState>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);
+  const [addressingId, setAddressingId] = useState<number | null>(null);
+  const [addressText, setAddressText] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -231,23 +233,12 @@ export default function ResearchActivity({
   const { feedback, revisions, monitoring, mockSections, unavailableSections } =
     displayedState;
 
-  async function applyFeedbackAction(
-    item: FeedbackResource,
-    action: "acknowledge" | "address",
-  ) {
-    const remarks =
-      action === "address"
-        ? window.prompt("Briefly describe what you addressed:")?.trim()
-        : undefined;
-    if (action === "address" && !remarks) return;
+  async function acknowledgeFeedback(item: FeedbackResource) {
     try {
       const updated = await recordResearcherFeedbackAction(
         researchDocumentId,
         item.id,
-        {
-          action,
-          ...(remarks ? { remarks } : {}),
-        },
+        { action: "acknowledge" },
       );
       setState((current) =>
         current.status === "ready"
@@ -259,6 +250,32 @@ export default function ResearchActivity({
             }
           : current,
       );
+    } catch (error) {
+      setState({ status: "error", message: activityError(error) });
+    }
+  }
+
+  async function submitAddressForm(item: FeedbackResource) {
+    const remarks = addressText.trim();
+    if (!remarks) return;
+    try {
+      const updated = await recordResearcherFeedbackAction(
+        researchDocumentId,
+        item.id,
+        { action: "address", remarks },
+      );
+      setState((current) =>
+        current.status === "ready"
+          ? {
+              ...current,
+              feedback: current.feedback.map((feedbackItem) =>
+                feedbackItem.id === updated.id ? updated : feedbackItem,
+              ),
+            }
+          : current,
+      );
+      setAddressingId(null);
+      setAddressText("");
     } catch (error) {
       setState({ status: "error", message: activityError(error) });
     }
@@ -329,30 +346,75 @@ export default function ResearchActivity({
                   <p className="activity-comment">{item.comment}</p>
                   {item.reviewer_name && <p>Reviewer: {item.reviewer_name}</p>}
                   {researcherActions && !mockSections.includes("feedback") && (
-                    <div className="row-actions">
-                      <Button
-                        variant="secondary"
-                        disabled={item.researcher_acknowledged_at != null}
-                        onClick={() =>
-                          void applyFeedbackAction(item, "acknowledge")
-                        }
-                      >
-                        {item.researcher_acknowledged_at
-                          ? "Acknowledged"
-                          : "Acknowledge"}
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        disabled={item.researcher_addressed_at != null}
-                        onClick={() =>
-                          void applyFeedbackAction(item, "address")
-                        }
-                      >
-                        {item.researcher_addressed_at
-                          ? "Addressed"
-                          : "Mark addressed"}
-                      </Button>
-                    </div>
+                    <>
+                      <div className="row-actions">
+                        <Button
+                          variant="secondary"
+                          disabled={item.researcher_acknowledged_at != null}
+                          onClick={() => void acknowledgeFeedback(item)}
+                        >
+                          {item.researcher_acknowledged_at
+                            ? "Acknowledged"
+                            : "Acknowledge"}
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          disabled={item.researcher_addressed_at != null}
+                          onClick={() => {
+                            setAddressingId(
+                              addressingId === item.id ? null : item.id,
+                            );
+                            setAddressText("");
+                          }}
+                        >
+                          {item.researcher_addressed_at
+                            ? "Addressed"
+                            : "Mark addressed"}
+                        </Button>
+                      </div>
+                      {addressingId === item.id &&
+                        item.researcher_addressed_at == null && (
+                          <form
+                            className="document-feedback-address-form"
+                            onSubmit={(event) => {
+                              event.preventDefault();
+                              void submitAddressForm(item);
+                            }}
+                          >
+                            <textarea
+                              // eslint-disable-next-line jsx-a11y/no-autofocus
+                              autoFocus
+                              required
+                              aria-label="What did you address?"
+                              value={addressText}
+                              onChange={(event) =>
+                                setAddressText(event.target.value)
+                              }
+                              placeholder="Reply to reviewer feedback…"
+                              rows={3}
+                            />
+                            <div className="document-feedback-address-actions">
+                              <span className="document-feedback-address-spacer" />
+                              <Button
+                                type="button"
+                                variant="quiet"
+                                onClick={() => {
+                                  setAddressingId(null);
+                                  setAddressText("");
+                                }}
+                              >
+                                Cancel
+                              </Button>
+                              <Button
+                                type="submit"
+                                disabled={!addressText.trim()}
+                              >
+                                Submit
+                              </Button>
+                            </div>
+                          </form>
+                        )}
+                    </>
                   )}
                   {item.researcher_action_remarks && (
                     <p>Researcher action: {item.researcher_action_remarks}</p>

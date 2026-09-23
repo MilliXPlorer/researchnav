@@ -266,30 +266,30 @@ describe("public catalog", () => {
 
 describe("role workspaces", () => {
   const cases: Array<[Exclude<Role, "researcher">, RegExp, string, string]> = [
-    ["admin", /System access overview/, "recent_research", "Recent research"],
-    ["adviser", /Pending reviews/, "assigned_reviews", "Assigned reviews"],
-    ["instructor", /Title proposals/, "title_proposals", "Title proposals"],
+    ["admin", /Dashboard/, "recent_research", "Recent research"],
+    ["adviser", /Dashboard/, "assigned_reviews", "Assigned reviews"],
+    ["instructor", /Dashboard/, "title_proposals", "Title proposals"],
     [
       "panel",
-      /Proposal defense brief/,
+      /Dashboard/,
       "repository_references",
       "Repository references",
     ],
     [
       "statistician",
-      /Methodology review/,
+      /Dashboard/,
       "completed_references",
       "Completed references",
     ],
     [
       "coordinator",
-      /Research program at a glance/,
+      /Program Overview/,
       "active_instructors",
       "Active instructors",
     ],
     [
       "librarian",
-      /Archiving queue/,
+      /Dashboard/,
       "repository_records",
       "Repository records",
     ],
@@ -693,6 +693,33 @@ describe("role workspaces", () => {
       expect(screen.queryByText("Unavailable")).not.toBeInTheDocument();
     },
   );
+
+  it("hides legacy schedules and duplicate flags on the coordinator overview", () => {
+    const coordinator = dashboardFor("coordinator", "active_instructors");
+    render(
+      <RoleWorkspace
+        {...readyProps("coordinator", "active_instructors")}
+        dashboardState={{
+          scope: dashboardScopeFor("coordinator"),
+          status: "ready",
+          dashboard: {
+            ...coordinator,
+            sections: [
+              ...coordinator.sections,
+              { key: "schedules", state: "ready", total: 0, reason: null, items: [] },
+              { key: "duplicate_flags", state: "ready", total: 0, reason: null, items: [] },
+            ],
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "View Active instructors" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "View Schedules" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "View Duplicate flags" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("meter", { name: "Schedules" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("meter", { name: "Duplicate flags" })).not.toBeInTheDocument();
+  });
 
   it("merges the research office navigation and shows institute totals below analytics", async () => {
     const officeNav = roleConfigs.find(
@@ -1410,7 +1437,7 @@ describe("authenticated notifications", () => {
       screen.queryByRole("dialog", { name: "Review access request" }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "System access overview." }),
+      screen.getByRole("heading", { name: "Dashboard" }),
     ).toBeInTheDocument();
   });
 

@@ -641,7 +641,7 @@ describe("researcher research workspace", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^Chapter 2/ }));
     fireEvent.change(screen.getByLabelText("Upload purpose"), {
-      target: { value: "response_to_feedback" },
+      target: { value: "final_revision" },
     });
     fireEvent.change(screen.getByLabelText("Manuscript file"), {
       target: {
@@ -665,7 +665,7 @@ describe("researcher research workspace", () => {
         "revised_manuscript",
       );
       expect((uploadCall?.[1]?.body as FormData).get("upload_purpose")).toBe(
-        "response_to_feedback",
+        "final_revision",
       );
     });
 

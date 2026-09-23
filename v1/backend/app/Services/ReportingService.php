@@ -63,7 +63,14 @@ class ReportingService
                 'methodology_signed_off' => MethodologyReview::query()->where(MethodologyReview::column('review_status'), 'signed_off')->count(),
             ],
             'by_section' => ClassSection::query()
-                ->withCount('researchDocuments')
+                ->withCount(['researchDocuments' => function ($query) use ($institute, $program): void {
+                    if ($institute !== null && trim($institute) !== '') {
+                        $query->where('institute', trim($institute));
+                    }
+                    if ($program !== null && trim($program) !== '') {
+                        $query->where('degree_program', trim($program));
+                    }
+                }])
                 ->orderBy('name')
                 ->get()
                 ->map(fn (ClassSection $section) => [
@@ -74,7 +81,150 @@ class ReportingService
                 ->all(),
             'instructors' => $this->scopedInstructors($documents),
             'adviser_load' => $this->adviserLoad(),
+            'studies' => $this->scopedStudies($documents),
+            'researchers' => $this->scopedResearchers($documents),
+            'defense_schedules' => $this->recentDefenseSchedules(),
+            'evaluations' => $this->recentEvaluations(),
+            'methodology_reviews' => $this->recentMethodologySignoffs(),
+            'active_instructors_list' => $this->activePeople('instructor'),
+            'active_advisers_list' => $this->activePeople('adviser'),
         ];
+    }
+
+    private function activePeople(string $role): array
+    {
+        return User::query()
+            ->where('role', $role)
+            ->where('access_status', 'active')
+            ->orderBy('first_name')
+            ->limit(300)
+            ->get(['id', 'first_name', 'middle_name', 'last_name', 'email'])
+            ->map(fn (User $user) => [
+                'id' => (string) $user->id,
+                'name' => $user->displayName(),
+                'email' => $user->email,
+            ])
+            ->all();
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function scopedStudies($documents): array
+    {
+        return collect(ResearchDocument::SUBMISSION_STATUSES)
+            ->flatMap(fn (string $status) => (clone $documents)
+                ->where('submission_status', $status)
+                ->with('section:id,name')
+                ->latest('updated_at')
+                ->limit(300)
+                ->get(['id', 'title', 'research_stage', 'submission_status', 'institute', 'degree_program', 'section_id', 'updated_at'])
+                ->map(fn (ResearchDocument $document) => [
+                    'id' => $document->id,
+                    'title' => $document->title,
+                    'research_stage' => $document->research_stage,
+                    'submission_status' => $document->submission_status,
+                    'institute' => $document->institute,
+                    'degree_program' => $document->degree_program,
+                    'section' => $document->section?->name,
+                    'updated_at' => $document->updated_at?->toISOString(),
+                ]))
+            ->values()
+            ->all();
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function scopedResearchers($documents): array
+    {
+        $authorCounts = DB::table('research_authors')
+            ->whereIn('research_document_id', (clone $documents)->select('id'))
+            ->whereNotNull('user_id')
+            ->selectRaw('user_id, count(distinct research_document_id) as documents_count')
+            ->groupBy('user_id')
+            ->pluck('documents_count', 'user_id');
+        if ($authorCounts->isEmpty()) {
+            return [];
+        }
+        $users = User::query()
+            ->whereIn('id', $authorCounts->keys()->all())
+            ->orderBy('first_name')
+            ->orderBy('last_name')
+            ->limit(300)
+            ->get(['id', 'first_name', 'middle_name', 'last_name', 'email']);
+
+        return $users
+            ->map(fn (User $user) => [
+                'user_id' => (string) $user->id,
+                'name' => $user->displayName(),
+                'email' => $user->email,
+                'documents_count' => (int) ($authorCounts[(string) $user->id] ?? $authorCounts[$user->id] ?? 0),
+            ])
+            ->all();
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function recentDefenseSchedules(): array
+    {
+        return DefenseSchedule::query()
+            ->with('researchDocument:id,title,research_stage,submission_status')
+            ->latest('scheduled_at')
+            ->limit(200)
+            ->get()
+            ->map(fn (DefenseSchedule $schedule) => [
+                'id' => $schedule->id,
+                'title' => $schedule->researchDocument?->title,
+                'research_stage' => $schedule->researchDocument?->research_stage,
+                'submission_status' => $schedule->researchDocument?->submission_status,
+                'status' => $schedule->status,
+                'scheduled_at' => $schedule->scheduled_at?->toISOString(),
+                'room' => $schedule->room,
+            ])
+            ->all();
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function recentEvaluations(): array
+    {
+        // In finalized installations evaluations live in research_reviews,
+        // which uses reviewed_at instead of the legacy submitted_at column.
+        $finalStorage = (new Evaluation)->usesFinalStorage();
+
+        return Evaluation::query()
+            ->with('researchDocument:id,title')
+            ->when(! $finalStorage, fn ($query) => $query->with('panelist:id,first_name,middle_name,last_name'))
+            ->latest($finalStorage ? 'reviewed_at' : 'submitted_at')
+            ->limit(200)
+            ->get()
+            ->map(fn (Evaluation $evaluation) => [
+                'id' => $evaluation->id,
+                'title' => $evaluation->researchDocument?->title,
+                'panelist' => $finalStorage ? null : $evaluation->panelist?->displayName(),
+                'originality' => $finalStorage ? null : $evaluation->originality,
+                'methodology' => $finalStorage ? null : $evaluation->methodology,
+                'clarity' => $finalStorage ? null : $evaluation->clarity,
+                'submitted_at' => $finalStorage
+                    ? ($evaluation->reviewed_at ? \Illuminate\Support\Carbon::parse($evaluation->reviewed_at)->toISOString() : null)
+                    : $evaluation->submitted_at?->toISOString(),
+            ])
+            ->all();
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function recentMethodologySignoffs(): array
+    {
+        $statusColumn = MethodologyReview::column('review_status');
+
+        return MethodologyReview::query()
+            ->where($statusColumn, 'signed_off')
+            ->with(['researchDocument:id,title', 'statistician:id,first_name,middle_name,last_name'])
+            ->latest(MethodologyReview::column('signed_off_at'))
+            ->limit(200)
+            ->get()
+            ->map(fn (MethodologyReview $review) => [
+                'id' => $review->id,
+                'title' => $review->researchDocument?->title,
+                'statistician' => $review->statistician?->displayName(),
+                'signed_off_at' => $review->signed_off_at?->toISOString(),
+            ])
+            ->all();
     }
 
     private function scopedInstructors($documents): array
@@ -115,6 +265,7 @@ class ReportingService
                 fn ($query) => $query->where($active, true)
             )
             ->with('reviewer:id,first_name,middle_name,last_name,email')
+            ->with('researchDocument:id,title,submission_status,research_stage')
             ->get()
             ->groupBy('reviewer_id')
             ->map(fn ($assignments, $reviewerId) => [
@@ -124,6 +275,19 @@ class ReportingService
                 ]))) : null,
                 'email' => $assignments->first()->reviewer?->email,
                 'active_assignments' => $assignments->count(),
+                'studies' => $assignments
+                    ->map(fn ($assignment) => $assignment->researchDocument)
+                    ->filter()
+                    ->unique('id')
+                    ->take(50)
+                    ->map(fn ($document) => [
+                        'id' => $document->id,
+                        'title' => $document->title,
+                        'submission_status' => $document->submission_status,
+                        'research_stage' => $document->research_stage,
+                    ])
+                    ->values()
+                    ->all(),
             ])
             ->values()
             ->sortByDesc('active_assignments')

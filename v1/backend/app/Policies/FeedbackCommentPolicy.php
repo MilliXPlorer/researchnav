@@ -23,7 +23,8 @@ class FeedbackCommentPolicy
 
     public function create(User $user, ResearchDocument $research): bool
     {
-        return DocumentReviewAuthorization::canAuthor($user, $research);
+        return DocumentReviewAuthorization::canAuthor($user, $research)
+            || DomainAuthorization::isResearcherParticipant($user, $research);
     }
 
     public function update(User $user, FeedbackComment $feedback): bool

@@ -278,6 +278,7 @@ Route::prefix('api')
 
             Route::get('research/{researchDocument}/feedback', [FeedbackController::class, 'index']);
             Route::post('research/{researchDocument}/feedback', [FeedbackController::class, 'store'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
+            Route::get('research/{researchDocument}/feedback/{feedback}/attachment', [FeedbackController::class, 'downloadAttachment']);
             Route::patch('research/{researchDocument}/feedback/{feedback}', [FeedbackController::class, 'update'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::patch('research/{researchDocument}/feedback/{feedback}/researcher-action', [FeedbackController::class, 'researcherAction'])->middleware(['origin.allowed', 'throttle:researcher-mutations']);
             Route::get('research/{researchDocument}/revisions', [RevisionController::class, 'index']);

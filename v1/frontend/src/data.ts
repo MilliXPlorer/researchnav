@@ -136,10 +136,9 @@ export const roleConfigs: RoleConfig[] = [
     id: "coordinator",
     label: "Research Coordinator",
     shortLabel: "Coordinator",
-    description: "Monitor the program and duplicate flags.",
+    description: "Monitor the program.",
     nav: [
       "Program Overview",
-      "Duplicate Flags",
       "Adviser Load",
       "Account Roles",
       "Reports",

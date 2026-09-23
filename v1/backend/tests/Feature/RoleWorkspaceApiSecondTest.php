@@ -83,6 +83,23 @@ class RoleWorkspaceApiSecondTest extends TestCase
             ->assertJsonPath('data.counts.pending_archiving', 1);
     }
 
+    public function test_coordinator_report_provides_scoped_study_details_for_count_drill_down(): void
+    {
+        $coordinator = $this->user(['role' => 'coordinator']);
+        $owner = $this->user(['role' => 'researcher']);
+        $visible = $this->document('revision_required', $owner);
+        $visible->update(['institute' => 'Institute of Computer Studies', 'degree_program' => 'Bachelor of Science in Computer Science']);
+        $hidden = $this->document('revision_required', $owner);
+        $hidden->update(['institute' => 'Institute of Health Sciences']);
+
+        $this->as($coordinator)->getJson('/api/coordinator/reports?institute=Institute%20of%20Computer%20Studies')
+            ->assertOk()
+            ->assertJsonPath('data.counts.revision_required', 1)
+            ->assertJsonPath('data.studies.0.id', $visible->id)
+            ->assertJsonCount(1, 'data.studies')
+            ->assertJsonStructure(['data' => ['researchers', 'defense_schedules', 'evaluations', 'methodology_reviews', 'active_instructors_list', 'active_advisers_list']]);
+    }
+
     public function test_reviewer_assignments_accept_panel_and_statistician_roles(): void
     {
         $office = $this->user(['role' => 'research-office']);

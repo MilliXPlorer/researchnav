@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class FeedbackComment extends ConsolidatedReviewModel
 {
@@ -83,6 +84,11 @@ class FeedbackComment extends ConsolidatedReviewModel
     public function documentFile(): BelongsTo
     {
         return $this->belongsTo(DocumentFile::class, static::column('document_file_id'));
+    }
+
+    public function attachment(): HasOne
+    {
+        return $this->hasOne(FeedbackAttachment::class, 'feedback_comment_id');
     }
 
     public function scopeOpen(Builder $query): Builder

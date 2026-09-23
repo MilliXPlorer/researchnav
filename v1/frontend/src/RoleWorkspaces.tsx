@@ -250,7 +250,7 @@ type WorkspaceConfig = {
 const workspaceConfigs: Record<Role, WorkspaceConfig> = {
   research_editor: {
     eyebrow: "Research Editor / Dashboard",
-    title: "Editorial review",
+    title: "Dashboard",
     description: "Assigned manuscripts, editorial corrections, and monitoring.",
     sections: {},
   },
@@ -292,8 +292,8 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
     },
   },
   admin: {
-    eyebrow: "System administration / Access control",
-    title: "System access overview.",
+    eyebrow: "System administration / Dashboard",
+    title: "Dashboard",
     description: "Live account, audit, and research activity summaries.",
     sections: {
       pending_accounts: {
@@ -344,8 +344,8 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
     },
   },
   adviser: {
-    eyebrow: "Review desk",
-    title: "Pending reviews",
+    eyebrow: "Research Adviser / Dashboard",
+    title: "Dashboard",
     description: "Assignments and revision requests for your advisees.",
     sections: {
       assigned_reviews: {
@@ -367,8 +367,8 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
   },
   instructor: {
     eyebrow: "My sections",
-    title: "Title proposals",
-    description: "Title proposals and active reviews assigned to you.",
+    title: "Dashboard",
+    description: "Title proposals, reviews, and repository references in your sections.",
     sections: {
       title_proposals: {
         title: "Title proposals",
@@ -386,8 +386,8 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
     },
   },
   panel: {
-    eyebrow: "Assigned manuscripts",
-    title: "Proposal defense brief",
+    eyebrow: "Research Panel / Dashboard",
+    title: "Dashboard",
     description: "Available defense information and repository references.",
     sections: {
       assigned_manuscripts: {
@@ -408,8 +408,8 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
     },
   },
   statistician: {
-    eyebrow: "Statistical review",
-    title: "Methodology review",
+    eyebrow: "Statistician / Dashboard",
+    title: "Dashboard",
     description:
       "Available methodology work and completed research references.",
     sections: {
@@ -430,8 +430,7 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
     },
   },
   coordinator: {
-    eyebrow: "Program overview",
-    title: "Research program at a glance.",
+    title: "Program Overview",
     description: "Live instructor access and program information.",
     sections: {
       active_instructors: {
@@ -449,16 +448,11 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
         description: "Instructors without active access.",
         destination: "Account Roles",
       },
-      duplicate_flags: {
-        title: "Duplicate flags",
-        description: "Duplicate-review information.",
-        destination: "Duplicate Flags",
-      },
     },
   },
   librarian: {
-    eyebrow: "Repository operations",
-    title: "Archiving queue",
+    eyebrow: "Librarian / Dashboard",
+    title: "Dashboard",
     description: "Repository records and available archiving information.",
     sections: {
       archiving_queue: {
@@ -537,7 +531,13 @@ function RoleDashboardWorkspace({
     ) : undefined;
 
   return (
-    <div className="workspace-content">
+    <div
+      className={
+        role === "research-office"
+          ? "workspace-content office-dashboard-workspace"
+          : "workspace-content"
+      }
+    >
       <WorkspaceHeader {...config} action={action} />
       <DashboardSections
         role={role}
@@ -656,6 +656,12 @@ function DashboardSections({
     );
   }
 
+  const visibleSections = role === "coordinator"
+    ? dashboardState.dashboard.sections.filter((section) =>
+        Object.prototype.hasOwnProperty.call(config.sections, section.key),
+      )
+    : dashboardState.dashboard.sections;
+
   return (
     <>
       {role === "researcher" && dashboardState.source === "mock" && (
@@ -670,7 +676,7 @@ function DashboardSections({
         </section>
       )}
       <DashboardStatistics
-        sections={dashboardState.dashboard.sections}
+        sections={visibleSections}
         config={config}
         onSelect={(section) => setSelectedSectionKey(section.key)}
       />
@@ -679,7 +685,7 @@ function DashboardSections({
       )}
       <div className="dashboard-visualizations">
         <DashboardWorkloadChart
-          sections={dashboardState.dashboard.sections}
+          sections={visibleSections}
           config={config}
         />
         {role !== "research-office" && dashboardState.dashboard.analytics && (
@@ -699,7 +705,7 @@ function DashboardSections({
           size="large"
         >
           {(() => {
-            const section = dashboardState.dashboard.sections.find(
+            const section = visibleSections.find(
               (item) => item.key === selectedSectionKey,
             );
             if (!section) return null;

@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\FeedbackComment;
+use App\Services\ReportingService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
@@ -11,6 +12,26 @@ use Tests\TestCase;
 class FinalReviewStorageCompatibilityTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_coordinator_report_reads_final_reviews_without_legacy_submitted_at(): void
+    {
+        Schema::create('research_reviews', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('research_document_id');
+            $table->uuid('reviewer_id');
+            $table->string('review_type');
+            $table->string('status');
+            $table->timestamp('reviewed_at')->nullable();
+            $table->timestamps();
+        });
+        Schema::drop('evaluations');
+        Schema::drop('methodology_reviews');
+
+        $report = app(ReportingService::class)->coordinatorProgram();
+
+        $this->assertSame(0, $report['counts']['evaluations_submitted']);
+        $this->assertSame([], $report['evaluations']);
+    }
 
     public function test_file_feedback_keeps_the_final_storage_document_file_column(): void
     {

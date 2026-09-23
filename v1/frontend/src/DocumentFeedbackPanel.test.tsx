@@ -125,9 +125,6 @@ describe("DocumentFeedbackPanel", () => {
   });
 
   it("lets a researcher acknowledge and mark feedback addressed", async () => {
-    const prompt = vi
-      .spyOn(window, "prompt")
-      .mockReturnValue("Updated the chapter.");
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, init?: RequestInit) => {
         if (init?.method === "PATCH") {
@@ -184,9 +181,22 @@ describe("DocumentFeedbackPanel", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Acknowledge" }));
     await screen.findByRole("button", { name: "Acknowledged" });
     fireEvent.click(screen.getByRole("button", { name: "Mark addressed" }));
+    fireEvent.change(
+      await screen.findByRole("textbox", { name: "What did you address?" }),
+      { target: { value: "Updated the chapter." } },
+    );
+    fireEvent.submit(
+      screen
+        .getByRole("button", { name: "Submit addressed reply" })
+        .closest("form")!,
+    );
 
-    expect(await screen.findByText(/Updated the chapter/)).toBeInTheDocument();
-    expect(prompt).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(
+        document.querySelector(".project-comment-response"),
+      ).toHaveTextContent("Updated the chapter.");
+    });
+    await screen.findByRole("button", { name: "Addressed" });
   });
 
   it("lets a feedback author resolve and reopen an item", async () => {

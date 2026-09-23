@@ -15,6 +15,6 @@ class StoreFeedbackRequest extends FormRequest
 
     public function rules(): array
     {
-        return ['document_file_id' => ['nullable', 'integer', 'exists:document_files,id'], 'comment' => ['required', 'string', 'max:10000'], 'feedback_type' => ['required', Rule::in(FeedbackComment::FEEDBACK_TYPES)]];
+        return ['document_file_id' => ['nullable', 'integer', 'exists:document_files,id'], 'comment' => ['required', 'string', 'max:10000'], 'feedback_type' => ['required', Rule::in(FeedbackComment::FEEDBACK_TYPES)], 'attachment' => ['nullable', 'file', 'max:25600', 'mimes:pdf,docx']];
     }
 }

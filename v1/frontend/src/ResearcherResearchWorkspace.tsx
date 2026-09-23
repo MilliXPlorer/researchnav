@@ -82,8 +82,6 @@ const uploadPurposes: Array<{
   label: string;
 }> = [
   { value: "initial_submission", label: "Initial Submission" },
-  { value: "response_to_feedback", label: "Response to Feedback" },
-  { value: "revision", label: "Revision" },
   { value: "final_revision", label: "Final Revision" },
 ];
 const emptyPeople: ResearchPeopleResource = { section: null, reviewers: [] };
@@ -259,7 +257,7 @@ export default function ResearcherResearchWorkspace({
       setTab(destinationTab ?? "overview");
       setUploadPurpose(
         research.submission_status === "revision_required"
-          ? "revision"
+          ? "final_revision"
           : "initial_submission",
       );
       const targetFile = files.find((file) => file.id === destinationFileId);
@@ -1091,6 +1089,9 @@ export default function ResearcherResearchWorkspace({
                     key={`feedback-${commentFile.id}`}
                     researchDocumentId={research.id}
                     file={commentFile}
+                    canReply
+                    researcherActions
+                    canUploadFile={canManageFiles && filesAreLive}
                     onClose={() => setCommentFile(null)}
                   />
                 </Modal>

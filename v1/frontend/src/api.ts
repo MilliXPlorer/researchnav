@@ -374,6 +374,14 @@ export interface ResearchPeopleResource {
   reviewers: Array<{ review_role: string; name: string | null }>;
 }
 
+export interface FeedbackAttachment {
+  original_filename: string;
+  file_extension: string;
+  mime_type: string;
+  file_size: number;
+  url: string;
+}
+
 export interface FeedbackResource {
   id: number;
   research_document_id: number;
@@ -393,6 +401,7 @@ export interface FeedbackResource {
   researcher_acknowledged_at?: string | null;
   researcher_addressed_at?: string | null;
   researcher_action_remarks?: string | null;
+  attachment?: FeedbackAttachment | null;
   created_at: string | null;
 }
 
@@ -411,6 +420,7 @@ export interface FeedbackInput {
   comment: string;
   feedback_type: FeedbackResource["feedback_type"];
   document_file_id?: number | null;
+  attachment?: File | null;
 }
 
 export interface PdfAnnotationRect {
@@ -974,13 +984,33 @@ export async function createFeedback(
   input: FeedbackInput,
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<FeedbackResource> {
+  const body =
+    input.attachment instanceof File
+      ? (() => {
+          const form = new FormData();
+          form.append("comment", input.comment);
+          form.append("feedback_type", input.feedback_type);
+          if (input.document_file_id != null) {
+            form.append("document_file_id", String(input.document_file_id));
+          }
+          form.append("attachment", input.attachment);
+          return form;
+        })()
+      : JSON.stringify(input);
   return (
     await apiRequest<{ data: FeedbackResource }>(
       `${researchPath(researchDocumentId)}/feedback`,
-      { method: "POST", body: JSON.stringify(input) },
+      { method: "POST", body },
       fetcher,
     )
   ).data;
+}
+
+export function feedbackAttachmentDownloadUrl(
+  researchDocumentId: string | number,
+  feedbackId: string | number,
+) {
+  return `${researchPath(researchDocumentId)}/feedback/${encodeURIComponent(String(feedbackId))}/attachment`;
 }
 
 export async function listPdfAnnotations(
@@ -3085,31 +3115,17 @@ export interface CoordinatorScheduleUpdateInput {
   status?: "scheduled" | "completed" | "cancelled";
 }
 
-export interface DuplicateFlagResource {
-  id: number;
-  overall_similarity_score: string | null;
-  classification: "low" | "moderate" | "high" | null;
-  adviser_review_required: boolean;
-  analyzed_at: string | null;
-  source: {
-    research_document_id: number;
-    title: string | null;
-    submission_status: string | null;
-    research_stage: string | null;
-  };
-  matched: {
-    research_document_id: number;
-    title: string | null;
-    submission_status: string | null;
-    research_stage: string | null;
-  };
-}
-
 export interface AdviserLoadItem {
   user_id: string;
   name: string | null;
   email: string | null;
   active_assignments: number;
+  studies: Array<{
+    id: number;
+    title: string | null;
+    submission_status: string | null;
+    research_stage: string | null;
+  }>;
 }
 
 export interface CoordinatorProgramReport {
@@ -3134,6 +3150,58 @@ export interface CoordinatorProgramReport {
   by_section: Array<{ id: number; name: string; documents_count: number }>;
   instructors: CoordinatorReportInstructor[];
   adviser_load: AdviserLoadItem[];
+  studies: CoordinatorReportStudy[];
+  researchers: CoordinatorReportResearcher[];
+  defense_schedules: CoordinatorReportDefense[];
+  evaluations: CoordinatorReportEvaluation[];
+  methodology_reviews: CoordinatorReportMethodology[];
+  active_instructors_list: Array<{ id: string; name: string; email: string }>;
+  active_advisers_list: Array<{ id: string; name: string; email: string }>;
+}
+
+export interface CoordinatorReportStudy {
+  id: number;
+  title: string | null;
+  research_stage: string | null;
+  submission_status: string | null;
+  institute: string | null;
+  degree_program: string | null;
+  section: string | null;
+  updated_at: string | null;
+}
+
+export interface CoordinatorReportResearcher {
+  user_id: string;
+  name: string | null;
+  email: string | null;
+  documents_count: number;
+}
+
+export interface CoordinatorReportDefense {
+  id: number;
+  title: string | null;
+  research_stage: string | null;
+  submission_status: string | null;
+  status: string;
+  scheduled_at: string | null;
+  room: string | null;
+}
+
+export interface CoordinatorReportEvaluation {
+  id: number;
+  title: string | null;
+  panelist: string | null;
+  originality: number | null;
+  methodology: number | null;
+  clarity: number | null;
+  submitted_at: string | null;
+}
+
+export interface CoordinatorReportMethodology {
+  id: number;
+  title: string | null;
+  statistician: string | null;
+  signed_off_at: string | null;
 }
 
 export interface CoordinatorReportInstructor {
@@ -3177,18 +3245,6 @@ export async function updateCoordinatorSchedule(
     await apiRequest<{ data: DefenseScheduleResource }>(
       `/api/coordinator/schedules/${encodeURIComponent(String(scheduleId))}`,
       { method: "PATCH", body: JSON.stringify(input) },
-      fetcher,
-    )
-  ).data;
-}
-
-export async function listDuplicateFlags(
-  fetcher: ApiFetch = globalThis.fetch,
-): Promise<DuplicateFlagResource[]> {
-  return (
-    await apiRequest<{ data: DuplicateFlagResource[] }>(
-      "/api/coordinator/duplicate-flags",
-      undefined,
       fetcher,
     )
   ).data;

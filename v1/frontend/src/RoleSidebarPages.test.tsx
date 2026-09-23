@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -151,7 +152,6 @@ function roleRoutes(): Array<[RegExp, Handler]> {
     [/\/api\/panel\/(schedule|assignments|history)$/, emptyData],
     [/\/api\/statistician\/(queue|signoffs)$/, emptyData],
     [/\/api\/coordinator\/schedules(\?|$)/, emptyData],
-    [/\/api\/coordinator\/duplicate-flags$/, emptyData],
     [/\/api\/coordinator\/adviser-load$/, emptyData],
     [/\/api\/coordinator\/reports$/, programReport],
     [
@@ -171,6 +171,112 @@ function roleRoutes(): Array<[RegExp, Handler]> {
 }
 
 describe("role workspace pages", () => {
+  it("switches Research Office report tabs and prints only the open report", async () => {
+    stubFetch([[/\/api\/office\/reports$/, () => new Response(JSON.stringify({
+      data: {
+        schema_version: 1,
+        counts: {},
+        by_institute: [{ institute: "Institute of Computer Studies", total: 5 }],
+        by_status: [{ status: "under_review", total: 2 }],
+        by_sdg: [{ id: 4, code: "SDG 4", title: "Quality Education", color_hex: "#006e52", total: 3 }],
+      },
+    }))]]);
+    const print = vi.fn(() => {
+      const report = document.querySelector(".office-report-print-area");
+      if (print.mock.calls.length === 1) {
+        expect(report).toHaveTextContent("Under Review");
+        expect(report).not.toHaveTextContent("Institute of Computer Studies");
+        expect(report).not.toHaveTextContent("Quality Education");
+      } else {
+        expect(report).toHaveTextContent("Quality Education");
+        expect(report).not.toHaveTextContent("Under Review");
+        expect(report).not.toHaveTextContent("Institute of Computer Studies");
+      }
+    });
+    vi.stubGlobal("print", print);
+
+    render(<RoleSidebarPage role="research-office" selectedNav="Reports & Exports" navigate={vi.fn()} />);
+    await screen.findByRole("heading", { name: "By academic unit" });
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "By submission status" }));
+    expect(screen.getByRole("button", { name: "By submission status" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("heading", { name: "By academic unit" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Print report" }));
+    await waitFor(() => expect(print).toHaveBeenCalledOnce());
+    act(() => window.dispatchEvent(new Event("afterprint")));
+    fireEvent.click(screen.getByRole("button", { name: "By Sustainable Development Goal" }));
+    expect(screen.queryByRole("heading", { name: "By submission status" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Print report" }));
+    await waitFor(() => expect(print).toHaveBeenCalledTimes(2));
+  });
+
+  it("prints the full coordinator report from any selected section", async () => {
+    stubFetch([[/\/api\/coordinator\/reports(\?|$)/, programReport]]);
+    const print = vi.fn(() => {
+      const report = document.querySelector(".coordinator-print-area");
+      expect(report).toBeInTheDocument();
+      expect(report).toHaveTextContent("All institutes");
+      expect(report).toHaveTextContent("Overview");
+      expect(report).toHaveTextContent("Research instructors");
+      expect(report).toHaveTextContent("Class sections");
+      expect(report).toHaveTextContent("Adviser load");
+    });
+    vi.stubGlobal("print", print);
+
+    render(<RoleSidebarPage role="coordinator" selectedNav="Reports" navigate={vi.fn()} />);
+    const printButton = await screen.findByRole("button", { name: "Print report" });
+    expect(printButton).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Class sections" }));
+    fireEvent.click(printButton);
+    await waitFor(() => expect(print).toHaveBeenCalledOnce());
+    window.dispatchEvent(new Event("afterprint"));
+    await waitFor(() => expect(printButton).toBeEnabled());
+  });
+
+  it("opens a coordinator report count and adviser row as read-only details", async () => {
+    stubFetch([
+      [/\/api\/coordinator\/reports(\?|$)/, () => new Response(JSON.stringify({
+        data: {
+          schema_version: 1,
+          filters: { institute: null, program: null },
+          counts: {
+            active_instructors: 0, active_advisers: 1, active_researchers: 0,
+            draft: 0, submitted: 0, under_review: 0, revision_required: 1,
+            approved: 0, archived: 0, flagged_similarity: 0,
+            defenses_scheduled: 0, defenses_completed: 0,
+            evaluations_submitted: 0, methodology_signed_off: 0,
+          },
+          studies: [{ id: 42, title: "Sample Study", section: "Class A", degree_program: "Computer Science", submission_status: "revision_required", updated_at: "2026-09-21T08:00:00Z" }],
+          researchers: [], defense_schedules: [], evaluations: [], methodology_reviews: [],
+          active_instructors_list: [], active_advisers_list: [],
+          instructors: [{ user_id: "i", name: "Prof. Dela Cruz", email: "instructor@example.edu", sections: ["Class A"] }],
+          by_section: [{ id: 1, name: "Class A", documents_count: 1 }],
+          adviser_load: [{ user_id: "a", name: "Dr. Rivera", email: "rivera@example.edu", active_assignments: 1, studies: [{ id: 42, title: "Sample Study", research_stage: "ongoing", submission_status: "revision_required" }] }],
+        },
+      }))],
+    ]);
+    render(<RoleSidebarPage role="coordinator" selectedNav="Reports" navigate={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "View Revision required" }));
+    expect(await screen.findByRole("dialog", { name: "Revision required" })).toHaveTextContent("Sample Study");
+    fireEvent.click(screen.getByRole("button", { name: /close/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Research instructors" }));
+    expect(screen.getByRole("heading", { name: "Research instructors" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "View Revision required" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Class sections" }));
+    expect(screen.getByRole("button", { name: "Class A" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Research instructors" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Adviser load" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dr. Rivera" }));
+    expect(await screen.findByRole("dialog", { name: "Dr. Rivera" })).toHaveTextContent("Sample Study");
+  });
+  it("opens an adviser's assigned studies from Adviser Load", async () => {
+    stubFetch([[/\/api\/coordinator\/adviser-load$/, () => new Response(JSON.stringify({
+      data: [{ user_id: "a", name: "Dr. Rivera", email: "rivera@example.edu", active_assignments: 1, studies: [{ id: 42, title: "Sample Study", research_stage: "ongoing", submission_status: "revision_required" }] }],
+    }))]]);
+    render(<RoleSidebarPage role="coordinator" selectedNav="Adviser Load" navigate={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Dr. Rivera" }));
+    expect(await screen.findByRole("dialog", { name: "Dr. Rivera" })).toHaveTextContent("Sample Study");
+  });
   it("separates the Instructor research workspace from the review queue", async () => {
     const fetchMock = stubFetch([
       [/\/api\/monitoring\/research$/, () => listData([])],
@@ -710,7 +816,6 @@ describe("role workspace pages", () => {
     {
       role: "coordinator",
       destinations: [
-        ["Duplicate Flags", "Duplicate flags"],
         ["Adviser Load", "Adviser load"],
         ["Account Roles", "Account roles"],
         ["Reports", "Program reports"],
