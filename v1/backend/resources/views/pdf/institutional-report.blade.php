@@ -7,11 +7,13 @@
         * { box-sizing: border-box; }
         body { margin: 0; color: #111; font-family: Arial, sans-serif; font-size: 8pt; }
         .letterhead { padding: 12px 0 18px; border-bottom: 1px solid #777; text-align: center; }
-        .letterhead table { width: auto; margin: 0 auto; border: 0; }
-        .letterhead td { padding: 0 7px; border: 0; vertical-align: middle; }
-        .letterhead img { width: 60px; height: 60px; object-fit: contain; }
-        .letterhead h1 { margin: 0 0 3px; font-size: 14pt; line-height: 1.15; }
-        .letterhead p { margin: 0; font-size: 8pt; }
+        .letterhead table { width: 350px; margin: 0 auto; border: 0; }
+        .letterhead td { padding: 0; border: 0; vertical-align: middle; }
+        .letterhead .logo-cell { width: 30px; text-align: center; }
+        .letterhead .school-details { width: 290px; text-align: center; }
+        .letterhead img { width: 60px; height: 60px; margin: 0 -15px; object-fit: contain; }
+        .letterhead h1 { margin: 0 0 3px; font-size: 14pt; line-height: 1.15; text-align: center; white-space: nowrap; }
+        .letterhead p { margin: 0; font-size: 8pt; text-align: center; }
         .title { padding: 16px 0 18px; text-align: center; }
         .title h2 { margin: 0 0 4px; font-size: 11pt; text-transform: uppercase; }
         .title p, .title small { display: block; margin: 0; color: #444; font-size: 7.5pt; line-height: 1.4; }
@@ -27,9 +29,9 @@
 <body>
     <header class="letterhead">
         <table role="presentation"><tr>
-            <td><img src="{{ $collegeLogo }}" alt=""></td>
-            <td><h1>Tangub City Global College</h1><p>Maloro, Tangub City</p></td>
-            <td><img src="{{ $researchLogo }}" alt=""></td>
+            <td class="logo-cell"><img src="{{ $collegeLogo }}" alt=""></td>
+            <td class="school-details"><h1>Tangub City Global College</h1><p>Maloro, Tangub City</p></td>
+            <td class="logo-cell"><img src="{{ $researchLogo }}" alt=""></td>
         </tr></table>
     </header>
     <section class="title">
