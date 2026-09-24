@@ -3185,6 +3185,22 @@ export async function listInstitutes(fetcher: ApiFetch = globalThis.fetch): Prom
   return (await apiRequest<{ data: string[] }>("/api/institutes", undefined, fetcher)).data;
 }
 
+export async function createInstitute(name: string, fetcher: ApiFetch = globalThis.fetch): Promise<string> {
+  return (await apiRequest<{ data: string }>(
+    "/api/admin/institutes",
+    { method: "POST", body: JSON.stringify({ name }) },
+    fetcher,
+  )).data;
+}
+
+export async function deleteInstitute(name: string, fetcher: ApiFetch = globalThis.fetch): Promise<void> {
+  await apiRequest(
+    `/api/admin/institutes/${encodeURIComponent(name)}`,
+    { method: "DELETE" },
+    fetcher,
+  );
+}
+
 export interface CoordinatorReportStudy {
   id: number;
   title: string | null;

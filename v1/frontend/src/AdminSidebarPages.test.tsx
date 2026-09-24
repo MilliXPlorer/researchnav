@@ -365,6 +365,76 @@ describe("administrator sidebar pages", () => {
     );
   });
 
+  it("manages institutes and reflects a new one in the coordinator dropdown", async () => {
+    const institutes = ["Institute of Computer Studies"];
+    const fetchMock = vi.fn(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const path = String(input);
+        if (path === "/api/institutes") {
+          return new Response(JSON.stringify({ data: [...institutes] }));
+        }
+        if (path === "/api/admin/institutes" && init?.method === "POST") {
+          const body = JSON.parse(String(init.body)) as { name: string };
+          institutes.push(body.name);
+          return new Response(JSON.stringify({ data: body.name }), {
+            status: 201,
+          });
+        }
+        if (path === "/api/admin/users")
+          return new Response(JSON.stringify(page([])));
+        return new Response(
+          JSON.stringify({
+            data: [],
+            links: { first: null, last: null, prev: null, next: null },
+            meta: {
+              current_page: 1,
+              from: null,
+              last_page: 1,
+              links: [],
+              path: "/api/admin/users",
+              per_page: 25,
+              to: null,
+              total: 0,
+            },
+          }),
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AdminSidebarPage selectedNav="User & Role Management" />);
+    fireEvent.click(screen.getByRole("button", { name: "Manage institutes" }));
+    const dialog = screen.getByRole("dialog", { name: "Manage institutes" });
+    const nameInput = await screen.findByLabelText("Institute name");
+    expect(
+      await within(dialog).findByText("Institute of Computer Studies"),
+    ).toBeInTheDocument();
+    fireEvent.change(nameInput, {
+      target: { value: "Institute of Engineering" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add institute" }));
+    expect(
+      await within(dialog).findByText("Added Institute of Engineering."),
+    ).toBeInTheDocument();
+    expect(
+      await within(dialog).findByText("Institute of Engineering"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close Manage institutes" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add user" }));
+    fireEvent.change(await screen.findByLabelText("Workspace role"), {
+      target: { value: "coordinator" },
+    });
+    const instituteSelect = await screen.findByLabelText("Institute");
+    expect(
+      within(instituteSelect).getByRole("option", {
+        name: "Institute of Engineering",
+      }),
+    ).toBeInTheDocument();
+  });
+
   it.each([
     {
       selectedNav: "Account Provisioning",
@@ -400,7 +470,14 @@ describe("administrator sidebar pages", () => {
       });
       vi.stubGlobal(
         "fetch",
-        vi.fn(() => {
+        vi.fn((input: string | URL | Request) => {
+          if (String(input) === "/api/institutes") {
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({ data: ["Institute of Computer Studies"] }),
+              ),
+            );
+          }
           requests += 1;
           return requests === 1
             ? Promise.resolve(

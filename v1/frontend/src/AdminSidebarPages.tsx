@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { formatPhilippineDateTime } from "./dateTime";
 import { instituteNames } from "./data";
-import { Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Building2, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import {
   ApiError,
+  createInstitute,
+  deleteInstitute,
   decideAccessRequest,
   deleteAdminUser,
   getSystemStatus,
@@ -11,6 +13,7 @@ import {
   listAdminAuditLogs,
   listAdminProvisionedAccounts,
   listAdminUsers,
+  listInstitutes,
   provisionAdminAccount,
   REQUESTABLE_ROLES,
   updateAdminUser,
@@ -141,6 +144,8 @@ function friendlyError(error: unknown, fallback: string) {
       return "At least one active administrator must remain.";
     if (error.code === "ACCOUNT_ROLE_CONFLICT")
       return "That email is already assigned a different role.";
+    if (error.code === "INSTITUTE_IN_USE")
+      return "This institute is assigned to users or research records and cannot be removed.";
     return `The server rejected this change (${error.code}). Refresh and try again.`;
   }
   if (error.status === 429)
@@ -148,6 +153,30 @@ function friendlyError(error: unknown, fallback: string) {
   return error.status >= 500
     ? `${fallback} (${error.code}).`
     : `${fallback} (${error.code}).`;
+}
+
+const INSTITUTES_CHANGED_EVENT = "researchnav:institutes-changed";
+
+/** Shared, database-backed institute list with a constant fallback for resilience. */
+function useInstituteOptions(): [string[], () => void] {
+  const [institutes, setInstitutes] = useState<string[]>([...instituteNames]);
+  useEffect(() => {
+    const load = () => {
+      void listInstitutes()
+        .then((values) => {
+          const names = Array.isArray(values)
+            ? values.filter((value): value is string => typeof value === "string")
+            : [];
+          if (names.length > 0) setInstitutes(names);
+        })
+        .catch(() => setInstitutes([...instituteNames]));
+    };
+    load();
+    window.addEventListener(INSTITUTES_CHANGED_EVENT, load);
+    return () => window.removeEventListener(INSTITUTES_CHANGED_EVENT, load);
+  }, []);
+  const refresh = () => window.dispatchEvent(new Event(INSTITUTES_CHANGED_EVENT));
+  return [institutes, refresh];
 }
 
 function AccessRequests() {
@@ -388,6 +417,7 @@ function AccountProvisioning({
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<RequestableRole>("researcher");
   const [institute, setInstitute] = useState("");
+  const [instituteOptions] = useInstituteOptions();
   const [provisioning, setProvisioning] = useState(false);
   const [notice, setNotice] = useState("");
   const [attempt, setAttempt] = useState(0);
@@ -495,7 +525,7 @@ function AccountProvisioning({
               Institute
               <select value={institute} onChange={(event) => setInstitute(event.target.value)} required>
                 <option value="">Select institute</option>
-                {instituteNames.map((name) => <option key={name} value={name}>{name}</option>)}
+                {instituteOptions.map((name) => <option key={name} value={name}>{name}</option>)}
               </select>
             </label>
           )}
@@ -618,7 +648,11 @@ function AllUsers({
     Record<string, { role: AdminRole; access_status: AccessStatus; institute: string | null }>
   >({});
   const [saving, setSaving] = useState<string | null>(null);
-  const [institutes, setInstitutes] = useState<string[]>([...instituteNames]);
+  const [institutes, refreshInstitutes] = useInstituteOptions();
+  const [managingInstitutes, setManagingInstitutes] = useState(false);
+  const [newInstitute, setNewInstitute] = useState("");
+  const [addingInstitute, setAddingInstitute] = useState(false);
+  const [removingInstitute, setRemovingInstitute] = useState<string | null>(null);
   const [editingUser, setEditingUser] = useState<AdminUserResource | null>(
     null,
   );
@@ -688,6 +722,38 @@ function AllUsers({
     return (
       drafts[user.id] ?? { role: user.role, access_status: user.access_status, institute: user.institute }
     );
+  }
+  async function addInstitute() {
+    const name = newInstitute.trim();
+    if (!name) return;
+    setSaveMessage("");
+    setAddingInstitute(true);
+    try {
+      await createInstitute(name);
+      setNewInstitute("");
+      setSaveMessage(`Added ${name}.`);
+      refreshInstitutes();
+    } catch (requestError) {
+      setSaveMessage(friendlyError(requestError, "Institute could not be added"));
+    } finally {
+      setAddingInstitute(false);
+    }
+  }
+  async function removeInstitute(name: string) {
+    setSaveMessage("");
+    setRemovingInstitute(name);
+    try {
+      await deleteInstitute(name);
+      if (editingUser && draftFor(editingUser).institute === name) {
+        setDrafts((current) => ({ ...current, [editingUser.id]: { ...draftFor(editingUser), institute: null } }));
+      }
+      setSaveMessage(`Removed ${name}.`);
+      refreshInstitutes();
+    } catch (requestError) {
+      setSaveMessage(friendlyError(requestError, "Institute could not be removed"));
+    } finally {
+      setRemovingInstitute(null);
+    }
   }
   async function save(user: AdminUserResource) {
     const draft = draftFor(user);
@@ -782,6 +848,17 @@ function AllUsers({
                 <Plus aria-hidden="true" />
               </Button>
             )}
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setSaveMessage("");
+                setManagingInstitutes(true);
+              }}
+              aria-label="Manage institutes"
+              title="Manage institutes"
+            >
+              <Building2 aria-hidden="true" />
+            </Button>
             <Button
               variant="secondary"
               onClick={reload}
@@ -1133,6 +1210,68 @@ function AllUsers({
               </Button>
             </div>
           </form>
+        </Modal>
+      )}
+      {managingInstitutes && (
+        <Modal
+          label="Manage institutes"
+          onClose={() => setManagingInstitutes(false)}
+          busy={removingInstitute !== null || addingInstitute}
+        >
+          <div className="admin-user-edit-form">
+            <header className="admin-user-edit-header">
+              <p className="eyebrow">User management</p>
+              <h2>Manage institutes</h2>
+              <p>Add institute options or remove unused custom institutes.</p>
+            </header>
+            {saveMessage && (
+              <p
+                role={saveMessage.startsWith("Added") || saveMessage.startsWith("Removed") ? "status" : "alert"}
+                className={saveMessage.startsWith("Added") || saveMessage.startsWith("Removed") ? "admin-success" : "admin-error"}
+              >
+                {saveMessage}
+              </p>
+            )}
+            <div className="admin-institute-create">
+              <label>
+                Institute name
+                <input
+                  value={newInstitute}
+                  maxLength={180}
+                  onChange={(event) => setNewInstitute(event.target.value)}
+                />
+              </label>
+              <Button
+                type="button"
+                variant="secondary"
+                className="icon-button"
+                aria-label="Add institute"
+                title="Add institute"
+                disabled={!newInstitute.trim() || addingInstitute}
+                onClick={() => void addInstitute()}
+              >
+                {addingInstitute ? "…" : <Plus />}
+              </Button>
+            </div>
+            <div className="admin-institute-list" aria-label="Institute management">
+              {institutes.map((institute) => (
+                <div key={institute} className="admin-institute-row">
+                  <span>{institute}</span>
+                  <Button
+                    type="button"
+                    variant="quiet"
+                    className="icon-button"
+                    aria-label={`Remove ${institute}`}
+                    title="Remove institute"
+                    disabled={removingInstitute === institute}
+                    onClick={() => void removeInstitute(institute)}
+                  >
+                    <Trash2 />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
         </Modal>
       )}
       {deletingUser && (

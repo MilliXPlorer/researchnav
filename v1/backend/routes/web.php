@@ -77,6 +77,10 @@ Route::prefix('api')
 
         Route::prefix('admin')->middleware(['current.user', 'account.active', 'active.admin'])->group(function (): void {
             Route::get('institutes', [InstituteController::class, 'index']);
+            Route::post('institutes', [InstituteController::class, 'store'])
+                ->middleware(['origin.allowed', 'throttle:domain-mutations']);
+            Route::delete('institutes/{institute}', [InstituteController::class, 'destroy'])
+                ->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('accounts', [ApiController::class, 'accounts']);
             Route::post('accounts', [ApiController::class, 'provisionAccount'])
                 ->middleware(['origin.allowed', 'throttle:provision-coordinators']);

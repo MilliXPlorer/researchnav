@@ -8312,14 +8312,16 @@ td strong {
   font-size: 12px;
   overflow-wrap: anywhere;
 }
-.admin-user-edit-form > label {
+.admin-user-edit-form > label,
+.admin-institute-create > label {
   display: grid;
   gap: 7px;
   color: var(--slate);
   font-size: 11px;
   font-weight: 600;
 }
-.admin-user-edit-form select {
+.admin-user-edit-form select,
+.admin-institute-create input {
   width: 100%;
   min-height: 46px;
   padding: 9px 12px;
@@ -8327,6 +8329,44 @@ td strong {
   border-radius: 9px;
   color: var(--ink);
   background: var(--paper);
+}
+.admin-institute-create {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px;
+  gap: 8px;
+  align-items: end;
+}
+.admin-institute-create .button {
+  width: 42px;
+  height: 46px;
+  min-height: 46px;
+  padding: 0;
+}
+.admin-institute-list {
+  border-top: 1px solid var(--line);
+}
+.admin-institute-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  gap: 10px;
+  align-items: center;
+  min-height: 48px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+.admin-institute-row > span {
+  min-width: 0;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.admin-institute-row .button {
+  width: 34px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0;
+  justify-self: end;
 }
 .admin-user-edit-actions {
   margin-top: 2px;
