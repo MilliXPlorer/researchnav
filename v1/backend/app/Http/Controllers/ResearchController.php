@@ -121,6 +121,7 @@ class ResearchController extends DomainController
             ],
             'reviewers' => $researchDocument->reviewAssignments->map(fn ($assignment) => [
                 'review_role' => $assignment->review_role,
+                'designation' => $assignment->designation,
                 'name' => $assignment->reviewer?->profileName() ?? 'Assigned reviewer',
             ])->values(),
         ]]);

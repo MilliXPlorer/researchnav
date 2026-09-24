@@ -32,8 +32,6 @@ import {
   UserCog,
   Users,
   X,
-  LogOut,
-  Pencil,
   type LucideIcon,
 } from "lucide-react";
 import { canEnterDashboard } from "./access";
@@ -383,10 +381,8 @@ export default function Dashboard({
                 );
             }}
           />
-          <kbd>⌘ K</kbd>
         </label>
         <div className="lamp-actions">
-          <span className="term-label">Role workspace</span>
           <button
             className="workspace-menu-button"
             onClick={() => setWorkspaceMenuOpen((open) => !open)}
@@ -403,17 +399,6 @@ export default function Dashboard({
           >
             <Bell />
             {unreadCount > 0 && <span>{unreadCount}</span>}
-          </button>
-          <button
-            className="account-switcher"
-            onClick={() => setAccountOpen(true)}
-            aria-label="Open account details"
-          >
-            <ProfileAvatar session={session} className="account-icon" />
-            <span className="account-copy">
-              <strong>{session.displayName}</strong>
-              <small>{session.email}</small>
-            </span>
           </button>
         </div>
       </header>
@@ -495,14 +480,6 @@ export default function Dashboard({
                 <strong>{session.displayName}</strong>
                 <small>{session.email}</small>
               </button>
-              <div className="shelf-profile-menu" role="menu">
-                <button role="menuitem" onClick={() => setAccountOpen(true)}>
-                  <Pencil size={14} /> Edit profile
-                </button>
-                <button role="menuitem" onClick={() => void onLogout?.()}>
-                  <LogOut size={14} /> Log out
-                </button>
-              </div>
             </div>
           </div>
         </div>

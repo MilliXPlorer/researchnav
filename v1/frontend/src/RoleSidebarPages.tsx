@@ -113,7 +113,6 @@ import {
   type InstructorStudentResource,
   type InstructorMonitoringEntry,
   type InstructorProjectTeam,
-  type InstitutionalReport,
   type ProjectTeamPerson,
   type LaravelPaginatedResponse,
   type MetadataStandardsItem,
@@ -2393,10 +2392,7 @@ function InstructorSections({
   const visibleStudents = (
     openSection ? (studentsFor[openSection.id] ?? []) : []
   ).filter((student) =>
-    matchesStudySearch(studySearch, [
-      studentName(student),
-      student.email,
-    ]),
+    matchesStudySearch(studySearch, [studentName(student), student.email]),
   );
   const {
     sortedRows: sortedStudents,
@@ -2419,12 +2415,13 @@ function InstructorSections({
     {},
   );
   const [studentBusy, setStudentBusy] = useState<Record<number, boolean>>({});
-  const [projectTeam, setProjectTeam] =
-  useState<InstructorProjectTeam | null>(null);
+  const [projectTeam, setProjectTeam] = useState<InstructorProjectTeam | null>(
+    null,
+  );
   const [selectedDocument, setSelectedDocument] =
     useState<InstructorSectionDocumentItem | null>(null);
   const [selectedResearch, setSelectedResearch] =
-  useState<ResearchDocumentSummaryResource | null>(null);
+    useState<ResearchDocumentSummaryResource | null>(null);
   const [documentPeople, setDocumentPeople] =
     useState<ResearchPeopleResource | null>(null);
   const [documentMembers, setDocumentMembers] = useState<
@@ -2634,51 +2631,51 @@ function InstructorSections({
     setSelectedDocument(document);
     setTeamLoading(true);
     try {
-        const [
-          fullResearch,
-          members,
-          team,
-          people,
-          advisers,
-          officePersonnel,
-          chairs,
-          panelists,
-        ] = await Promise.allSettled([
-          getInternalResearch(document.research_document_id),
-          listSectionDocumentMembers(sectionId, document.research_document_id),
-          getInstructorProjectTeam(
-            sectionId,
-            document.research_document_id,
-            "proposal",
-          ),
-          getResearchPeople(document.research_document_id),
-          listInstructorProjectTeamCandidates(
-            sectionId,
-            document.research_document_id,
-            "adviser",
-          ),
-          listInstructorProjectTeamCandidates(
-            sectionId,
-            document.research_document_id,
-            "research_office_representative",
-          ),
-          listInstructorPanelists().then((people) =>
-            people.map((person) => ({
-              user_id: person.id,
-              name: person.name,
-              email: person.email,
-              team_role: "chair" as const,
-            })),
-          ),
-          listInstructorPanelists().then((people) =>
-            people.map((person) => ({
-              user_id: person.id,
-              name: person.name,
-              email: person.email,
-              team_role: "panel_member" as const,
-            })),
-          ),
-        ]);
+      const [
+        fullResearch,
+        members,
+        team,
+        people,
+        advisers,
+        officePersonnel,
+        chairs,
+        panelists,
+      ] = await Promise.allSettled([
+        getInternalResearch(document.research_document_id),
+        listSectionDocumentMembers(sectionId, document.research_document_id),
+        getInstructorProjectTeam(
+          sectionId,
+          document.research_document_id,
+          "proposal",
+        ),
+        getResearchPeople(document.research_document_id),
+        listInstructorProjectTeamCandidates(
+          sectionId,
+          document.research_document_id,
+          "adviser",
+        ),
+        listInstructorProjectTeamCandidates(
+          sectionId,
+          document.research_document_id,
+          "research_office_representative",
+        ),
+        listInstructorPanelists().then((people) =>
+          people.map((person) => ({
+            user_id: person.id,
+            name: person.name,
+            email: person.email,
+            team_role: "chair" as const,
+          })),
+        ),
+        listInstructorPanelists().then((people) =>
+          people.map((person) => ({
+            user_id: person.id,
+            name: person.name,
+            email: person.email,
+            team_role: "panel_member" as const,
+          })),
+        ),
+      ]);
       if (requestId !== teamRequestRef.current) return;
 
       if (fullResearch.status === "fulfilled") {
@@ -2764,7 +2761,7 @@ function InstructorSections({
     navigate("/app/instructor/sections");
   }
 
-    async function loadProjectTeamStage(
+  async function loadProjectTeamStage(
     stage: "proposal" | "final",
     options?: { openModal?: boolean; resetDisclosures?: boolean },
   ) {
@@ -2803,7 +2800,8 @@ function InstructorSections({
 
   async function saveProjectTeamRole(
     role: "adviser" | "researchOffice" | "chair" | "panelMembers",
-  ) {    if (!openSection || !selectedDocument) return;
+  ) {
+    if (!openSection || !selectedDocument) return;
     const requestId = teamRequestRef.current;
     setTeamBusy(true);
     setDetailsNotice("");
@@ -2829,7 +2827,8 @@ function InstructorSections({
             panel_member_ids:
               role === "panelMembers"
                 ? teamDraft.panel_member_ids
-                : (projectTeam?.panel_members.map((member) => member.user_id) ?? []),
+                : (projectTeam?.panel_members.map((member) => member.user_id) ??
+                  []),
           },
         );
         if (requestId !== teamRequestRef.current) return;
@@ -3959,7 +3958,10 @@ function InstructorSections({
                 />
                 <div key="students">
                   <div className="project-assignment-control">
-                    <span className="project-assignment-icon" aria-hidden="true">
+                    <span
+                      className="project-assignment-icon"
+                      aria-hidden="true"
+                    >
                       <GraduationCap />
                     </span>
                     <span>
@@ -4149,8 +4151,8 @@ function InstructorSections({
                   />
                 </label>
                 <p className="project-picker-note">
-                  Only students already enrolled in this section can be
-                  assigned to the study.
+                  Only students already enrolled in this section can be assigned
+                  to the study.
                 </p>
                 <ul className="student-candidates">
                   {(studentsFor[openSection.id] ?? [])
@@ -4274,8 +4276,8 @@ function InstructorSections({
                         </p>
                       ) : matchingCandidates.length === 0 ? (
                         <p className="project-assignment-empty" role="status">
-                          No accounts match “
-                          {teamSearches[disclosure]?.trim()}”.
+                          No accounts match “{teamSearches[disclosure]?.trim()}
+                          ”.
                         </p>
                       ) : (
                         <ProjectAccountOptions
@@ -4400,7 +4402,9 @@ function InstructorSections({
                     <ProjectAccountOptions
                       candidates={matchingPanelCandidates}
                       selectedIds={teamDraft.panel_member_ids}
-                      disabledIds={teamDraft.chair_id ? [teamDraft.chair_id] : []}
+                      disabledIds={
+                        teamDraft.chair_id ? [teamDraft.chair_id] : []
+                      }
                       disabledLabel="Panel chair"
                       onToggle={(person, selected) =>
                         setTeamDraft((current) => {
@@ -5469,7 +5473,12 @@ function CoordinatorAdviserLoad({ role }: { role: Role }) {
           </div>
         </section>
       )}
-      {spotlight && <SpotlightModal spotlight={spotlight} onClose={() => setSpotlight(null)} />}
+      {spotlight && (
+        <SpotlightModal
+          spotlight={spotlight}
+          onClose={() => setSpotlight(null)}
+        />
+      )}
     </div>
   );
 }
@@ -5587,15 +5596,11 @@ function CoordinatorAccountRoles({ role }: { role: Role }) {
         ) : loading || users === null ? (
           <Loading label="Loading instructor accounts" />
         ) : users.length === 0 ? (
-          <p className="admin-empty">
-            No instructor accounts yet.
-          </p>
+          <p className="admin-empty">No instructor accounts yet.</p>
         ) : (
           <div className="admin-table-wrap">
             <table>
-              <caption className="sr-only">
-                Instructor accounts
-              </caption>
+              <caption className="sr-only">Instructor accounts</caption>
               <thead>
                 <tr>
                   <SortableHeader
@@ -5651,17 +5656,45 @@ function useReportPrint() {
   const [printReady, setPrintReady] = useState(false);
   useEffect(() => {
     if (!printReady) return;
-    // Wait until the print layout has been committed to the DOM.
+    let cancelled = false;
     const finishPrint = () => setPrintReady(false);
     window.addEventListener("afterprint", finishPrint);
     const frame = window.requestAnimationFrame(() => {
-      try {
-        window.print();
-      } catch {
-        setPrintReady(false);
-      }
+      const images = Array.from(
+        document.querySelectorAll<HTMLImageElement>(
+          ".coordinator-print-area img",
+        ),
+      );
+      const imageLoads = images.map(
+        (image) =>
+          new Promise<void>((resolve) => {
+            if (image.complete) {
+              resolve();
+              return;
+            }
+            image.addEventListener("load", () => resolve(), { once: true });
+            image.addEventListener("error", () => resolve(), { once: true });
+          }),
+      );
+
+      const imageTimeout = new Promise<void>((resolve) => {
+        window.setTimeout(resolve, 1500);
+      });
+
+      void Promise.race([
+        Promise.all(imageLoads).then(() => undefined),
+        imageTimeout,
+      ]).then(() => {
+        if (cancelled) return;
+        try {
+          window.print();
+        } catch {
+          setPrintReady(false);
+        }
+      });
     });
     return () => {
+      cancelled = true;
       window.cancelAnimationFrame(frame);
       window.removeEventListener("afterprint", finishPrint);
     };
@@ -5692,20 +5725,21 @@ function CoordinatorReports({ role }: { role: Role }) {
       appliedFilters.current.institute !== instituteFilter ||
       appliedFilters.current.program !== programFilter
     ) {
-      appliedFilters.current = { institute: instituteFilter, program: programFilter };
+      appliedFilters.current = {
+        institute: instituteFilter,
+        program: programFilter,
+      };
       reloadRef.current();
     }
   }, [instituteFilter, programFilter]);
-  const reportIsCurrent = state.status === "ready" &&
+  const reportIsCurrent =
+    state.status === "ready" &&
     (state.data.filters?.institute ?? "") === instituteFilter &&
     (state.data.filters?.program ?? "") === programFilter;
   const programOptions =
-    instituteFilter && instituteNames.includes(
-      instituteFilter as (typeof instituteNames)[number],
-    )
-      ? programsByInstitute[
-          instituteFilter as keyof typeof programsByInstitute
-        ]
+    instituteFilter &&
+    instituteNames.includes(instituteFilter as (typeof instituteNames)[number])
+      ? programsByInstitute[instituteFilter as keyof typeof programsByInstitute]
       : [];
   return (
     <div className="workspace-content admin-sidebar-page coordinator-report-page">
@@ -5718,11 +5752,20 @@ function CoordinatorReports({ role }: { role: Role }) {
             <Button
               variant="secondary"
               disabled={!reportIsCurrent || printReady}
-              onClick={() => { setSpotlight(null); beginPrint(); }}
+              onClick={() => {
+                setSpotlight(null);
+                beginPrint();
+              }}
             >
               <Printer aria-hidden="true" /> Print report
             </Button>
-            <Button variant="secondary" onClick={() => { setSpotlight(null); reload(); }}>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setSpotlight(null);
+                reload();
+              }}
+            >
               <RefreshCw /> Refresh
             </Button>
           </div>
@@ -5759,7 +5802,10 @@ function CoordinatorReports({ role }: { role: Role }) {
             <select
               value={programFilter}
               disabled={programOptions.length === 0}
-              onChange={(event) => { setSpotlight(null); setProgramFilter(event.target.value); }}
+              onChange={(event) => {
+                setSpotlight(null);
+                setProgramFilter(event.target.value);
+              }}
             >
               <option value="">All programs</option>
               {programOptions.map((program) => (
@@ -5777,19 +5823,27 @@ function CoordinatorReports({ role }: { role: Role }) {
         <InlineError message={state.message} retry={reload} />
       ) : (
         <>
-          <nav className="project-workspace-tabs coordinator-report-switcher" aria-label="Report sections">
-            {([
-              ["overview", "Overview", FileText],
-              ["instructors", "Research instructors", GraduationCap],
-              ["sections", "Class sections", Folder],
-              ["advisers", "Adviser load", Users],
-            ] as const).map(([section, title, Icon]) => (
+          <nav
+            className="project-workspace-tabs coordinator-report-switcher"
+            aria-label="Report sections"
+          >
+            {(
+              [
+                ["overview", "Overview", FileText],
+                ["instructors", "Research instructors", GraduationCap],
+                ["sections", "Class sections", Folder],
+                ["advisers", "Adviser load", Users],
+              ] as const
+            ).map(([section, title, Icon]) => (
               <button
                 key={section}
                 type="button"
                 className={reportSection === section ? "is-active" : ""}
                 aria-pressed={reportSection === section}
-                onClick={() => { setReportSection(section); setSpotlight(null); }}
+                onClick={() => {
+                  setReportSection(section);
+                  setSpotlight(null);
+                }}
               >
                 <Icon aria-hidden="true" />
                 <span>{title}</span>
@@ -5800,135 +5854,180 @@ function CoordinatorReports({ role }: { role: Role }) {
             <ProgramCounts report={state.data} onSelect={setSpotlight} />
           )}
           {reportSection === "instructors" && (
-          <section className="panel-card admin-data-card">
-            <div className="admin-card-heading">
-              <div>
-                <h2>Research instructors</h2>
-                <p>
-                  {state.data.filters?.institute || state.data.filters?.program
-                    ? "Instructors handling sections with research in the selected scope."
-                    : "Instructors handling sections with research documents."}
+            <section className="panel-card admin-data-card">
+              <div className="admin-card-heading">
+                <div>
+                  <h2>Research instructors</h2>
+                  <p>
+                    {state.data.filters?.institute ||
+                    state.data.filters?.program
+                      ? "Instructors handling sections with research in the selected scope."
+                      : "Instructors handling sections with research documents."}
+                  </p>
+                </div>
+              </div>
+              {state.data.instructors.length === 0 ? (
+                <p className="admin-empty">
+                  No instructors handle sections in this scope.
                 </p>
-              </div>
-            </div>
-            {state.data.instructors.length === 0 ? (
-              <p className="admin-empty">
-                No instructors handle sections in this scope.
-              </p>
-            ) : (
-              <div className="admin-table-wrap">
-                <table>
-                  <caption className="sr-only">Research instructors</caption>
-                  <thead>
-                    <tr>
-                      <th>Instructor</th>
-                      <th>Email</th>
-                      <th>Sections</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {state.data.instructors.map((instructor) => (
-                      <tr key={instructor.user_id}>
-                        <td>
-                          <button type="button" className="coordinator-report-link" onClick={() => setSpotlight({
-                            title: instructor.name || "Research instructor",
-                            description: "Sections handled in the selected scope.",
-                            columns: ["Section"],
-                            rows: instructor.sections.map((name) => [name]),
-                          })}>{instructor.name || "—"}</button>
-                        </td>
-                        <td>{instructor.email || "—"}</td>
-                        <td>{instructor.sections.join(", ")}</td>
+              ) : (
+                <div className="admin-table-wrap">
+                  <table>
+                    <caption className="sr-only">Research instructors</caption>
+                    <thead>
+                      <tr>
+                        <th>Instructor</th>
+                        <th>Email</th>
+                        <th>Sections</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
+                    </thead>
+                    <tbody>
+                      {state.data.instructors.map((instructor) => (
+                        <tr key={instructor.user_id}>
+                          <td>
+                            <button
+                              type="button"
+                              className="coordinator-report-link"
+                              onClick={() =>
+                                setSpotlight({
+                                  title:
+                                    instructor.name || "Research instructor",
+                                  description:
+                                    "Sections handled in the selected scope.",
+                                  columns: ["Section"],
+                                  rows: instructor.sections.map((name) => [
+                                    name,
+                                  ]),
+                                })
+                              }
+                            >
+                              {instructor.name || "—"}
+                            </button>
+                          </td>
+                          <td>{instructor.email || "—"}</td>
+                          <td>{instructor.sections.join(", ")}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
           )}
           {reportSection === "sections" && (
-          <section className="panel-card admin-data-card">
-            <div className="admin-card-heading">
-              <div>
-                <h2>Class sections</h2>
-                <p>Document count per class section.</p>
+            <section className="panel-card admin-data-card">
+              <div className="admin-card-heading">
+                <div>
+                  <h2>Class sections</h2>
+                  <p>Document count per class section.</p>
+                </div>
               </div>
-            </div>
-            {state.data.by_section.length === 0 ? (
-              <p className="admin-empty">No class sections exist.</p>
-            ) : (
-              <div className="admin-table-wrap">
-                <table>
-                  <caption className="sr-only">Class sections</caption>
-                  <thead>
-                    <tr>
-                      <th>Section</th>
-                      <th>Documents</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {state.data.by_section.map((section) => (
-                      <tr key={section.id}>
-                        <td>
-                          <button type="button" className="coordinator-report-link" onClick={() => setSpotlight({
-                            title: section.name,
-                            description: "Recent studies in this section within the selected scope.",
-                            columns: ["Study", "Status", "Last updated"],
-                            rows: (state.data.studies ?? []).filter((study) => study.section === section.name).map((study) => [study.title || "—", label(study.submission_status || "Unknown"), displayDate(study.updated_at)]),
-                          })}>{section.name}</button>
-                        </td>
-                        <td>{section.documents_count}</td>
+              {state.data.by_section.length === 0 ? (
+                <p className="admin-empty">No class sections exist.</p>
+              ) : (
+                <div className="admin-table-wrap">
+                  <table>
+                    <caption className="sr-only">Class sections</caption>
+                    <thead>
+                      <tr>
+                        <th>Section</th>
+                        <th>Documents</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
+                    </thead>
+                    <tbody>
+                      {state.data.by_section.map((section) => (
+                        <tr key={section.id}>
+                          <td>
+                            <button
+                              type="button"
+                              className="coordinator-report-link"
+                              onClick={() =>
+                                setSpotlight({
+                                  title: section.name,
+                                  description:
+                                    "Recent studies in this section within the selected scope.",
+                                  columns: ["Study", "Status", "Last updated"],
+                                  rows: (state.data.studies ?? [])
+                                    .filter(
+                                      (study) => study.section === section.name,
+                                    )
+                                    .map((study) => [
+                                      study.title || "—",
+                                      label(
+                                        study.submission_status || "Unknown",
+                                      ),
+                                      displayDate(study.updated_at),
+                                    ]),
+                                })
+                              }
+                            >
+                              {section.name}
+                            </button>
+                          </td>
+                          <td>{section.documents_count}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
           )}
           {reportSection === "advisers" && (
-          <section className="panel-card admin-data-card">
-            <div className="admin-card-heading">
-              <div>
-                <h2>Adviser load</h2>
-                <p>Active research assignments per adviser.</p>
+            <section className="panel-card admin-data-card">
+              <div className="admin-card-heading">
+                <div>
+                  <h2>Adviser load</h2>
+                  <p>Active research assignments per adviser.</p>
+                </div>
               </div>
-            </div>
-            {state.data.adviser_load.length === 0 ? (
-              <p className="admin-empty">
-                No advisers have active assignments.
-              </p>
-            ) : (
-              <div className="admin-table-wrap">
-                <table>
-                  <caption className="sr-only">Adviser load</caption>
-                  <thead>
-                    <tr>
-                      <th>Adviser</th>
-                      <th>Email</th>
-                      <th>Active assignments</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {state.data.adviser_load.map((item) => (
-                      <tr key={item.user_id}>
-                        <td>
-                          <button type="button" className="coordinator-report-link" onClick={() => setSpotlight(adviserSpotlight(item))}>{item.name ?? "—"}</button>
-                        </td>
-                        <td>{item.email ?? "—"}</td>
-                        <td>{item.active_assignments}</td>
+              {state.data.adviser_load.length === 0 ? (
+                <p className="admin-empty">
+                  No advisers have active assignments.
+                </p>
+              ) : (
+                <div className="admin-table-wrap">
+                  <table>
+                    <caption className="sr-only">Adviser load</caption>
+                    <thead>
+                      <tr>
+                        <th>Adviser</th>
+                        <th>Email</th>
+                        <th>Active assignments</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
+                    </thead>
+                    <tbody>
+                      {state.data.adviser_load.map((item) => (
+                        <tr key={item.user_id}>
+                          <td>
+                            <button
+                              type="button"
+                              className="coordinator-report-link"
+                              onClick={() =>
+                                setSpotlight(adviserSpotlight(item))
+                              }
+                            >
+                              {item.name ?? "—"}
+                            </button>
+                          </td>
+                          <td>{item.email ?? "—"}</td>
+                          <td>{item.active_assignments}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
           )}
         </>
       )}
-      {spotlight && <SpotlightModal spotlight={spotlight} onClose={() => setSpotlight(null)} />}
+      {spotlight && (
+        <SpotlightModal
+          spotlight={spotlight}
+          onClose={() => setSpotlight(null)}
+        />
+      )}
       {printReady && state.status === "ready" && (
         <CoordinatorPrintableReport report={state.data} />
       )}
@@ -5936,23 +6035,73 @@ function CoordinatorReports({ role }: { role: Role }) {
   );
 }
 
-function ProgramCounts({ report, onSelect }: { report: CoordinatorProgramReport; onSelect: (spotlight: ReportSpotlight) => void }) {
+function ProgramCounts({
+  report,
+  onSelect,
+}: {
+  report: CoordinatorProgramReport;
+  onSelect: (spotlight: ReportSpotlight) => void;
+}) {
   const counts = report.counts;
   const open = (name: string) => onSelect(countSpotlight(report, name));
   return (
     <section className="admin-stat-grid" aria-label="Program counts">
-      <Stat label="Active instructors" value={counts.active_instructors} onSelect={() => open("Active instructors")} />
-      <Stat label="Active advisers" value={counts.active_advisers} onSelect={() => open("Active advisers")} />
-      <Stat label="Active researchers" value={counts.active_researchers} onSelect={() => open("Active researchers")} />
-      <Stat label="Drafts" value={counts.draft} onSelect={() => open("Drafts")} />
-      <Stat label="Submitted" value={counts.submitted} onSelect={() => open("Submitted")} />
-      <Stat label="Under review" value={counts.under_review} onSelect={() => open("Under review")} />
-      <Stat label="Revision required" value={counts.revision_required} onSelect={() => open("Revision required")} />
-      <Stat label="Approved" value={counts.approved} onSelect={() => open("Approved")} />
-      <Stat label="Archived" value={counts.archived} onSelect={() => open("Archived")} />
+      <Stat
+        label="Active instructors"
+        value={counts.active_instructors}
+        onSelect={() => open("Active instructors")}
+      />
+      <Stat
+        label="Active advisers"
+        value={counts.active_advisers}
+        onSelect={() => open("Active advisers")}
+      />
+      <Stat
+        label="Active researchers"
+        value={counts.active_researchers}
+        onSelect={() => open("Active researchers")}
+      />
+      <Stat
+        label="Drafts"
+        value={counts.draft}
+        onSelect={() => open("Drafts")}
+      />
+      <Stat
+        label="Submitted"
+        value={counts.submitted}
+        onSelect={() => open("Submitted")}
+      />
+      <Stat
+        label="Under review"
+        value={counts.under_review}
+        onSelect={() => open("Under review")}
+      />
+      <Stat
+        label="Revision required"
+        value={counts.revision_required}
+        onSelect={() => open("Revision required")}
+      />
+      <Stat
+        label="Approved"
+        value={counts.approved}
+        onSelect={() => open("Approved")}
+      />
+      <Stat
+        label="Archived"
+        value={counts.archived}
+        onSelect={() => open("Archived")}
+      />
       <Stat label="Flagged similarity" value={counts.flagged_similarity} />
-      <Stat label="Defenses scheduled" value={counts.defenses_scheduled} onSelect={() => open("Defenses scheduled")} />
-      <Stat label="Defenses completed" value={counts.defenses_completed} onSelect={() => open("Defenses completed")} />
+      <Stat
+        label="Defenses scheduled"
+        value={counts.defenses_scheduled}
+        onSelect={() => open("Defenses scheduled")}
+      />
+      <Stat
+        label="Defenses completed"
+        value={counts.defenses_completed}
+        onSelect={() => open("Defenses completed")}
+      />
       <Stat
         label="Evaluations submitted"
         value={counts.evaluations_submitted}
@@ -5967,7 +6116,11 @@ function ProgramCounts({ report, onSelect }: { report: CoordinatorProgramReport;
   );
 }
 
-function CoordinatorPrintableReport({ report }: { report: CoordinatorProgramReport }) {
+function CoordinatorPrintableReport({
+  report,
+}: {
+  report: CoordinatorProgramReport;
+}) {
   const totals = [
     ["Active instructors", report.counts.active_instructors],
     ["Active advisers", report.counts.active_advisers],
@@ -5991,22 +6144,34 @@ function CoordinatorPrintableReport({ report }: { report: CoordinatorProgramRepo
         <span>ResearchNAV · Research Coordinator</span>
         <h1>Program report</h1>
         <p>
-          Institute: {report.filters?.institute || "All institutes"} · Program: {report.filters?.program || "All programs"}
+          Institute: {report.filters?.institute || "All institutes"} · Program:{" "}
+          {report.filters?.program || "All programs"}
         </p>
-        <small>Printed {formatPhilippineDateTime(new Date().toISOString())}</small>
+        <small>
+          Printed {formatPhilippineDateTime(new Date().toISOString())}
+        </small>
       </header>
       <section>
         <h2>Overview</h2>
         <dl className="coordinator-print-counts">
           {totals.map(([name, count]) => (
-            <div key={name}><dt>{name}</dt><dd>{count.toLocaleString()}</dd></div>
+            <div key={name}>
+              <dt>{name}</dt>
+              <dd>{count.toLocaleString()}</dd>
+            </div>
           ))}
         </dl>
       </section>
       <section>
         <h2>Research instructors</h2>
         <table>
-          <thead><tr><th>Instructor</th><th>Email</th><th>Sections</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Instructor</th>
+              <th>Email</th>
+              <th>Sections</th>
+            </tr>
+          </thead>
           <tbody>
             {report.instructors.map((instructor) => (
               <tr key={instructor.user_id}>
@@ -6017,24 +6182,42 @@ function CoordinatorPrintableReport({ report }: { report: CoordinatorProgramRepo
             ))}
           </tbody>
         </table>
-        {report.instructors.length === 0 && <p>No instructors in this scope.</p>}
+        {report.instructors.length === 0 && (
+          <p>No instructors in this scope.</p>
+        )}
       </section>
       <section>
         <h2>Class sections</h2>
         <table>
-          <thead><tr><th>Section</th><th>Documents</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Section</th>
+              <th>Documents</th>
+            </tr>
+          </thead>
           <tbody>
             {report.by_section.map((section) => (
-              <tr key={section.id}><td>{section.name}</td><td>{section.documents_count}</td></tr>
+              <tr key={section.id}>
+                <td>{section.name}</td>
+                <td>{section.documents_count}</td>
+              </tr>
             ))}
           </tbody>
         </table>
-        {report.by_section.length === 0 && <p>No class sections in this scope.</p>}
+        {report.by_section.length === 0 && (
+          <p>No class sections in this scope.</p>
+        )}
       </section>
       <section>
         <h2>Adviser load</h2>
         <table>
-          <thead><tr><th>Adviser</th><th>Email</th><th>Active assignments</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Adviser</th>
+              <th>Email</th>
+              <th>Active assignments</th>
+            </tr>
+          </thead>
           <tbody>
             {report.adviser_load.map((adviser) => (
               <tr key={adviser.user_id}>
@@ -6045,7 +6228,9 @@ function CoordinatorPrintableReport({ report }: { report: CoordinatorProgramRepo
             ))}
           </tbody>
         </table>
-        {report.adviser_load.length === 0 && <p>No advisers have active assignments.</p>}
+        {report.adviser_load.length === 0 && (
+          <p>No advisers have active assignments.</p>
+        )}
       </section>
     </article>
   );
@@ -6064,35 +6249,113 @@ function adviserSpotlight(adviser: AdviserLoadItem): ReportSpotlight {
   };
 }
 
-function countSpotlight(report: CoordinatorProgramReport, name: string): ReportSpotlight {
-  const description = "Most recently updated studies in this status (up to 300 shown). The count includes all matching studies.";
+function countSpotlight(
+  report: CoordinatorProgramReport,
+  name: string,
+): ReportSpotlight {
+  const description =
+    "Most recently updated studies in this status (up to 300 shown). The count includes all matching studies.";
   const studies = report.studies ?? [];
-  const status = ({ Drafts: "draft", Submitted: "submitted", "Under review": "under_review", "Revision required": "revision_required", Approved: "approved", Archived: "archived" } as Record<string, string>)[name];
+  const status = (
+    {
+      Drafts: "draft",
+      Submitted: "submitted",
+      "Under review": "under_review",
+      "Revision required": "revision_required",
+      Approved: "approved",
+      Archived: "archived",
+    } as Record<string, string>
+  )[name];
   if (status) {
     return {
       title: name,
       description,
       columns: ["Study", "Section", "Program", "Last updated"],
-      rows: studies.filter((study) => study.submission_status === status).map((study) => [
-        study.title || "—", study.section || "—", study.degree_program || "—", displayDate(study.updated_at),
-      ]),
+      rows: studies
+        .filter((study) => study.submission_status === status)
+        .map((study) => [
+          study.title || "—",
+          study.section || "—",
+          study.degree_program || "—",
+          displayDate(study.updated_at),
+        ]),
     };
   }
   if (name === "Active instructors" || name === "Active advisers") {
-    const people = name === "Active instructors" ? report.active_instructors_list ?? [] : report.active_advisers_list ?? [];
-    return { title: name, description: "Active accounts across the institution (up to 300 shown).", columns: ["Name", "Email"], rows: people.map((person) => [person.name, person.email]) };
+    const people =
+      name === "Active instructors"
+        ? (report.active_instructors_list ?? [])
+        : (report.active_advisers_list ?? []);
+    return {
+      title: name,
+      description: "Active accounts across the institution (up to 300 shown).",
+      columns: ["Name", "Email"],
+      rows: people.map((person) => [person.name, person.email]),
+    };
   }
   if (name === "Active researchers") {
-    return { title: name, description: "Researchers authoring studies in the selected scope (up to 300 shown). The unfiltered count includes all active researcher accounts.", columns: ["Researcher", "Email", "Studies"], rows: (report.researchers ?? []).map((person) => [person.name || "—", person.email || "—", String(person.documents_count)]) };
+    return {
+      title: name,
+      description:
+        "Researchers authoring studies in the selected scope (up to 300 shown). The unfiltered count includes all active researcher accounts.",
+      columns: ["Researcher", "Email", "Studies"],
+      rows: (report.researchers ?? []).map((person) => [
+        person.name || "—",
+        person.email || "—",
+        String(person.documents_count),
+      ]),
+    };
   }
   if (name === "Defenses scheduled" || name === "Defenses completed") {
     const status = name === "Defenses scheduled" ? "scheduled" : "completed";
-    return { title: name, description: "Recent defense schedules across the institution (up to 200 shown).", columns: ["Study", "Date", "Room"], rows: (report.defense_schedules ?? []).filter((schedule) => schedule.status === status).map((schedule) => [schedule.title || "—", displayDate(schedule.scheduled_at), schedule.room || "—"]) };
+    return {
+      title: name,
+      description:
+        "Recent defense schedules across the institution (up to 200 shown).",
+      columns: ["Study", "Date", "Room"],
+      rows: (report.defense_schedules ?? [])
+        .filter((schedule) => schedule.status === status)
+        .map((schedule) => [
+          schedule.title || "—",
+          displayDate(schedule.scheduled_at),
+          schedule.room || "—",
+        ]),
+    };
   }
   if (name === "Evaluations submitted") {
-    return { title: name, description: "Recent panel evaluations across the institution (up to 200 shown).", columns: ["Study", "Panelist", "Originality", "Methodology", "Clarity", "Submitted"], rows: (report.evaluations ?? []).map((evaluation) => [evaluation.title || "—", evaluation.panelist || "—", String(evaluation.originality ?? "—"), String(evaluation.methodology ?? "—"), String(evaluation.clarity ?? "—"), displayDate(evaluation.submitted_at)]) };
+    return {
+      title: name,
+      description:
+        "Recent panel evaluations across the institution (up to 200 shown).",
+      columns: [
+        "Study",
+        "Panelist",
+        "Originality",
+        "Methodology",
+        "Clarity",
+        "Submitted",
+      ],
+      rows: (report.evaluations ?? []).map((evaluation) => [
+        evaluation.title || "—",
+        evaluation.panelist || "—",
+        String(evaluation.originality ?? "—"),
+        String(evaluation.methodology ?? "—"),
+        String(evaluation.clarity ?? "—"),
+        displayDate(evaluation.submitted_at),
+      ]),
+    };
   }
-  return { title: name, description: "Recent methodology sign-offs across the institution (up to 200 shown).", columns: ["Study", "Statistician", "Signed off"], rows: (report.methodology_reviews ?? []).map((review) => [review.title || "—", review.statistician || "—", displayDate(review.signed_off_at)]) };
+  return {
+    title: name,
+    description:
+      "Recent methodology sign-offs across the institution (up to 200 shown).",
+    columns: ["Study", "Statistician", "Signed off"],
+    rows: (report.methodology_reviews ?? []).map((review) => [
+      review.title || "—",
+      review.statistician || "—",
+      displayDate(review.signed_off_at),
+    ]),
+  };
 }
 
 /* ---------------------------------- Librarian ---------------------------------- */
@@ -7915,14 +8178,24 @@ function OfficeUsers({ role }: { role: Role }) {
 
 function OfficeReports({ role }: { role: Role }) {
   const [attempt, reload] = useAttempt();
-  const [activeReport, setActiveReport] = useState<OfficeReportSection>("academic_units");
-  const [printReady, beginPrint] = useReportPrint();
+  const [activeReport, setActiveReport] =
+    useState<OfficeReportSection>("academic_units");
   const state = useLoad(() => getInstitutionalReport(), attempt);
+
+  function openCurrentPdf() {
+    window.open(
+      `/api/office/reports/${activeReport.replaceAll("_", "-")}/pdf`,
+      "_blank",
+      "noopener,noreferrer",
+    );
+  }
 
   function exportCurrentCsv() {
     if (state.status !== "ready") return;
     const csv = buildOfficeReportCsv(state.data, new Set([activeReport]));
-    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const url = URL.createObjectURL(
+      new Blob([csv], { type: "text/csv;charset=utf-8" }),
+    );
     const link = document.createElement("a");
     link.href = url;
     link.download = `researchnav-${activeReport.replaceAll("_", "-")}-${new Date().toISOString().slice(0, 10)}.csv`;
@@ -7934,10 +8207,14 @@ function OfficeReports({ role }: { role: Role }) {
 
   const reportActions = (
     <div className="row-actions office-report-actions">
-      <Button type="button" disabled={printReady} onClick={beginPrint}>
+      <Button type="button" onClick={openCurrentPdf}>
         <Printer aria-hidden="true" /> Print report
       </Button>
-      <Button type="button" variant="secondary" disabled={printReady} onClick={exportCurrentCsv}>
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={exportCurrentCsv}
+      >
         <Download aria-hidden="true" /> Export CSV
       </Button>
     </div>
@@ -7961,7 +8238,10 @@ function OfficeReports({ role }: { role: Role }) {
         <InlineError message={state.message} retry={reload} />
       ) : (
         <>
-          <nav className="project-workspace-tabs office-report-switcher" aria-label="Report sections">
+          <nav
+            className="project-workspace-tabs office-report-switcher"
+            aria-label="Report sections"
+          >
             {officeReportOptions.map((option) => {
               const Icon = {
                 academic_units: Building2,
@@ -7974,7 +8254,6 @@ function OfficeReports({ role }: { role: Role }) {
                   type="button"
                   className={activeReport === option.key ? "is-active" : ""}
                   aria-pressed={activeReport === option.key}
-                  disabled={printReady}
                   onClick={() => setActiveReport(option.key)}
                 >
                   <Icon aria-hidden="true" />
@@ -7984,169 +8263,112 @@ function OfficeReports({ role }: { role: Role }) {
             })}
           </nav>
           {activeReport === "academic_units" && (
-          <section className="panel-card admin-data-card">
-            <div className="admin-card-heading">
-              <div>
-                <h2>By academic unit</h2>
-                <p>Research records per academic unit.</p>
+            <section className="panel-card admin-data-card">
+              <div className="admin-card-heading">
+                <div>
+                  <h2>By academic unit</h2>
+                  <p>Research records per academic unit.</p>
+                </div>
+                {reportActions}
               </div>
-              {reportActions}
-            </div>
-            {state.data.by_institute.length === 0 ? (
-              <p className="admin-empty">No academic units are recorded.</p>
-            ) : (
+              {state.data.by_institute.length === 0 ? (
+                <p className="admin-empty">No academic units are recorded.</p>
+              ) : (
+                <div className="admin-table-wrap">
+                  <table>
+                    <caption className="sr-only">By academic unit</caption>
+                    <thead>
+                      <tr>
+                        <th>Academic unit</th>
+                        <th>Records</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {state.data.by_institute.map((unit) => (
+                        <tr key={unit.institute}>
+                          <td>{unit.institute}</td>
+                          <td>{unit.total}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          )}
+          {activeReport === "submission_status" && (
+            <section className="panel-card admin-data-card">
+              <div className="admin-card-heading">
+                <div>
+                  <h2>By submission status</h2>
+                  <p>Research records per submission status.</p>
+                </div>
+                {reportActions}
+              </div>
               <div className="admin-table-wrap">
                 <table>
-                  <caption className="sr-only">By academic unit</caption>
+                  <caption className="sr-only">By submission status</caption>
                   <thead>
                     <tr>
-                      <th>Academic unit</th>
+                      <th>Status</th>
                       <th>Records</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {state.data.by_institute.map((unit) => (
-                      <tr key={unit.institute}>
-                        <td>{unit.institute}</td>
-                        <td>{unit.total}</td>
+                    {state.data.by_status.map((row) => (
+                      <tr key={row.status}>
+                        <td>{label(row.status)}</td>
+                        <td>{row.total}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-            )}
-          </section>
-          )}
-          {activeReport === "submission_status" && (
-          <section className="panel-card admin-data-card">
-            <div className="admin-card-heading">
-              <div>
-                <h2>By submission status</h2>
-                <p>Research records per submission status.</p>
-              </div>
-              {reportActions}
-            </div>
-            <div className="admin-table-wrap">
-              <table>
-                <caption className="sr-only">By submission status</caption>
-                <thead>
-                  <tr>
-                    <th>Status</th>
-                    <th>Records</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {state.data.by_status.map((row) => (
-                    <tr key={row.status}>
-                      <td>{label(row.status)}</td>
-                      <td>{row.total}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
+            </section>
           )}
           {activeReport === "sdgs" && (
-          <section className="panel-card admin-data-card">
-            <div className="admin-card-heading">
-              <div>
-                <h2>By Sustainable Development Goal</h2>
-                <p>Research alignments across the 17 UN goals.</p>
+            <section className="panel-card admin-data-card">
+              <div className="admin-card-heading">
+                <div>
+                  <h2>By Sustainable Development Goal</h2>
+                  <p>Research alignments across the 17 UN goals.</p>
+                </div>
+                {reportActions}
               </div>
-              {reportActions}
-            </div>
-            <div className="admin-table-wrap">
-              <table>
-                <caption className="sr-only">
-                  By Sustainable Development Goal
-                </caption>
-                <thead>
-                  <tr>
-                    <th>Goal</th>
-                    <th>Records</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(state.data.by_sdg ?? []).map((row) => (
-                    <tr key={row.id}>
-                      <td>
-                        <span
-                          className="report-sdg-number"
-                          style={{ backgroundColor: row.color_hex }}
-                        >
-                          {row.id}
-                        </span>{" "}
-                        {row.title}
-                      </td>
-                      <td>{row.total}</td>
+              <div className="admin-table-wrap">
+                <table>
+                  <caption className="sr-only">
+                    By Sustainable Development Goal
+                  </caption>
+                  <thead>
+                    <tr>
+                      <th>Goal</th>
+                      <th>Records</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
+                  </thead>
+                  <tbody>
+                    {(state.data.by_sdg ?? []).map((row) => (
+                      <tr key={row.id}>
+                        <td>
+                          <span
+                            className="report-sdg-number"
+                            style={{ backgroundColor: row.color_hex }}
+                          >
+                            {row.id}
+                          </span>{" "}
+                          {row.title}
+                        </td>
+                        <td>{row.total}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
           )}
         </>
       )}
-      {printReady && state.status === "ready" && (
-        <OfficePrintableReport report={state.data} section={activeReport} />
-      )}
     </div>
-  );
-}
-
-function OfficePrintableReport({
-  report,
-  section,
-}: {
-  report: InstitutionalReport;
-  section: OfficeReportSection;
-}) {
-  return (
-    <article className="coordinator-print-area office-report-print-area" aria-hidden="true">
-      <header className="coordinator-print-heading">
-        <span>ResearchNAV · Research Office</span>
-        <h1>{officeReportOptions.find((option) => option.key === section)?.label}</h1>
-        <small>Printed {formatPhilippineDateTime(new Date().toISOString())}</small>
-      </header>
-      {section === "academic_units" && (
-        <section>
-          <h2>By academic unit</h2>
-          <table>
-            <thead><tr><th>Academic unit</th><th>Records</th></tr></thead>
-            <tbody>{report.by_institute.map((unit) => (
-              <tr key={unit.institute}><td>{unit.institute}</td><td>{unit.total}</td></tr>
-            ))}</tbody>
-          </table>
-          {report.by_institute.length === 0 && <p>No academic units are recorded.</p>}
-        </section>
-      )}
-      {section === "submission_status" && (
-        <section>
-          <h2>By submission status</h2>
-          <table>
-            <thead><tr><th>Status</th><th>Records</th></tr></thead>
-            <tbody>{report.by_status.map((row) => (
-              <tr key={row.status}><td>{label(row.status)}</td><td>{row.total}</td></tr>
-            ))}</tbody>
-          </table>
-          {report.by_status.length === 0 && <p>No submission statuses are recorded.</p>}
-        </section>
-      )}
-      {section === "sdgs" && (
-        <section>
-          <h2>By Sustainable Development Goal</h2>
-          <table>
-            <thead><tr><th>Goal</th><th>Records</th></tr></thead>
-            <tbody>{(report.by_sdg ?? []).map((row) => (
-              <tr key={row.id}><td>{row.code} · {row.title}</td><td>{row.total}</td></tr>
-            ))}</tbody>
-          </table>
-          {(report.by_sdg ?? []).length === 0 && <p>No Sustainable Development Goals are recorded.</p>}
-        </section>
-      )}
-    </article>
   );
 }
 
@@ -8170,8 +8392,8 @@ function ResearcherSubmissions({
   const [editing, setEditing] =
     useState<ResearchDocumentSummaryResource | null>(null);
   const editingMetadataOnly =
-  editing !== null &&
-  ["submitted", "under_review"].includes(editing.submission_status);
+    editing !== null &&
+    ["submitted", "under_review"].includes(editing.submission_status);
   const [activityFor, setActivityFor] =
     useState<ResearchDocumentSummaryResource | null>(null);
   const [editDirty, setEditDirty] = useState(false);
@@ -8214,8 +8436,8 @@ function ResearcherSubmissions({
         setLoading(false);
       });
     const editingMetadataOnly =
-    editing !== null &&
-    ["submitted", "under_review"].includes(editing.submission_status);
+      editing !== null &&
+      ["submitted", "under_review"].includes(editing.submission_status);
     return () => {
       cancelled = true;
     };
@@ -8314,9 +8536,12 @@ function ResearcherSubmissions({
                     )}
                     {source === "live" &&
                       !loading &&
-                      ["draft", "revision_required", "submitted", "under_review"].includes(
-                        document.submission_status,
-                      ) && (
+                      [
+                        "draft",
+                        "revision_required",
+                        "submitted",
+                        "under_review",
+                      ].includes(document.submission_status) && (
                         <>
                           {["submitted", "under_review"].includes(
                             document.submission_status,
@@ -8334,18 +8559,18 @@ function ResearcherSubmissions({
                               <Pencil size={17} aria-hidden="true" />
                             </button>
                           ) : (
-                          <button
-                            className="icon-button"
-                            aria-label="Edit submission"
-                            title="Edit submission"
-                            onClick={() => {
-                              setEditDirty(false);
-                              setEditing(document);
-                            }}
-                            disabled={submitting === String(document.id)}
-                          >
-                            <Pencil size={17} aria-hidden="true" />
-                          </button>
+                            <button
+                              className="icon-button"
+                              aria-label="Edit submission"
+                              title="Edit submission"
+                              onClick={() => {
+                                setEditDirty(false);
+                                setEditing(document);
+                              }}
+                              disabled={submitting === String(document.id)}
+                            >
+                              <Pencil size={17} aria-hidden="true" />
+                            </button>
                           )}
 
                           {document.submission_status === "draft" && (
@@ -8361,7 +8586,6 @@ function ResearcherSubmissions({
                           )}
                         </>
                       )}
-
                   </span>
                 }
               />
@@ -8414,8 +8638,8 @@ function ResearcherSubmissions({
                 submitted
                   ? `"${document.title}" has been submitted.`
                   : editingMetadataOnly
-                  ? `Metadata for "${document.title}" has been updated.`
-                  : `Draft "${document.title}" has been updated.`,
+                    ? `Metadata for "${document.title}" has been updated.`
+                    : `Draft "${document.title}" has been updated.`,
               );
               setEditing(null);
               refresh();
@@ -8598,9 +8822,7 @@ export function ResearcherNewSubmission({
     const submitter = (event.nativeEvent as SubmitEvent)
       .submitter as HTMLButtonElement | null;
     const submitAfterSave =
-      !metadataOnly &&
-      !isRevisionRequired &&
-      submitter?.value === "submit";
+      !metadataOnly && !isRevisionRequired && submitter?.value === "submit";
     if (authors.some((author) => !author.author_name.trim())) {
       setError("Every author must have a name.");
       return;
@@ -8703,27 +8925,27 @@ export function ResearcherNewSubmission({
       {embedded ? (
         <header className="workspace-header">
           <div>
-          <p className="eyebrow">
-            {metadataOnly ? "Researcher / Metadata" : "Researcher / Draft"}
-          </p>
+            <p className="eyebrow">
+              {metadataOnly ? "Researcher / Metadata" : "Researcher / Draft"}
+            </p>
 
-          <h2>
-            {metadataOnly
-              ? "Edit metadata"
-              : draft
-                ? "Edit submission"
-                : "New submission"}
-          </h2>
+            <h2>
+              {metadataOnly
+                ? "Edit metadata"
+                : draft
+                  ? "Edit submission"
+                  : "New submission"}
+            </h2>
 
-          <p>
-            {metadataOnly
-              ? "Update the research details associated with this manuscript."
-              : draft
-                ? isRevisionRequired
-                  ? "Update metadata, authors, and revised manuscript files before resubmitting the requested revision."
-                  : "Update metadata, authors, and manuscript files before submission."
-                : "Create a research draft, add its authors, and optionally attach a manuscript."}
-          </p>
+            <p>
+              {metadataOnly
+                ? "Update the research details associated with this manuscript."
+                : draft
+                  ? isRevisionRequired
+                    ? "Update metadata, authors, and revised manuscript files before resubmitting the requested revision."
+                    : "Update metadata, authors, and manuscript files before submission."
+                  : "Create a research draft, add its authors, and optionally attach a manuscript."}
+            </p>
           </div>
         </header>
       ) : (
@@ -8751,25 +8973,25 @@ export function ResearcherNewSubmission({
                 maxLength={500}
               />
             </label>
-          {metadataOnly && (
-            <label className="metadata-year-field">
-              Publication year
-              <select
-                value={publicationYear}
-                onChange={(event) => setPublicationYear(event.target.value)}
-              >
-                <option value="">Select year</option>
-                {Array.from(
-                  { length: new Date().getFullYear() - 1900 },
-                  (_, index) => new Date().getFullYear() - index,
-                ).map((year) => (
-                  <option key={year} value={year}>
-                    {year}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
+            {metadataOnly && (
+              <label className="metadata-year-field">
+                Publication year
+                <select
+                  value={publicationYear}
+                  onChange={(event) => setPublicationYear(event.target.value)}
+                >
+                  <option value="">Select year</option>
+                  {Array.from(
+                    { length: new Date().getFullYear() - 1900 },
+                    (_, index) => new Date().getFullYear() - index,
+                  ).map((year) => (
+                    <option key={year} value={year}>
+                      {year}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
           </div>
 
           <label className="submission-abstract-field">
@@ -8872,7 +9094,9 @@ export function ResearcherNewSubmission({
                     list="submission-programs"
                     value={degreeProgram}
                     placeholder={
-                      institute ? "Search programs" : "Choose an institute first"
+                      institute
+                        ? "Search programs"
+                        : "Choose an institute first"
                     }
                     disabled={
                       !instituteNames.includes(
@@ -8923,78 +9147,78 @@ export function ResearcherNewSubmission({
           )}
 
           {!metadataOnly && (
-          <fieldset className="author-editor submission-authors">
-            <legend>Authors</legend>
-            {authors.map((author, index) => (
-              <div className="author-row" key={index}>
-                <label>
-                  Author name
-                  <input
-                    value={author.author_name}
-                    onChange={(event) =>
-                      changeAuthor(index, { author_name: event.target.value })
-                    }
-                    maxLength={255}
-                  />
-                </label>
-                {authors.length > 1 && (
-                  <Button
-                    variant="secondary"
-                    onClick={() => removeAuthor(index)}
-                  >
-                    Remove
-                  </Button>
-                )}
-              </div>
-            ))}
-            <Button variant="secondary" onClick={addAuthor}>
-              Add author
-            </Button>
-          </fieldset>
+            <fieldset className="author-editor submission-authors">
+              <legend>Authors</legend>
+              {authors.map((author, index) => (
+                <div className="author-row" key={index}>
+                  <label>
+                    Author name
+                    <input
+                      value={author.author_name}
+                      onChange={(event) =>
+                        changeAuthor(index, { author_name: event.target.value })
+                      }
+                      maxLength={255}
+                    />
+                  </label>
+                  {authors.length > 1 && (
+                    <Button
+                      variant="secondary"
+                      onClick={() => removeAuthor(index)}
+                    >
+                      Remove
+                    </Button>
+                  )}
+                </div>
+              ))}
+              <Button variant="secondary" onClick={addAuthor}>
+                Add author
+              </Button>
+            </fieldset>
           )}
           {!metadataOnly && (
-          <fieldset className="author-editor submission-file">
-            <legend>Manuscript file (optional)</legend>
-            <div className="score-grid">
-              <label>
-                Document type
-                <select
-                  value={documentType}
+            <fieldset className="author-editor submission-file">
+              <legend>Manuscript file (optional)</legend>
+              <div className="score-grid">
+                <label>
+                  Document type
+                  <select
+                    value={documentType}
+                    onChange={(event) =>
+                      setDocumentType(
+                        event.target
+                          .value as DocumentFileResource["document_type"],
+                      )
+                    }
+                  >
+                    {(isRevisionRequired
+                      ? [
+                          {
+                            value: "revised_manuscript",
+                            label: "Revised manuscript",
+                          },
+                          ...submissionDocumentTypes,
+                        ]
+                      : submissionDocumentTypes
+                    ).map((type) => (
+                      <option key={type.value} value={type.value}>
+                        {type.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <ManuscriptFilePicker
+                  label="PDF or DOCX (maximum 25 MB)"
+                  help="PDF or DOCX, maximum 25 MB"
+                  inputRef={fileInput}
+                  accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  file={manuscript}
                   onChange={(event) =>
-                    setDocumentType(
-                      event.target
-                        .value as DocumentFileResource["document_type"],
-                    )
+                    setManuscript(event.target.files?.[0] ?? null)
                   }
-                >
-                  {(isRevisionRequired
-                    ? [
-                        {
-                          value: "revised_manuscript",
-                          label: "Revised manuscript",
-                        },
-                        ...submissionDocumentTypes,
-                      ]
-                    : submissionDocumentTypes
-                  ).map((type) => (
-                    <option key={type.value} value={type.value}>
-                      {type.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <ManuscriptFilePicker
-                label="PDF or DOCX (maximum 25 MB)"
-                help="PDF or DOCX, maximum 25 MB"
-                inputRef={fileInput}
-                accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                file={manuscript}
-                onChange={(event) =>
-                  setManuscript(event.target.files?.[0] ?? null)
-                }
-              />
-            </div>
-          </fieldset>
+                />
+              </div>
+            </fieldset>
           )}
 
           <div className="modal-actions submission-actions">
@@ -9013,21 +9237,21 @@ export function ResearcherNewSubmission({
               {onCancel ? "Cancel" : "Reset"}
             </Button>
             <Button type="submit" value="draft" disabled={saving}>
-            {saving
-              ? "Saving…"
-              : metadataOnly
-                ? "Save metadata"
-                : isRevisionRequired
-                  ? "Save changes"
-                  : draft
-                    ? "Update draft"
-                    : "Save draft"}
+              {saving
+                ? "Saving…"
+                : metadataOnly
+                  ? "Save metadata"
+                  : isRevisionRequired
+                    ? "Save changes"
+                    : draft
+                      ? "Update draft"
+                      : "Save draft"}
             </Button>
-          {!metadataOnly && !isRevisionRequired && (
-            <Button type="submit" value="submit" disabled={saving}>
-              {saving ? "Working…" : "Save and submit"}
-            </Button>
-          )}
+            {!metadataOnly && !isRevisionRequired && (
+              <Button type="submit" value="submit" disabled={saving}>
+                {saving ? "Working…" : "Save and submit"}
+              </Button>
+            )}
           </div>
         </form>
         {notice && (

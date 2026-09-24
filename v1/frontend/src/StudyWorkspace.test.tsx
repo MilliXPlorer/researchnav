@@ -252,4 +252,90 @@ describe("StudyWorkspace", () => {
     expect(screen.queryByText("Genevieve Hilot")).not.toBeInTheDocument();
     expect(screen.queryByText("Jun Rey Sta. Rita")).not.toBeInTheDocument();
   });
+
+  it("shows all proposal assignment roles when the stage team is empty", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/files") || url.endsWith("/feedback")) {
+          return new Response(JSON.stringify({ data: [] }));
+        }
+        if (url.endsWith("/folders")) {
+          return new Response(JSON.stringify({ data: [] }));
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+
+    render(
+      <StudyWorkspace
+        role="instructor"
+        researchDocumentId={794}
+        title="Section project"
+        context={["Thesis 2"]}
+        researchers={[]}
+        projectTeam={{
+          section_id: 5,
+          research_document_id: 794,
+          defense_type: "proposal",
+          instructor: null,
+          researchers: [],
+          adviser: null,
+          research_office_representative: null,
+          chair: null,
+          panel_members: [],
+          support_assignments: {
+            editor: null,
+            statistician: null,
+            librarian: null,
+          },
+          pre_defense_ready: false,
+          post_defense_ready: false,
+          complete: false,
+        }}
+        people={{
+          section: {
+            id: 5,
+            name: "Thesis 2",
+            academic_year: "2026-2027",
+            instructor_name: "Instructor One",
+          },
+          reviewers: [
+            { review_role: "adviser", name: "Adviser One" },
+            { review_role: "research-office", name: "Representative One" },
+            {
+              review_role: "panel",
+              designation: "panel_chair",
+              name: "Chair One",
+            },
+            {
+              review_role: "panel",
+              designation: "panel_1",
+              name: "Panelist One",
+            },
+            { review_role: "research_editor", name: "Editor One" },
+            { review_role: "statistician", name: "Statistician One" },
+            { review_role: "librarian", name: "Librarian One" },
+          ],
+        }}
+      />,
+    );
+
+    expect(await screen.findByTestId("study-workspace")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Research Team" }));
+
+    for (const name of [
+      "Instructor One",
+      "Adviser One",
+      "Representative One",
+      "Chair One",
+      "Panelist One",
+      "Editor One",
+      "Statistician One",
+      "Librarian One",
+    ]) {
+      expect(screen.getAllByText(name).length).toBeGreaterThan(0);
+    }
+  });
 });

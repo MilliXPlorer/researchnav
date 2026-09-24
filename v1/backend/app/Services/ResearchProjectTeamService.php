@@ -8,6 +8,7 @@ use App\Models\ResearchDocument;
 use App\Models\ResearchProjectTeamMember;
 use App\Models\ReviewAssignment;
 use App\Models\User;
+use App\Models\UserRole;
 use App\Notifications\ResearchActivityNotification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -35,6 +36,27 @@ class ResearchProjectTeamService
         'chair' => 'panel',
         'panel_member' => 'panel',
     ];
+
+    /**
+     * Canonical slugs for each project role. The research-office slot also
+     * accepts historical compatibility accounts (coordinator / academics)
+     * that share the same canonical research_office identity.
+     */
+    private const ELIGIBLE_CANONICAL = [
+        'researcher' => UserRole::RESEARCHER,
+        'adviser' => UserRole::RESEARCH_ADVISER,
+        'research_office_representative' => UserRole::RESEARCH_OFFICE,
+        'chair' => UserRole::RESEARCH_PANELIST,
+        'panel_member' => UserRole::RESEARCH_PANELIST,
+    ];
+
+    private const ELIGIBLE_LEGACY = [
+        'researcher' => ['researcher'],
+        'adviser' => ['adviser'],
+        'research_office_representative' => ['research-office', 'coordinator', 'academics'],
+        'chair' => ['panel'],
+        'panel_member' => ['panel'],
+    ];
     private const SUPPORT_ROLES = ['statistician', 'librarian', 'research_editor'];
 
     public function candidates(ClassSection $section, ResearchDocument $document, string $teamRole, ?string $search): array
@@ -44,8 +66,14 @@ class ResearchProjectTeamService
             throw new ApiValidationException(['team_role' => ['Unknown project role.']]);
         }
 
+        $canonical = self::ELIGIBLE_CANONICAL[$teamRole];
+        $legacy = self::ELIGIBLE_LEGACY[$teamRole];
         $query = User::query()
-            ->where('role', self::ELIGIBLE_ROLES[$teamRole])
+            ->where(function ($roleQuery) use ($legacy, $canonical): void {
+                $roleQuery->whereIn('role', $legacy)
+                    ->orWhereIn('role_id', UserRole::query()->where('slug', $canonical)->select('id'))
+                    ->orWhereHas('roleDefinition', fn ($roles) => $roles->where('slug', $canonical));
+            })
             ->where('access_status', 'active')
             ->where('account_status', 'active');
         if ($search !== null && trim($search) !== '') {
@@ -152,8 +180,7 @@ class ResearchProjectTeamService
             foreach ($slots as $teamRole => $ids) {
                 foreach ($ids as $id) {
                     $user = $users->get($id);
-                    if ($user === null || $user->role !== self::ELIGIBLE_ROLES[$teamRole]
-                        || $user->access_status !== 'active' || $user->account_status !== 'active') {
+                    if ($user === null || ! $this->isEligible($user, $teamRole)) {
                         throw new ApiValidationException([$teamRole => ['The selected account is not eligible for this role.']]);
                     }
                 }
@@ -231,11 +258,7 @@ class ResearchProjectTeamService
                     ->lockForUpdate()
                     ->findOrFail($userId);
 
-                if (
-                    $user->role !== self::ELIGIBLE_ROLES[$teamRole]
-                    || $user->access_status !== 'active'
-                    || $user->account_status !== 'active'
-                ) {
+                if (! $this->isEligible($user, $teamRole)) {
                     throw new ApiValidationException([
                         $teamRole => ['The selected account is not eligible for this role.'],
                     ]);
@@ -250,7 +273,7 @@ class ResearchProjectTeamService
                     ->get();
 
                 foreach ($conflicting as $member) {
-                    if (self::ELIGIBLE_ROLES[$member->team_role] === $user->role) {
+                    if ($this->sameCanonicalRole($member->team_role, $teamRole)) {
                         throw new ApiValidationException([
                             $teamRole => ['Each person may only hold one project role.'],
                         ]);
@@ -478,6 +501,39 @@ class ResearchProjectTeamService
     private function assertNested(ClassSection $section, ResearchDocument $document): void
     {
         abort_unless((int) $document->section_id === (int) $section->id, 404);
+    }
+
+    private function isEligible(User $user, string $teamRole): bool
+    {
+        if ($user->access_status !== 'active' || $user->account_status !== 'active') {
+            return false;
+        }
+        if (in_array($user->role, self::ELIGIBLE_LEGACY[$teamRole] ?? [], true)) {
+            return true;
+        }
+
+        return $this->canonicalForUser($user) === (self::ELIGIBLE_CANONICAL[$teamRole] ?? null);
+    }
+
+    private function sameCanonicalRole(string $leftTeamRole, string $rightTeamRole): bool
+    {
+        return (self::ELIGIBLE_CANONICAL[$leftTeamRole] ?? $leftTeamRole)
+            === (self::ELIGIBLE_CANONICAL[$rightTeamRole] ?? $rightTeamRole);
+    }
+
+    private function canonicalForUser(User $user): ?string
+    {
+        $slug = $user->relationLoaded('roleDefinition') && $user->roleDefinition !== null
+            ? $user->roleDefinition->slug
+            : UserRole::query()->whereKey($user->role_id)->value('slug');
+        if (is_string($slug) && $slug !== '') {
+            return $slug;
+        }
+        try {
+            return User::canonicalSlugForLegacyRole((string) $user->role);
+        } catch (\InvalidArgumentException) {
+            return null;
+        }
     }
 
     private function member(?ResearchProjectTeamMember $member): ?array

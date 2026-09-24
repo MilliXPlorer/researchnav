@@ -241,17 +241,29 @@ export default function StudyWorkspace({
   const librarianName =
     projectTeam?.support_assignments.librarian?.name ??
     reviewerName(fallbackPeople, "librarian");
-  const panelNames =
-    projectTeam?.panel_members.map((member) => member.name) ??
+  const fallbackPanelNames =
     fallbackPeople?.reviewers
-      .filter((reviewer) => reviewer.review_role === "panel")
-      .map((reviewer) => reviewer.name) ??
-    [];
+      .filter(
+        (reviewer) =>
+          reviewer.review_role === "panel" &&
+          reviewer.designation !== "panel_chair",
+      )
+      .map((reviewer) => reviewer.name) ?? [];
+  const panelNames = projectTeam?.panel_members.length
+    ? projectTeam.panel_members.map((member) => member.name)
+    : fallbackPanelNames;
   const representativeName =
     projectTeam?.research_office_representative?.name ??
+    reviewerName(fallbackPeople, "research-office") ??
     reviewerName(fallbackPeople, "research_office_representative");
   const chairName =
-    projectTeam?.chair?.name ?? reviewerName(fallbackPeople, "chair");
+    projectTeam?.chair?.name ??
+    fallbackPeople?.reviewers.find(
+      (reviewer) =>
+        reviewer.review_role === "panel" &&
+        reviewer.designation === "panel_chair",
+    )?.name ??
+    reviewerName(fallbackPeople, "chair");
   const readinessAvailable = projectTeam != null;
   const folderOptions = [
     ...folders,

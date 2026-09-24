@@ -206,6 +206,8 @@ Route::prefix('api')
             Route::get('users', [ResearchOfficeController::class, 'users']);
             Route::patch('users/{user}', [ResearchOfficeController::class, 'updateUser'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('reports', [ResearchOfficeController::class, 'reports']);
+            Route::get('reports/{section}/pdf', [ResearchOfficeController::class, 'reportPdf']);
+            Route::get('reports/logos/{logo}', [ResearchOfficeController::class, 'reportLogo']);
             Route::get('research/{researchDocument}/team', [ResearchOfficeController::class, 'projectTeam']);
             Route::get('research/{researchDocument}/representative-candidates', [ResearchOfficeController::class, 'representativeCandidates']);
             Route::put('research/{researchDocument}/representative', [ResearchOfficeController::class, 'assignRepresentative'])->middleware(['origin.allowed', 'throttle:domain-mutations']);

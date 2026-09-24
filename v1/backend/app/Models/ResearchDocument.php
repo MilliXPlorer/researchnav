@@ -89,6 +89,14 @@ class ResearchDocument extends Model
         });
     }
 
+    public function scopeInRepository(Builder $query): Builder
+    {
+        return $query
+            ->whereIn('submission_status', ['approved', 'archived'])
+            ->where('archive_status', 'archived')
+            ->whereIn('visibility', ['registered_only', 'public']);
+    }
+
     public function submitter(): BelongsTo
     {
         return $this->belongsTo(User::class, 'submitted_by');

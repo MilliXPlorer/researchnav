@@ -36,7 +36,8 @@ class ResearcherWorkflowGapsTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.section.name', 'ICS 4A')
             ->assertJsonPath('data.section.instructor_name', 'Ina Structor')
-            ->assertJsonPath('data.reviewers.0.name', 'Ada Viser');
+            ->assertJsonPath('data.reviewers.0.name', 'Ada Viser')
+            ->assertJsonPath('data.reviewers.0.designation', null);
 
         $this->as(User::factory()->create())->getJson('/api/research/'.$research->id.'/people')->assertForbidden();
     }

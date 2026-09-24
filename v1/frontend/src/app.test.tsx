@@ -149,7 +149,7 @@ describe("public catalog", () => {
     ).toBeInTheDocument();
   });
 
-  it("provides the profile menu from the workspace sidebar", async () => {
+  it("opens profile editing from the workspace sidebar", async () => {
     const user = {
       email: "ada@example.test",
       role: "researcher" as const,
@@ -178,11 +178,11 @@ describe("public catalog", () => {
     expect(
       within(sidebar as HTMLElement).getByText("Ada Lovelace"),
     ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open profile for Ada Lovelace" }),
+    );
     expect(
-      screen.getByRole("menuitem", { name: "Edit profile" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("menuitem", { name: "Log out" }),
+      await screen.findByRole("dialog", { name: "Edit profile" }),
     ).toBeInTheDocument();
   });
 
@@ -269,12 +269,7 @@ describe("role workspaces", () => {
     ["admin", /Dashboard/, "recent_research", "Recent research"],
     ["adviser", /Dashboard/, "assigned_reviews", "Assigned reviews"],
     ["instructor", /Dashboard/, "title_proposals", "Title proposals"],
-    [
-      "panel",
-      /Dashboard/,
-      "repository_references",
-      "Repository references",
-    ],
+    ["panel", /Dashboard/, "repository_references", "Repository references"],
     [
       "statistician",
       /Dashboard/,
@@ -287,12 +282,7 @@ describe("role workspaces", () => {
       "active_instructors",
       "Active instructors",
     ],
-    [
-      "librarian",
-      /Dashboard/,
-      "repository_records",
-      "Repository records",
-    ],
+    ["librarian", /Dashboard/, "repository_records", "Repository records"],
     [
       "research-office",
       /Institutional research dashboard/,
@@ -644,7 +634,9 @@ describe("role workspaces", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "My Research" }));
     fireEvent.click(
-      await screen.findByRole("button", { name: "Manage folder" }),
+      await screen.findByRole("button", {
+        name: "Open research folder Open without refresh",
+      }),
     );
 
     expect(await screen.findByText("Open without refresh")).toBeInTheDocument();
@@ -706,19 +698,41 @@ describe("role workspaces", () => {
             ...coordinator,
             sections: [
               ...coordinator.sections,
-              { key: "schedules", state: "ready", total: 0, reason: null, items: [] },
-              { key: "duplicate_flags", state: "ready", total: 0, reason: null, items: [] },
+              {
+                key: "schedules",
+                state: "ready",
+                total: 0,
+                reason: null,
+                items: [],
+              },
+              {
+                key: "duplicate_flags",
+                state: "ready",
+                total: 0,
+                reason: null,
+                items: [],
+              },
             ],
           },
         }}
       />,
     );
 
-    expect(screen.getByRole("button", { name: "View Active instructors" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "View Schedules" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "View Duplicate flags" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("meter", { name: "Schedules" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("meter", { name: "Duplicate flags" })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "View Active instructors" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "View Schedules" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "View Duplicate flags" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("meter", { name: "Schedules" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("meter", { name: "Duplicate flags" }),
+    ).not.toBeInTheDocument();
   });
 
   it("merges the research office navigation and shows institute totals below analytics", async () => {
@@ -776,6 +790,7 @@ describe("role workspaces", () => {
     );
 
     const analytics = screen.getByText("Research analytics");
+    expect(screen.getByText("4 total")).toBeInTheDocument();
     const overview = await screen.findByRole("heading", {
       name: "Institutional Overview",
     });
@@ -2382,7 +2397,9 @@ describe("sign out middleware", () => {
     render(<App initialState={authenticatedAppState} />);
 
     fireEvent.click(
-      await screen.findByRole("button", { name: "Open account details" }),
+      await screen.findByRole("button", {
+        name: "Open profile for Research Student",
+      }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
 
@@ -2391,7 +2408,9 @@ describe("sign out middleware", () => {
       screen.getByRole("heading", { name: /Find the study/ }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Open account details" }),
+      screen.queryByRole("button", {
+        name: "Open profile for Research Student",
+      }),
     ).not.toBeInTheDocument();
   });
 
@@ -2401,7 +2420,9 @@ describe("sign out middleware", () => {
     render(<App initialState={authenticatedAppState} />);
 
     fireEvent.click(
-      await screen.findByRole("button", { name: "Open account details" }),
+      await screen.findByRole("button", {
+        name: "Open profile for Research Student",
+      }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
 

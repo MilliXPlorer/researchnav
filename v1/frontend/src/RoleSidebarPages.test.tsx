@@ -171,43 +171,80 @@ function roleRoutes(): Array<[RegExp, Handler]> {
 }
 
 describe("role workspace pages", () => {
-  it("switches Research Office report tabs and prints only the open report", async () => {
-    stubFetch([[/\/api\/office\/reports$/, () => new Response(JSON.stringify({
-      data: {
-        schema_version: 1,
-        counts: {},
-        by_institute: [{ institute: "Institute of Computer Studies", total: 5 }],
-        by_status: [{ status: "under_review", total: 2 }],
-        by_sdg: [{ id: 4, code: "SDG 4", title: "Quality Education", color_hex: "#006e52", total: 3 }],
-      },
-    }))]]);
-    const print = vi.fn(() => {
-      const report = document.querySelector(".office-report-print-area");
-      if (print.mock.calls.length === 1) {
-        expect(report).toHaveTextContent("Under Review");
-        expect(report).not.toHaveTextContent("Institute of Computer Studies");
-        expect(report).not.toHaveTextContent("Quality Education");
-      } else {
-        expect(report).toHaveTextContent("Quality Education");
-        expect(report).not.toHaveTextContent("Under Review");
-        expect(report).not.toHaveTextContent("Institute of Computer Studies");
-      }
-    });
-    vi.stubGlobal("print", print);
+  it("switches Research Office report tabs and opens the active report PDF", async () => {
+    stubFetch([
+      [
+        /\/api\/office\/reports$/,
+        () =>
+          new Response(
+            JSON.stringify({
+              data: {
+                schema_version: 1,
+                counts: {},
+                by_institute: [
+                  { institute: "Institute of Computer Studies", total: 5 },
+                ],
+                by_status: [{ status: "under_review", total: 2 }],
+                by_sdg: [
+                  {
+                    id: 4,
+                    code: "SDG 4",
+                    title: "Quality Education",
+                    color_hex: "#006e52",
+                    total: 3,
+                  },
+                ],
+              },
+            }),
+          ),
+      ],
+    ]);
+    const open = vi.fn();
+    vi.stubGlobal("open", open);
 
-    render(<RoleSidebarPage role="research-office" selectedNav="Reports & Exports" navigate={vi.fn()} />);
+    render(
+      <RoleSidebarPage
+        role="research-office"
+        selectedNav="Reports & Exports"
+        navigate={vi.fn()}
+      />,
+    );
     await screen.findByRole("heading", { name: "By academic unit" });
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "By submission status" }));
-    expect(screen.getByRole("button", { name: "By submission status" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.queryByRole("heading", { name: "By academic unit" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Print report" }));
-    await waitFor(() => expect(print).toHaveBeenCalledOnce());
-    act(() => window.dispatchEvent(new Event("afterprint")));
-    fireEvent.click(screen.getByRole("button", { name: "By Sustainable Development Goal" }));
-    expect(screen.queryByRole("heading", { name: "By submission status" })).not.toBeInTheDocument();
+    expect(open).toHaveBeenLastCalledWith(
+      "/api/office/reports/academic-units/pdf",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "By submission status" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "By submission status" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(
+      screen.queryByRole("heading", { name: "By academic unit" }),
+    ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Print report" }));
-    await waitFor(() => expect(print).toHaveBeenCalledTimes(2));
+    expect(open).toHaveBeenLastCalledWith(
+      "/api/office/reports/submission-status/pdf",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "By Sustainable Development Goal" }),
+    );
+    expect(
+      screen.queryByRole("heading", { name: "By submission status" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Print report" }));
+    expect(open).toHaveBeenLastCalledWith(
+      "/api/office/reports/sdgs/pdf",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(open).toHaveBeenCalledTimes(3);
   });
 
   it("prints the full coordinator report from any selected section", async () => {
@@ -223,8 +260,16 @@ describe("role workspace pages", () => {
     });
     vi.stubGlobal("print", print);
 
-    render(<RoleSidebarPage role="coordinator" selectedNav="Reports" navigate={vi.fn()} />);
-    const printButton = await screen.findByRole("button", { name: "Print report" });
+    render(
+      <RoleSidebarPage
+        role="coordinator"
+        selectedNav="Reports"
+        navigate={vi.fn()}
+      />,
+    );
+    const printButton = await screen.findByRole("button", {
+      name: "Print report",
+    });
     expect(printButton).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "Class sections" }));
     fireEvent.click(printButton);
@@ -235,47 +280,148 @@ describe("role workspace pages", () => {
 
   it("opens a coordinator report count and adviser row as read-only details", async () => {
     stubFetch([
-      [/\/api\/coordinator\/reports(\?|$)/, () => new Response(JSON.stringify({
-        data: {
-          schema_version: 1,
-          filters: { institute: null, program: null },
-          counts: {
-            active_instructors: 0, active_advisers: 1, active_researchers: 0,
-            draft: 0, submitted: 0, under_review: 0, revision_required: 1,
-            approved: 0, archived: 0, flagged_similarity: 0,
-            defenses_scheduled: 0, defenses_completed: 0,
-            evaluations_submitted: 0, methodology_signed_off: 0,
-          },
-          studies: [{ id: 42, title: "Sample Study", section: "Class A", degree_program: "Computer Science", submission_status: "revision_required", updated_at: "2026-09-21T08:00:00Z" }],
-          researchers: [], defense_schedules: [], evaluations: [], methodology_reviews: [],
-          active_instructors_list: [], active_advisers_list: [],
-          instructors: [{ user_id: "i", name: "Prof. Dela Cruz", email: "instructor@example.edu", sections: ["Class A"] }],
-          by_section: [{ id: 1, name: "Class A", documents_count: 1 }],
-          adviser_load: [{ user_id: "a", name: "Dr. Rivera", email: "rivera@example.edu", active_assignments: 1, studies: [{ id: 42, title: "Sample Study", research_stage: "ongoing", submission_status: "revision_required" }] }],
-        },
-      }))],
+      [
+        /\/api\/coordinator\/reports(\?|$)/,
+        () =>
+          new Response(
+            JSON.stringify({
+              data: {
+                schema_version: 1,
+                filters: { institute: null, program: null },
+                counts: {
+                  active_instructors: 0,
+                  active_advisers: 1,
+                  active_researchers: 0,
+                  draft: 0,
+                  submitted: 0,
+                  under_review: 0,
+                  revision_required: 1,
+                  approved: 0,
+                  archived: 0,
+                  flagged_similarity: 0,
+                  defenses_scheduled: 0,
+                  defenses_completed: 0,
+                  evaluations_submitted: 0,
+                  methodology_signed_off: 0,
+                },
+                studies: [
+                  {
+                    id: 42,
+                    title: "Sample Study",
+                    section: "Class A",
+                    degree_program: "Computer Science",
+                    submission_status: "revision_required",
+                    updated_at: "2026-09-21T08:00:00Z",
+                  },
+                ],
+                researchers: [],
+                defense_schedules: [],
+                evaluations: [],
+                methodology_reviews: [],
+                active_instructors_list: [],
+                active_advisers_list: [],
+                instructors: [
+                  {
+                    user_id: "i",
+                    name: "Prof. Dela Cruz",
+                    email: "instructor@example.edu",
+                    sections: ["Class A"],
+                  },
+                ],
+                by_section: [{ id: 1, name: "Class A", documents_count: 1 }],
+                adviser_load: [
+                  {
+                    user_id: "a",
+                    name: "Dr. Rivera",
+                    email: "rivera@example.edu",
+                    active_assignments: 1,
+                    studies: [
+                      {
+                        id: 42,
+                        title: "Sample Study",
+                        research_stage: "ongoing",
+                        submission_status: "revision_required",
+                      },
+                    ],
+                  },
+                ],
+              },
+            }),
+          ),
+      ],
     ]);
-    render(<RoleSidebarPage role="coordinator" selectedNav="Reports" navigate={vi.fn()} />);
-    fireEvent.click(await screen.findByRole("button", { name: "View Revision required" }));
-    expect(await screen.findByRole("dialog", { name: "Revision required" })).toHaveTextContent("Sample Study");
+    render(
+      <RoleSidebarPage
+        role="coordinator"
+        selectedNav="Reports"
+        navigate={vi.fn()}
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "View Revision required" }),
+    );
+    expect(
+      await screen.findByRole("dialog", { name: "Revision required" }),
+    ).toHaveTextContent("Sample Study");
     fireEvent.click(screen.getByRole("button", { name: /close/i }));
-    fireEvent.click(screen.getByRole("button", { name: "Research instructors" }));
-    expect(screen.getByRole("heading", { name: "Research instructors" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "View Revision required" })).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Research instructors" }),
+    );
+    expect(
+      screen.getByRole("heading", { name: "Research instructors" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "View Revision required" }),
+    ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Class sections" }));
     expect(screen.getByRole("button", { name: "Class A" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Research instructors" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Research instructors" }),
+    ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Adviser load" }));
     fireEvent.click(screen.getByRole("button", { name: "Dr. Rivera" }));
-    expect(await screen.findByRole("dialog", { name: "Dr. Rivera" })).toHaveTextContent("Sample Study");
+    expect(
+      await screen.findByRole("dialog", { name: "Dr. Rivera" }),
+    ).toHaveTextContent("Sample Study");
   });
   it("opens an adviser's assigned studies from Adviser Load", async () => {
-    stubFetch([[/\/api\/coordinator\/adviser-load$/, () => new Response(JSON.stringify({
-      data: [{ user_id: "a", name: "Dr. Rivera", email: "rivera@example.edu", active_assignments: 1, studies: [{ id: 42, title: "Sample Study", research_stage: "ongoing", submission_status: "revision_required" }] }],
-    }))]]);
-    render(<RoleSidebarPage role="coordinator" selectedNav="Adviser Load" navigate={vi.fn()} />);
+    stubFetch([
+      [
+        /\/api\/coordinator\/adviser-load$/,
+        () =>
+          new Response(
+            JSON.stringify({
+              data: [
+                {
+                  user_id: "a",
+                  name: "Dr. Rivera",
+                  email: "rivera@example.edu",
+                  active_assignments: 1,
+                  studies: [
+                    {
+                      id: 42,
+                      title: "Sample Study",
+                      research_stage: "ongoing",
+                      submission_status: "revision_required",
+                    },
+                  ],
+                },
+              ],
+            }),
+          ),
+      ],
+    ]);
+    render(
+      <RoleSidebarPage
+        role="coordinator"
+        selectedNav="Adviser Load"
+        navigate={vi.fn()}
+      />,
+    );
     fireEvent.click(await screen.findByRole("button", { name: "Dr. Rivera" }));
-    expect(await screen.findByRole("dialog", { name: "Dr. Rivera" })).toHaveTextContent("Sample Study");
+    expect(
+      await screen.findByRole("dialog", { name: "Dr. Rivera" }),
+    ).toHaveTextContent("Sample Study");
   });
   it("separates the Instructor research workspace from the review queue", async () => {
     const fetchMock = stubFetch([
@@ -1087,12 +1233,20 @@ describe("role workspace pages", () => {
 
     await screen.findByText("My study title");
     expect(
-      screen.getByRole("button", { name: "Manage folder" }),
+      screen.getByRole("button", {
+        name: "Open research folder My study title",
+      }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Submit" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Edit submission" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Submit research" }),
+    ).toBeInTheDocument();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Edit submission" }),
+    );
     await screen.findByRole("heading", { name: "Edit submission" });
     expect(screen.queryByLabelText(/User ID/)).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Title"), {
@@ -1167,7 +1321,9 @@ describe("role workspace pages", () => {
         navigate={vi.fn()}
       />,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Edit submission" }),
+    );
     expect(
       await screen.findByRole("heading", { name: "Edit submission" }),
     ).toBeInTheDocument();
@@ -1209,7 +1365,9 @@ describe("role workspace pages", () => {
         navigate={vi.fn()}
       />,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Edit submission" }),
+    );
     await screen.findByRole("heading", { name: "Edit submission" });
     fireEvent.change(screen.getByLabelText("Title"), {
       target: { value: "Unsafe upload" },
@@ -1292,7 +1450,9 @@ describe("role workspace pages", () => {
     expect(
       await screen.findByRole("heading", { name: "My research" }),
     ).toBeInTheDocument();
-    const submitButton = await screen.findByRole("button", { name: "Submit" });
+    const submitButton = await screen.findByRole("button", {
+      name: "Submit research",
+    });
     fireEvent.click(submitButton);
     expect(
       await screen.findByText('"My study title" has been submitted.'),
@@ -1303,7 +1463,7 @@ describe("role workspace pages", () => {
     );
     await waitFor(() => expect(listRequests).toBeGreaterThan(1));
     expect(
-      screen.queryByRole("button", { name: "Submit" }),
+      screen.queryByRole("button", { name: "Submit research" }),
     ).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", {
@@ -1331,10 +1491,12 @@ describe("role workspace pages", () => {
     );
 
     fireEvent.click(
-      await screen.findByRole("button", { name: "Manage folder" }),
+      await screen.findByRole("button", {
+        name: "Open research folder My study title",
+      }),
     );
     expect(navigate).toHaveBeenCalledWith("/research/7");
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit submission" }));
     expect(
       await screen.findByRole("heading", { name: "Edit submission" }),
     ).toBeInTheDocument();
@@ -1366,7 +1528,9 @@ describe("role workspace pages", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Edit submission" }),
+    );
     const institute = await screen.findByLabelText("Institute");
     const program = screen.getByLabelText("Program");
     expect(program).toBeDisabled();
@@ -2206,13 +2370,21 @@ describe("role workspace pages", () => {
         () => listData([student]),
       ],
       [
-        /\/api\/instructor\/sections\/7\/documents\/11\/team$/,
+        /\/api\/instructor\/sections\/7\/documents\/11\/team(?:\?|$)/,
         () =>
           new Response(
             JSON.stringify({
               data: {
                 section_id: 7,
                 research_document_id: 11,
+                researchers: [
+                  {
+                    user_id: student.id,
+                    name: "Student One",
+                    email: student.email,
+                    team_role: "researcher",
+                  },
+                ],
                 instructor: null,
                 adviser,
                 research_office_representative: null,
@@ -2234,6 +2406,15 @@ describe("role workspace pages", () => {
         /\/api\/instructor\/sections\/7\/documents\/11\/team\/candidates/,
         () => listData([adviser]),
       ],
+      [/\/api\/research\/11$/, () => listData([draftResource({ id: 11 })])],
+      [
+        /\/api\/research\/11\/people$/,
+        () =>
+          new Response(
+            JSON.stringify({ data: { section: null, reviewers: [] } }),
+          ),
+      ],
+      [/\/api\/instructor\/panelists$/, emptyData],
       [/\/api\/research\/11\/(files|folders|feedback)$/, emptyData],
     ]);
 
@@ -2267,6 +2448,7 @@ describe("role workspace pages", () => {
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     fireEvent.click(screen.getByRole("button", { name: "Research Team" }));
+    await screen.findByLabelText("Defense team");
     fireEvent.click(
       await screen.findByRole("button", { name: "Remove Student One" }),
     );
@@ -2274,10 +2456,13 @@ describe("role workspace pages", () => {
       screen.getByRole("button", { name: "Remove student" }),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    fireEvent.click(screen.getByRole("button", { name: "Research Team" }));
-    fireEvent.click(screen.getByRole("button", { name: "Manage assignments" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Manage assignments" }),
+    );
     expect(
-      screen.getByRole("dialog", { name: "Manage project assignments" }),
+      await screen.findByRole("dialog", {
+        name: "Manage project assignments",
+      }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Add students" }),
@@ -2291,11 +2476,7 @@ describe("role workspace pages", () => {
       screen.getByRole("button", { name: "Close Manage project assignments" }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Manage assignments" }));
-    await waitFor(() =>
-      expect(
-        screen.queryByText("Loading current project assignments…"),
-      ).not.toBeInTheDocument(),
-    );
+    await screen.findByRole("dialog", { name: "Manage project assignments" });
     fireEvent.click(
       screen.getByRole("button", { name: "Assign research adviser" }),
     );

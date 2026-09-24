@@ -371,7 +371,11 @@ export interface ResearchPeopleResource {
     academic_year: string | null;
     instructor_name: string | null;
   } | null;
-  reviewers: Array<{ review_role: string; name: string | null }>;
+  reviewers: Array<{
+    review_role: string;
+    designation?: string | null;
+    name: string | null;
+  }>;
 }
 
 export interface FeedbackAttachment {

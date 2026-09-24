@@ -368,7 +368,8 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
   instructor: {
     eyebrow: "My sections",
     title: "Dashboard",
-    description: "Title proposals, reviews, and repository references in your sections.",
+    description:
+      "Title proposals, reviews, and repository references in your sections.",
     sections: {
       title_proposals: {
         title: "Title proposals",
@@ -656,11 +657,12 @@ function DashboardSections({
     );
   }
 
-  const visibleSections = role === "coordinator"
-    ? dashboardState.dashboard.sections.filter((section) =>
-        Object.prototype.hasOwnProperty.call(config.sections, section.key),
-      )
-    : dashboardState.dashboard.sections;
+  const visibleSections =
+    role === "coordinator"
+      ? dashboardState.dashboard.sections.filter((section) =>
+          Object.prototype.hasOwnProperty.call(config.sections, section.key),
+        )
+      : dashboardState.dashboard.sections;
 
   return (
     <>
@@ -681,13 +683,12 @@ function DashboardSections({
         onSelect={(section) => setSelectedSectionKey(section.key)}
       />
       {role === "research-office" && (
-        <InstituteCountAnalytics studiesByInstitute={officeInstituteStudies} />
+        <InstituteCountAnalytics
+          instituteTotals={dashboardState.dashboard.institutional_overview}
+        />
       )}
       <div className="dashboard-visualizations">
-        <DashboardWorkloadChart
-          sections={visibleSections}
-          config={config}
-        />
+        <DashboardWorkloadChart sections={visibleSections} config={config} />
         {role !== "research-office" && dashboardState.dashboard.analytics && (
           <DashboardAnalytics analytics={dashboardState.dashboard.analytics} />
         )}
@@ -879,17 +880,19 @@ const INSTITUTE_CHART_TOP = 26;
 const INSTITUTE_CHART_BOTTOM = 48;
 
 function InstituteCountAnalytics({
-  studiesByInstitute,
+  instituteTotals,
 }: {
-  studiesByInstitute: OfficeInstituteStudies;
+  instituteTotals?: Array<{ institute: string; total: number }> | null;
 }) {
+  const totals = new Map(
+    (instituteTotals ?? []).map((item) => [item.institute, item.total]),
+  );
   const points = OFFICE_INSTITUTES.map((institute) => ({
     ...institute,
-    total: studiesByInstitute[institute.code]?.length ?? 0,
+    total: totals.get(institute.name) ?? 0,
   }));
-  const allUnavailable = OFFICE_INSTITUTES.every(
-    ({ code }) => studiesByInstitute[code] === null,
-  );
+  const unassignedTotal = totals.get("Unassigned / Other") ?? 0;
+  const allUnavailable = !instituteTotals;
   const maximum = Math.max(1, ...points.map((point) => point.total));
   const plotWidth =
     INSTITUTE_CHART_WIDTH - INSTITUTE_CHART_LEFT - INSTITUTE_CHART_RIGHT;
@@ -913,7 +916,8 @@ function InstituteCountAnalytics({
           <p>Live distribution based on archived ResearchNAV studies.</p>
         </div>
         <strong>
-          {points.reduce((sum, point) => sum + point.total, 0)} total
+          {points.reduce((sum, point) => sum + point.total, unassignedTotal)}{" "}
+          total
         </strong>
       </figcaption>
       {allUnavailable ? (

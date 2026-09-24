@@ -184,6 +184,45 @@ class DashboardTest extends TestCase
         $this->assertSame(1, $sections['pending_archiving']['total']);
     }
 
+    public function test_research_office_repository_total_matches_institute_analytics(): void
+    {
+        $office = $this->user('research-office');
+        $this->document([
+            'submission_status' => 'approved',
+            'archive_status' => 'archived',
+            'visibility' => 'public',
+            'institute' => 'Institute of Computer Studies',
+        ]);
+        $this->document([
+            'submission_status' => 'archived',
+            'archive_status' => 'archived',
+            'visibility' => 'registered_only',
+            'institute' => 'Institute of Health Sciences',
+        ]);
+        $this->document([
+            'submission_status' => 'archived',
+            'archive_status' => 'archived',
+            'visibility' => 'public',
+            'institute' => null,
+        ]);
+        $this->document([
+            'submission_status' => 'archived',
+            'archive_status' => 'archived',
+            'visibility' => 'private',
+            'institute' => 'Institute of Arts and Sciences',
+        ]);
+
+        $response = $this->dashboard($office)->assertOk();
+        $sections = $this->sections($response);
+        $overview = collect($response->json('data.institutional_overview'));
+
+        $this->assertSame(3, $sections['archived_repository']['total']);
+        $this->assertSame(3, $overview->sum('total'));
+        $this->assertSame(1, $overview->firstWhere('institute', 'Institute of Computer Studies')['total']);
+        $this->assertSame(1, $overview->firstWhere('institute', 'Institute of Health Sciences')['total']);
+        $this->assertSame(1, $overview->firstWhere('institute', 'Unassigned / Other')['total']);
+    }
+
     public function test_admin_aggregates_are_exact_and_unavailable_sections_remain_null(): void
     {
         $admin = $this->user('admin');

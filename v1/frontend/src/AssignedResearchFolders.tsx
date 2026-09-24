@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Folder, RefreshCw } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
+import { ArrowLeft, Check, ChevronDown, Folder, RefreshCw } from "lucide-react";
 import {
   assignOfficeRepresentative,
   getInternalResearch,
@@ -100,7 +100,13 @@ function AssignedResearchFoldersContent({
     [],
   );
   const [representativeId, setRepresentativeId] = useState("");
+  const [representativeMenuOpen, setRepresentativeMenuOpen] = useState(false);
+  const representativeMenuId = useId();
+  const representativeMenuRef = useRef<HTMLDivElement>(null);
+  const representativeTriggerRef = useRef<HTMLButtonElement>(null);
   const [representativeBusy, setRepresentativeBusy] = useState(false);
+  const [representativeLoading, setRepresentativeLoading] = useState(false);
+  const [representativeError, setRepresentativeError] = useState("");
   const [folderSearch, setFolderSearch] = useState("");
   const [instituteFilter, setInstituteFilter] = useState("");
   const [stageFilter, setStageFilter] = useState("");
@@ -109,6 +115,29 @@ function AssignedResearchFoldersContent({
     selectedRef.current = selected;
   }, [selected]);
 
+  useEffect(() => {
+    if (!representativeMenuOpen) return;
+
+    function closeRepresentativeMenu(event: MouseEvent) {
+      if (!representativeMenuRef.current?.contains(event.target as Node)) {
+        setRepresentativeMenuOpen(false);
+      }
+    }
+
+    function closeRepresentativeMenuOnEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setRepresentativeMenuOpen(false);
+      representativeTriggerRef.current?.focus();
+    }
+
+    document.addEventListener("mousedown", closeRepresentativeMenu);
+    document.addEventListener("keydown", closeRepresentativeMenuOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeRepresentativeMenu);
+      document.removeEventListener("keydown", closeRepresentativeMenuOnEscape);
+    };
+  }, [representativeMenuOpen]);
+
   function clearSelectedStudy() {
     setSelected("");
     setResearch(null);
@@ -116,7 +145,10 @@ function AssignedResearchFoldersContent({
     setTeam(null);
     setRepresentatives([]);
     setRepresentativeId("");
+    setRepresentativeMenuOpen(false);
     setRepresentativeBusy(false);
+    setRepresentativeLoading(false);
+    setRepresentativeError("");
     setLoadedId("");
   }
 
@@ -152,28 +184,52 @@ function AssignedResearchFoldersContent({
       getResearchPeople(selected),
     ])
       .then(async ([record, researchPeople]) => {
-        const officeData =
-          role === "research-office" && record.section_id != null
-            ? await Promise.all([
-                getOfficeProjectTeam(selected),
-                listOfficeRepresentativeCandidates(selected),
-              ])
-            : null;
-
         if (cancelled) return;
         setResearch(record);
         setPeople(researchPeople);
-        if (officeData) {
-          const [loadedTeam, officeRepresentatives] = officeData;
-          setTeam(loadedTeam);
-          setRepresentatives(officeRepresentatives);
-          setRepresentativeId(
-            loadedTeam.research_office_representative?.user_id ?? "",
-          );
+
+        if (role === "research-office" && record.section_id != null) {
+          setRepresentativeLoading(true);
+          setRepresentativeError("");
+          try {
+            const loadedTeam = await getOfficeProjectTeam(selected);
+            if (cancelled) return;
+            setTeam(loadedTeam);
+            setRepresentativeId(
+              loadedTeam.research_office_representative?.user_id ?? "",
+            );
+          } catch {
+            if (cancelled) return;
+            setTeam(null);
+            setRepresentativeId("");
+            setRepresentatives([]);
+            setRepresentativeLoading(false);
+            setLoadedId(selected);
+            setError("");
+            return;
+          }
+
+          try {
+            const officeRepresentatives =
+              await listOfficeRepresentativeCandidates(selected);
+            if (cancelled) return;
+            setRepresentatives(officeRepresentatives);
+            setRepresentativeError("");
+          } catch {
+            if (cancelled) return;
+            setRepresentatives([]);
+            setRepresentativeError(
+              "Active Research Office personnel could not be loaded. Retry opening this folder.",
+            );
+          } finally {
+            if (!cancelled) setRepresentativeLoading(false);
+          }
         } else {
           setTeam(null);
           setRepresentatives([]);
           setRepresentativeId("");
+          setRepresentativeError("");
+          setRepresentativeLoading(false);
         }
         setLoadedId(selected);
         setError("");
@@ -243,6 +299,18 @@ function AssignedResearchFoldersContent({
         : 0,
     );
 
+  const currentRepresentative = team?.research_office_representative ?? null;
+  const representativeOptions =
+    currentRepresentative &&
+    !representatives.some(
+      (person) => person.user_id === currentRepresentative.user_id,
+    )
+      ? [...representatives, currentRepresentative]
+      : representatives;
+  const selectedRepresentative = representativeOptions.find(
+    (person) => person.user_id === representativeId,
+  );
+
   const actorExtension =
     role !== "research-office" || !research ? undefined : research.section_id !=
       null ? (
@@ -258,31 +326,97 @@ function AssignedResearchFoldersContent({
           </div>
         </div>
         <div className="office-representative-control">
-          <label>
-            <span>Representative</span>
-            <select
-              value={representativeId}
-              onChange={(event) => setRepresentativeId(event.target.value)}
+          <div className="office-representative-field">
+            <span id={`${representativeMenuId}-label`}>Representative</span>
+            <div
+              className="office-representative-select"
+              ref={representativeMenuRef}
             >
-              <option value="">No representative assigned</option>
-              {representatives.map((person) => (
-                <option key={person.user_id} value={person.user_id}>
-                  {person.name} ({person.email})
-                </option>
-              ))}
-            </select>
-          </label>
+              <button
+                ref={representativeTriggerRef}
+                type="button"
+                aria-labelledby={`${representativeMenuId}-label`}
+                aria-haspopup="listbox"
+                aria-expanded={representativeMenuOpen}
+                aria-controls={representativeMenuId}
+                disabled={representativeLoading}
+                onClick={() => setRepresentativeMenuOpen((open) => !open)}
+              >
+                <span>
+                  {selectedRepresentative
+                    ? `${selectedRepresentative.name} (${selectedRepresentative.email})`
+                    : "No representative assigned"}
+                </span>
+                <ChevronDown aria-hidden="true" />
+              </button>
+              {representativeMenuOpen && (
+                <div
+                  className="office-representative-options"
+                  id={representativeMenuId}
+                  role="listbox"
+                  aria-labelledby={`${representativeMenuId}-label`}
+                >
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={representativeId === ""}
+                    onClick={() => {
+                      setRepresentativeId("");
+                      setRepresentativeMenuOpen(false);
+                    }}
+                  >
+                    <span>No representative assigned</span>
+                    {representativeId === "" && <Check aria-hidden="true" />}
+                  </button>
+                  {representativeOptions.map((person) => (
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={representativeId === person.user_id}
+                      key={person.user_id}
+                      onClick={() => {
+                        setRepresentativeId(person.user_id);
+                        setRepresentativeMenuOpen(false);
+                      }}
+                    >
+                      <span>{person.name} ({person.email})</span>
+                      {representativeId === person.user_id && (
+                        <Check aria-hidden="true" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
           <Button
             onClick={() => void saveRepresentative()}
             disabled={
               representativeBusy ||
-              representativeId ===
-                (team?.research_office_representative?.user_id ?? "")
+              representativeLoading ||
+              representativeId === (currentRepresentative?.user_id ?? "")
             }
           >
             {representativeBusy ? "Saving..." : "Save assignment"}
           </Button>
         </div>
+        {representativeLoading && (
+          <p className="project-empty-copy">Loading Research Office personnel…</p>
+        )}
+        {!representativeLoading && representativeError && (
+          <p className="project-empty-copy" role="alert">
+            {representativeError}
+          </p>
+        )}
+        {!representativeLoading &&
+          !representativeError &&
+          representativeOptions.length === 0 && (
+            <p className="project-empty-copy">
+              No active Research Office personnel found. Ask an administrator to
+              activate a research-office account before assigning a
+              representative.
+            </p>
+          )}
       </section>
     ) : (
       <p className="project-empty-copy">
@@ -417,6 +551,8 @@ function AssignedResearchFoldersContent({
                       selected={selected === String(item.id)}
                       onOpen={() => {
                         setRepresentativeBusy(false);
+                        setRepresentativeLoading(false);
+                        setRepresentativeError("");
                         setSelected(String(item.id));
                       }}
                     />

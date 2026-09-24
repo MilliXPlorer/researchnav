@@ -80,7 +80,43 @@ class RoleWorkspaceApiSecondTest extends TestCase
         $this->as($office)->getJson('/api/office/reports')
             ->assertOk()
             ->assertJsonPath('data.counts.total_users', 3)
-            ->assertJsonPath('data.counts.pending_archiving', 1);
+            ->assertJsonPath('data.counts.pending_archiving', 1)
+            ->assertJsonPath('data.counts.archived', 0);
+    }
+
+    public function test_office_report_logos_are_served_from_private_storage(): void
+    {
+        $office = $this->user(['role' => 'research-office']);
+
+        foreach (['college', 'research-publications'] as $logo) {
+            $this->as($office)
+                ->get('/api/office/reports/logos/'.$logo)
+                ->assertOk()
+                ->assertHeader('Content-Type', 'image/jpeg');
+        }
+
+        $this->as($office)
+            ->get('/api/office/reports/logos/unknown')
+            ->assertNotFound();
+    }
+
+    public function test_office_report_sections_are_rendered_as_pdfs(): void
+    {
+        $office = $this->user(['role' => 'research-office']);
+        $owner = $this->user(['role' => 'researcher']);
+        $this->document('approved', $owner, 'pending_archiving');
+
+        foreach (['academic-units', 'submission-status', 'sdgs'] as $section) {
+            $response = $this->as($office)->get('/api/office/reports/'.$section.'/pdf');
+
+            $response->assertOk()
+                ->assertHeader('Content-Type', 'application/pdf')
+                ->assertHeader('Cache-Control', 'no-store, private');
+            $this->assertStringStartsWith('%PDF-', $response->getContent());
+        }
+
+        $this->as($office)->get('/api/office/reports/unknown/pdf')->assertNotFound();
+        $this->as($owner)->get('/api/office/reports/academic-units/pdf')->assertForbidden();
     }
 
     public function test_coordinator_report_provides_scoped_study_details_for_count_drill_down(): void

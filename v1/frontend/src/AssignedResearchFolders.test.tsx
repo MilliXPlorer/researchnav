@@ -64,7 +64,20 @@ function assignedStudyFetch(input: RequestInfo | URL) {
           },
           reviewers: [
             { review_role: "adviser", name: "Prof. Mara Lim" },
+            { review_role: "research-office", name: "Rina Office" },
+            {
+              review_role: "panel",
+              designation: "panel_chair",
+              name: "Paolo Chair",
+            },
+            {
+              review_role: "panel",
+              designation: "panel_1",
+              name: "Pia Panelist",
+            },
+            { review_role: "research_editor", name: "Eddie Editor" },
             { review_role: "statistician", name: "Noel Reyes" },
+            { review_role: "librarian", name: "Libby Reyes" },
           ],
         },
       }),
@@ -166,6 +179,44 @@ describe("AssignedResearchFolders", () => {
       ).not.toBeInTheDocument();
     },
   );
+
+  it.each<Role>([
+    "adviser",
+    "instructor",
+    "panel",
+    "statistician",
+    "research_editor",
+    "librarian",
+  ])("shows every assigned team role in the shared %s workspace", async (role) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => assignedStudyFetch(input)),
+    );
+
+    render(<AssignedResearchFolders role={role} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Open research folder Coastal Resilience Study",
+      }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Research Team" }),
+    );
+
+    for (const name of [
+      "Dr. Lina Cruz",
+      "Prof. Mara Lim",
+      "Rina Office",
+      "Paolo Chair",
+      "Pia Panelist",
+      "Eddie Editor",
+      "Noel Reyes",
+      "Libby Reyes",
+    ]) {
+      expect(screen.getAllByText(name).length).toBeGreaterThan(0);
+    }
+  });
 
   it("moves from the full-width assigned study list to the workspace and back", async () => {
     vi.stubGlobal(
@@ -479,8 +530,13 @@ describe("AssignedResearchFolders", () => {
       await screen.findByRole("button", { name: "Research Team" }),
     );
 
-    const representative = await screen.findByLabelText("Representative");
-    fireEvent.change(representative, { target: { value: "rep-1" } });
+    const representative = await screen.findByRole("button", {
+      name: "Representative",
+    });
+    fireEvent.click(representative);
+    expect(representative).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(screen.getByRole("option", { name: /Taylor Lee/ }));
+    expect(representative).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(screen.getByRole("button", { name: "Save assignment" }));
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(

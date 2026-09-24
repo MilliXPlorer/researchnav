@@ -17,15 +17,6 @@ use Illuminate\Support\Facades\Schema;
 
 class ReportingService
 {
-    private const INSTITUTE_NAMES = [
-        'Institute of Health Sciences',
-        'Institute of Computer Studies',
-        'Institute of Business and Financial Management',
-        'Institute of Criminal Justice Education',
-        'Institute of Teacher Education',
-        'Institute of Arts and Sciences',
-    ];
-
     public function coordinatorProgram(?string $institute = null, ?string $program = null): array
     {
         $documents = ResearchDocument::query()
@@ -331,10 +322,19 @@ class ReportingService
     public function officeInstitutional(): array
     {
         $documents = ResearchDocument::query();
+        $repositoryDocuments = ResearchDocument::query()->inRepository();
         $instituteColumn = Schema::hasColumn('research_documents', 'institute')
             ? 'institute'
             : 'academic_unit';
         $instituteExpression = "COALESCE({$instituteColumn}, institution_name)";
+        $repositoryTotal = (clone $repositoryDocuments)->count();
+        $byInstitute = (clone $repositoryDocuments)
+            ->whereIn(DB::raw($instituteExpression), ResearchDocument::INSTITUTES)
+            ->selectRaw("{$instituteExpression} as institute, count(*) as total")
+            ->groupByRaw($instituteExpression)
+            ->get()
+            ->mapWithKeys(fn ($row) => [$row->institute => (int) $row->total]);
+        $assignedInstituteTotal = $byInstitute->sum();
 
         return [
             'schema_version' => 1,
@@ -342,19 +342,24 @@ class ReportingService
                 'total_users' => User::query()->count(),
                 'active_users' => User::query()->where('access_status', 'active')->count(),
                 'pending_archiving' => (clone $documents)->where('archive_status', 'pending_archiving')->count(),
-                'archived' => (clone $documents)->where('archive_status', 'archived')->count(),
+                'archived' => $repositoryTotal,
                 'flagged_similarity' => SimilarityResult::query()->latestPerPair()->where('adviser_review_required', true)->count(),
                 'audit_events' => AuditLog::query()->count(),
                 'evaluations_submitted' => Evaluation::query()->count(),
                 'methodology_signed_off' => MethodologyReview::query()->where(MethodologyReview::column('review_status'), 'signed_off')->count(),
             ],
-            'by_institute' => (clone $documents)
-                ->whereIn(DB::raw($instituteExpression), self::INSTITUTE_NAMES)
-                ->selectRaw("{$instituteExpression} as institute, count(*) as total")
-                ->groupByRaw($instituteExpression)
-                ->orderByDesc('total')
-                ->get()
-                ->map(fn ($row) => ['institute' => $row->institute, 'total' => (int) $row->total])
+            'by_institute' => collect(ResearchDocument::INSTITUTES)
+                ->map(fn (string $institute) => [
+                    'institute' => $institute,
+                    'total' => $byInstitute->get($institute, 0),
+                ])
+                ->when(
+                    $assignedInstituteTotal < $repositoryTotal,
+                    fn (Collection $rows) => $rows->push([
+                        'institute' => 'Unassigned / Other',
+                        'total' => $repositoryTotal - $assignedInstituteTotal,
+                    ])
+                )
                 ->all(),
             'by_status' => collect(ResearchDocument::SUBMISSION_STATUSES)
                 ->map(fn (string $status) => ['status' => $status, 'total' => (clone $documents)->where('submission_status', $status)->count()])

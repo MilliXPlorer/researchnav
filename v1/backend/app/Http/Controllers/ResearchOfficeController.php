@@ -9,6 +9,7 @@ use App\Models\DocumentFile;
 use App\Models\ResearchDocument;
 use App\Models\User;
 use App\Services\ComplianceService;
+use App\Services\InstitutionalPdfService;
 use App\Services\PrivateDocumentFileResolver;
 use App\Services\ReportingService;
 use App\Services\ResearchProjectTeamService;
@@ -16,6 +17,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Throwable;
 use ZipArchive;
@@ -120,6 +122,45 @@ class ResearchOfficeController extends DomainController
             ->header('Cache-Control', 'private, no-store');
     }
 
+    public function reportPdf(string $section, ReportingService $reports, InstitutionalPdfService $pdf)
+    {
+        $report = $reports->officeInstitutional();
+        [$title, $columns, $rows] = match ($section) {
+            'academic-units' => ['By academic unit', ['Academic unit', 'Records'], collect($report['by_institute'])->map(fn (array $row) => [$row['institute'], $row['total']])->all()],
+            'submission-status' => ['By submission status', ['Status', 'Records'], collect($report['by_status'])->map(fn (array $row) => [str($row['status'])->replace('_', ' ')->title()->toString(), $row['total']])->all()],
+            'sdgs' => ['By Sustainable Development Goal', ['Goal', 'Records'], collect($report['by_sdg'])->map(fn (array $row) => [$row['code'].' · '.$row['title'], $row['total']])->all()],
+            default => abort(404),
+        };
+        $total = collect($rows)->sum(fn (array $row) => (int) $row[1]);
+
+        return response($pdf->render($title, $columns, $rows, $total), 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'inline; filename="researchnav-'.$section.'-'.now()->format('Y-m-d').'.pdf"',
+            'Cache-Control' => 'private, no-store',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+    }
+
+    public function reportLogo(string $logo)
+    {
+        $filename = match ($logo) {
+            'college' => 'tcgc_logo.jpg',
+            'research-publications' => 'research_publications_logo.jpg',
+            default => null,
+        };
+
+        abort_if($filename === null, 404);
+
+        $path = 'logo/'.$filename;
+        abort_unless(Storage::disk('local')->exists($path), 404);
+
+        return response(Storage::disk('local')->get($path), 200, [
+            'Content-Type' => 'image/jpeg',
+            'Cache-Control' => 'private, max-age=3600',
+            'Content-Disposition' => 'inline; filename="'.$filename.'"',
+        ]);
+    }
+
     public function projectTeam(ResearchDocument $researchDocument, ResearchProjectTeamService $teams): JsonResponse
     {
         $section = $researchDocument->section()->firstOrFail();
@@ -172,8 +213,7 @@ class ResearchOfficeController extends DomainController
 
         $documents = ResearchDocument::query()
             ->with('sdgs')
-            ->where('submission_status', 'archived')
-            ->where('archive_status', 'archived')
+            ->inRepository()
             ->where('institute', $fullName)
             ->orderByDesc('publication_year')
             ->orderByDesc('title')

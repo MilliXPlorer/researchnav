@@ -11,6 +11,7 @@ use App\Models\SimilarityResult;
 use App\Models\TitleValidation;
 use App\Models\User;
 use App\Services\DomainAuthorization;
+use App\Services\ReportingService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -28,7 +29,7 @@ class DashboardController extends DomainController
         'updated_at',
     ];
 
-    public function index(Request $request): JsonResponse
+    public function index(Request $request, ReportingService $reports): JsonResponse
     {
         $actor = $this->actor($request);
         $effectiveRole = $actor->roleDefinition?->slug === 'research_editor' ? 'research_editor' : $actor->role;
@@ -54,6 +55,9 @@ class DashboardController extends DomainController
             'role' => $effectiveRole,
             'sections' => $sections,
             'analytics' => $this->analytics($actor),
+            'institutional_overview' => $effectiveRole === 'research-office'
+                ? $reports->officeInstitutional()['by_institute']
+                : null,
         ];
 
         return response()

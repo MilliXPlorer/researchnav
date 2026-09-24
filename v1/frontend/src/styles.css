@@ -496,6 +496,10 @@ p {
 }
 
 @media print {
+  @page {
+    size: A4 portrait;
+    margin: 1in;
+  }
   .lamp-bar,
   .shelf-rail,
   .mobile-tabs,
@@ -3403,48 +3407,6 @@ button[aria-expanded="true"] > .sidebar-nav-chevron {
   color: #8fb29d;
   font-size: 8px;
 }
-.shelf-profile-menu {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 10px);
-  z-index: 2;
-  min-width: 150px;
-  padding: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 10px;
-  background: #18382b;
-  box-shadow: 0 12px 30px rgba(3, 18, 12, 0.28);
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(5px);
-  transition:
-    opacity var(--dur) var(--ease-out),
-    transform var(--dur) var(--ease-out);
-}
-.shelf-profile-copy:hover .shelf-profile-menu,
-.shelf-profile-copy:focus-within .shelf-profile-menu {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateY(0);
-}
-.shelf-profile-menu button {
-  width: 100%;
-  padding: 8px 9px;
-  border: 0;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--paper);
-  background: transparent;
-  font-size: 10px;
-  text-align: left;
-  cursor: pointer;
-}
-.shelf-profile-menu button:hover,
-.shelf-profile-menu button:focus-visible {
-  background: rgba(255, 255, 255, 0.1);
-}
 .workspace {
   min-height: calc(100vh - 64px);
 }
@@ -3738,19 +3700,104 @@ button[aria-expanded="true"] > .sidebar-nav-chevron {
   gap: 12px;
 }
 
-.office-representative-control label,
-.office-representative-control label span {
+.office-representative-field {
   display: grid;
   gap: 6px;
+  min-width: 0;
 }
 
-.office-representative-control select {
+.office-representative-select {
+  position: relative;
+  min-width: 0;
+}
+
+.office-representative-select > button {
+  display: flex;
   width: 100%;
   min-height: 42px;
-  padding: 0 12px;
+  padding: 0 10px 0 12px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+}
+
+.office-representative-select > button > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.office-representative-select > button svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.office-representative-select > button:focus-visible {
+  border-color: var(--fern);
+  outline: 0;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fern) 18%, transparent);
+}
+
+.office-representative-options {
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--paper);
+  box-shadow: 0 12px 28px rgba(16, 32, 25, 0.14);
+}
+
+.office-representative-options button {
+  display: flex;
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--slate);
+  font: inherit;
+  text-align: left;
+}
+
+.office-representative-options button:hover,
+.office-representative-options button:focus-visible {
+  background: var(--mist);
+  color: var(--ink);
+  outline: 0;
+}
+
+.office-representative-options button[aria-selected="true"] {
+  background: var(--fern-soft);
+  color: var(--canopy);
+}
+
+.office-representative-options button span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.office-representative-options button svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
 }
 
 .study-list-controls {
@@ -12399,5 +12446,125 @@ td strong {
   .coordinator-print-area th {
     border-bottom: 2px solid #214c38;
     color: #214c38;
+  }
+  .office-report-print-area {
+    position: relative;
+    width: auto;
+    margin-right: 1in;
+    margin-left: 1in;
+    min-height: calc(11.69in - 2in);
+    padding: 0 0 0.25in;
+    color: #111;
+    font-family: Arial, sans-serif;
+    font-size: 8pt;
+  }
+  .office-report-print-browser-line {
+    margin: 5mm 0 9mm;
+    padding-left: 3mm;
+    color: #555;
+    font-family: Arial, sans-serif;
+    font-size: 7pt;
+  }
+  .office-report-print-browser-line a {
+    color: inherit;
+    text-decoration: none;
+  }
+  .office-report-letterhead {
+    min-height: 60px;
+    padding: 0 0 5mm;
+    border-bottom: 1 solid #777;
+    font-family: Arial, sans-serif;
+    text-align: center;
+  }
+  .office-report-letterhead-inner {
+    display: inline-grid;
+    grid-template-columns: 62px auto 62px;
+    align-items: center;
+    gap: 10px;
+    margin: 0 auto;
+  }
+  .office-report-letterhead img {
+    display: block;
+    width: 60px;
+    height: 60px;
+    object-fit: contain;
+  }
+  .office-report-letterhead p {
+    margin: 0;
+    color: #222;
+    font-size: 8pt;
+    line-height: 1.35;
+  }
+  .office-report-letterhead h1 {
+    margin: 0 0 3px;
+    color: #111;
+    font-family: Arial, sans-serif;
+    font-size: 14pt;
+    font-weight: 700;
+    line-height: 1.15;
+  }
+  .office-report-print-title {
+    padding: 4mm 0 5mm;
+    text-align: center;
+  }
+  .office-report-print-title h2 {
+    margin: 0 0 5px;
+    color: #111;
+    font-family: Arial, sans-serif;
+    font-size: 11pt;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+  .office-report-print-title p,
+  .office-report-print-title small {
+    display: block;
+    margin: 0;
+    color: #444;
+    line-height: 1.45;
+    font-size: 7.5pt;
+  }
+  .office-report-print-area section {
+    margin: 0;
+  }
+  .office-report-print-area th:last-child,
+  .office-report-print-area td:last-child {
+    width: 80px;
+    text-align: right;
+  }
+  .office-report-print-area table {
+    border-top: 0;
+    table-layout: auto;
+  }
+  .office-report-print-area th,
+  .office-report-print-area td {
+    padding: 5px 4px;
+    border: 0;
+    border-bottom: 0.5px solid #d2d2d2;
+    color: #111;
+  }
+  .office-report-print-area th {
+    border-top: 1px solid #777;
+    border-bottom: 1px solid #777;
+    font-size: 7.25pt;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+  .office-report-print-area tbody tr {
+    background: transparent;
+    break-inside: auto;
+  }
+  .office-report-print-footer {
+    position: absolute;
+    right: 0;
+    bottom: -0.2in;
+    color: #444;
+    font-family: Arial, sans-serif;
+    font-size: 7pt;
+    text-align: right;
+  }
+  .office-report-print-footer a {
+    color: inherit;
+    text-decoration: none;
   }
 }
