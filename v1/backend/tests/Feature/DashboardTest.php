@@ -376,9 +376,42 @@ class DashboardTest extends TestCase
         }
     }
 
+    public function test_coordinator_dashboard_does_not_publish_misleading_research_analytics(): void
+    {
+        $this->document(['created_at' => now()]);
+
+        $this->dashboard($this->user('coordinator'))
+            ->assertOk()
+            ->assertJsonPath('data.analytics', null);
+    }
+
+    public function test_research_office_analytics_include_all_research_activity(): void
+    {
+        Carbon::setTestNow('2026-08-22 12:00:00');
+        try {
+            $this->document([
+                'submission_status' => 'archived',
+                'archive_status' => 'archived',
+                'created_at' => '2026-08-05 10:00:00',
+            ]);
+
+            $analytics = $this->dashboard($this->user('research-office'))
+                ->assertOk()
+                ->json('data.analytics');
+
+            $this->assertSame(1, $analytics['series'][0]['points'][5]['value']);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
     private function user(string $role, string $accessStatus = 'active'): User
     {
-        return User::factory()->create(['role' => $role, 'access_status' => $accessStatus]);
+        return User::factory()->create([
+            'role' => $role,
+            'access_status' => $accessStatus,
+            'institute' => $role === 'coordinator' ? 'Institute of Computer Studies' : null,
+        ]);
     }
 
     private function document(array $attributes = []): ResearchDocument

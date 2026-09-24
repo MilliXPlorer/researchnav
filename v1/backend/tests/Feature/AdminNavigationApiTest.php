@@ -18,6 +18,24 @@ class AdminNavigationApiTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_administrator_can_list_configured_institutes_and_assign_one_to_a_user(): void
+    {
+        $admin = $this->user(['role' => 'admin', 'access_status' => 'active']);
+        $target = $this->user();
+
+        $this->as($admin)->getJson('/api/admin/institutes')
+            ->assertOk()
+            ->assertJsonCount(6, 'data');
+
+        $this->as($admin)->patchJson('/api/admin/users/'.$target->id, [
+            'institute' => 'Institute of Computer Studies',
+        ], $this->origin())
+            ->assertOk()
+            ->assertJsonPath('data.institute', 'Institute of Computer Studies');
+
+        $this->assertSame('Institute of Computer Studies', $target->fresh()->institute);
+    }
+
     public function test_admin_navigation_requires_an_active_administrator_with_an_active_canonical_role(): void
     {
         $this->getJson('/api/admin/users')
@@ -62,7 +80,7 @@ class AdminNavigationApiTest extends TestCase
 
         $entry = $response->json('data.0');
         $this->assertSame([
-            'id', 'email', 'student_employee_id', 'names', 'role', 'access_status', 'is_admin',
+            'id', 'email', 'student_employee_id', 'names', 'role', 'institute', 'access_status', 'is_admin',
             'invitation_sent_at', 'confirmed_at', 'last_login_at', 'created_at', 'updated_at',
         ], array_keys($entry));
         $this->assertArrayNotHasKey('google_sub', $entry);
@@ -377,10 +395,25 @@ class AdminNavigationApiTest extends TestCase
             ->assertHeader('Cache-Control', 'no-store, private')
             ->assertExactJson(['users' => []]);
 
-        $this->as($admin)->postJson('/api/admin/coordinators', ['email' => 'coordinator@example.edu'], $this->origin())
+        $this->as($admin)->postJson('/api/admin/coordinators', [
+            'email' => 'coordinator@example.edu',
+            'institute' => 'Institute of Computer Studies',
+        ], $this->origin())
             ->assertCreated()
             ->assertJsonPath('user.role', 'coordinator');
         $this->assertDatabaseHas('audit_logs', ['user_id' => $admin->id, 'action' => 'COORDINATOR_PROVISIONED']);
+    }
+
+    public function test_coordinator_provisioning_requires_a_configured_institute(): void
+    {
+        $admin = $this->user(['role' => 'admin', 'access_status' => 'active']);
+
+        $this->as($admin)->postJson('/api/admin/coordinators', ['email' => 'coordinator@example.edu'], $this->origin())
+            ->assertBadRequest();
+        $this->as($admin)->postJson('/api/admin/coordinators', [
+            'email' => 'coordinator@example.edu',
+            'institute' => 'Unknown Institute',
+        ], $this->origin())->assertBadRequest();
     }
 
     public function test_administrator_can_provision_and_list_supported_account_roles(): void
@@ -505,6 +538,7 @@ class AdminNavigationApiTest extends TestCase
             'adviser',
         ], $response->json('data.*.role'));
     }
+
     public function test_users_listing_can_sort_by_access_status_ascending(): void
     {
         $admin = $this->user([

@@ -37,6 +37,7 @@ import type {
 } from "./researchWorkspaceRoute";
 import type { Role } from "./types";
 import { SdgBadges } from "./SdgMetadata";
+import DefenseTeamRoster from "./DefenseTeamRoster";
 
 type WorkspaceTab = ResearchWorkspaceTab;
 
@@ -219,27 +220,28 @@ export default function StudyWorkspace({
   const [defenseTeamStage, setDefenseTeamStage] = useState<
     "proposal" | "final"
   >("proposal");
+  const currentTeam = projectTeam;
   // Review-assignment contacts describe the proposal-stage setup. Once a
   // stage-specific team is loaded, the final defense view must reflect only
   // what was actually assigned for final (Unassigned until the instructor
   // assigns it) instead of mirroring the proposal contacts.
   const fallbackPeople =
-    projectTeam != null && defenseTeamStage === "final" ? undefined : people;
+    currentTeam != null && defenseTeamStage === "final" ? undefined : people;
   const instructorName =
-    projectTeam?.instructor?.name ??
+    currentTeam?.instructor?.name ??
     fallbackPeople?.section?.instructor_name ??
     null;
   const adviserName =
-    projectTeam?.adviser?.name ?? reviewerName(fallbackPeople, "adviser");
+    currentTeam?.adviser?.name ?? reviewerName(fallbackPeople, "adviser");
   const editorName =
-    projectTeam?.support_assignments.editor?.name ??
+    currentTeam?.support_assignments.editor?.name ??
     reviewerName(fallbackPeople, "research_editor") ??
     reviewerName(fallbackPeople, "editor");
   const statisticianName =
-    projectTeam?.support_assignments.statistician?.name ??
+    currentTeam?.support_assignments.statistician?.name ??
     reviewerName(fallbackPeople, "statistician");
   const librarianName =
-    projectTeam?.support_assignments.librarian?.name ??
+    currentTeam?.support_assignments.librarian?.name ??
     reviewerName(fallbackPeople, "librarian");
   const fallbackPanelNames =
     fallbackPeople?.reviewers
@@ -249,22 +251,22 @@ export default function StudyWorkspace({
           reviewer.designation !== "panel_chair",
       )
       .map((reviewer) => reviewer.name) ?? [];
-  const panelNames = projectTeam?.panel_members.length
-    ? projectTeam.panel_members.map((member) => member.name)
+  const panelNames = currentTeam?.panel_members.length
+    ? currentTeam.panel_members.map((member) => member.name)
     : fallbackPanelNames;
   const representativeName =
-    projectTeam?.research_office_representative?.name ??
+    currentTeam?.research_office_representative?.name ??
     reviewerName(fallbackPeople, "research-office") ??
     reviewerName(fallbackPeople, "research_office_representative");
   const chairName =
-    projectTeam?.chair?.name ??
+    currentTeam?.chair?.name ??
     fallbackPeople?.reviewers.find(
       (reviewer) =>
         reviewer.review_role === "panel" &&
         reviewer.designation === "panel_chair",
     )?.name ??
     reviewerName(fallbackPeople, "chair");
-  const readinessAvailable = projectTeam != null;
+  const readinessAvailable = currentTeam != null;
   const folderOptions = [
     ...folders,
     ...(files.some((file) => !file.relative_path) ? ["Unfiled"] : []),
@@ -541,7 +543,9 @@ export default function StudyWorkspace({
               </ul>
             )}
           </section>
-          {teamLoading ? (
+          {!controls?.onDefenseTeamStageChange && !projectTeam ? (
+            <DefenseTeamRoster researchDocumentId={researchDocumentId} people={people ?? { section: null, reviewers: [] }} />
+          ) : teamLoading ? (
             <WorkspaceLoading label="Loading current team assignments" />
           ) : (
             <>
@@ -575,12 +579,12 @@ export default function StudyWorkspace({
                       {readinessAvailable && (
                         <span
                           className={
-                            projectTeam.pre_defense_ready
+                             currentTeam!.pre_defense_ready
                               ? "status-dot is-ready"
                               : "status-dot"
                           }
                         >
-                          {projectTeam.pre_defense_ready ? "Ready" : "Incomplete"}
+                           {currentTeam!.pre_defense_ready ? "Ready" : "Incomplete"}
                         </span>
                       )}
                     </div>
@@ -609,12 +613,12 @@ export default function StudyWorkspace({
                       {readinessAvailable && (
                         <span
                           className={
-                            projectTeam.post_defense_ready
+                             currentTeam!.post_defense_ready
                               ? "status-dot is-ready"
                               : "status-dot"
                           }
                         >
-                          {projectTeam.post_defense_ready ? "Ready" : "Incomplete"}
+                           {currentTeam!.post_defense_ready ? "Ready" : "Incomplete"}
                         </span>
                       )}
                     </div>
@@ -649,12 +653,12 @@ export default function StudyWorkspace({
                       {readinessAvailable && (
                         <span
                           className={
-                            projectTeam.pre_defense_ready
+                             currentTeam!.pre_defense_ready
                               ? "status-dot is-ready"
                               : "status-dot"
                           }
                         >
-                          {projectTeam.pre_defense_ready ? "Ready" : "Incomplete"}
+                           {currentTeam!.pre_defense_ready ? "Ready" : "Incomplete"}
                         </span>
                       )}
                     </div>
@@ -683,12 +687,12 @@ export default function StudyWorkspace({
                       {readinessAvailable && (
                         <span
                           className={
-                            projectTeam.post_defense_ready
+                             currentTeam!.post_defense_ready
                               ? "status-dot is-ready"
                               : "status-dot"
                           }
                         >
-                          {projectTeam.post_defense_ready ? "Ready" : "Incomplete"}
+                           {currentTeam!.post_defense_ready ? "Ready" : "Incomplete"}
                         </span>
                       )}
                     </div>

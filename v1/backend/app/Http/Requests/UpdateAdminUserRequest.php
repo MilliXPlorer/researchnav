@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Models\ResearchDocument;
 use App\Models\User;
 use App\Models\UserRole;
 use Illuminate\Foundation\Http\FormRequest;
@@ -10,7 +11,7 @@ use Illuminate\Validation\Validator;
 
 class UpdateAdminUserRequest extends FormRequest
 {
-    private const ALLOWED_FIELDS = ['role', 'access_status'];
+    private const ALLOWED_FIELDS = ['role', 'access_status', 'institute'];
 
     public function authorize(): bool
     {
@@ -22,6 +23,7 @@ class UpdateAdminUserRequest extends FormRequest
         return [
             'role' => ['sometimes', 'string', Rule::in([...User::LEGACY_ROLES, UserRole::RESEARCH_EDITOR])],
             'access_status' => ['sometimes', 'string', Rule::in(User::ACCESS_STATUSES)],
+            'institute' => ['sometimes', 'nullable', 'string', Rule::in(ResearchDocument::INSTITUTES)],
         ];
     }
 
@@ -36,6 +38,13 @@ class UpdateAdminUserRequest extends FormRequest
 
             if (! $this->hasAny(self::ALLOWED_FIELDS)) {
                 $validator->errors()->add('request', 'At least one mutable field is required.');
+            }
+
+            $target = $this->route('user') ? User::query()->find($this->route('user')) : null;
+            $role = $this->input('role', $target?->role);
+            $institute = $this->exists('institute') ? $this->input('institute') : $target?->institute;
+            if ($role === 'coordinator' && ! in_array($institute, ResearchDocument::INSTITUTES, true)) {
+                $validator->errors()->add('institute', 'A valid institute is required for coordinator accounts.');
             }
         });
     }

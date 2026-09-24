@@ -94,6 +94,9 @@ class ResearchProjectTeamService
     ): array
     {
         $this->assertNested($section, $document);
+        if (! in_array($defenseType, ['proposal', 'final'], true)) {
+            throw new ApiValidationException(['defense_type' => ['Unknown defense type.']]);
+        }
         $members = ResearchProjectTeamMember::query()
             ->with('user')
             ->where('research_document_id', $document->id)

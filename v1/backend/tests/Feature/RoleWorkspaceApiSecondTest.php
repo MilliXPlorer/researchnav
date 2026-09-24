@@ -121,7 +121,7 @@ class RoleWorkspaceApiSecondTest extends TestCase
 
     public function test_coordinator_report_provides_scoped_study_details_for_count_drill_down(): void
     {
-        $coordinator = $this->user(['role' => 'coordinator']);
+        $coordinator = $this->user(['role' => 'coordinator', 'institute' => 'Institute of Computer Studies']);
         $owner = $this->user(['role' => 'researcher']);
         $visible = $this->document('revision_required', $owner);
         $visible->update(['institute' => 'Institute of Computer Studies', 'degree_program' => 'Bachelor of Science in Computer Science']);
@@ -153,7 +153,7 @@ class RoleWorkspaceApiSecondTest extends TestCase
         $this->assertDatabaseHas('research_review_assignments', ['research_document_id' => $document->id, 'reviewer_id' => $panelist->id, 'review_role' => 'panel', 'is_active' => true]);
         $this->assertDatabaseHas('research_review_assignments', ['research_document_id' => $document->id, 'reviewer_id' => $statistician->id, 'review_role' => 'statistician', 'is_active' => true]);
 
-        $coordinator = $this->user(['role' => 'coordinator']);
+        $coordinator = $this->user(['role' => 'coordinator', 'institute' => 'Institute of Computer Studies']);
         $this->as($coordinator)->putJson('/api/research/'.$document->id.'/reviewers', [
             'reviewers' => [['reviewer_id' => $panelist->id, 'review_role' => 'panel']],
         ], $this->origin())->assertForbidden();

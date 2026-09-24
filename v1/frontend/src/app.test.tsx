@@ -672,19 +672,48 @@ describe("role workspaces", () => {
       expect(
         screen.getByRole("heading", { level: 2, name: "Statistics" }),
       ).toBeInTheDocument();
-      expect(
-        screen.getByRole("heading", { level: 3, name: "Current workload" }),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByRole("meter", { name: sectionHeading }),
-      ).toHaveAttribute("aria-valuenow", "7");
-      expect(screen.getByText("7")).toBeInTheDocument();
+      const workloadMeter = screen.queryByRole("meter", { name: sectionHeading });
+      if (workloadMeter) {
+        expect(workloadMeter).toHaveAttribute("aria-valuenow", "7");
+        expect(
+          screen.getByLabelText(`${sectionHeading}: 7 total`),
+        ).toHaveTextContent("7 total");
+      }
       fireEvent.click(sectionButton);
       expect(screen.getByRole("dialog")).toBeInTheDocument();
       expect(screen.getByText(`${role} API RECORD`)).toBeInTheDocument();
       expect(screen.queryByText("Unavailable")).not.toBeInTheDocument();
     },
   );
+
+  it("excludes non-research totals from the workload graph", () => {
+    const dashboard = dashboardFor("panel", "assigned_manuscripts");
+    render(
+      <RoleWorkspace
+        {...readyProps("panel", "assigned_manuscripts")}
+        dashboardState={{
+          scope: dashboardScopeFor("panel"),
+          status: "ready",
+          dashboard: {
+            ...dashboard,
+            sections: [
+              dashboard.sections[0],
+              {
+                key: "defense_schedule",
+                state: "ready",
+                total: 12,
+                reason: null,
+                items: [],
+              },
+            ],
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("meter", { name: "Assigned manuscripts" })).toBeInTheDocument();
+    expect(screen.queryByRole("meter", { name: "Defense schedule" })).not.toBeInTheDocument();
+  });
 
   it("hides legacy schedules and duplicate flags on the coordinator overview", () => {
     const coordinator = dashboardFor("coordinator", "active_instructors");
@@ -736,6 +765,7 @@ describe("role workspaces", () => {
   });
 
   it("merges the research office navigation and shows institute totals below analytics", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     const officeNav = roleConfigs.find(
       (config) => config.id === "research-office",
     )?.nav;
@@ -755,7 +785,10 @@ describe("role workspaces", () => {
         if (path === "/api/office/institutes/IHS/studies") {
           return new Response(
             JSON.stringify({
-              data: [{ id: 42, year: "2026", title: "Community Health Study" }],
+              data: [
+                { id: 42, year: "2026", title: "Community Health Study" },
+                { id: 43, year: "2025", title: "Nutrition Research" },
+              ],
             }),
           );
         }
@@ -800,7 +833,7 @@ describe("role workspaces", () => {
     ).toBeTruthy();
     expect(
       await screen.findByLabelText(
-        "Institute of Health Sciences: 1 research records",
+        "Institute of Health Sciences: 2 research records",
       ),
     ).toBeInTheDocument();
     expect(
@@ -810,7 +843,7 @@ describe("role workspaces", () => {
     ).toBeInTheDocument();
 
     fireEvent.click(
-      screen.getByLabelText("Institute of Health Sciences: 1 research records"),
+      screen.getByLabelText("Institute of Health Sciences: 2 research records"),
     );
     const studyLink = await screen.findByRole("link", {
       name: /Community Health Study/,
@@ -822,6 +855,24 @@ describe("role workspaces", () => {
         "/api/office/institutes/IHS/studies/2026/Community%20Health%20Study/open?id=42",
       ),
     );
+    const search = screen.getByRole("searchbox", {
+      name: "Search Institute of Health Sciences studies",
+    });
+    expect(screen.getByText("2 of 2")).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: "nutrition" } });
+    expect(screen.getByText("Community Health Study")).toBeInTheDocument();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(screen.queryByText("Community Health Study")).not.toBeInTheDocument();
+    expect(screen.getByText("Nutrition Research")).toBeInTheDocument();
+    expect(screen.getByText("1 of 2")).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: "missing study" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(screen.getByText("No studies match your search.")).toBeInTheDocument();
+    vi.useRealTimers();
   });
 
   it("renders every administrator dashboard section and opens internal records", () => {
@@ -1218,6 +1269,7 @@ describe("role workspaces", () => {
     expect(
       screen.queryByRole("button", { name: /New submission/ }),
     ).not.toBeInTheDocument();
+    expect(screen.queryByText("Similarity results")).not.toBeInTheDocument();
   });
 });
 

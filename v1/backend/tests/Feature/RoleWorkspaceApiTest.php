@@ -35,7 +35,11 @@ class RoleWorkspaceApiTest extends TestCase
             $this->as($this->user(['role' => 'researcher']))->{$method.'Json'}($path)
                 ->assertForbidden()
                 ->assertExactJson(['error' => 'ROLE_NOT_AUTHORIZED']);
-            $this->as($this->user(['role' => $role]))->{$method.'Json'}($path)->assertOk();
+            $attributes = ['role' => $role];
+            if ($role === 'coordinator') {
+                $attributes['institute'] = 'Institute of Computer Studies';
+            }
+            $this->as($this->user($attributes))->{$method.'Json'}($path)->assertOk();
         }
 
         $this->as($this->user(['role' => 'adviser', 'access_status' => 'invited']))->getJson('/api/adviser/advisees')
@@ -45,8 +49,9 @@ class RoleWorkspaceApiTest extends TestCase
 
     public function test_coordinator_schedules_can_be_created_listed_and_resolved(): void
     {
-        $coordinator = $this->user(['role' => 'coordinator']);
+        $coordinator = $this->user(['role' => 'coordinator', 'institute' => 'Institute of Computer Studies']);
         $research = $this->document('draft');
+        $research->update(['institute' => 'Institute of Computer Studies']);
         $future = now()->addDays(3)->toISOString();
 
         $this->as($coordinator)->getJson('/api/coordinator/schedules')

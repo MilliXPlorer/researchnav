@@ -11,49 +11,51 @@ use App\Models\ResearchDocument;
 use App\Models\ReviewAssignment;
 use App\Models\SimilarityResult;
 use App\Models\User;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 class ReportingService
 {
-    public function coordinatorProgram(?string $institute = null, ?string $program = null): array
+    public function __construct(private readonly CoordinatorInstituteScope $coordinatorScope) {}
+
+    public function coordinatorProgram(User $actor, ?string $program = null): array
     {
-        $documents = ResearchDocument::query()
-            ->when($institute !== null && trim($institute) !== '', fn ($query) => $query->where('institute', trim($institute)))
+        $institute = $this->coordinatorScope->institute($actor);
+        $documents = $this->coordinatorScope->documents($actor)
             ->when($program !== null && trim($program) !== '', fn ($query) => $query->where('degree_program', trim($program)));
-        $filtered = $institute !== null && trim($institute) !== ''
-            || $program !== null && trim($program) !== '';
+        $users = $this->coordinatorScope->users($actor);
 
         return [
             'schema_version' => 1,
             'filters' => [
-                'institute' => $filtered ? ($institute !== null && trim($institute) !== '' ? trim($institute) : null) : null,
+                'institute' => $institute,
                 'program' => $program !== null && trim($program) !== '' ? trim($program) : null,
             ],
             'counts' => [
-                'active_instructors' => User::query()->where('role', 'instructor')->where('access_status', 'active')->count(),
-                'active_advisers' => User::query()->where('role', 'adviser')->where('access_status', 'active')->count(),
-                'active_researchers' => $filtered
-                    ? DB::table('research_authors')
-                        ->whereIn('research_document_id', (clone $documents)->select('id'))
-                        ->whereNotNull('user_id')
-                        ->distinct()
-                        ->count('user_id')
-                    : User::query()->where('role', 'researcher')->where('access_status', 'active')->count(),
+                'active_instructors' => (clone $users)->where('role', 'instructor')->where('access_status', 'active')->count(),
+                'active_advisers' => (clone $users)->where('role', 'adviser')->where('access_status', 'active')->count(),
+                'active_researchers' => DB::table('research_authors')
+                    ->whereIn('research_document_id', (clone $documents)->select('id'))
+                    ->whereNotNull('user_id')
+                    ->whereIn('user_id', (clone $users)->select('id'))
+                    ->distinct()
+                    ->count('user_id'),
                 'draft' => (clone $documents)->where('submission_status', 'draft')->count(),
                 'submitted' => (clone $documents)->where('submission_status', 'submitted')->count(),
                 'under_review' => (clone $documents)->where('submission_status', 'under_review')->count(),
                 'revision_required' => (clone $documents)->where('submission_status', 'revision_required')->count(),
                 'approved' => (clone $documents)->where('submission_status', 'approved')->count(),
                 'archived' => (clone $documents)->where('submission_status', 'archived')->count(),
-                'flagged_similarity' => SimilarityResult::query()->latestPerPair()->where('adviser_review_required', true)->count(),
-                'defenses_scheduled' => DefenseSchedule::query()->where('status', 'scheduled')->count(),
-                'defenses_completed' => DefenseSchedule::query()->where('status', 'completed')->count(),
-                'evaluations_submitted' => Evaluation::query()->count(),
-                'methodology_signed_off' => MethodologyReview::query()->where(MethodologyReview::column('review_status'), 'signed_off')->count(),
+                'flagged_similarity' => $this->similarityQuery($documents)->count(),
+                'defenses_scheduled' => DefenseSchedule::query()->where('status', 'scheduled')->whereIn('research_document_id', (clone $documents)->select('id'))->count(),
+                'defenses_completed' => DefenseSchedule::query()->where('status', 'completed')->whereIn('research_document_id', (clone $documents)->select('id'))->count(),
+                'evaluations_submitted' => Evaluation::query()->whereIn(Evaluation::column('research_document_id'), (clone $documents)->select('id'))->count(),
+                'methodology_signed_off' => MethodologyReview::query()->whereIn(MethodologyReview::column('research_document_id'), (clone $documents)->select('id'))->where(MethodologyReview::column('review_status'), 'signed_off')->count(),
             ],
             'by_section' => ClassSection::query()
+                ->whereIn('id', (clone $documents)->whereNotNull('section_id')->select('section_id'))
                 ->withCount(['researchDocuments' => function ($query) use ($institute, $program): void {
                     if ($institute !== null && trim($institute) !== '') {
                         $query->where('institute', trim($institute));
@@ -71,20 +73,20 @@ class ReportingService
                 ])
                 ->all(),
             'instructors' => $this->scopedInstructors($documents),
-            'adviser_load' => $this->adviserLoad(),
+            'adviser_load' => $this->adviserLoad($actor, $documents),
             'studies' => $this->scopedStudies($documents),
-            'researchers' => $this->scopedResearchers($documents),
-            'defense_schedules' => $this->recentDefenseSchedules(),
-            'evaluations' => $this->recentEvaluations(),
-            'methodology_reviews' => $this->recentMethodologySignoffs(),
-            'active_instructors_list' => $this->activePeople('instructor'),
-            'active_advisers_list' => $this->activePeople('adviser'),
+            'researchers' => $this->scopedResearchers($documents, $users),
+            'defense_schedules' => $this->recentDefenseSchedules($documents),
+            'evaluations' => $this->recentEvaluations($documents),
+            'methodology_reviews' => $this->recentMethodologySignoffs($documents),
+            'active_instructors_list' => $this->activePeople('instructor', $users),
+            'active_advisers_list' => $this->activePeople('adviser', $users),
         ];
     }
 
-    private function activePeople(string $role): array
+    private function activePeople(string $role, $users): array
     {
-        return User::query()
+        return (clone $users)
             ->where('role', $role)
             ->where('access_status', 'active')
             ->orderBy('first_name')
@@ -123,7 +125,7 @@ class ReportingService
     }
 
     /** @return list<array<string, mixed>> */
-    private function scopedResearchers($documents): array
+    private function scopedResearchers($documents, $users): array
     {
         $authorCounts = DB::table('research_authors')
             ->whereIn('research_document_id', (clone $documents)->select('id'))
@@ -134,14 +136,14 @@ class ReportingService
         if ($authorCounts->isEmpty()) {
             return [];
         }
-        $users = User::query()
+        $researchers = (clone $users)
             ->whereIn('id', $authorCounts->keys()->all())
             ->orderBy('first_name')
             ->orderBy('last_name')
             ->limit(300)
             ->get(['id', 'first_name', 'middle_name', 'last_name', 'email']);
 
-        return $users
+        return $researchers
             ->map(fn (User $user) => [
                 'user_id' => (string) $user->id,
                 'name' => $user->displayName(),
@@ -152,9 +154,10 @@ class ReportingService
     }
 
     /** @return list<array<string, mixed>> */
-    private function recentDefenseSchedules(): array
+    private function recentDefenseSchedules($documents): array
     {
         return DefenseSchedule::query()
+            ->whereIn('research_document_id', (clone $documents)->select('id'))
             ->with('researchDocument:id,title,research_stage,submission_status')
             ->latest('scheduled_at')
             ->limit(200)
@@ -172,13 +175,14 @@ class ReportingService
     }
 
     /** @return list<array<string, mixed>> */
-    private function recentEvaluations(): array
+    private function recentEvaluations($documents): array
     {
         // In finalized installations evaluations live in research_reviews,
         // which uses reviewed_at instead of the legacy submitted_at column.
         $finalStorage = (new Evaluation)->usesFinalStorage();
 
         return Evaluation::query()
+            ->whereIn(Evaluation::column('research_document_id'), (clone $documents)->select('id'))
             ->with('researchDocument:id,title')
             ->when(! $finalStorage, fn ($query) => $query->with('panelist:id,first_name,middle_name,last_name'))
             ->latest($finalStorage ? 'reviewed_at' : 'submitted_at')
@@ -192,18 +196,19 @@ class ReportingService
                 'methodology' => $finalStorage ? null : $evaluation->methodology,
                 'clarity' => $finalStorage ? null : $evaluation->clarity,
                 'submitted_at' => $finalStorage
-                    ? ($evaluation->reviewed_at ? \Illuminate\Support\Carbon::parse($evaluation->reviewed_at)->toISOString() : null)
+                    ? ($evaluation->reviewed_at ? Carbon::parse($evaluation->reviewed_at)->toISOString() : null)
                     : $evaluation->submitted_at?->toISOString(),
             ])
             ->all();
     }
 
     /** @return list<array<string, mixed>> */
-    private function recentMethodologySignoffs(): array
+    private function recentMethodologySignoffs($documents): array
     {
         $statusColumn = MethodologyReview::column('review_status');
 
         return MethodologyReview::query()
+            ->whereIn(MethodologyReview::column('research_document_id'), (clone $documents)->select('id'))
             ->where($statusColumn, 'signed_off')
             ->with(['researchDocument:id,title', 'statistician:id,first_name,middle_name,last_name'])
             ->latest(MethodologyReview::column('signed_off_at'))
@@ -220,12 +225,13 @@ class ReportingService
 
     private function scopedInstructors($documents): array
     {
-        $sectionIds = (clone $documents)
+        $scopedDocuments = (clone $documents)
             ->whereNotNull('section_id')
-            ->select('section_id');
+            ->get(['id', 'title', 'section_id'])
+            ->groupBy('section_id');
 
         return ClassSection::query()
-            ->whereIn('id', $sectionIds)
+            ->whereIn('id', $scopedDocuments->keys()->all())
             ->with('instructor:id,first_name,middle_name,last_name,email')
             ->get()
             ->filter(fn (ClassSection $section) => $section->instructor !== null)
@@ -235,18 +241,32 @@ class ReportingService
                 'name' => $sections->first()->instructor->displayName(),
                 'email' => $sections->first()->instructor->email,
                 'sections' => $sections->pluck('name')->unique()->values()->all(),
+                'studies' => $sections
+                    ->flatMap(fn (ClassSection $section) => $scopedDocuments->get($section->id, collect()))
+                    ->unique('id')
+                    ->sortBy('title')
+                    ->map(fn (ResearchDocument $document) => [
+                        'id' => $document->id,
+                        'title' => $document->title,
+                    ])
+                    ->values()
+                    ->all(),
             ])
             ->sortBy('name')
             ->values()
             ->all();
     }
 
-    public function adviserLoad(): array
+    public function adviserLoad(User $actor, $documents = null): array
     {
         $active = ReviewAssignment::column('is_active');
+        $documents ??= $this->coordinatorScope->documents($actor);
+        $users = $this->coordinatorScope->users($actor);
 
         return ReviewAssignment::query()
             ->where(ReviewAssignment::column('review_role'), 'adviser')
+            ->whereIn(ReviewAssignment::column('research_document_id'), (clone $documents)->select('id'))
+            ->whereIn(ReviewAssignment::column('reviewer_id'), (clone $users)->select('id'))
             ->when(
                 $active === 'status',
                 fn ($query) => $query->where($active, 'active')
@@ -286,11 +306,11 @@ class ReportingService
             ->all();
     }
 
-    public function duplicateFlags(): array
+    public function duplicateFlags(User $actor): array
     {
-        return SimilarityResult::query()
-            ->latestPerPair()
-            ->where('adviser_review_required', true)
+        $documents = $this->coordinatorScope->documents($actor);
+
+        return $this->similarityQuery($documents)
             ->with(['sourceResearch:id,title,submission_status,research_stage,submitted_by', 'matchedResearch:id,title,submission_status,research_stage'])
             ->orderByRaw('CASE WHEN overall_similarity_score IS NULL THEN 1 ELSE 0 END')
             ->orderByDesc('overall_similarity_score')
@@ -317,6 +337,15 @@ class ReportingService
                 ],
             ])
             ->all();
+    }
+
+    private function similarityQuery($documents)
+    {
+        return SimilarityResult::query()
+            ->latestPerPair()
+            ->where('adviser_review_required', true)
+            ->whereIn('source_research_id', (clone $documents)->select('id'))
+            ->whereIn('matched_research_id', (clone $documents)->select('id'));
     }
 
     public function officeInstitutional(): array

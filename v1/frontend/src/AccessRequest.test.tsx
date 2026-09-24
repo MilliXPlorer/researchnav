@@ -20,6 +20,15 @@ const pendingRequest = {
   decided_at: null,
 };
 
+const institutes = [
+  "Institute of Computer Studies",
+  "Institute of Health Sciences",
+  "Institute of Business and Financial Management",
+  "Institute of Arts and Sciences",
+  "Institute of Criminal Justice Education",
+  "Institute of Teacher Education",
+];
+
 describe("AccessRequestPanel", () => {
   it("submits a role request for a verified account without a role", async () => {
     const calls: Array<{ url: string; body: unknown }> = [];
@@ -29,6 +38,9 @@ describe("AccessRequestPanel", () => {
         const url = String(input);
         if (url === "/api/access-requests/mine" && init?.method === undefined) {
           return new Response(JSON.stringify({ data: null }));
+        }
+        if (url === "/api/institutes") {
+          return new Response(JSON.stringify({ data: institutes }));
         }
         calls.push({
           url,
@@ -47,6 +59,12 @@ describe("AccessRequestPanel", () => {
     fireEvent.change(screen.getByLabelText("Full name"), {
       target: { value: "Filjoy Adala" },
     });
+    fireEvent.change(screen.getByLabelText("Institute"), {
+      target: { value: "Institute of Computer Studies" },
+    });
+    fireEvent.change(screen.getByLabelText("Reason for access"), {
+      target: { value: "Teaching research methods." },
+    });
     fireEvent.click(screen.getByRole("button", { name: /Send request/ }));
 
     await waitFor(() =>
@@ -59,7 +77,30 @@ describe("AccessRequestPanel", () => {
     expect(calls[0].body).toMatchObject({
       requested_role: "instructor",
       full_name: "Filjoy Adala",
+      program: "Institute of Computer Studies",
+      justification: "Teaching research methods.",
     });
+  });
+
+  it("offers only the six approved institutes and requires a selection", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ data: null }))),
+    );
+
+    render(<AccessRequestPanel />);
+
+    const institute = await screen.findByLabelText("Institute");
+    expect(institute).toBeRequired();
+    expect(screen.getByLabelText("Full name")).toBeRequired();
+    expect(screen.getByLabelText("Reason for access")).toBeRequired();
+    expect(institute.querySelectorAll("option")).toHaveLength(7);
+    expect(
+      screen.getByRole("option", { name: "Institute of Computer Studies" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "Institute of Teacher Education" }),
+    ).toBeInTheDocument();
   });
 
   it("shows an existing pending request instead of a second form", async () => {
@@ -124,8 +165,17 @@ describe("AccessRequestPanel", () => {
     );
 
     render(<AccessRequestPanel />);
+    fireEvent.change(await screen.findByLabelText("Institute"), {
+      target: { value: "Institute of Computer Studies" },
+    });
+    fireEvent.change(screen.getByLabelText("Full name"), {
+      target: { value: "Filjoy Adala" },
+    });
+    fireEvent.change(screen.getByLabelText("Reason for access"), {
+      target: { value: "Starting my capstone." },
+    });
     fireEvent.click(
-      await screen.findByRole("button", { name: /Send request/ }),
+      screen.getByRole("button", { name: /Send request/ }),
     );
 
     expect(await screen.findByRole("alert")).toHaveTextContent(

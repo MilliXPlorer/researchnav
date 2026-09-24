@@ -30,7 +30,7 @@ class User extends Authenticatable
     public $incrementing = false;
 
     protected $fillable = [
-        'email', 'google_sub', 'role', 'role_id', 'access_status', 'account_status', 'is_admin',
+        'email', 'google_sub', 'role', 'role_id', 'institute', 'access_status', 'account_status', 'is_admin',
         'student_employee_id', 'first_name', 'middle_name', 'last_name', 'password', 'email_verified_at',
         'invited_by', 'invitation_sent_at', 'confirmed_at', 'last_login_at', 'remember_token',
     ];

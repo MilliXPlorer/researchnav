@@ -45,6 +45,7 @@ import DefenseMonitoringMenu, {
   type DefenseType,
 } from "./DefenseMonitoringMenu";
 import SharedMonitoring from "./SharedMonitoring";
+import DefenseTeamRoster from "./DefenseTeamRoster";
 import PdfAnnotationWorkspace from "./PdfAnnotationWorkspace";
 import DocumentFeedbackPanel from "./DocumentFeedbackPanel";
 import DocxPreviewWorkspace from "./DocxPreviewWorkspace";
@@ -629,6 +630,10 @@ export default function ResearcherResearchWorkspace({
             {(research.sdgs?.length ?? 0) > 0 && (
               <SdgBadges sdgs={research.sdgs ?? []} />
             )}
+            <p>Research Instructor: <span>{context.people.section?.instructor_name ?? "Unassigned"}</span></p>
+            {context.people.reviewers.find((person) => person.review_role === "adviser")?.name && (
+              <p>Research Adviser: <span>{context.people.reviewers.find((person) => person.review_role === "adviser")?.name}</span></p>
+            )}
           </section>
           <section className="project-overview-card">
             <div className="project-card-heading">
@@ -719,43 +724,7 @@ export default function ResearcherResearchWorkspace({
               </p>
             </div>
           </div>
-          <section className="project-team-block">
-            <div className="project-team-block-heading">
-              <div>
-                <p className="eyebrow">Assigned contacts</p>
-                <h5>Instructor and reviewers</h5>
-              </div>
-            </div>
-            <div className="project-actor-grid">
-              {[
-                {
-                  role: "Research Instructor",
-                  name: context.people.section?.instructor_name,
-                },
-                ...context.people.reviewers.map((reviewer) => ({
-                  role: humanize(reviewer.review_role),
-                  name: reviewer.name,
-                })),
-              ].map((actor, index) => (
-                <div
-                  className="project-actor-row"
-                  key={`${actor.role}-${index}`}
-                >
-                  <span>
-                    <strong>{actor.role}</strong>
-                    <small>Assigned to this research</small>
-                  </span>
-                  <span
-                    className={
-                      actor.name ? "actor-name" : "actor-name is-empty"
-                    }
-                  >
-                    {actor.name || "Unassigned"}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </section>
+          <DefenseTeamRoster researchDocumentId={research.id} people={context.people} refreshKey={attempt} />
           <div className="researcher-support-grid">
             {supportRoles.map(
               ({ role: supportActorRole, label: actorLabel }) => {

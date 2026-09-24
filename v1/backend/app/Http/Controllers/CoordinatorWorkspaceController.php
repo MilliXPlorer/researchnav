@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Exceptions\ApiValidationException;
 use App\Models\DefenseSchedule;
 use App\Services\DefenseScheduleService;
+use App\Services\InstitutionalPdfService;
 use App\Services\ReportingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -48,17 +49,17 @@ class CoordinatorWorkspaceController extends DomainController
         return response()->json(['data' => $this->payload($schedule)]);
     }
 
-    public function duplicateFlags(ReportingService $reports): JsonResponse
+    public function duplicateFlags(Request $request, ReportingService $reports): JsonResponse
     {
         return response()
-            ->json(['data' => $reports->duplicateFlags(), 'schema_version' => 1])
+            ->json(['data' => $reports->duplicateFlags($this->actor($request)), 'schema_version' => 1])
             ->header('Cache-Control', 'private, no-store');
     }
 
-    public function adviserLoad(ReportingService $reports): JsonResponse
+    public function adviserLoad(Request $request, ReportingService $reports): JsonResponse
     {
         return response()
-            ->json(['data' => $reports->adviserLoad(), 'schema_version' => 1])
+            ->json(['data' => $reports->adviserLoad($this->actor($request)), 'schema_version' => 1])
             ->header('Cache-Control', 'private, no-store');
     }
 
@@ -75,10 +76,37 @@ class CoordinatorWorkspaceController extends DomainController
 
         return response()
             ->json(['data' => $reports->coordinatorProgram(
-                $validated['institute'] ?? null,
+                $this->actor($request),
                 $validated['program'] ?? null,
             )])
             ->header('Cache-Control', 'private, no-store');
+    }
+
+    public function reportPdf(string $section, Request $request, ReportingService $reports, InstitutionalPdfService $pdf)
+    {
+        $validator = Validator::make($request->query(), [
+            'program' => ['nullable', 'string', 'max:255'],
+        ]);
+        if ($validator->fails()) {
+            throw new ApiValidationException($validator->errors()->toArray());
+        }
+        $report = $reports->coordinatorProgram($this->actor($request), $validator->validated()['program'] ?? null);
+        [$title, $columns, $rows] = match ($section) {
+            'overview' => ['Program Report Overview', ['Metric', 'Total'], collect($report['counts'])->map(fn (int $count, string $key) => [str($key)->replace('_', ' ')->title()->toString(), $count])->values()->all()],
+            'instructors' => ['List of Active Research Instructors', ['Name', 'Email', 'Research Title(s)'], collect($report['instructors'])->map(fn (array $row) => [$row['name'], $row['email'], collect($row['studies'])->pluck('title')->join('; ') ?: '—'])->all()],
+            'sections' => ['List of Class Sections', ['Class Section', 'Research Studies'], collect($report['by_section'])->map(fn (array $row) => [$row['name'], $row['documents_count']])->all()],
+            'advisers' => ['List of Active Research Advisers', ['Name', 'Email', 'Research Title(s)'], collect($report['adviser_load'])->map(fn (array $row) => [$row['name'] ?: '—', $row['email'] ?: '—', collect($row['studies'])->pluck('title')->join('; ') ?: '—'])->all()],
+            default => abort(404),
+        };
+        $program = $report['filters']['program'];
+        $subtitle = $report['filters']['institute'].($program ? ' · '.$program : '');
+
+        return response($pdf->render($title, $columns, $rows, count($rows), $subtitle), 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'inline; filename="researchnav-coordinator-'.$section.'-'.now()->format('Y-m-d').'.pdf"',
+            'Cache-Control' => 'private, no-store',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
     }
 
     private function payload(DefenseSchedule $schedule): array

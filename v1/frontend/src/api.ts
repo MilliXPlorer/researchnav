@@ -107,6 +107,7 @@ export interface AdminUserResource {
     last_name: string | null;
   };
   role: AdminRole;
+  institute: string | null;
   access_status: AccessStatus;
   is_admin: boolean;
   invitation_sent_at: string | null;
@@ -1167,6 +1168,7 @@ export async function provisionAccount(
     | "/api/coordinator/instructors",
   email: string,
   role?: RequestableRole,
+  institute?: string,
   fetcher: ApiFetch = globalThis.fetch,
 ) {
   return (
@@ -1174,7 +1176,7 @@ export async function provisionAccount(
       endpoint,
       {
         method: "POST",
-        body: JSON.stringify({ email, ...(role ? { role } : {}) }),
+        body: JSON.stringify({ email, ...(role ? { role } : {}), ...(institute ? { institute } : {}) }),
       },
       fetcher,
     )
@@ -1191,9 +1193,10 @@ export function listAdminCoordinators(
 /** Provisions one coordinator account through the administrator-only endpoint. */
 export function provisionCoordinator(
   email: string,
+  institute: string,
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<UserSession> {
-  return provisionAccount("/api/admin/coordinators", email, undefined, fetcher);
+  return provisionAccount("/api/admin/coordinators", email, undefined, institute, fetcher);
 }
 
 export function listAdminProvisionedAccounts(
@@ -1205,9 +1208,10 @@ export function listAdminProvisionedAccounts(
 export function provisionAdminAccount(
   email: string,
   role: RequestableRole,
+  institute?: string,
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<UserSession> {
-  return provisionAccount("/api/admin/accounts", email, role, fetcher);
+  return provisionAccount("/api/admin/accounts", email, role, institute, fetcher);
 }
 
 function adminQuery(
@@ -1245,7 +1249,7 @@ export function listAdminUsers(
 
 export async function updateAdminUser(
   id: string,
-  input: Partial<Pick<AdminUserResource, "role" | "access_status">>,
+  input: Partial<Pick<AdminUserResource, "role" | "access_status" | "institute">>,
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<AdminUserResource> {
   return (
@@ -3163,6 +3167,24 @@ export interface CoordinatorProgramReport {
   active_advisers_list: Array<{ id: string; name: string; email: string }>;
 }
 
+export async function getResearchProjectTeam(
+  researchDocumentId: string | number,
+  defenseType: "proposal" | "final" = "proposal",
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<InstructorProjectTeam> {
+  return (
+    await apiRequest<{ data: InstructorProjectTeam }>(
+      `/api/research/${encodeURIComponent(String(researchDocumentId))}/team?defense_type=${defenseType}`,
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export async function listInstitutes(fetcher: ApiFetch = globalThis.fetch): Promise<string[]> {
+  return (await apiRequest<{ data: string[] }>("/api/institutes", undefined, fetcher)).data;
+}
+
 export interface CoordinatorReportStudy {
   id: number;
   title: string | null;
@@ -3213,6 +3235,7 @@ export interface CoordinatorReportInstructor {
   name: string;
   email: string;
   sections: string[];
+  studies: Array<{ id: number; title: string }>;
 }
 
 export async function listCoordinatorSchedules(
@@ -3267,14 +3290,10 @@ export async function listAdviserLoad(
 }
 
 export async function getCoordinatorProgramReport(
-  institute?: string,
   program?: string,
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<CoordinatorProgramReport> {
   const params = new URLSearchParams();
-  if (institute && institute.trim() !== "") {
-    params.set("institute", institute.trim());
-  }
   if (program && program.trim() !== "") {
     params.set("program", program.trim());
   }
@@ -3847,9 +3866,9 @@ export interface AccessRequestResource {
 
 export interface AccessRequestInput {
   requested_role: RequestableRole;
-  full_name?: string;
-  program?: string;
-  justification?: string;
+  full_name: string;
+  program: string;
+  justification: string;
 }
 
 export async function getMyAccessRequest(

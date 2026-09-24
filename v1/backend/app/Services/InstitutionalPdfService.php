@@ -12,13 +12,14 @@ class InstitutionalPdfService
      * @param  list<string>  $columns
      * @param  list<list<string|int>>  $rows
      */
-    public function render(string $title, array $columns, array $rows, int $total): string
+    public function render(string $title, array $columns, array $rows, int $total, ?string $subtitle = null): string
     {
         $html = view('pdf.institutional-report', [
             'title' => $title,
             'columns' => $columns,
             'rows' => $rows,
             'total' => $total,
+            'subtitle' => $subtitle,
             'generatedAt' => now()->timezone('Asia/Manila')->format('n/j/Y, g:i:s A'),
             'collegeLogo' => $this->imageDataUri('logo/tcgc_logo.jpg'),
             'researchLogo' => $this->imageDataUri('logo/research_publications_logo.jpg'),

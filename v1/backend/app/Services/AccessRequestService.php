@@ -172,7 +172,11 @@ class AccessRequestService
                     throw new AccessRequestException('ROLE_NOT_GRANTABLE');
                 }
 
-                $applicant->fill(['role' => $grantedRole, 'access_status' => 'active']);
+                $applicant->fill([
+                    'role' => $grantedRole,
+                    'access_status' => 'active',
+                    'institute' => $accessRequest->program,
+                ]);
                 $applicant->confirmed_at ??= now();
                 $applicant->save();
             }

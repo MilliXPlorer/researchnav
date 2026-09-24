@@ -1,4 +1,4 @@
-import { ExternalLink, LibraryBig, ShieldCheck } from "lucide-react";
+import { ExternalLink, LibraryBig, Search, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "./components";
 import { formatPhilippineDate } from "./dateTime";
@@ -7,7 +7,6 @@ import AdminResearchWorkspace from "./AdminResearchWorkspace";
 import AssignedResearchFolders from "./AssignedResearchFolders";
 import ResearcherResearchWorkspace from "./ResearcherResearchWorkspace";
 import type { ResearchWorkspaceDestination } from "./researchWorkspaceRoute";
-import SimilarityResults from "./SimilarityResults";
 import ResearchOfficeBulkImport from "./ResearchOfficeBulkImport";
 import iasLogo from "./institute_logo/ias.webp";
 import ibfsLogo from "./institute_logo/ibfs.webp";
@@ -148,7 +147,6 @@ export default function RoleWorkspace({
       <ResearcherWorkspace
         navigate={navigate}
         selectNav={selectNav}
-        researchDocumentId={researchDocumentId}
         dashboardScope={dashboardScope}
         dashboardState={dashboardState}
         onRetry={onRetry}
@@ -198,14 +196,12 @@ function WorkspaceHeader({
 function ResearcherWorkspace({
   navigate,
   selectNav,
-  researchDocumentId,
   dashboardScope,
   dashboardState,
   onRetry,
 }: {
   navigate: (path: string) => void;
   selectNav: (item: string) => void;
-  researchDocumentId?: string | number;
   dashboardScope: string;
   dashboardState: RoleDashboardLoadState;
   onRetry: () => void;
@@ -227,7 +223,6 @@ function ResearcherWorkspace({
         dashboardState={dashboardState}
         onRetry={onRetry}
       />
-      <SimilarityResults researchDocumentId={researchDocumentId} />
     </div>
   );
 }
@@ -238,6 +233,7 @@ type SectionConfig = {
   catalog?: boolean;
   internalRecord?: boolean;
   destination?: string;
+  researchMetric?: boolean;
 };
 
 type WorkspaceConfig = {
@@ -262,27 +258,33 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
       my_drafts: {
         title: "Drafts",
         description: "Records you have started but not yet submitted.",
+        researchMetric: true,
       },
       my_under_review: {
         title: "Under review",
         description: "Submitted research currently being reviewed.",
+        researchMetric: true,
       },
       my_revision_required: {
         title: "Revision required",
         description: "Research returned to you for required revisions.",
+        researchMetric: true,
       },
       my_flagged_similarity: {
         title: "Flagged title similarity",
         description:
           "Your research with a stored similarity flag at or above the review threshold.",
+        researchMetric: true,
       },
       my_approved: {
         title: "Approved",
         description: "Your research cleared to proceed.",
+        researchMetric: true,
       },
       my_archived: {
         title: "Archived",
         description: "Your research preserved in the institutional repository.",
+        researchMetric: true,
       },
       repository_references: {
         title: "Repository references",
@@ -305,41 +307,49 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
         title: "Draft research",
         description: "Internal research records still in draft.",
         internalRecord: true,
+        researchMetric: true,
       },
       submission_queue: {
         title: "Submission queue",
         description: "Submitted research awaiting review.",
         internalRecord: true,
+        researchMetric: true,
       },
       revision_required: {
         title: "Revision required",
         description: "Research returned for required revisions.",
         internalRecord: true,
+        researchMetric: true,
       },
       pending_title_validations: {
         title: "Pending title validations",
         description: "Human title-validation decisions awaiting review.",
         internalRecord: true,
+        researchMetric: true,
       },
       flagged_similarity: {
         title: "Flagged similarity",
         description: "Research with persisted similarity flags.",
         internalRecord: true,
+        researchMetric: true,
       },
       approved_for_archiving: {
         title: "Approved for archiving",
         description: "Approved research ready for repository archiving.",
         internalRecord: true,
+        researchMetric: true,
       },
       archived_repository: {
         title: "Archived repository",
         description: "Archived research records in the repository.",
         internalRecord: true,
+        researchMetric: true,
       },
       recent_research: {
         title: "Recent research",
         description: "Recently updated internal research records.",
         internalRecord: true,
+        researchMetric: true,
       },
     },
   },
@@ -352,11 +362,13 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
         title: "Assigned reviews",
         description: "Active research reviews assigned to you.",
         internalRecord: true,
+        researchMetric: true,
       },
       revision_requests: {
         title: "Revision requests",
         description: "Assigned research awaiting revisions.",
         internalRecord: true,
+        researchMetric: true,
       },
       repository_references: {
         title: "Repository references",
@@ -374,10 +386,12 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
       title_proposals: {
         title: "Title proposals",
         description: "Assigned title proposals.",
+        researchMetric: true,
       },
       pending_reviews: {
         title: "Pending reviews",
         description: "Assigned research awaiting review.",
+        researchMetric: true,
       },
       repository_references: {
         title: "Repository references",
@@ -395,6 +409,7 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
         title: "Assigned manuscripts",
         description: "Manuscripts authorized for panel review.",
         internalRecord: true,
+        researchMetric: true,
       },
       defense_schedule: {
         title: "Defense schedule",
@@ -417,6 +432,7 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
       methodology_reviews: {
         title: "Methodology reviews",
         description: "Research authorized for methodology review.",
+        researchMetric: true,
       },
       signoffs: {
         title: "Sign-offs",
@@ -459,6 +475,7 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
       archiving_queue: {
         title: "Archiving queue",
         description: "Research authorized for archiving.",
+        researchMetric: true,
       },
       metadata_validation: {
         title: "Metadata validation",
@@ -482,10 +499,12 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
         description:
           "Research where you are the assigned Research Office representative.",
         internalRecord: true,
+        researchMetric: true,
       },
       submission_queue: {
         title: "Submission queue",
         description: "Submitted research awaiting institutional review.",
+        researchMetric: true,
       },
       bulk_import: {
         title: "Upload Manuscript",
@@ -495,10 +514,12 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
       revision_requests: {
         title: "Revision requests",
         description: "Research awaiting revisions.",
+        researchMetric: true,
       },
       pending_archiving: {
         title: "Pending archiving",
         description: "Research awaiting repository archiving.",
+        researchMetric: true,
       },
       archived_repository: {
         title: "Archived repository",
@@ -688,7 +709,12 @@ function DashboardSections({
         />
       )}
       <div className="dashboard-visualizations">
-        <DashboardWorkloadChart sections={visibleSections} config={config} />
+        <DashboardWorkloadChart
+          sections={visibleSections.filter(
+            (section) => config.sections[section.key]?.researchMetric,
+          )}
+          config={config}
+        />
         {role !== "research-office" && dashboardState.dashboard.analytics && (
           <DashboardAnalytics analytics={dashboardState.dashboard.analytics} />
         )}
@@ -741,17 +767,33 @@ function OfficeInstitutionalOverview({
   const [selectedInstitute, setSelectedInstitute] = useState<string | null>(
     null,
   );
+  const [studyQuery, setStudyQuery] = useState("");
+  const [debouncedStudyQuery, setDebouncedStudyQuery] = useState("");
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setDebouncedStudyQuery(studyQuery);
+    }, 250);
+
+    return () => window.clearTimeout(timeout);
+  }, [studyQuery]);
 
   function selectInstitute(code: string) {
     if (selectedInstitute === code) {
       setSelectedInstitute(null);
+      setStudyQuery("");
+      setDebouncedStudyQuery("");
       return;
     }
     setSelectedInstitute(code);
+    setStudyQuery("");
+    setDebouncedStudyQuery("");
   }
 
   function closeInstituteStudies() {
     setSelectedInstitute(null);
+    setStudyQuery("");
+    setDebouncedStudyQuery("");
   }
 
   const selectedInstituteName = OFFICE_INSTITUTES.find(
@@ -760,6 +802,16 @@ function OfficeInstitutionalOverview({
   const selectedStudies = selectedInstitute
     ? studiesByInstitute[selectedInstitute]
     : undefined;
+  const normalizedStudyQuery = debouncedStudyQuery
+    .trim()
+    .toLocaleLowerCase();
+  const filteredStudies = Array.isArray(selectedStudies)
+    ? selectedStudies.filter((study) =>
+        `${study.title} ${study.year}`
+          .toLocaleLowerCase()
+          .includes(normalizedStudyQuery),
+      )
+    : [];
 
   return (
     <>
@@ -849,21 +901,43 @@ function OfficeInstitutionalOverview({
                 No studies are stored for this institute.
               </p>
             ) : (
-              <div className="office-study-list" aria-label="Studies">
-                {selectedStudies.map((study) => (
-                  <a
-                    className="office-study-item"
-                    key={study.id}
-                    href={officeInstituteStudyOpenUrl(selectedInstitute, study)}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <span className="office-study-year">{study.year}</span>
-                    <strong>{study.title}</strong>
-                    <ExternalLink aria-hidden="true" />
-                  </a>
-                ))}
-              </div>
+              <>
+                <div className="office-study-search">
+                  <Search aria-hidden="true" />
+                  <input
+                    type="search"
+                    value={studyQuery}
+                    onChange={(event) => setStudyQuery(event.target.value)}
+                    aria-label={`Search ${selectedInstituteName} studies`}
+                    placeholder="Search by title or year..."
+                    autoComplete="off"
+                  />
+                  <span aria-live="polite">
+                    {filteredStudies.length} of {selectedStudies.length}
+                  </span>
+                </div>
+                {filteredStudies.length === 0 ? (
+                  <p className="office-institute-message">
+                    No studies match your search.
+                  </p>
+                ) : (
+                  <div className="office-study-list" aria-label="Studies">
+                    {filteredStudies.map((study) => (
+                      <a
+                        className="office-study-item"
+                        key={study.id}
+                        href={officeInstituteStudyOpenUrl(selectedInstitute, study)}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <span className="office-study-year">{study.year}</span>
+                        <strong>{study.title}</strong>
+                        <ExternalLink aria-hidden="true" />
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </Modal>
@@ -1005,6 +1079,14 @@ const CHART_RIGHT = 12;
 const CHART_TOP = 12;
 const CHART_BOTTOM = 26;
 
+function niceChartMaximum(value: number) {
+  if (value <= 5) return Math.max(1, value);
+  const magnitude = 10 ** Math.floor(Math.log10(value));
+  const normalized = value / magnitude;
+  const rounded = normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+  return rounded * magnitude;
+}
+
 function DashboardAnalytics({
   analytics,
 }: {
@@ -1013,20 +1095,21 @@ function DashboardAnalytics({
   const allValues = analytics.series.flatMap((series) =>
     series.points.map((point) => point.value),
   );
-  const maximum = Math.max(1, ...allValues);
-  const labels = analytics.series[0]?.points ?? [];
+  const maximum = niceChartMaximum(Math.max(0, ...allValues));
+  const labels = Array.from(
+    new Map(
+      analytics.series
+        .flatMap((series) => series.points)
+        .map((point) => [point.key, point]),
+    ).values(),
+  ).sort((left, right) => left.key.localeCompare(right.key));
   const plotWidth = CHART_WIDTH - CHART_LEFT - CHART_RIGHT;
   const plotHeight = CHART_HEIGHT - CHART_TOP - CHART_BOTTOM;
-  const gridValues =
-    maximum <= 4
-      ? Array.from({ length: maximum + 1 }, (_, index) => maximum - index)
-      : [
-          ...new Set(
-            [maximum, 0.75, 0.5, 0.25, 0].map((value) =>
-              value <= 1 ? Math.round(maximum * value) : value,
-            ),
-          ),
-        ];
+  const gridStep = maximum <= 5 ? 1 : maximum / 5;
+  const gridValues = Array.from(
+    { length: Math.round(maximum / gridStep) + 1 },
+    (_, index) => maximum - index * gridStep,
+  );
   const x = (index: number) =>
     CHART_LEFT + (index * plotWidth) / Math.max(labels.length - 1, 1);
   const y = (value: number) =>
@@ -1081,7 +1164,13 @@ function DashboardAnalytics({
           })}
 
           {analytics.series.map((series, seriesIndex) => {
-            const points = series.points
+            const valuesByKey = new Map(
+              series.points.map((point) => [point.key, point]),
+            );
+            const orderedPoints = labels.map(
+              (label) => valuesByKey.get(label.key) ?? { ...label, value: 0 },
+            );
+            const points = orderedPoints
               .map((point, index) => `${x(index)},${y(point.value)}`)
               .join(" ");
             return (
@@ -1090,15 +1179,21 @@ function DashboardAnalytics({
                 className={`analytics-line analytics-series-${seriesIndex + 1}`}
               >
                 <polyline points={points} />
-                {series.points.map((point, index) => (
-                  <circle
-                    key={point.key}
-                    cx={x(index)}
-                    cy={y(point.value)}
-                    r="4"
-                  >
-                    <title>{`${point.label} ${series.label}: ${point.value}`}</title>
-                  </circle>
+                {orderedPoints.map((point, index) => (
+                  <g key={point.key}>
+                    <circle cx={x(index)} cy={y(point.value)} r="4">
+                      <title>{`${point.label} ${series.label}: ${point.value}`}</title>
+                    </circle>
+                    {point.value > 0 && (
+                      <text
+                        className="analytics-point-value"
+                        x={x(index)}
+                        y={Math.max(CHART_TOP + 9, y(point.value) - 8 - seriesIndex * 10)}
+                      >
+                        {point.value}
+                      </text>
+                    )}
+                  </g>
                 ))}
               </g>
             );
@@ -1133,7 +1228,7 @@ function DashboardAnalytics({
               <th>{point.label}</th>
               {analytics.series.map((series) => (
                 <td key={series.key}>
-                  {series.points[pointIndex]?.value ?? 0}
+                  {series.points.find((item) => item.key === point.key)?.value ?? 0}
                 </td>
               ))}
             </tr>
@@ -1229,6 +1324,9 @@ function DashboardWorkloadChart({
             <div key={section.key} className="dashboard-chart-row">
               <div className="dashboard-chart-label">
                 <span>{title}</span>
+                <strong aria-label={`${title}: ${section.total} total`}>
+                  {section.total} total
+                </strong>
               </div>
               <div
                 className="dashboard-chart-meter"

@@ -10,6 +10,7 @@ use App\Models\ReviewAssignment;
 use App\Models\SimilarityResult;
 use App\Models\TitleValidation;
 use App\Models\User;
+use App\Services\CoordinatorInstituteScope;
 use App\Services\DomainAuthorization;
 use App\Services\ReportingService;
 use Illuminate\Database\Eloquent\Builder;
@@ -18,6 +19,8 @@ use Illuminate\Http\Request;
 
 class DashboardController extends DomainController
 {
+    public function __construct(private readonly CoordinatorInstituteScope $coordinatorScope) {}
+
     private const PREVIEW_COLUMNS = [
         'id',
         'title',
@@ -39,7 +42,7 @@ class DashboardController extends DomainController
             'instructor' => $this->instructorSections($actor),
             'panel' => $this->panelSections($actor),
             'statistician' => $this->statisticianSections($actor),
-            'coordinator' => $this->coordinatorSections(),
+            'coordinator' => $this->coordinatorSections($actor),
             'librarian' => $this->librarianSections(),
             'research-office' => $this->researchOfficeSections($actor),
             'research_editor' => [],
@@ -65,9 +68,13 @@ class DashboardController extends DomainController
             ->header('Cache-Control', 'private, no-store');
     }
 
-    private function analytics(User $actor): array
+    private function analytics(User $actor): ?array
     {
         $query = $this->analyticsDocuments($actor);
+        if ($query === null) {
+            return null;
+        }
+
         $firstMonth = now()->startOfMonth()->subMonths(5);
         $months = collect(range(0, 5))->map(fn (int $offset) => $firstMonth->copy()->addMonths($offset));
 
@@ -100,19 +107,22 @@ class DashboardController extends DomainController
         ];
     }
 
-    private function analyticsDocuments(User $actor): Builder
+    private function analyticsDocuments(User $actor): ?Builder
     {
+        $effectiveRole = $actor->roleDefinition?->slug === 'research_editor' ? 'research_editor' : $actor->role;
         if (DomainAuthorization::isActiveAdministrator($actor)) {
             return ResearchDocument::query();
         }
 
-        return match ($actor->role) {
+        return match ($effectiveRole) {
             'researcher' => $this->researcherDocuments($actor),
             'adviser' => $this->assignedDocuments($actor, 'adviser'),
             'instructor' => $this->assignedDocuments($actor, 'instructor'),
             'panel' => $this->assignedDocuments($actor, 'panel'),
             'statistician' => $this->assignedDocuments($actor, 'statistician'),
-            default => ResearchDocument::query(),
+            'librarian' => ResearchDocument::query()->whereIn('submission_status', ['approved', 'archived']),
+            'research-office' => ResearchDocument::query(),
+            default => null,
         };
     }
 
@@ -198,14 +208,19 @@ class DashboardController extends DomainController
         ];
     }
 
-    private function coordinatorSections(): array
+    private function coordinatorSections(User $actor): array
     {
+        $institute = $this->coordinatorScope->institute($actor);
+        $documents = $this->coordinatorScope->documents($actor);
+
         return [
-            $this->countSection('active_instructors', User::query()->where('role', 'instructor')->where('access_status', 'active')),
-            $this->countSection('invited_instructors', User::query()->where('role', 'instructor')->where('access_status', 'invited')),
-            $this->countSection('blocked_instructors', User::query()->where('role', 'instructor')->where('access_status', 'blocked')),
-            $this->countSection('schedules', DefenseSchedule::query()->where('status', 'scheduled')),
-            $this->countSection('duplicate_flags', SimilarityResult::query()->latestPerPair()->where('adviser_review_required', true)),
+            $this->countSection('active_instructors', User::query()->where('institute', $institute)->where('role', 'instructor')->where('access_status', 'active')),
+            $this->countSection('invited_instructors', User::query()->where('institute', $institute)->where('role', 'instructor')->where('access_status', 'invited')),
+            $this->countSection('blocked_instructors', User::query()->where('institute', $institute)->where('role', 'instructor')->where('access_status', 'blocked')),
+            $this->countSection('schedules', DefenseSchedule::query()->where('status', 'scheduled')->whereIn('research_document_id', (clone $documents)->select('id'))),
+            $this->countSection('duplicate_flags', SimilarityResult::query()->latestPerPair()->where('adviser_review_required', true)
+                ->whereIn('source_research_id', (clone $documents)->select('id'))
+                ->whereIn('matched_research_id', (clone $documents)->select('id'))),
         ];
     }
 
@@ -238,7 +253,12 @@ class DashboardController extends DomainController
         return ResearchDocument::query()->whereHas('reviewAssignments', fn (Builder $assignments) => $assignments
             ->where(ReviewAssignment::column('reviewer_id'), $actor->id)
             ->where(ReviewAssignment::column('review_role'), $reviewRole)
-            ->where(ReviewAssignment::column('is_active'), ReviewAssignment::column('is_active') === 'status' ? 'active' : true));
+            ->whereIn(
+                ReviewAssignment::column('is_active'),
+                ReviewAssignment::column('is_active') === 'status'
+                    ? ['accepted', 'confirmed', 'active']
+                    : [true],
+            ));
     }
 
     private function repositoryDocuments(): Builder

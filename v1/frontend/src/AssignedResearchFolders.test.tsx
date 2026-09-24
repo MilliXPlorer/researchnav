@@ -83,6 +83,21 @@ function assignedStudyFetch(input: RequestInfo | URL) {
       }),
     );
   }
+  if (url === `/api/research/${research.id}/team?defense_type=proposal`) {
+    return new Response(JSON.stringify({ data: {
+      section_id: 2, research_document_id: research.id, defense_type: "proposal",
+      instructor: { user_id: "i1", name: "Dr. Lina Cruz", email: "i@test", team_role: "instructor" },
+      researchers: [], adviser: { user_id: "a1", name: "Prof. Mara Lim", email: "a@test", team_role: "adviser" },
+      research_office_representative: { user_id: "o1", name: "Rina Office", email: "o@test", team_role: "research_office_representative" },
+      chair: { user_id: "c1", name: "Paolo Chair", email: "c@test", team_role: "chair" },
+      panel_members: [{ user_id: "p1", name: "Pia Panelist", email: "p@test", team_role: "panel_member" }],
+      support_assignments: {
+        editor: { user_id: "e1", name: "Eddie Editor", email: "e@test", assignment_role: "research_editor", status: "accepted" },
+        statistician: { user_id: "s1", name: "Noel Reyes", email: "s@test", assignment_role: "statistician", status: "accepted" },
+        librarian: { user_id: "l1", name: "Libby Reyes", email: "l@test", assignment_role: "librarian", status: "accepted" },
+      }, pre_defense_ready: true, post_defense_ready: false, complete: false,
+    } }));
+  }
   if (
     url === `/api/research/${research.id}/files` ||
     url === `/api/research/${research.id}/folders` ||
@@ -204,7 +219,7 @@ describe("AssignedResearchFolders", () => {
       await screen.findByRole("button", { name: "Research Team" }),
     );
 
-    for (const name of [
+  for (const name of [
       "Dr. Lina Cruz",
       "Prof. Mara Lim",
       "Rina Office",
@@ -214,7 +229,7 @@ describe("AssignedResearchFolders", () => {
       "Noel Reyes",
       "Libby Reyes",
     ]) {
-      expect(screen.getAllByText(name).length).toBeGreaterThan(0);
+      expect((await screen.findAllByText(name)).length).toBeGreaterThan(0);
     }
   });
 

@@ -5528,7 +5528,7 @@ function CoordinatorAccountRoles({ role }: { role: Role }) {
     setNotice("");
     setProvisioning(true);
     try {
-      await provisionAccount("/api/coordinator/instructors", email.trim());
+      await provisionAccount("/api/coordinator/instructors", email.trim(), undefined, undefined);
       setEmail("");
       setNotice("Instructor account added.");
       reload();
@@ -5652,94 +5652,40 @@ function CoordinatorAccountRoles({ role }: { role: Role }) {
   );
 }
 
-function useReportPrint() {
-  const [printReady, setPrintReady] = useState(false);
-  useEffect(() => {
-    if (!printReady) return;
-    let cancelled = false;
-    const finishPrint = () => setPrintReady(false);
-    window.addEventListener("afterprint", finishPrint);
-    const frame = window.requestAnimationFrame(() => {
-      const images = Array.from(
-        document.querySelectorAll<HTMLImageElement>(
-          ".coordinator-print-area img",
-        ),
-      );
-      const imageLoads = images.map(
-        (image) =>
-          new Promise<void>((resolve) => {
-            if (image.complete) {
-              resolve();
-              return;
-            }
-            image.addEventListener("load", () => resolve(), { once: true });
-            image.addEventListener("error", () => resolve(), { once: true });
-          }),
-      );
-
-      const imageTimeout = new Promise<void>((resolve) => {
-        window.setTimeout(resolve, 1500);
-      });
-
-      void Promise.race([
-        Promise.all(imageLoads).then(() => undefined),
-        imageTimeout,
-      ]).then(() => {
-        if (cancelled) return;
-        try {
-          window.print();
-        } catch {
-          setPrintReady(false);
-        }
-      });
-    });
-    return () => {
-      cancelled = true;
-      window.cancelAnimationFrame(frame);
-      window.removeEventListener("afterprint", finishPrint);
-    };
-  }, [printReady]);
-  return [printReady, () => setPrintReady(true)] as const;
-}
-
 function CoordinatorReports({ role }: { role: Role }) {
   const [attempt, reload] = useAttempt();
-  const [instituteFilter, setInstituteFilter] = useState("");
   const [programFilter, setProgramFilter] = useState("");
   const [reportSection, setReportSection] = useState<
     "overview" | "instructors" | "sections" | "advisers"
   >("overview");
   const [spotlight, setSpotlight] = useState<ReportSpotlight | null>(null);
-  const [printReady, beginPrint] = useReportPrint();
   const state = useLoad(
-    () => getCoordinatorProgramReport(instituteFilter, programFilter),
+    () => getCoordinatorProgramReport(programFilter),
     attempt,
   );
-  const appliedFilters = useRef({ institute: "", program: "" });
+  const appliedFilters = useRef({ program: "" });
   const reloadRef = useRef(reload);
   useEffect(() => {
     reloadRef.current = reload;
   });
   useEffect(() => {
     if (
-      appliedFilters.current.institute !== instituteFilter ||
       appliedFilters.current.program !== programFilter
     ) {
       appliedFilters.current = {
-        institute: instituteFilter,
         program: programFilter,
       };
       reloadRef.current();
     }
-  }, [instituteFilter, programFilter]);
+  }, [programFilter]);
   const reportIsCurrent =
     state.status === "ready" &&
-    (state.data.filters?.institute ?? "") === instituteFilter &&
     (state.data.filters?.program ?? "") === programFilter;
+  const assignedInstitute = state.status === "ready" ? state.data.filters?.institute ?? "" : "";
   const programOptions =
-    instituteFilter &&
-    instituteNames.includes(instituteFilter as (typeof instituteNames)[number])
-      ? programsByInstitute[instituteFilter as keyof typeof programsByInstitute]
+    assignedInstitute &&
+    instituteNames.includes(assignedInstitute as (typeof instituteNames)[number])
+      ? programsByInstitute[assignedInstitute as keyof typeof programsByInstitute]
       : [];
   return (
     <div className="workspace-content admin-sidebar-page coordinator-report-page">
@@ -5751,10 +5697,17 @@ function CoordinatorReports({ role }: { role: Role }) {
           <div className="row-actions">
             <Button
               variant="secondary"
-              disabled={!reportIsCurrent || printReady}
+              disabled={!reportIsCurrent}
               onClick={() => {
                 setSpotlight(null);
-                beginPrint();
+                const params = new URLSearchParams();
+                if (programFilter) params.set("program", programFilter);
+                const query = params.toString();
+                window.open(
+                  `/api/coordinator/reports/${reportSection}/pdf${query ? `?${query}` : ""}`,
+                  "_blank",
+                  "noopener,noreferrer",
+                );
               }}
             >
               <Printer aria-hidden="true" /> Print report
@@ -5775,28 +5728,16 @@ function CoordinatorReports({ role }: { role: Role }) {
         <div className="admin-card-heading">
           <div>
             <h2>Filters</h2>
-            <p>Scope the report by institute and program.</p>
+            <p>Reports are limited to your assigned institute.</p>
           </div>
         </div>
-        <div className="admin-filters">
-          <label>
-            Institute
-            <select
-              value={instituteFilter}
-              onChange={(event) => {
-                setSpotlight(null);
-                setInstituteFilter(event.target.value);
-                setProgramFilter("");
-              }}
-            >
-              <option value="">All institutes</option>
-              {instituteNames.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </label>
+        <div className="admin-filters coordinator-report-filters">
+          <div className="coordinator-report-scope" role="group" aria-label="Assigned institute">
+            <span className="coordinator-report-filter-label">Institute</span>
+            <div className="coordinator-report-readonly">
+              {assignedInstitute || "Assigned institute"}
+            </div>
+          </div>
           <label>
             Program
             <select
@@ -6028,9 +5969,6 @@ function CoordinatorReports({ role }: { role: Role }) {
           onClose={() => setSpotlight(null)}
         />
       )}
-      {printReady && state.status === "ready" && (
-        <CoordinatorPrintableReport report={state.data} />
-      )}
     </div>
   );
 }
@@ -6113,126 +6051,6 @@ function ProgramCounts({
         onSelect={() => open("Methodology signed off")}
       />
     </section>
-  );
-}
-
-function CoordinatorPrintableReport({
-  report,
-}: {
-  report: CoordinatorProgramReport;
-}) {
-  const totals = [
-    ["Active instructors", report.counts.active_instructors],
-    ["Active advisers", report.counts.active_advisers],
-    ["Active researchers", report.counts.active_researchers],
-    ["Drafts", report.counts.draft],
-    ["Submitted", report.counts.submitted],
-    ["Under review", report.counts.under_review],
-    ["Revision required", report.counts.revision_required],
-    ["Approved", report.counts.approved],
-    ["Archived", report.counts.archived],
-    ["Flagged similarity", report.counts.flagged_similarity],
-    ["Defenses scheduled", report.counts.defenses_scheduled],
-    ["Defenses completed", report.counts.defenses_completed],
-    ["Evaluations submitted", report.counts.evaluations_submitted],
-    ["Methodology signed off", report.counts.methodology_signed_off],
-  ] as const;
-
-  return (
-    <article className="coordinator-print-area" aria-hidden="true">
-      <header className="coordinator-print-heading">
-        <span>ResearchNAV · Research Coordinator</span>
-        <h1>Program report</h1>
-        <p>
-          Institute: {report.filters?.institute || "All institutes"} · Program:{" "}
-          {report.filters?.program || "All programs"}
-        </p>
-        <small>
-          Printed {formatPhilippineDateTime(new Date().toISOString())}
-        </small>
-      </header>
-      <section>
-        <h2>Overview</h2>
-        <dl className="coordinator-print-counts">
-          {totals.map(([name, count]) => (
-            <div key={name}>
-              <dt>{name}</dt>
-              <dd>{count.toLocaleString()}</dd>
-            </div>
-          ))}
-        </dl>
-      </section>
-      <section>
-        <h2>Research instructors</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Instructor</th>
-              <th>Email</th>
-              <th>Sections</th>
-            </tr>
-          </thead>
-          <tbody>
-            {report.instructors.map((instructor) => (
-              <tr key={instructor.user_id}>
-                <td>{instructor.name || "—"}</td>
-                <td>{instructor.email || "—"}</td>
-                <td>{instructor.sections.join(", ") || "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {report.instructors.length === 0 && (
-          <p>No instructors in this scope.</p>
-        )}
-      </section>
-      <section>
-        <h2>Class sections</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Section</th>
-              <th>Documents</th>
-            </tr>
-          </thead>
-          <tbody>
-            {report.by_section.map((section) => (
-              <tr key={section.id}>
-                <td>{section.name}</td>
-                <td>{section.documents_count}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {report.by_section.length === 0 && (
-          <p>No class sections in this scope.</p>
-        )}
-      </section>
-      <section>
-        <h2>Adviser load</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Adviser</th>
-              <th>Email</th>
-              <th>Active assignments</th>
-            </tr>
-          </thead>
-          <tbody>
-            {report.adviser_load.map((adviser) => (
-              <tr key={adviser.user_id}>
-                <td>{adviser.name || "—"}</td>
-                <td>{adviser.email || "—"}</td>
-                <td>{adviser.active_assignments}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {report.adviser_load.length === 0 && (
-          <p>No advisers have active assignments.</p>
-        )}
-      </section>
-    </article>
   );
 }
 

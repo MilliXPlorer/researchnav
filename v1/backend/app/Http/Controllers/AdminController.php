@@ -34,6 +34,7 @@ class AdminController extends DomainController
             'middle_name',
             'last_name',
             'role',
+            'institute',
             'access_status',
             'is_admin',
             'invitation_sent_at',

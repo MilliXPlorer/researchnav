@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { formatPhilippineDateTime } from "./dateTime";
+import { instituteNames } from "./data";
 import { Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import {
   ApiError,
@@ -386,6 +387,7 @@ function AccountProvisioning({
   const [error, setError] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<RequestableRole>("researcher");
+  const [institute, setInstitute] = useState("");
   const [provisioning, setProvisioning] = useState(false);
   const [notice, setNotice] = useState("");
   const [attempt, setAttempt] = useState(0);
@@ -434,7 +436,7 @@ function AccountProvisioning({
     setNotice("");
     setProvisioning(true);
     try {
-      await provisionAdminAccount(email.trim(), role);
+      await provisionAdminAccount(email.trim(), role, role === "coordinator" ? institute : undefined);
       setEmail("");
       setNotice("Account provisioned.");
       if (onAdded) onAdded();
@@ -488,6 +490,15 @@ function AccountProvisioning({
               ))}
             </select>
           </label>
+          {role === "coordinator" && (
+            <label>
+              Institute
+              <select value={institute} onChange={(event) => setInstitute(event.target.value)} required>
+                <option value="">Select institute</option>
+                {instituteNames.map((name) => <option key={name} value={name}>{name}</option>)}
+              </select>
+            </label>
+          )}
           <Button type="submit" disabled={provisioning}>
             {provisioning ? "Adding…" : "Add user"}
           </Button>
@@ -604,9 +615,10 @@ function AllUsers({
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [drafts, setDrafts] = useState<
-    Record<string, { role: AdminRole; access_status: AccessStatus }>
+    Record<string, { role: AdminRole; access_status: AccessStatus; institute: string | null }>
   >({});
   const [saving, setSaving] = useState<string | null>(null);
+  const [institutes, setInstitutes] = useState<string[]>([...instituteNames]);
   const [editingUser, setEditingUser] = useState<AdminUserResource | null>(
     null,
   );
@@ -674,7 +686,7 @@ function AllUsers({
   }
   function draftFor(user: AdminUserResource) {
     return (
-      drafts[user.id] ?? { role: user.role, access_status: user.access_status }
+      drafts[user.id] ?? { role: user.role, access_status: user.access_status, institute: user.institute }
     );
   }
   async function save(user: AdminUserResource) {
@@ -997,6 +1009,7 @@ function AllUsers({
                                   [user.id]: {
                                     role: user.role,
                                     access_status: user.access_status,
+                                    institute: user.institute,
                                   },
                                 }));
                                 setEditingUser(user);
@@ -1091,6 +1104,26 @@ function AllUsers({
                   <option key={status} value={status}>
                     {label(status)}
                   </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Institute
+              <select
+                value={draftFor(editingUser).institute ?? ""}
+                onChange={(event) =>
+                  setDrafts((current) => ({
+                    ...current,
+                    [editingUser.id]: {
+                      ...draftFor(editingUser),
+                      institute: event.target.value || null,
+                    },
+                  }))
+                }
+              >
+                <option value="">Not assigned</option>
+                {institutes.map((institute) => (
+                  <option key={institute} value={institute}>{institute}</option>
                 ))}
               </select>
             </label>

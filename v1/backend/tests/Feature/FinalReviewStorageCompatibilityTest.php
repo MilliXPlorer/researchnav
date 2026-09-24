@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\FeedbackComment;
+use App\Models\User;
 use App\Services\ReportingService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -27,7 +28,9 @@ class FinalReviewStorageCompatibilityTest extends TestCase
         Schema::drop('evaluations');
         Schema::drop('methodology_reviews');
 
-        $report = app(ReportingService::class)->coordinatorProgram();
+        $report = app(ReportingService::class)->coordinatorProgram(
+            User::factory()->create(['role' => 'coordinator', 'institute' => 'Institute of Computer Studies'])
+        );
 
         $this->assertSame(0, $report['counts']['evaluations_submitted']);
         $this->assertSame([], $report['evaluations']);

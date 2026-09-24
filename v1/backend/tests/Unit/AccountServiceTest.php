@@ -51,7 +51,7 @@ class AccountServiceTest extends TestCase
     public function test_provisioning_preserves_the_existing_policy_semantics(): void
     {
         $researcher = $this->user(['access_status' => 'blocked']);
-        $result = app(AccountService::class)->provisionUser($researcher->email, 'coordinator', $researcher->id);
+        $result = app(AccountService::class)->provisionUser($researcher->email, 'coordinator', $researcher->id, 'Institute of Computer Studies');
 
         $this->assertSame('coordinator', $result->role);
         $this->assertSame('invited', $result->access_status);

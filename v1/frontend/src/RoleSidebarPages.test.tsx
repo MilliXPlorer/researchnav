@@ -247,18 +247,10 @@ describe("role workspace pages", () => {
     expect(open).toHaveBeenCalledTimes(3);
   });
 
-  it("prints the full coordinator report from any selected section", async () => {
+  it("opens a coordinator PDF for only the selected report section", async () => {
     stubFetch([[/\/api\/coordinator\/reports(\?|$)/, programReport]]);
-    const print = vi.fn(() => {
-      const report = document.querySelector(".coordinator-print-area");
-      expect(report).toBeInTheDocument();
-      expect(report).toHaveTextContent("All institutes");
-      expect(report).toHaveTextContent("Overview");
-      expect(report).toHaveTextContent("Research instructors");
-      expect(report).toHaveTextContent("Class sections");
-      expect(report).toHaveTextContent("Adviser load");
-    });
-    vi.stubGlobal("print", print);
+    const open = vi.fn();
+    vi.stubGlobal("open", open);
 
     render(
       <RoleSidebarPage
@@ -273,9 +265,18 @@ describe("role workspace pages", () => {
     expect(printButton).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "Class sections" }));
     fireEvent.click(printButton);
-    await waitFor(() => expect(print).toHaveBeenCalledOnce());
-    window.dispatchEvent(new Event("afterprint"));
-    await waitFor(() => expect(printButton).toBeEnabled());
+    expect(open).toHaveBeenCalledWith(
+      "/api/coordinator/reports/sections/pdf",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Research instructors" }));
+    fireEvent.click(printButton);
+    expect(open).toHaveBeenLastCalledWith(
+      "/api/coordinator/reports/instructors/pdf",
+      "_blank",
+      "noopener,noreferrer",
+    );
   });
 
   it("opens a coordinator report count and adviser row as read-only details", async () => {
@@ -326,6 +327,7 @@ describe("role workspace pages", () => {
                     name: "Prof. Dela Cruz",
                     email: "instructor@example.edu",
                     sections: ["Class A"],
+                    studies: [{ id: 1, title: "Study A" }],
                   },
                 ],
                 by_section: [{ id: 1, name: "Class A", documents_count: 1 }],

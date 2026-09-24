@@ -183,6 +183,40 @@ class SharedMonitoringTest extends TestCase
             ->assertJsonPath('data.stages.before_proposal_defense.sections.0.assigned_actor_name', $proposalAdviser->displayName());
     }
 
+    public function test_every_assigned_actor_can_read_the_stage_specific_project_team(): void
+    {
+        $instructor = $this->user(['role' => 'instructor']);
+        $adviser = $this->user(['role' => 'adviser']);
+        $section = ClassSection::query()->create(['instructor_id' => $instructor->id, 'name' => 'Thesis 2']);
+        $research = ResearchDocument::factory()->create(['section_id' => $section->id]);
+        $research->reviewAssignments()->create([
+            'reviewer_id' => $adviser->id,
+            'assigned_by' => $instructor->id,
+            'review_role' => 'adviser',
+            'defense_type' => 'proposal',
+            'is_active' => true,
+        ]);
+        ResearchProjectTeamMember::query()->create([
+            'research_document_id' => $research->id,
+            'defense_type' => 'proposal',
+            'user_id' => $adviser->id,
+            'team_role' => 'adviser',
+            'assigned_by' => $instructor->id,
+        ]);
+
+        $this->as($adviser)
+            ->getJson('/api/research/'.$research->id.'/team?defense_type=proposal')
+            ->assertOk()
+            ->assertJsonPath('data.defense_type', 'proposal')
+            ->assertJsonPath('data.adviser.name', $adviser->displayName());
+
+        $this->as($adviser)
+            ->getJson('/api/research/'.$research->id.'/team?defense_type=final')
+            ->assertOk()
+            ->assertJsonPath('data.defense_type', 'final')
+            ->assertJsonPath('data.adviser', null);
+    }
+
     /**
      * @param string[] $expectedStages
      */

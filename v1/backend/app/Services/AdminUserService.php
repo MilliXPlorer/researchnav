@@ -12,7 +12,7 @@ class AdminUserService
 {
     public function __construct(private readonly AuditService $audit) {}
 
-    /** @param array{role?: string, access_status?: string} $changes */
+    /** @param array{role?: string, access_status?: string, institute?: string|null} $changes */
     public function update(User $actor, string $targetId, array $changes, Request $request): User
     {
         return DB::transaction(function () use ($actor, $targetId, $changes, $request): User {

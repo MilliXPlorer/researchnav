@@ -33,9 +33,9 @@ class AccessRequestController extends DomainController
     {
         $data = $this->validated($request, [
             'requested_role' => ['required', 'string', 'in:'.implode(',', AccessRequestService::REQUESTABLE_ROLES)],
-            'full_name' => ['nullable', 'string', 'max:180'],
-            'program' => ['nullable', 'string', 'max:180'],
-            'justification' => ['nullable', 'string', 'max:1000'],
+            'full_name' => ['required', 'string', 'max:180'],
+            'program' => ['required', 'string', 'max:180'],
+            'justification' => ['required', 'string', 'max:1000'],
         ]);
 
         try {

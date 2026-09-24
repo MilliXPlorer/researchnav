@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Notifications\ResearchActivityNotification;
 use App\Services\DomainAuthorization;
 use App\Services\MonitoringService;
+use App\Services\ResearchProjectTeamService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -88,14 +89,34 @@ class SharedMonitoringController extends DomainController
         $actor = $this->actor($request);
         $this->authorizeView($actor, $researchDocument);
         $entries = DB::table('monitoring_entries')->leftJoin('users', 'monitoring_entries.reviewer_id', '=', 'users.id')->where('monitoring_entries.research_document_id', $researchDocument->id)->orderBy('monitoring_entries.monitoring_stage')->orderBy('monitoring_entries.designation')->select('monitoring_entries.*', DB::raw("TRIM(CONCAT_WS(' ', users.first_name, users.middle_name, users.last_name)) as reviewer_name"))->get();
-        $reviewActors = $researchDocument->reviewAssignments()->with('reviewer')->get()->filter(fn ($assignment) => $assignment->is_active && $assignment->reviewer !== null)->mapWithKeys(fn ($assignment) => [$this->assignmentDesignation($assignment) => $assignment->reviewer->displayName()]);
+        $reviewAssignments = $researchDocument->reviewAssignments()->with('reviewer')->get()
+            ->filter(fn ($assignment) => $assignment->is_active && $assignment->reviewer !== null);
         if ($researchDocument->section?->instructor !== null) {
-            $reviewActors->put('Instructor', $researchDocument->section->instructor->displayName());
+            $instructorName = $researchDocument->section->instructor->displayName();
+        } else {
+            $instructorName = null;
         }
         $researchDocument->loadMissing('authors.user');
         $teamByStage = $this->teamMembersByStage($researchDocument);
 
-        return response()->json(['data' => ['research_document_id' => $researchDocument->id, 'title' => $researchDocument->title, 'researchers' => $this->researcherNames($researchDocument), 'editable_stages' => collect(self::STAGES)->filter(fn (string $stage) => $this->canEditStage($actor, $researchDocument, $stage))->values()->all(), 'stages' => collect(self::STAGES)->mapWithKeys(fn (string $stage) => [$stage => $this->stage($this->isBeforeStage($stage) ? self::PRE : self::POST, $entries->where('monitoring_stage', $stage), $actor->id, $this->actorsForStage($stage, $reviewActors, $teamByStage))])->all()]])->header('Cache-Control', 'private, no-store');
+        return response()->json(['data' => ['research_document_id' => $researchDocument->id, 'title' => $researchDocument->title, 'researchers' => $this->researcherNames($researchDocument), 'editable_stages' => collect(self::STAGES)->filter(fn (string $stage) => $this->canEditStage($actor, $researchDocument, $stage))->values()->all(), 'stages' => collect(self::STAGES)->mapWithKeys(function (string $stage) use ($entries, $actor, $teamByStage, $reviewAssignments, $instructorName) {
+            $defenseType = str_contains($stage, '_final_defense') ? 'final' : 'proposal';
+            $reviewActors = $reviewAssignments->filter(fn ($assignment) => ! Schema::hasColumn((new ReviewAssignment)->getTable(), 'defense_type') || $assignment->defense_type === $defenseType)
+                ->mapWithKeys(fn ($assignment) => [$this->assignmentDesignation($assignment) => $assignment->reviewer->displayName()]);
+            if ($instructorName !== null) $reviewActors->put('Instructor', $instructorName);
+
+            return [$stage => $this->stage($this->isBeforeStage($stage) ? self::PRE : self::POST, $entries->where('monitoring_stage', $stage), $actor->id, $this->actorsForStage($stage, $reviewActors, $teamByStage))];
+        })->all()]])->header('Cache-Control', 'private, no-store');
+    }
+
+    public function team(Request $request, ResearchDocument $researchDocument, ResearchProjectTeamService $teams): JsonResponse
+    {
+        $this->authorizeView($this->actor($request), $researchDocument);
+        $input = $request->validate(['defense_type' => ['nullable', Rule::in(['proposal', 'final'])]]);
+        $section = $researchDocument->section()->firstOrFail();
+
+        return response()->json(['data' => $teams->get($section, $researchDocument, $input['defense_type'] ?? 'proposal')])
+            ->header('Cache-Control', 'private, no-store');
     }
 
     public function update(Request $request, ResearchDocument $researchDocument, MonitoringService $activity): JsonResponse
@@ -353,7 +374,10 @@ class SharedMonitoringController extends DomainController
         // contacts still show when a role was never managed through the team UI.
         $fallback = fn (string $key) => $isFinal ? null : $reviewActors->get($key);
 
-        $actors = $reviewActors->toBase()->only(['Instructor', 'Editor', 'Statistician', 'Librarian']);
+        $actors = collect(['Instructor' => $reviewActors->get('Instructor')]);
+        foreach (['Editor', 'Statistician', 'Librarian'] as $key) {
+            $actors->put($key, $reviewActors->get($key));
+        }
         $actors->put('Adviser', $memberName('adviser') ?? $fallback('Adviser'));
         $actors->put('Research Rep', $memberName('research_office_representative') ?? $fallback('Research Rep'));
         $actors->put('Chair', $memberName('chair') ?? $fallback('Chair'));

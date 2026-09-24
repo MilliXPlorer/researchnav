@@ -1,10 +1,12 @@
 <?php
 
 use App\Exceptions\ApiValidationException;
+use App\Exceptions\CoordinatorInstituteRequiredException;
 use App\Http\Middleware\DiscardUnauthenticatedSession;
 use App\Http\Middleware\EnsureActiveAccount;
 use App\Http\Middleware\EnsureActiveAdministrator;
 use App\Http\Middleware\EnsureAllowedOrigin;
+use App\Http\Middleware\EnsureCoordinatorAuthority;
 use App\Http\Middleware\EnsureOfficeAuthority;
 use App\Http\Middleware\EnsureRequestBodySize;
 use App\Http\Middleware\EnsureRole;
@@ -40,6 +42,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'optional.current.user' => ResolveOptionalCurrentUser::class,
             'account.active' => EnsureActiveAccount::class,
             'active.admin' => EnsureActiveAdministrator::class,
+            'coordinator.authority' => EnsureCoordinatorAuthority::class,
             'role' => EnsureRole::class,
             'office.authority' => EnsureOfficeAuthority::class,
             'api.bodylimit' => EnsureRequestBodySize::class,
@@ -65,6 +68,11 @@ return Application::configure(basePath: dirname(__DIR__))
                 'error' => 'INVALID_REQUEST',
                 'details' => ['formErrors' => [], 'fieldErrors' => $exception->fieldErrors],
             ], 400);
+        });
+        $exceptions->render(function (CoordinatorInstituteRequiredException $exception, Request $request): ?Response {
+            return $request->is('api/*')
+                ? response()->json(['error' => 'COORDINATOR_INSTITUTE_REQUIRED'], 403)
+                : null;
         });
         $exceptions->render(function (ValidationException $exception, Request $request): ?Response {
             if (! $request->is('api/*')) {

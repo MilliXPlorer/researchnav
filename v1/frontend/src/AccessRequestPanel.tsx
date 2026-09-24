@@ -3,13 +3,14 @@ import { ClipboardCheck, Send } from "lucide-react";
 import {
   ApiError,
   getMyAccessRequest,
+  listInstitutes,
   REQUESTABLE_ROLES,
   submitAccessRequest,
   type AccessRequestResource,
   type RequestableRole,
 } from "./api";
 import { Button } from "./components";
-import { roleConfigs } from "./data";
+import { instituteNames, roleConfigs } from "./data";
 
 type State =
   | { status: "loading" }
@@ -44,7 +45,8 @@ export default function AccessRequestPanel() {
   const [error, setError] = useState("");
   const [role, setRole] = useState<RequestableRole>("researcher");
   const [fullName, setFullName] = useState("");
-  const [program, setProgram] = useState("");
+  const [institute, setInstitute] = useState("");
+  const [institutes, setInstitutes] = useState<string[]>([...instituteNames]);
   const [justification, setJustification] = useState("");
 
   useEffect(() => {
@@ -68,6 +70,14 @@ export default function AccessRequestPanel() {
       cancelled = true;
       window.clearInterval(interval);
     };
+  }, []);
+
+  useEffect(() => {
+    void listInstitutes()
+      .then((values) => {
+        if (Array.isArray(values)) setInstitutes(values);
+      })
+      .catch(() => undefined);
   }, []);
 
   if (state.status === "loading") {
@@ -133,9 +143,9 @@ export default function AccessRequestPanel() {
         setState({ status: "submitting" });
         void submitAccessRequest({
           requested_role: role,
-          full_name: fullName.trim() || undefined,
-          program: program.trim() || undefined,
-          justification: justification.trim() || undefined,
+          full_name: fullName.trim(),
+          program: institute,
+          justification: justification.trim(),
         })
           .then((request) => setState({ status: "submitted", request }))
           .catch((requestFailure: unknown) => {
@@ -167,6 +177,7 @@ export default function AccessRequestPanel() {
       <label>
         Full name
         <input
+          required
           value={fullName}
           maxLength={180}
           onChange={(event) => setFullName(event.target.value)}
@@ -175,18 +186,27 @@ export default function AccessRequestPanel() {
       </label>
 
       <label>
-        Program or department
-        <input
-          value={program}
-          maxLength={180}
-          onChange={(event) => setProgram(event.target.value)}
-          placeholder="e.g. BS Computer Science"
-        />
+        Institute
+        <select
+          required
+          value={institute}
+          onChange={(event) => setInstitute(event.target.value)}
+        >
+          <option value="" disabled>
+            Select your institute
+          </option>
+          {institutes.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
       </label>
 
       <label>
         Reason for access
         <textarea
+          required
           value={justification}
           maxLength={1000}
           rows={3}

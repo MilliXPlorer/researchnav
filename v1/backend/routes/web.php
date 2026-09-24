@@ -10,6 +10,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DocumentFileController;
 use App\Http\Controllers\EditorController;
 use App\Http\Controllers\FeedbackController;
+use App\Http\Controllers\InstituteController;
 use App\Http\Controllers\InstructorController;
 use App\Http\Controllers\LibrarianController;
 use App\Http\Controllers\MonitoringController;
@@ -75,6 +76,7 @@ Route::prefix('api')
             ]);
 
         Route::prefix('admin')->middleware(['current.user', 'account.active', 'active.admin'])->group(function (): void {
+            Route::get('institutes', [InstituteController::class, 'index']);
             Route::get('accounts', [ApiController::class, 'accounts']);
             Route::post('accounts', [ApiController::class, 'provisionAccount'])
                 ->middleware(['origin.allowed', 'throttle:provision-coordinators']);
@@ -98,6 +100,7 @@ Route::prefix('api')
         // An applicant is authenticated by Google but has no role yet, so these
         // two routes deliberately omit the active-account requirement.
         Route::middleware('current.user')->group(function (): void {
+            Route::get('institutes', [InstituteController::class, 'index']);
             Route::get('access-requests/mine', [AccessRequestController::class, 'mine']);
             Route::post('access-requests', [AccessRequestController::class, 'store'])
                 ->middleware(['origin.allowed', 'throttle:domain-mutations']);
@@ -169,13 +172,14 @@ Route::prefix('api')
             Route::put('research/{researchDocument}/monitoring', [StatisticianController::class, 'saveMonitoring'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
         });
 
-        Route::prefix('coordinator')->middleware(['current.user', 'account.active', 'role:coordinator,admin'])->group(function (): void {
+        Route::prefix('coordinator')->middleware(['current.user', 'account.active', 'coordinator.authority'])->group(function (): void {
             Route::get('schedules', [CoordinatorWorkspaceController::class, 'schedules']);
             Route::post('schedules', [CoordinatorWorkspaceController::class, 'storeSchedule'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::patch('schedules/{defenseSchedule}', [CoordinatorWorkspaceController::class, 'updateSchedule'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('duplicate-flags', [CoordinatorWorkspaceController::class, 'duplicateFlags']);
             Route::get('adviser-load', [CoordinatorWorkspaceController::class, 'adviserLoad']);
             Route::get('reports', [CoordinatorWorkspaceController::class, 'reports']);
+            Route::get('reports/{section}/pdf', [CoordinatorWorkspaceController::class, 'reportPdf']);
         });
 
         Route::prefix('librarian')->middleware(['current.user', 'account.active', 'role:librarian'])->group(function (): void {
@@ -233,6 +237,7 @@ Route::prefix('api')
             Route::get('monitoring/research', [SharedMonitoringController::class, 'research']);
             Route::get('monitoring/progress-updates', [SharedMonitoringController::class, 'progressUpdates'])->middleware('role:adviser,instructor');
             Route::get('research/{researchDocument}/shared-monitoring', [SharedMonitoringController::class, 'show']);
+            Route::get('research/{researchDocument}/team', [SharedMonitoringController::class, 'team']);
             Route::put('research/{researchDocument}/shared-monitoring', [SharedMonitoringController::class, 'update'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::delete('research/{researchDocument}/shared-monitoring', [SharedMonitoringController::class, 'destroy'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::post('research/{researchDocument}/shared-monitoring/signature', [SharedMonitoringController::class, 'storeSignature'])->middleware(['origin.allowed', 'throttle:domain-mutations']);

@@ -92,7 +92,7 @@ class RoleAccessMatrixTest extends TestCase
 
     public function test_compatibility_roles_are_denied_office_authority_but_keep_their_workspace(): void
     {
-        $coordinator = $this->user(['role' => 'coordinator']);
+        $coordinator = $this->user(['role' => 'coordinator', 'institute' => 'Institute of Computer Studies']);
         $this->as($coordinator)->getJson('/api/office/users')
             ->assertForbidden()
             ->assertExactJson(['error' => 'ROLE_NOT_AUTHORIZED']);

@@ -36,7 +36,7 @@
     </header>
     <section class="title">
         <h2>{{ $title }}</h2>
-        <p>ResearchNAV Institutional Report</p>
+        <p>{{ $subtitle ?? 'ResearchNAV Institutional Report' }}</p>
         <small>Total records: {{ $total }}</small>
     </section>
     @if (count($rows) > 0)
