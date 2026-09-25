@@ -7,6 +7,7 @@ use App\Services\ManuscriptTextExtractionException;
 use App\Services\ManuscriptTextExtractor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 use Mockery;
 use Tests\TestCase;
@@ -22,6 +23,8 @@ class ContentUploadSimilarityTest extends TestCase
         parent::setUp();
         config()->set('researchnav.similarity.python_binary', PHP_BINARY);
         config()->set('researchnav.similarity.cli_path', base_path('tests/Fixtures/similarity_worker.php'));
+        config()->set('researchnav.similarity.upload_text_cache_ttl_seconds', 900);
+        Cache::flush();
         File::deleteDirectory($this->uploadRoot());
     }
 
@@ -82,6 +85,58 @@ class ContentUploadSimilarityTest extends TestCase
         ])->assertDontSee('private parser detail');
 
         $this->assertSame([], File::directories($this->uploadRoot()));
+    }
+
+    public function test_it_reuses_extracted_text_for_identical_upload_bytes(): void
+    {
+        $extractor = Mockery::mock(ManuscriptTextExtractor::class);
+        $extractor->shouldReceive('extract')->once()
+            ->andReturn('machine learning student performance prediction');
+        $this->app->instance(ManuscriptTextExtractor::class, $extractor);
+        $user = $this->researcher();
+
+        $this->as($user)->post('/api/similarity/content-upload', [
+            'file' => $this->pdf(),
+        ], $this->origin())->assertOk();
+        $this->as($user)->post('/api/similarity/content-upload', [
+            'file' => $this->pdf(),
+        ], $this->origin())->assertOk();
+
+        $this->assertSame([], File::directories($this->uploadRoot()));
+    }
+
+    public function test_it_does_not_share_cached_text_between_different_uploads(): void
+    {
+        $extractor = Mockery::mock(ManuscriptTextExtractor::class);
+        $extractor->shouldReceive('extract')->twice()
+            ->andReturn('first extracted manuscript', 'second extracted manuscript');
+        $this->app->instance(ManuscriptTextExtractor::class, $extractor);
+        $user = $this->researcher();
+
+        $this->as($user)->post('/api/similarity/content-upload', [
+            'file' => $this->pdf(),
+        ], $this->origin())->assertOk();
+        $this->as($user)->post('/api/similarity/content-upload', [
+            'file' => UploadedFile::fake()->createWithContent('other.pdf', "%PDF-1.4\n2 0 obj\n"),
+        ], $this->origin())->assertOk();
+    }
+
+    public function test_it_does_not_cache_failed_extraction(): void
+    {
+        $extractor = Mockery::mock(ManuscriptTextExtractor::class);
+        $extractor->shouldReceive('extract')->once()->andThrow(
+            new ManuscriptTextExtractionException('temporary parser failure'),
+        );
+        $extractor->shouldReceive('extract')->once()->andReturn('successful retry text');
+        $this->app->instance(ManuscriptTextExtractor::class, $extractor);
+        $user = $this->researcher();
+
+        $this->as($user)->post('/api/similarity/content-upload', [
+            'file' => $this->pdf(),
+        ], $this->origin())->assertUnprocessable();
+        $this->as($user)->post('/api/similarity/content-upload', [
+            'file' => $this->pdf(),
+        ], $this->origin())->assertOk();
     }
 
     public function test_it_rejects_unsupported_and_unexpected_fields(): void

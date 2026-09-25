@@ -11,6 +11,7 @@ class UploadedContentSimilarityService
 {
     public function __construct(
         private readonly ManuscriptTextExtractor $extractor,
+        private readonly UploadedContentTextCache $textCache,
         private readonly PublicRepositorySimilarityService $similarity,
     ) {}
 
@@ -50,7 +51,14 @@ class UploadedContentSimilarityService
                 throw new UploadedContentUnreadableException;
             }
 
-            $content = $this->extractor->extract($canonicalPath);
+            $sha256 = hash_file('sha256', $canonicalPath);
+            if (! is_string($sha256)) {
+                throw new UploadedContentUnreadableException;
+            }
+            $content = $this->textCache->remember(
+                $sha256,
+                fn (): string => $this->extractor->extract($canonicalPath),
+            );
             if (trim($content) === '') {
                 throw new UploadedContentUnreadableException;
             }

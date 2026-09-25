@@ -59,6 +59,7 @@ return [
         'php_memory_limit' => env('SIMILARITY_PHP_MEMORY_LIMIT', '512M'),
         'maximum_input_bytes' => (int) env('SIMILARITY_MAXIMUM_INPUT_BYTES', 268435456),
         'maximum_output_bytes' => (int) env('SIMILARITY_MAXIMUM_OUTPUT_BYTES', 2097152),
+        'upload_text_cache_ttl_seconds' => (int) env('SIMILARITY_UPLOAD_TEXT_CACHE_TTL_SECONDS', 900),
     ],
     'manuscript_search' => [
         // The worker receives one verified canonical private-disk path by argv.

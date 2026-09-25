@@ -165,9 +165,11 @@ def main() -> None:
         if isinstance(value, dict) and set(value) == {"query", "candidates"}:
             query, candidates = _query_payload(raw)
             is_public_query = True
+            is_uploaded_content = False
         elif isinstance(value, dict) and set(value) == {"uploaded_content", "candidates"}:
             query, candidates = _uploaded_content_payload(raw)
             is_public_query = True
+            is_uploaded_content = True
         else:
             source, candidates = _payload(raw)
             is_public_query = False
@@ -178,7 +180,10 @@ def main() -> None:
         if is_public_query:
             # TF-IDF/cosine remains the official rank. FastText contributes an
             # independent semantic support score when a model is configured.
-            results = compare_query(query, candidates, _optional_fasttext_model())
+            results = compare_query(
+                query, candidates, _optional_fasttext_model(),
+                uploaded_content=is_uploaded_content,
+            )
         else:
             # FastText is contextual support only on both protocols. Its model,
             # package, or runtime must never make official TF-IDF unavailable.
