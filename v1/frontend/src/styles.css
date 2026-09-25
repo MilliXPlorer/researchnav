@@ -9028,16 +9028,59 @@ td strong {
   width: 100%;
   position: static;
 }
+.assigned-research-folders .research-folder-row-actions {
+  flex-shrink: 0;
+  background: transparent;
+}
+.support-assignment-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.support-assignment-actions .support-assignment-action {
+  min-height: 36px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+  transform: none;
+}
+.support-assignment-actions .support-assignment-accept,
+.support-assignment-actions .support-assignment-accept:hover:not(:disabled),
+.support-assignment-actions .support-assignment-accept:active:not(:disabled) {
+  color: var(--paper);
+  background: var(--canopy);
+  box-shadow: none;
+}
+.support-assignment-actions .support-assignment-decline,
+.support-assignment-actions .support-assignment-decline:hover:not(:disabled) {
+  color: var(--canopy);
+  background: var(--paper);
+  border-color: #b8cec0;
+  box-shadow: none;
+}
 @media (max-width: 767px) {
   .research-folder-row {
-    grid-template-columns: 1fr;
+    flex-wrap: wrap;
   }
   .research-folder-row-actions {
+    width: 100%;
     padding: 0 14px 14px;
   }
   .research-folder-row-actions .row-actions {
     width: 100%;
     justify-content: flex-start;
+  }
+  .assigned-research-folders .research-folder-row-main {
+    flex-basis: 100%;
+  }
+  .assigned-research-folders .research-folder-row-actions {
+    justify-content: flex-end;
+  }
+  .support-assignment-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
 }
 .title-member-panel {

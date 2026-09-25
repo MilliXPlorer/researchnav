@@ -550,85 +550,85 @@ function AssignedResearchFoldersContent({
                     No assigned studies match your search.
                   </p>
                 )}
-                {visibleFolders.map((item, index) => (
-                  <div key={item.id}>
-                    {role === "research-office" &&
-                      (index === 0 ||
-                        visibleFolders[index - 1]?.institute !==
-                          item.institute) && (
-                        <p className="project-folder-institute">
-                          {item.institute || "Institute not set"}
-                        </p>
-                      )}
-                    <ResearchFolderRow
-                      title={item.title}
-                      metadata={
-                        ["requested", "pending"].includes(
-                          item.assignment_status ?? "",
-                        )
-                          ? "Assignment request pending"
-                          : item.research_stage
-                          ? label(item.research_stage)
-                          : "Research project"
-                      }
-                      detail={item.researchers.join(", ") || "Researchers"}
-                      selected={selected === String(item.id)}
-                      onOpen={() => {
-                        if (
-                          ["requested", "pending"].includes(
-                            item.assignment_status ?? "",
-                          )
-                        )
-                          return;
-                        setRepresentativeBusy(false);
-                        setRepresentativeLoading(false);
-                        setRepresentativeError("");
-                        setSelected(String(item.id));
-                      }}
-                      openLabel={
-                        ["requested", "pending"].includes(
-                          item.assignment_status ?? "",
-                        )
-                          ? `Assignment request for ${item.title}`
-                          : undefined
-                      }
-                      actions={
-                        item.assignment_id &&
-                        ["requested", "pending"].includes(
-                          item.assignment_status ?? "",
-                        ) ? (
-                          <>
-                            <Button
-                              disabled={respondingAssignmentId !== null}
-                              onClick={() =>
-                                void respondToAssignment(
-                                  item.assignment_id!,
-                                  "accept",
-                                )
-                              }
-                            >
-                              {respondingAssignmentId === item.assignment_id
-                                ? "Updating..."
-                                : "Accept"}
-                            </Button>
-                            <Button
-                              variant="secondary"
-                              disabled={respondingAssignmentId !== null}
-                              onClick={() =>
-                                void respondToAssignment(
-                                  item.assignment_id!,
-                                  "decline",
-                                )
-                              }
-                            >
-                              Decline
-                            </Button>
-                          </>
-                        ) : undefined
-                      }
-                    />
-                  </div>
-                ))}
+                {visibleFolders.map((item, index) => {
+                  const pendingAssignment = ["requested", "pending"].includes(
+                    item.assignment_status ?? "",
+                  );
+
+                  return (
+                    <div key={item.id}>
+                      {role === "research-office" &&
+                        (index === 0 ||
+                          visibleFolders[index - 1]?.institute !==
+                            item.institute) && (
+                          <p className="project-folder-institute">
+                            {item.institute || "Institute not set"}
+                          </p>
+                        )}
+                      <ResearchFolderRow
+                        title={item.title}
+                        metadata={
+                          pendingAssignment
+                            ? `Assignment request pending · ${item.researchers.join(", ") || "Researcher"}`
+                            : item.research_stage
+                              ? label(item.research_stage)
+                              : "Research project"
+                        }
+                        detail={
+                          pendingAssignment
+                            ? undefined
+                            : item.researchers.join(", ") || "Researchers"
+                        }
+                        selected={selected === String(item.id)}
+                        onOpen={() => {
+                          if (pendingAssignment) return;
+                          setRepresentativeBusy(false);
+                          setRepresentativeLoading(false);
+                          setRepresentativeError("");
+                          setSelected(String(item.id));
+                        }}
+                        openLabel={
+                          pendingAssignment
+                            ? `Assignment request for ${item.title}`
+                            : undefined
+                        }
+                        actions={
+                          item.assignment_id && pendingAssignment ? (
+                            <div className="support-assignment-actions">
+                              <Button
+                                className="support-assignment-action support-assignment-accept"
+                                disabled={respondingAssignmentId !== null}
+                                onClick={() =>
+                                  void respondToAssignment(
+                                    item.assignment_id!,
+                                    "accept",
+                                  )
+                                }
+                              >
+                                {respondingAssignmentId === item.assignment_id
+                                  ? "Updating..."
+                                  : "Accept"}
+                              </Button>
+                              <Button
+                                variant="secondary"
+                                className="support-assignment-action support-assignment-decline"
+                                disabled={respondingAssignmentId !== null}
+                                onClick={() =>
+                                  void respondToAssignment(
+                                    item.assignment_id!,
+                                    "decline",
+                                  )
+                                }
+                              >
+                                Decline
+                              </Button>
+                            </div>
+                          ) : undefined
+                        }
+                      />
+                    </div>
+                  );
+                })}
               </div>
             </aside>
           )}

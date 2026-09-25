@@ -274,13 +274,24 @@ describe("AssignedResearchFolders", () => {
       render(<AssignedResearchFolders role={role} />);
 
       expect(
-        await screen.findByText("Assignment request pending"),
+        await screen.findByText("Assignment request pending · Ari Santos"),
       ).toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+      const accept = screen.getByRole("button", { name: "Accept" });
+      const decline = screen.getByRole("button", { name: "Decline" });
+      expect(accept).toHaveClass(
+        "support-assignment-action",
+        "support-assignment-accept",
+      );
+      expect(decline).toHaveClass(
+        "support-assignment-action",
+        "support-assignment-decline",
+      );
+      expect(accept.parentElement).toHaveClass("support-assignment-actions");
+      fireEvent.click(accept);
 
       await waitFor(() =>
         expect(
-          screen.queryByText("Assignment request pending"),
+          screen.queryByText("Assignment request pending · Ari Santos"),
         ).not.toBeInTheDocument(),
       );
       expect(fetchMock).not.toHaveBeenCalledWith(
