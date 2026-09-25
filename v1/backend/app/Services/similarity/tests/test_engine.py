@@ -4,7 +4,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from similarity.engine import compare_query, compare_titles, decimal_score, title_tokens
+from similarity.engine import compare_query, compare_titles, decimal_score, matched_terms, title_tokens
 from similarity.stopwords import preprocess_title
 
 
@@ -54,6 +54,36 @@ def test_public_query_uses_ready_content_only_and_keeps_fasttext_supporting_only
     assert results[0]["content_similarity_score"] == "1.000000000000"
     assert results[1]["content_similarity_score"] is None
     assert all(result["fasttext_support_score"] is None for result in results)
+
+
+def test_matched_terms_exclude_noise_but_keep_meaningful_terms() -> None:
+    terms = [
+        "00", "2024", "1st", "21st", "2.5", "50%", "3,000", "____", "----",
+        "++++", "//", "...", "===", "***", "___---", "", " ", "academic",
+        "performance", "covid-19", "5g", "c++", "e-learning", "k-12", "r&d",
+    ]
+
+    assert matched_terms(terms, terms) == [
+        "5g", "academic", "c++", "covid-19", "e-learning", "k-12",
+        "performance", "r&d",
+    ]
+
+
+def test_uploaded_content_ranks_exact_content_match_ahead_of_title_match() -> None:
+    results = compare_query(
+        "exact archived manuscript content",
+        [
+            {"id": 2, "title": "Exact Archived Manuscript Content", "content": "different candidate body"},
+            {"id": 3, "title": "Unrelated title", "content": "exact archived manuscript content"},
+        ],
+        None,
+        uploaded_content=True,
+    )
+
+    assert [result["matched_research_id"] for result in results] == [3, 2]
+    assert results[0]["content_similarity_score"] == "1.000000000000"
+    assert results[0]["title_similarity_score"] == "0.000000000000"
+    assert results[0]["matched_terms"] == ["archived", "content", "exact", "manuscript"]
 
 
 def test_preprocessing_and_score_precision_are_preserved() -> None:

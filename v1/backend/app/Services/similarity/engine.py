@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import math
+import re
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Iterable
 
 _TWELVE_PLACES = Decimal("0.000000000001")
+_ORDINAL_NUMBER_RE = re.compile(r"\A\d+(?:st|nd|rd|th)\Z", re.IGNORECASE)
 
 try:
     from .cosine import source_cosine_scores
@@ -27,6 +29,18 @@ class InvalidWorkerInput(ValueError):
 def title_tokens(title: str) -> list[str]:
     """Backward-compatible name for deterministic title preprocessing."""
     return preprocess_title(title)
+
+
+def matched_terms(left: Iterable[str], right: Iterable[str]) -> list[str]:
+    """Return bounded lexical overlap without changing scoring tokens."""
+    shared = sorted(set(left).intersection(right))
+    return [
+        term
+        for term in shared
+        if len(term) <= 100
+        and any(character.isalpha() for character in term)
+        and _ORDINAL_NUMBER_RE.fullmatch(term) is None
+    ][:32]
 
 
 def decimal_score(value: float) -> str:
@@ -101,11 +115,7 @@ def compare_titles(
             "title_similarity_score": decimal_score(title_value),
             "content_similarity_score": decimal_score(content_value) if content_value is not None else None,
             "fasttext_score": decimal_score(support.score) if support is not None else None,
-            "matched_terms": [
-                term
-                for term in sorted(source_tokens.intersection(tokens))
-                if len(term) <= 100
-            ][:32],
+            "matched_terms": matched_terms(source_tokens, tokens),
             "contextual_analysis": (
                 support.analysis
                 if support is not None
@@ -123,11 +133,18 @@ def compare_titles(
 
 
 def compare_query(
-    query: str, candidates: Iterable[dict[str, Any]], fasttext_model: Any | None
+    query: str, candidates: Iterable[dict[str, Any]], fasttext_model: Any | None,
+    uploaded_content: bool = False,
 ) -> list[dict[str, Any]]:
-    """Emit independent components for a typed query; PHP applies policy."""
+    """Emit independent components for a typed query or uploaded manuscript."""
     candidate_list = list(candidates)
-    comparison_texts = [query, *(record_text(candidate) for candidate in candidate_list)]
+    comparison_texts = [
+        query,
+        *(
+            candidate.get("content", "") if uploaded_content else record_text(candidate)
+            for candidate in candidate_list
+        ),
+    ]
     token_lists = [preprocess_title(text) for text in comparison_texts]
     title_scores = source_cosine_scores(
         title_tfidf_matrix([query, *(candidate["title"] for candidate in candidate_list)])
@@ -160,16 +177,13 @@ def compare_query(
             "matched_research_id": candidate["id"],
             "title_similarity_score": title_score,
             "content_similarity_score": decimal_score(content_value) if content_value is not None else None,
-            "matched_terms": [
-                term
-                for term in sorted(query_tokens.intersection(tokens))
-                if len(term) <= 100
-            ][:32],
+            "matched_terms": matched_terms(query_tokens, tokens),
             "fasttext_support_score": (
                 decimal_score(support.score) if support is not None else None
             ),
         }
-        ranked_results.append((title_value, candidate["id"], result))
+        ranking_value = content_value if uploaded_content and content_value is not None else title_value
+        ranked_results.append((ranking_value, candidate["id"], result))
 
     return [
         result
