@@ -40,6 +40,42 @@ class SharedMonitoringTest extends TestCase
             ->assertJsonCount(4, 'data.stages');
     }
 
+    #[DataProvider('supportRoleProvider')]
+    public function test_requested_support_assignment_appears_in_assigned_research_folder(string $role): void
+    {
+        $researcher = $this->user(['role' => 'researcher']);
+        $supportActor = $this->user(['role' => $role]);
+        $research = ResearchDocument::factory()->create();
+        $research->reviewAssignments()->create([
+            'reviewer_id' => $supportActor->id,
+            'assigned_by' => $researcher->id,
+            'review_role' => $role,
+            'is_active' => false,
+            'status' => 'requested',
+        ]);
+        $assignment = $research->reviewAssignments()->firstOrFail();
+
+        $this->as($supportActor)
+            ->getJson('/api/monitoring/research')
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $research->id)
+            ->assertJsonPath('data.0.assignment_id', $assignment->id)
+            ->assertJsonPath('data.0.assignment_status', 'requested');
+
+        $this->as($supportActor)
+            ->getJson('/api/research/'.$research->id.'/shared-monitoring')
+            ->assertForbidden();
+    }
+
+    public static function supportRoleProvider(): array
+    {
+        return [
+            'statistician' => ['statistician'],
+            'librarian' => ['librarian'],
+            'editor' => ['research_editor'],
+        ];
+    }
+
     public function test_final_defense_entries_use_an_independent_stage_context(): void
     {
         $office = $this->user(['role' => 'research-office']);
@@ -218,7 +254,7 @@ class SharedMonitoringTest extends TestCase
     }
 
     /**
-     * @param string[] $expectedStages
+     * @param  string[]  $expectedStages
      */
     #[DataProvider('monitoringEditorMatrix')]
     public function test_every_involved_actor_can_edit_their_monitoring_stages(string $role, array $expectedStages): void
@@ -272,7 +308,8 @@ class SharedMonitoringTest extends TestCase
         ];
     }
 
-    public function test_unassigned_role_does_not_gain_shared_monitoring_access(): void    {
+    public function test_unassigned_role_does_not_gain_shared_monitoring_access(): void
+    {
         $research = ResearchDocument::factory()->create();
         $unassigned = $this->user(['role' => 'adviser']);
 

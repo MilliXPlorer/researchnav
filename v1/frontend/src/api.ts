@@ -2913,6 +2913,8 @@ export interface SharedMonitoringResearch {
   research_stage: string;
   institute?: string | null;
   researchers: string[];
+  assignment_id?: number | null;
+  assignment_status?: string | null;
 }
 export interface SharedMonitoringEntry {
   id: number;

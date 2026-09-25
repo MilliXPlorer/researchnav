@@ -233,6 +233,63 @@ describe("AssignedResearchFolders", () => {
     }
   });
 
+  it.each<Role>(["statistician", "research_editor", "librarian"])(
+    "lets %s accept a pending assignment before opening its folder",
+    async (role) => {
+      let accepted = false;
+      const pendingResearch = {
+        ...research,
+        assignment_id: 81,
+        assignment_status: "requested",
+      };
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input);
+          if (url === "/api/monitoring/research") {
+            return new Response(
+              JSON.stringify({
+                data: [
+                  accepted
+                    ? { ...pendingResearch, assignment_status: "accepted" }
+                    : pendingResearch,
+                ],
+              }),
+            );
+          }
+          if (url === "/api/support-assignments/81/respond") {
+            expect(init?.method).toBe("PATCH");
+            expect(JSON.parse(String(init?.body))).toEqual({ decision: "accept" });
+            accepted = true;
+            return new Response(
+              JSON.stringify({
+                data: { id: 81, status: "accepted" },
+              }),
+            );
+          }
+          throw new Error(`Unexpected request: ${url}`);
+        },
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      render(<AssignedResearchFolders role={role} />);
+
+      expect(
+        await screen.findByText("Assignment request pending"),
+      ).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+
+      await waitFor(() =>
+        expect(
+          screen.queryByText("Assignment request pending"),
+        ).not.toBeInTheDocument(),
+      );
+      expect(fetchMock).not.toHaveBeenCalledWith(
+        `/api/research/${research.id}`,
+        expect.anything(),
+      );
+    },
+  );
+
   it("moves from the full-width assigned study list to the workspace and back", async () => {
     vi.stubGlobal(
       "fetch",

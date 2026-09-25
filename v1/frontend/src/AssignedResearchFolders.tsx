@@ -7,6 +7,7 @@ import {
   getResearchPeople,
   listOfficeRepresentativeCandidates,
   listSharedMonitoringResearch,
+  respondToSupportAssignment,
   type InstructorProjectTeam,
   type ProjectTeamPerson,
   type ResearchDocumentSummaryResource,
@@ -110,6 +111,9 @@ function AssignedResearchFoldersContent({
   const [folderSearch, setFolderSearch] = useState("");
   const [instituteFilter, setInstituteFilter] = useState("");
   const [stageFilter, setStageFilter] = useState("");
+  const [respondingAssignmentId, setRespondingAssignmentId] = useState<
+    number | null
+  >(null);
 
   useEffect(() => {
     selectedRef.current = selected;
@@ -150,6 +154,22 @@ function AssignedResearchFoldersContent({
     setRepresentativeLoading(false);
     setRepresentativeError("");
     setLoadedId("");
+  }
+
+  async function respondToAssignment(
+    assignmentId: number,
+    decision: "accept" | "decline",
+  ) {
+    setRespondingAssignmentId(assignmentId);
+    setError("");
+    try {
+      await respondToSupportAssignment(assignmentId, decision);
+      setAttempt((value) => value + 1);
+    } catch {
+      setError("The assignment request could not be updated.");
+    } finally {
+      setRespondingAssignmentId(null);
+    }
   }
 
   useEffect(() => {
@@ -543,18 +563,69 @@ function AssignedResearchFoldersContent({
                     <ResearchFolderRow
                       title={item.title}
                       metadata={
-                        item.research_stage
+                        ["requested", "pending"].includes(
+                          item.assignment_status ?? "",
+                        )
+                          ? "Assignment request pending"
+                          : item.research_stage
                           ? label(item.research_stage)
                           : "Research project"
                       }
                       detail={item.researchers.join(", ") || "Researchers"}
                       selected={selected === String(item.id)}
                       onOpen={() => {
+                        if (
+                          ["requested", "pending"].includes(
+                            item.assignment_status ?? "",
+                          )
+                        )
+                          return;
                         setRepresentativeBusy(false);
                         setRepresentativeLoading(false);
                         setRepresentativeError("");
                         setSelected(String(item.id));
                       }}
+                      openLabel={
+                        ["requested", "pending"].includes(
+                          item.assignment_status ?? "",
+                        )
+                          ? `Assignment request for ${item.title}`
+                          : undefined
+                      }
+                      actions={
+                        item.assignment_id &&
+                        ["requested", "pending"].includes(
+                          item.assignment_status ?? "",
+                        ) ? (
+                          <>
+                            <Button
+                              disabled={respondingAssignmentId !== null}
+                              onClick={() =>
+                                void respondToAssignment(
+                                  item.assignment_id!,
+                                  "accept",
+                                )
+                              }
+                            >
+                              {respondingAssignmentId === item.assignment_id
+                                ? "Updating..."
+                                : "Accept"}
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              disabled={respondingAssignmentId !== null}
+                              onClick={() =>
+                                void respondToAssignment(
+                                  item.assignment_id!,
+                                  "decline",
+                                )
+                              }
+                            >
+                              Decline
+                            </Button>
+                          </>
+                        ) : undefined
+                      }
                     />
                   </div>
                 ))}

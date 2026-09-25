@@ -41,14 +41,37 @@ class SharedMonitoringController extends DomainController
         } else {
             $query->where(function ($documents) use ($actor): void {
                 $active = ReviewAssignment::column('is_active');
-                $documents->whereHas('reviewAssignments', fn ($a) => $a->where(ReviewAssignment::column('reviewer_id'), $actor->id)->when($active === 'status', fn ($q) => $q->whereIn($active, ['accepted', 'confirmed', 'active']), fn ($q) => $q->where($active, true)));
+                $documents->whereHas('reviewAssignments', function ($assignments) use ($actor, $active): void {
+                    $assignments->where(ReviewAssignment::column('reviewer_id'), $actor->id)
+                        ->where(function ($status) use ($active): void {
+                            $status->where($active, $active === 'status' ? 'active' : true);
+                            if (Schema::hasColumn((new ReviewAssignment)->getTable(), 'status')) {
+                                $status->orWhereIn('status', ['requested', 'pending', 'accepted', 'confirmed', 'active']);
+                            }
+                        });
+                });
                 if (DomainAuthorization::hasAnyRole($actor, ['instructor', 'research_instructor'])) {
                     $documents->orWhereHas('section', fn ($section) => $section->where('instructor_id', $actor->id));
                 }
             });
         }
 
-        return response()->json(['data' => $query->latest()->get()->map(fn ($item) => ['id' => $item->id, 'title' => $item->title, 'research_stage' => $item->research_stage, 'institute' => $item->institute, 'researchers' => $this->researcherNames($item)])]);
+        return response()->json(['data' => $query->latest()->get()->map(function ($item) use ($actor) {
+            $assignment = $item->reviewAssignments()
+                ->where(ReviewAssignment::column('reviewer_id'), $actor->id)
+                ->latest('id')
+                ->first();
+
+            return [
+                'id' => $item->id,
+                'title' => $item->title,
+                'research_stage' => $item->research_stage,
+                'institute' => $item->institute,
+                'researchers' => $this->researcherNames($item),
+                'assignment_id' => $assignment?->id,
+                'assignment_status' => $assignment?->status,
+            ];
+        })]);
     }
 
     public function progressUpdates(Request $request): JsonResponse
@@ -103,7 +126,9 @@ class SharedMonitoringController extends DomainController
             $defenseType = str_contains($stage, '_final_defense') ? 'final' : 'proposal';
             $reviewActors = $reviewAssignments->filter(fn ($assignment) => ! Schema::hasColumn((new ReviewAssignment)->getTable(), 'defense_type') || $assignment->defense_type === $defenseType)
                 ->mapWithKeys(fn ($assignment) => [$this->assignmentDesignation($assignment) => $assignment->reviewer->displayName()]);
-            if ($instructorName !== null) $reviewActors->put('Instructor', $instructorName);
+            if ($instructorName !== null) {
+                $reviewActors->put('Instructor', $instructorName);
+            }
 
             return [$stage => $this->stage($this->isBeforeStage($stage) ? self::PRE : self::POST, $entries->where('monitoring_stage', $stage), $actor->id, $this->actorsForStage($stage, $reviewActors, $teamByStage))];
         })->all()]])->header('Cache-Control', 'private, no-store');
@@ -475,8 +500,7 @@ class SharedMonitoringController extends DomainController
     {
         return $researchDocument->authors
             ->map(
-                fn ($author) =>
-                    $author->user?->profileName()
+                fn ($author) => $author->user?->profileName()
                     ?: $author->author_name
             )
             ->values()
