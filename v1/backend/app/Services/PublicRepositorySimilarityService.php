@@ -3,7 +3,9 @@
 namespace App\Services;
 
 use App\Models\ResearchDocument;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Schema;
 
 class PublicRepositorySimilarityService
@@ -13,21 +15,22 @@ class PublicRepositorySimilarityService
     ) {}
 
     /**
-     * Compare an unpersisted visitor query with every currently eligible public
-     * archive. This deliberately has no audit, monitoring, notification, or
-     * database-write side effect.
+     * Compare an unpersisted visitor query with every matching public archive,
+     * rank the complete result set, and then return one ten-study page.
      *
-     * @return array<int, array<string, mixed>>
+     * @param  array<string, mixed>  $filters
+     * @return LengthAwarePaginator<int, array<string, mixed>>
      */
-    public function compare(string $query): array
+    public function compare(array $filters): LengthAwarePaginator
     {
         $this->configureMemoryLimit();
-        $maximumCandidates = min(1000, max(1, (int) config('researchnav.similarity.maximum_candidates')));
-        $candidates = $this->eligibleCandidates($maximumCandidates);
+        $query = trim((string) $filters['q']);
+        $page = max(1, (int) ($filters['page'] ?? 1));
+        $candidates = $this->matchingCandidates($query, $filters);
         $candidateSnapshots = $this->candidateSnapshots($candidates);
 
-        if ($candidates->count() > $maximumCandidates) {
-            throw new PublicRepositorySimilarityCapacityException('Public similarity candidate limit exceeded.');
+        if ($candidates->isEmpty()) {
+            return new LengthAwarePaginator([], 0, 10, $page, ['path' => request()->url(), 'pageName' => 'page']);
         }
 
         $results = $this->process->runQuery($query, $candidates);
@@ -49,7 +52,7 @@ class PublicRepositorySimilarityService
                 || ($result['overall_similarity_score'] !== null && $result['overall_similarity_score'] !== '0.000000000000'),
         ));
 
-        return array_map(function (array $result) use ($byId): array {
+        $mapped = array_map(function (array $result) use ($byId): array {
             /** @var ResearchDocument $research */
             $research = $byId->get($result['matched_research_id']);
 
@@ -60,6 +63,93 @@ class PublicRepositorySimilarityService
                 'fasttext_support_score' => $result['fasttext_support_score'],
             ];
         }, $nonzeroResults);
+
+        if (($filters['sort'] ?? 'relevance') !== 'relevance') {
+            $direction = $filters['sort'] === 'oldest' ? 1 : -1;
+            usort($mapped, function (array $first, array $second) use ($direction): int {
+                $yearComparison = ((int) $first['research']->publication_year <=> (int) $second['research']->publication_year) * $direction;
+
+                return $yearComparison !== 0
+                    ? $yearComparison
+                    : ((int) $first['research']->id <=> (int) $second['research']->id);
+            });
+        }
+
+        $total = count($mapped);
+        $lastPage = max(1, (int) ceil($total / 10));
+        $page = min($page, $lastPage);
+
+        return new LengthAwarePaginator(
+            array_slice($mapped, ($page - 1) * 10, 10),
+            $total,
+            10,
+            $page,
+            ['path' => request()->url(), 'pageName' => 'page'],
+        );
+    }
+
+    /** @param array<string, mixed> $filters */
+    private function matchingCandidates(string $term, array $filters): Collection
+    {
+        $query = ResearchDocument::query()
+            ->select('research_documents.*')
+            ->with($this->candidateRelations())
+            ->whereNull('research_documents.deleted_at')
+            ->where('submission_status', 'archived')
+            ->where('archive_status', 'archived')
+            ->where('visibility', 'public');
+
+        $terms = collect(preg_split('/[^\pL\pN]+/u', $term) ?: [])
+            ->map(fn (string $value): string => trim($value))
+            ->filter(fn (string $value): bool => mb_strlen($value) >= 2)
+            ->unique()
+            ->values();
+        $query->where(function (Builder $matches) use ($terms): void {
+            foreach ($terms as $term) {
+                $like = $this->like($term);
+                $matches->orWhere(function (Builder $match) use ($like): void {
+                    $match->whereRaw("research_documents.title LIKE ? ESCAPE '!'", [$like])
+                        ->orWhereRaw("research_documents.abstract LIKE ? ESCAPE '!'", [$like])
+                        ->orWhereRaw("research_documents.keywords LIKE ? ESCAPE '!'", [$like])
+                        ->orWhereHas('authors', fn (Builder $authors) => $authors->whereRaw("author_name LIKE ? ESCAPE '!'", [$like]));
+
+                    if (Schema::hasTable('manuscript_search_documents')) {
+                        $match->orWhereHas('manuscriptSearchDocument', fn (Builder $document) => $document
+                            ->where('extraction_status', 'ready')
+                            ->whereRaw("body_text LIKE ? ESCAPE '!'", [$like]));
+                    }
+                });
+            }
+        });
+
+        if ($yearFrom = $filters['year_from'] ?? null) {
+            $query->where('publication_year', '>=', $yearFrom);
+        }
+        if ($yearTo = $filters['year_to'] ?? null) {
+            $query->where('publication_year', '<=', $yearTo);
+        }
+        if ($category = $filters['category'] ?? null) {
+            $query->whereHas('category', fn (Builder $categories) => $categories->where('slug', $category)->orWhere('name', $category));
+        }
+        if ($institute = $filters['institute'] ?? null) {
+            $query->where('institute', $institute);
+        }
+        foreach ($filters['sdg_ids'] ?? [] as $sdgId) {
+            $query->whereHas('sdgs', fn (Builder $sdgs) => $sdgs->where('sdgs.id', $sdgId));
+        }
+
+        match ($filters['sort'] ?? 'relevance') {
+            'oldest' => $query->orderBy('publication_year'),
+            default => $query->orderByDesc('publication_year'),
+        };
+
+        $maximumCandidates = min(1000, max(1, (int) config('researchnav.similarity.maximum_candidates')));
+        $candidates = $query->orderBy('title')->orderBy('research_documents.id')->limit($maximumCandidates + 1)->get();
+        if ($candidates->count() > $maximumCandidates) {
+            throw new PublicRepositorySimilarityCapacityException('Public similarity candidate limit exceeded.');
+        }
+
+        return $candidates;
     }
 
     /** @return array<int, array<string, mixed>> */
@@ -205,5 +295,10 @@ class PublicRepositorySimilarityService
             $limit = '512M';
         }
         ini_set('memory_limit', $limit);
+    }
+
+    private function like(string $value): string
+    {
+        return '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $value).'%';
     }
 }

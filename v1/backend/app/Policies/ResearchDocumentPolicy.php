@@ -24,11 +24,7 @@ class ResearchDocumentPolicy
 
         return (DomainAuthorization::isResearcherParticipant($user, $research)
                 || DomainAuthorization::isActiveAdministrator($user))
-            && in_array(
-                $research->submission_status,
-                ['draft', 'submitted', 'under_review', 'revision_required'],
-                true
-            );
+            && in_array($research->submission_status, ['draft', 'revision_required'], true);
     }
 
     public function update(User $user, ResearchDocument $research): bool

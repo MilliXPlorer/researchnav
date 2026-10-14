@@ -8253,9 +8253,6 @@ function ResearcherSubmissions({
         setActivityFor(null);
         setLoading(false);
       });
-    const editingMetadataOnly =
-      editing !== null &&
-      ["submitted", "under_review"].includes(editing.submission_status);
     return () => {
       cancelled = true;
     };

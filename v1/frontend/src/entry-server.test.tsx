@@ -43,7 +43,7 @@ describe("SSR entry", () => {
 
     expect(result.statusCode).toBe(200);
     expect(result.appHtml).toContain("Calculating similarity results");
-    expect(result.appHtml).not.toContain("SERVER RENDERED STUDY");
+    expect(result.appHtml).toContain("SERVER RENDERED STUDY");
     expect(result.serializedState).toContain("SERVER RENDERED STUDY");
     expect(result.setCookies).toEqual([]);
   });

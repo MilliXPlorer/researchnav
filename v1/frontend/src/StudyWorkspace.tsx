@@ -176,7 +176,7 @@ export default function StudyWorkspace({
       );
       setFiles(loadedFiles);
       setFolders(loadedFolders);
-      setTab(destination?.tab ?? "overview");
+      if (destination?.tab) setTab(destination.tab);
       const targetFile = loadedFiles.find(
         (file) => file.id === destination?.fileId,
       );

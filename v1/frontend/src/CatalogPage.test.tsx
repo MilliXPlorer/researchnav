@@ -93,13 +93,17 @@ function resource(
   };
 }
 
-function renderCatalog(initialSearch?: string, session?: UserSession | null) {
+function renderCatalog(
+  initialSearch?: string,
+  session?: UserSession | null,
+  records: ResearchRecord[] = [fallbackRecord],
+) {
   return render(
     <CatalogPage
       onSignIn={vi.fn()}
       session={session}
       navigate={vi.fn()}
-      records={[fallbackRecord]}
+      records={records}
       initialSearch={initialSearch}
     />,
   );
@@ -244,10 +248,14 @@ describe("CatalogPage public similarity search", () => {
     expect(window.location.search).toContain("year_from=2022");
     expect(window.location.search).toContain("year_to=2024");
     expect(
-      within(to).getAllByRole("option").map((option) => option.textContent),
+      within(to)
+        .getAllByRole("option")
+        .map((option) => option.textContent),
     ).not.toContain("2020");
     expect(
-      within(from).getAllByRole("option").map((option) => option.textContent),
+      within(from)
+        .getAllByRole("option")
+        .map((option) => option.textContent),
     ).not.toContain("2026");
     expect(
       await screen.findByText("No studies match these filters"),
@@ -362,13 +370,90 @@ describe("CatalogPage public similarity search", () => {
       target: { value: "newest" },
     });
 
-    const titles = screen
-      .getAllByRole("heading", { level: 2 })
-      .map((heading) => heading.textContent);
-    expect(titles).toEqual([
-      "Less relevant newer study",
-      "More relevant older study",
+    await waitFor(() =>
+      expect(fetch).toHaveBeenLastCalledWith(
+        "/api/repository/similarity",
+        expect.objectContaining({
+          body: JSON.stringify({ q: "water", sort: "newest" }),
+        }),
+      ),
+    );
+  });
+
+  it("shows the full total and requests only the selected page of ten", async () => {
+    const fetchMock = vi.fn(async (_path: string, init?: RequestInit) => {
+      const requestedPage = JSON.parse(String(init?.body)).page ?? 1;
+      return new Response(
+        JSON.stringify({
+          data: [resource(requestedPage, `Page ${requestedPage} result`)],
+          links: { first: null, last: null, prev: null, next: null },
+          meta: {
+            current_page: requestedPage,
+            from: (requestedPage - 1) * 10 + 1,
+            last_page: 45,
+            links: [],
+            path: "/api/repository/similarity",
+            per_page: 10,
+            to: requestedPage * 10,
+            total: 450,
+          },
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderCatalog("?q=education");
+
+    expect(await screen.findByText("450")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Page 2" }));
+    await screen.findByText("Page 2 result");
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/repository/similarity",
+      expect.objectContaining({
+        body: JSON.stringify({ q: "education", page: 2 }),
+      }),
+    );
+    expect(window.location.search).toContain("page=2");
+  });
+
+  it("uses a centered accessible title-aware circular progress indicator", () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise<Response>(() => undefined)),
+    );
+
+    const { container } = renderCatalog("?q=education", null, [
+      {
+        ...fallbackRecord,
+        id: "7",
+        title: "Assessment of Physical Education",
+        keywords: ["education"],
+      },
     ]);
+
+    expect(
+      screen.getByRole("status", { name: /Calculating similarity results/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("progressbar", {
+        name: "Ranking Assessment of Physical Education",
+      }),
+    ).toHaveAttribute("aria-valuenow", "1");
+    expect(
+      screen.getByRole("heading", {
+        name: "Assessment of Physical Education",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Highest similarity results will appear first."),
+    ).toBeInTheDocument();
+    expect(
+      container.querySelector(".similarity-progress-ring"),
+    ).toBeInTheDocument();
+    expect(
+      container.querySelector(".similarity-progress-track"),
+    ).not.toBeInTheDocument();
+    expect(container.querySelector("video")).not.toBeInTheDocument();
   });
 
   it("displays only the overall score, API classification, and alert statuses on the card", async () => {

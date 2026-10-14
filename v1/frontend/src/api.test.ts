@@ -300,29 +300,51 @@ describe("public repository API", () => {
                 score_status: "scored",
               },
             ],
+            links: { first: null, last: null, prev: null, next: null },
+            meta: {
+              current_page: 2,
+              from: 11,
+              last_page: 45,
+              links: [],
+              path: "/api/repository/similarity",
+              per_page: 10,
+              to: 20,
+              total: 450,
+            },
           }),
         ),
     );
 
     await expect(
-      searchPublicResearchBySimilarity("climate adaptation", fetchMock),
-    ).resolves.toMatchObject([
-      {
-        id: "1",
-        queryTitleSimilarityScore: "0.700000",
-        queryContentSimilarityScore: "0.823456",
-        querySimilarityScore: "0.823456",
-        overallSimilarityPercentage: "25.170000",
-        titleWeight: "0.300000000000",
-        contentWeightedContribution: "16.408000",
-        classification: "low",
-      },
-    ]);
+      searchPublicResearchBySimilarity(
+        { q: "climate adaptation", page: 2, yearFrom: 2020, sdgIds: [4] },
+        fetchMock,
+      ),
+    ).resolves.toMatchObject({
+      data: [
+        {
+          id: "1",
+          queryTitleSimilarityScore: "0.700000",
+          queryContentSimilarityScore: "0.823456",
+          querySimilarityScore: "0.823456",
+          overallSimilarityPercentage: "25.170000",
+          titleWeight: "0.300000000000",
+          contentWeightedContribution: "16.408000",
+          classification: "low",
+        },
+      ],
+      meta: { current_page: 2, total: 450 },
+    });
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/repository/similarity",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ q: "climate adaptation" }),
+        body: JSON.stringify({
+          q: "climate adaptation",
+          page: 2,
+          year_from: 2020,
+          sdg_ids: [4],
+        }),
         credentials: "include",
       }),
     );

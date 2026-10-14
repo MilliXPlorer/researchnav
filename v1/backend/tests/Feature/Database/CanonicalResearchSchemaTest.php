@@ -84,7 +84,7 @@ class CanonicalResearchSchemaTest extends TestCase
     {
         $this->assertTrue(Schema::hasColumns('research_review_assignments', ['review_role', 'is_active']));
         foreach ([
-            ['research_review_assignments', 'research_review_assignment_unique'],
+            ['research_review_assignments', 'research_review_assignment_defense_unique'],
             ['class_section_members', 'section_document_user_unique'],
             ['evaluations', 'evaluation_document_panelist_unique'],
             ['methodology_reviews', 'methodology_review_document_statistician_unique'],

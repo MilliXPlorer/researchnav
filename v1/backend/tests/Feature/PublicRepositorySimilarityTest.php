@@ -153,32 +153,68 @@ class PublicRepositorySimilarityTest extends TestCase
         }
     }
 
-    public function test_query_fails_without_truncating_when_the_configured_candidate_limit_is_exceeded(): void
+    public function test_query_globally_scores_matches_then_paginates_the_ranked_results(): void
     {
-        config()->set('researchnav.similarity.maximum_candidates', 2);
-        $this->archivedPublic('First');
-        $this->archivedPublic('Second');
-        $this->archivedPublic('Third');
-
-        $this->postJson('/api/repository/similarity', ['q' => 'query'])
-            ->assertStatus(503)
-            ->assertExactJson(['error' => 'SIMILARITY_CAPACITY_EXCEEDED']);
-    }
-
-    public function test_query_honors_a_configured_candidate_limit_above_the_previous_cap(): void
-    {
-        config()->set('researchnav.similarity.maximum_candidates', 251);
-        foreach (range(1, 251) as $index) {
-            $this->archivedPublic('Candidate '.$index);
+        foreach (range(1, 25) as $index) {
+            $this->archivedPublic(sprintf('Education study %02d', $index));
         }
-        $this->useTestWorker();
+        $candidateCount = 0;
+        $this->app->instance(SimilarityProcessRunner::class, new class($candidateCount) extends SimilarityProcessRunner
+        {
+            public function __construct(private int &$candidateCount) {}
 
-        $this->postJson('/api/repository/similarity', ['q' => 'query'])->assertOk();
+            public function runQuery(string $query, Collection $candidates): array
+            {
+                $this->candidateCount = $candidates->count();
+
+                return $candidates->map(fn (ResearchDocument $candidate): array => [
+                    'matched_research_id' => $candidate->id,
+                    'query_title_similarity_score' => '0.500000000000',
+                    'query_title_similarity_percentage' => '50.000000000000',
+                    'query_content_similarity_score' => '0.500000000000',
+                    'query_content_similarity_percentage' => '50.000000000000',
+                    'query_similarity_score' => '0.500000000000',
+                    'query_similarity_percentage' => '50.000000000000',
+                    'title_similarity_score' => '0.500000000000',
+                    'title_similarity_percentage' => '50.000000000000',
+                    'title_weight' => '0.300000000000',
+                    'title_weighted_contribution' => '15.000000000000',
+                    'content_similarity_score' => '0.500000000000',
+                    'content_similarity_percentage' => '50.000000000000',
+                    'content_weight' => '0.700000000000',
+                    'content_weighted_contribution' => '35.000000000000',
+                    'overall_similarity_score' => '0.500000000000',
+                    'overall_similarity_percentage' => '50.000000000000',
+                    'classification' => 'moderate',
+                    'overall_flagged' => false,
+                    'title_match_alert' => false,
+                    'adviser_review_required' => false,
+                    'flag_reason' => 'not_flagged',
+                    'algorithm_version' => 'test',
+                    'score_status' => 'scored',
+                    'matched_terms' => ['education'],
+                    'fasttext_support_score' => null,
+                ])->all();
+            }
+        });
+
+        $response = $this->postJson('/api/repository/similarity', ['q' => 'Education', 'page' => 2]);
+
+        $response->assertOk()
+            ->assertJsonCount(10, 'data')
+            ->assertJsonPath('meta.current_page', 2)
+            ->assertJsonPath('meta.per_page', 10)
+            ->assertJsonPath('meta.last_page', 3)
+            ->assertJsonPath('meta.total', 25)
+            ->assertJsonPath('meta.from', 11)
+            ->assertJsonPath('meta.to', 20);
+        $this->assertSame(25, $candidateCount);
+        $this->assertSame('Education study 11', $response->json('data.0.title'));
     }
 
     public function test_query_rejects_results_when_a_candidate_leaves_the_public_catalog_during_scoring(): void
     {
-        $candidate = $this->archivedPublic('Candidate');
+        $candidate = $this->archivedPublic('Candidate query');
         $this->app->instance(SimilarityProcessRunner::class, new class($candidate) extends SimilarityProcessRunner
         {
             public function __construct(private readonly ResearchDocument $candidate) {}
@@ -204,6 +240,47 @@ class PublicRepositorySimilarityTest extends TestCase
         $this->postJson('/api/repository/similarity', ['q' => 'query'])
             ->assertStatus(409)
             ->assertExactJson(['error' => 'SIMILARITY_CATALOG_CHANGED']);
+    }
+
+    public function test_query_applies_requested_date_order_after_similarity_scoring(): void
+    {
+        $older = $this->archivedPublic('Education older');
+        $older->update(['publication_year' => 2020]);
+        $newer = $this->archivedPublic('Education newer');
+        $newer->update(['publication_year' => 2025]);
+        $this->app->instance(SimilarityProcessRunner::class, new class extends SimilarityProcessRunner
+        {
+            public function runQuery(string $query, Collection $candidates): array
+            {
+                return $candidates->reverse()->values()->map(fn (ResearchDocument $candidate): array => [
+                    'matched_research_id' => $candidate->id,
+                    'title_similarity_score' => '0.500000000000',
+                    'title_similarity_percentage' => '50.000000000000',
+                    'title_weight' => '0.300000000000',
+                    'title_weighted_contribution' => '15.000000000000',
+                    'content_similarity_score' => '0.500000000000',
+                    'content_similarity_percentage' => '50.000000000000',
+                    'content_weight' => '0.700000000000',
+                    'content_weighted_contribution' => '35.000000000000',
+                    'overall_similarity_score' => '0.500000000000',
+                    'overall_similarity_percentage' => '50.000000000000',
+                    'classification' => 'moderate',
+                    'overall_flagged' => false,
+                    'title_match_alert' => false,
+                    'adviser_review_required' => false,
+                    'flag_reason' => 'not_flagged',
+                    'algorithm_version' => 'test',
+                    'score_status' => 'scored',
+                    'matched_terms' => ['education'],
+                    'fasttext_support_score' => null,
+                ])->all();
+            }
+        });
+
+        $this->postJson('/api/repository/similarity', ['q' => 'Education', 'sort' => 'newest'])
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $newer->id)
+            ->assertJsonPath('data.1.id', $older->id);
     }
 
     public function test_query_rejects_a_candidate_projection_change_before_the_public_response(): void
@@ -315,7 +392,8 @@ class PublicRepositorySimilarityTest extends TestCase
         try {
             $this->postJson('/api/repository/similarity', ['q' => 'query'])
                 ->assertOk()
-                ->assertExactJson(['data' => []]);
+                ->assertJsonPath('data', [])
+                ->assertJsonPath('meta.total', 0);
         } finally {
             putenv('TEST_SECRET');
             unset($_ENV['TEST_SECRET'], $_SERVER['TEST_SECRET']);

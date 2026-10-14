@@ -48,19 +48,26 @@ def decimal_score(value: float) -> str:
     if not math.isfinite(value):
         raise ValueError("Score must be finite.")
     normalized = min(1.0, max(0.0, value))
-    return format(Decimal(str(normalized)).quantize(_TWELVE_PLACES, rounding=ROUND_HALF_UP), "f")
+    return format(
+        Decimal(str(normalized)).quantize(_TWELVE_PLACES, rounding=ROUND_HALF_UP), "f"
+    )
 
 
 def percentage_score(score: str) -> str:
     """Compatibility utility; policy percentages are authoritative in PHP."""
-    return format((Decimal(score) * Decimal("100")).quantize(_TWELVE_PLACES, rounding=ROUND_HALF_UP), "f")
+    return format(
+        (Decimal(score) * Decimal("100")).quantize(
+            _TWELVE_PLACES, rounding=ROUND_HALF_UP
+        ),
+        "f",
+    )
 
 
 def record_text(record: dict[str, Any]) -> str:
     """Combine a record title with extracted content when content is available."""
     content = record.get("content")
     return (
-        f'{record["title"]}\n{content}'
+        f"{record['title']}\n{content}"
         if isinstance(content, str) and content
         else record["title"]
     )
@@ -72,15 +79,26 @@ def _content_scores(
     """Score only pairs with two extracted full-text projections."""
     if not isinstance(source.get("content"), str) or not source["content"]:
         return {candidate["id"]: None for candidate in candidates}
-    available = [candidate for candidate in candidates if isinstance(candidate.get("content"), str) and candidate["content"]]
-    matrix = title_tfidf_matrix([source["content"], *(candidate["content"] for candidate in available)])
+    available = [
+        candidate
+        for candidate in candidates
+        if isinstance(candidate.get("content"), str) and candidate["content"]
+    ]
+    matrix = title_tfidf_matrix(
+        [source["content"], *(candidate["content"] for candidate in available)]
+    )
     values = source_cosine_scores(matrix)
-    by_id = {candidate["id"]: value for candidate, value in zip(available, values, strict=True)}
+    by_id = {
+        candidate["id"]: value
+        for candidate, value in zip(available, values, strict=True)
+    }
     return {candidate["id"]: by_id.get(candidate["id"]) for candidate in candidates}
 
 
 def compare_titles(
-    source: dict[str, Any], candidates: Iterable[dict[str, Any]], fasttext_model: Any | None
+    source: dict[str, Any],
+    candidates: Iterable[dict[str, Any]],
+    fasttext_model: Any | None,
 ) -> list[dict[str, Any]]:
     """Emit independent title/content TF-IDF cosine components only."""
     candidate_list = list(candidates)
@@ -105,7 +123,9 @@ def compare_titles(
         support = None
         if fasttext_model is not None:
             try:
-                support = contextual_support(fasttext_model, comparison_texts[0], candidate_text)
+                support = contextual_support(
+                    fasttext_model, comparison_texts[0], candidate_text
+                )
             except (TypeError, ValueError, ArithmeticError, RuntimeError):
                 # Model errors can include runtime/model details, so this is
                 # deliberately converted to generic supporting-only context.
@@ -113,8 +133,12 @@ def compare_titles(
         result = {
             "matched_research_id": candidate["id"],
             "title_similarity_score": decimal_score(title_value),
-            "content_similarity_score": decimal_score(content_value) if content_value is not None else None,
-            "fasttext_score": decimal_score(support.score) if support is not None else None,
+            "content_similarity_score": decimal_score(content_value)
+            if content_value is not None
+            else None,
+            "fasttext_score": decimal_score(support.score)
+            if support is not None
+            else None,
             "matched_terms": matched_terms(source_tokens, tokens),
             "contextual_analysis": (
                 support.analysis
@@ -133,7 +157,9 @@ def compare_titles(
 
 
 def compare_query(
-    query: str, candidates: Iterable[dict[str, Any]], fasttext_model: Any | None,
+    query: str,
+    candidates: Iterable[dict[str, Any]],
+    fasttext_model: Any | None,
     uploaded_content: bool = False,
 ) -> list[dict[str, Any]]:
     """Emit independent components for a typed query or uploaded manuscript."""
@@ -145,13 +171,24 @@ def compare_query(
             for candidate in candidate_list
         ),
     ]
+
     token_lists = [preprocess_title(text) for text in comparison_texts]
     title_scores = source_cosine_scores(
-        title_tfidf_matrix([query, *(candidate["title"] for candidate in candidate_list)])
+        title_tfidf_matrix(
+            [query, *(candidate["title"] for candidate in candidate_list)]
+        )
     )
-    available = [candidate for candidate in candidate_list if isinstance(candidate.get("content"), str) and candidate["content"]]
-    content_values = source_cosine_scores(title_tfidf_matrix([query, *(candidate["content"] for candidate in available)]))
-    content_scores = {candidate["id"]: value for candidate, value in zip(available, content_values, strict=True)}
+    available = [
+        candidate
+        for candidate in candidate_list
+        if isinstance(candidate.get("content"), str) and candidate["content"]
+    ]
+    content_texts = [query, *(candidate["content"] for candidate in available)]
+    content_values = source_cosine_scores(title_tfidf_matrix(content_texts))
+    content_scores = {
+        candidate["id"]: value
+        for candidate, value in zip(available, content_values, strict=True)
+    }
     query_tokens = set(token_lists[0])
     ranked_results: list[tuple[float, int, dict[str, Any]]] = []
 
@@ -176,13 +213,19 @@ def compare_query(
         result = {
             "matched_research_id": candidate["id"],
             "title_similarity_score": title_score,
-            "content_similarity_score": decimal_score(content_value) if content_value is not None else None,
+            "content_similarity_score": decimal_score(content_value)
+            if content_value is not None
+            else None,
             "matched_terms": matched_terms(query_tokens, tokens),
             "fasttext_support_score": (
                 decimal_score(support.score) if support is not None else None
             ),
         }
-        ranking_value = content_value if uploaded_content and content_value is not None else title_value
+        ranking_value = (
+            content_value
+            if uploaded_content and content_value is not None
+            else title_value
+        )
         ranked_results.append((ranking_value, candidate["id"], result))
 
     return [

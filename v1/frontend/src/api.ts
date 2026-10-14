@@ -1176,7 +1176,11 @@ export async function provisionAccount(
       endpoint,
       {
         method: "POST",
-        body: JSON.stringify({ email, ...(role ? { role } : {}), ...(institute ? { institute } : {}) }),
+        body: JSON.stringify({
+          email,
+          ...(role ? { role } : {}),
+          ...(institute ? { institute } : {}),
+        }),
       },
       fetcher,
     )
@@ -1196,7 +1200,13 @@ export function provisionCoordinator(
   institute: string,
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<UserSession> {
-  return provisionAccount("/api/admin/coordinators", email, undefined, institute, fetcher);
+  return provisionAccount(
+    "/api/admin/coordinators",
+    email,
+    undefined,
+    institute,
+    fetcher,
+  );
 }
 
 export function listAdminProvisionedAccounts(
@@ -1211,7 +1221,13 @@ export function provisionAdminAccount(
   institute?: string,
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<UserSession> {
-  return provisionAccount("/api/admin/accounts", email, role, institute, fetcher);
+  return provisionAccount(
+    "/api/admin/accounts",
+    email,
+    role,
+    institute,
+    fetcher,
+  );
 }
 
 function adminQuery(
@@ -1249,7 +1265,9 @@ export function listAdminUsers(
 
 export async function updateAdminUser(
   id: string,
-  input: Partial<Pick<AdminUserResource, "role" | "access_status" | "institute">>,
+  input: Partial<
+    Pick<AdminUserResource, "role" | "access_status" | "institute">
+  >,
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<AdminUserResource> {
   return (
@@ -1408,6 +1426,19 @@ export interface PublicRepositorySimilarityResource extends PublicResearchResour
 
 export interface PublicRepositorySimilarityResponse {
   data?: PublicRepositorySimilarityResource[];
+  links?: LaravelPaginationLinks;
+  meta?: LaravelPaginationMeta;
+}
+
+export interface PublicRepositorySimilaritySearch {
+  q: string;
+  page?: number;
+  yearFrom?: string | number;
+  yearTo?: string | number;
+  category?: string;
+  institute?: string;
+  sdgIds?: number[];
+  sort?: "relevance" | "newest" | "oldest";
 }
 
 export async function clearUserLogs(
@@ -1609,20 +1640,52 @@ export async function searchPublicResearch(
  * The returned order is the server's ranking and must remain unchanged by callers.
  */
 export async function searchPublicResearchBySimilarity(
-  q: string,
+  search: string | PublicRepositorySimilaritySearch,
   fetcher: ApiFetch = globalThis.fetch,
   signal?: AbortSignal,
-): Promise<ResearchRecord[]> {
+): Promise<LaravelPaginatedResponse<ResearchRecord>> {
+  const input = typeof search === "string" ? { q: search } : search;
+  const body = {
+    q: input.q,
+    ...(input.page && input.page > 1 ? { page: input.page } : {}),
+    ...(input.yearFrom ? { year_from: Number(input.yearFrom) } : {}),
+    ...(input.yearTo ? { year_to: Number(input.yearTo) } : {}),
+    ...(input.category ? { category: input.category } : {}),
+    ...(input.institute ? { institute: input.institute } : {}),
+    ...(input.sdgIds?.length ? { sdg_ids: input.sdgIds } : {}),
+    ...(input.sort && input.sort !== "relevance" ? { sort: input.sort } : {}),
+  };
   const response = await apiRequest<PublicRepositorySimilarityResponse>(
     "/api/repository/similarity",
     {
       method: "POST",
-      body: JSON.stringify({ q }),
+      body: JSON.stringify(body),
       signal,
     },
     fetcher,
   );
-  return (response.data ?? []).map(toResearchRecord);
+  const records = (response.data ?? []).map(toResearchRecord);
+  const fallbackMeta: LaravelPaginationMeta = {
+    current_page: input.page ?? 1,
+    from: records.length > 0 ? ((input.page ?? 1) - 1) * 10 + 1 : null,
+    last_page: 1,
+    links: [],
+    path: "/api/repository/similarity",
+    per_page: 10,
+    to:
+      records.length > 0 ? ((input.page ?? 1) - 1) * 10 + records.length : null,
+    total: records.length,
+  };
+  return {
+    data: records,
+    links: response.links ?? {
+      first: null,
+      last: null,
+      prev: null,
+      next: null,
+    },
+    meta: response.meta ?? fallbackMeta,
+  };
 }
 
 /**
@@ -3183,19 +3246,31 @@ export async function getResearchProjectTeam(
   ).data;
 }
 
-export async function listInstitutes(fetcher: ApiFetch = globalThis.fetch): Promise<string[]> {
-  return (await apiRequest<{ data: string[] }>("/api/institutes", undefined, fetcher)).data;
+export async function listInstitutes(
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<string[]> {
+  return (
+    await apiRequest<{ data: string[] }>("/api/institutes", undefined, fetcher)
+  ).data;
 }
 
-export async function createInstitute(name: string, fetcher: ApiFetch = globalThis.fetch): Promise<string> {
-  return (await apiRequest<{ data: string }>(
-    "/api/admin/institutes",
-    { method: "POST", body: JSON.stringify({ name }) },
-    fetcher,
-  )).data;
+export async function createInstitute(
+  name: string,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<string> {
+  return (
+    await apiRequest<{ data: string }>(
+      "/api/admin/institutes",
+      { method: "POST", body: JSON.stringify({ name }) },
+      fetcher,
+    )
+  ).data;
 }
 
-export async function deleteInstitute(name: string, fetcher: ApiFetch = globalThis.fetch): Promise<void> {
+export async function deleteInstitute(
+  name: string,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<void> {
   await apiRequest(
     `/api/admin/institutes/${encodeURIComponent(name)}`,
     { method: "DELETE" },

@@ -14,9 +14,6 @@ export default function DefenseTeamRoster({ researchDocumentId, people, refreshK
 
   useEffect(() => {
     let cancelled = false;
-    setTeam(null);
-    setLoading(true);
-    setError("");
     void getResearchProjectTeam(researchDocumentId, defenseType)
       .then((value) => { if (!cancelled) setTeam(value); })
       .catch(() => { if (!cancelled) setError("Defense team could not be loaded."); })
@@ -49,14 +46,24 @@ export default function DefenseTeamRoster({ researchDocumentId, people, refreshK
   return <>
     <div className="project-team-stage-control">
       <label>Defense team
-        <select value={defenseType} onChange={(event) => setDefenseType(event.target.value as "proposal" | "final")}>
+        <select value={defenseType} onChange={(event) => {
+          setTeam(null);
+          setLoading(true);
+          setError("");
+          setDefenseType(event.target.value as "proposal" | "final");
+        }}>
           <option value="proposal">Proposal Defense</option>
           <option value="final">Final Defense</option>
         </select>
       </label>
     </div>
     {loading && <p>Loading current team assignments…</p>}
-    {error && <div role="alert">{error} <button type="button" className="text-action" onClick={() => setRetry((value) => value + 1)}>Retry</button></div>}
+    {error && <div role="alert">{error} <button type="button" className="text-action" onClick={() => {
+      setTeam(null);
+      setLoading(true);
+      setError("");
+      setRetry((value) => value + 1);
+    }}>Retry</button></div>}
     {!loading && <div className="project-stage-columns">
       <section className="project-team-block">
         <div className="project-team-block-heading"><div><p className="eyebrow">Before {defenseType === "proposal" ? "Proposal" : "Final"} Defense</p><h5>Pre-defense team</h5></div>

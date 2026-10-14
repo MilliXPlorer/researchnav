@@ -4,8 +4,16 @@ import subprocess
 import sys
 from pathlib import Path
 
-from similarity.engine import compare_query, compare_titles, decimal_score, matched_terms, title_tokens
+from similarity.engine import (
+    compare_query,
+    compare_titles,
+    decimal_score,
+    matched_terms,
+    title_tokens,
+)
+from similarity.cosine import source_cosine_scores
 from similarity.stopwords import preprocess_title
+from similarity.tfidf import title_tfidf_matrix
 
 
 class FakeFastText:
@@ -21,8 +29,12 @@ def test_worker_emits_independent_twelve_decimal_components_not_a_final_score() 
     )[0]
 
     assert set(result) == {
-        "matched_research_id", "title_similarity_score", "content_similarity_score",
-        "fasttext_score", "matched_terms", "contextual_analysis",
+        "matched_research_id",
+        "title_similarity_score",
+        "content_similarity_score",
+        "fasttext_score",
+        "matched_terms",
+        "contextual_analysis",
     }
     assert result["title_similarity_score"] == "1.000000000000"
     assert result["content_similarity_score"] == "1.000000000000"
@@ -30,7 +42,9 @@ def test_worker_emits_independent_twelve_decimal_components_not_a_final_score() 
     assert "final_similarity_score" not in result
 
 
-def test_unavailable_content_has_a_title_component_but_no_fake_zero_content_score() -> None:
+def test_unavailable_content_has_a_title_component_but_no_fake_zero_content_score() -> (
+    None
+):
     result = compare_titles(
         {"id": 1, "title": "Climate Water"},
         [{"id": 2, "title": "Climate Water", "content": "unavailable is omitted"}],
@@ -41,11 +55,17 @@ def test_unavailable_content_has_a_title_component_but_no_fake_zero_content_scor
     assert result["content_similarity_score"] is None
 
 
-def test_public_query_uses_ready_content_only_and_keeps_fasttext_supporting_only() -> None:
+def test_public_query_uses_ready_content_only_and_keeps_fasttext_supporting_only() -> (
+    None
+):
     results = compare_query(
         "education artificial intelligence",
         [
-            {"id": 2, "title": "Unrelated", "content": "education artificial intelligence"},
+            {
+                "id": 2,
+                "title": "Unrelated",
+                "content": "education artificial intelligence",
+            },
             {"id": 3, "title": "Unrelated"},
         ],
         None,
@@ -56,25 +76,125 @@ def test_public_query_uses_ready_content_only_and_keeps_fasttext_supporting_only
     assert all(result["fasttext_support_score"] is None for result in results)
 
 
-def test_matched_terms_exclude_noise_but_keep_meaningful_terms() -> None:
-    terms = [
-        "00", "2024", "1st", "21st", "2.5", "50%", "3,000", "____", "----",
-        "++++", "//", "...", "===", "***", "___---", "", " ", "academic",
-        "performance", "covid-19", "5g", "c++", "e-learning", "k-12", "r&d",
+def test_matched_terms_exclude_numeric_ordinals_and_symbol_noise() -> None:
+    assert matched_terms(
+        [
+            "00",
+            "1080",
+            "2024",
+            "1st",
+            "2nd",
+            "3rd",
+            "21st",
+            "2.5",
+            "50%",
+            "3,000",
+            "____",
+            "----",
+            "++++",
+            "//",
+            "...",
+            "===",
+            "***",
+            "___---",
+            "/////",
+            "",
+            " ",
+            "academic",
+            "performance",
+            "students",
+            "research",
+            "learning",
+            "covid-19",
+            "5g",
+            "c++",
+            "e-learning",
+            "k-12",
+            "r&d",
+        ],
+        [
+            "00",
+            "1080",
+            "2024",
+            "1st",
+            "2nd",
+            "3rd",
+            "21st",
+            "2.5",
+            "50%",
+            "3,000",
+            "____",
+            "----",
+            "++++",
+            "//",
+            "...",
+            "===",
+            "***",
+            "___---",
+            "/////",
+            "",
+            " ",
+            "academic",
+            "performance",
+            "students",
+            "research",
+            "learning",
+            "covid-19",
+            "5g",
+            "c++",
+            "e-learning",
+            "k-12",
+            "r&d",
+        ],
+    ) == [
+        "5g",
+        "academic",
+        "c++",
+        "covid-19",
+        "e-learning",
+        "k-12",
+        "learning",
+        "performance",
+        "r&d",
+        "research",
+        "students",
     ]
 
-    assert matched_terms(terms, terms) == [
-        "5g", "academic", "c++", "covid-19", "e-learning", "k-12",
-        "performance", "r&d",
-    ]
+
+def test_shared_term_filter_does_not_change_uploaded_content_scores_or_ranking() -> (
+    None
+):
+    results = compare_query(
+        "2024 03 1st climate water",
+        [
+            {"id": 2, "title": "Unrelated", "content": "2024 03 1st astronomy geology"},
+            {"id": 3, "title": "Unrelated", "content": "2024 03 climate water"},
+        ],
+        None,
+        uploaded_content=True,
+    )
+
+    assert results[0]["matched_terms"] == ["climate", "water"]
+    assert results[0]["content_similarity_score"] != "0.000000000000"
+    assert results[1]["matched_terms"] == []
+    assert results[1]["content_similarity_score"] != "0.000000000000"
+    assert [result["matched_research_id"] for result in results] == [3, 2]
 
 
 def test_uploaded_content_ranks_exact_content_match_ahead_of_title_match() -> None:
     results = compare_query(
         "exact archived manuscript content",
         [
-            {"id": 2, "title": "Exact Archived Manuscript Content", "content": "different candidate body"},
-            {"id": 3, "title": "Unrelated title", "content": "exact archived manuscript content"},
+            {
+                "id": 2,
+                "title": "Exact Archived Manuscript Content",
+                "content": "different candidate body",
+            },
+            {
+                "id": 3,
+                "title": "Unrelated title",
+                "content": "exact archived manuscript content",
+            },
         ],
         None,
         uploaded_content=True,
@@ -83,23 +203,85 @@ def test_uploaded_content_ranks_exact_content_match_ahead_of_title_match() -> No
     assert [result["matched_research_id"] for result in results] == [3, 2]
     assert results[0]["content_similarity_score"] == "1.000000000000"
     assert results[0]["title_similarity_score"] == "0.000000000000"
-    assert results[0]["matched_terms"] == ["archived", "content", "exact", "manuscript"]
+
+
+def test_shared_term_filter_keeps_title_and_content_scores_unchanged() -> None:
+    query = "academic performance students 2024"
+    candidate = {
+        "id": 2,
+        "title": "Academic Performance",
+        "content": "academic performance students 2024",
+    }
+    result = compare_query(
+        query,
+        [candidate],
+        None,
+        uploaded_content=True,
+    )[0]
+    expected_title = decimal_score(
+        source_cosine_scores(title_tfidf_matrix([query, str(candidate["title"])]))[0]
+    )
+    expected_content = decimal_score(
+        source_cosine_scores(title_tfidf_matrix([query, str(candidate["content"])]))[0]
+    )
+
+    assert result["matched_terms"] == ["academic", "performance", "students"]
+    assert result["title_similarity_score"] == expected_title
+    assert result["content_similarity_score"] == expected_content
+
+
+def test_uploaded_content_still_uses_custom_fasttext_model_for_support() -> None:
+    class RecordingFastText:
+        def __init__(self) -> None:
+            self.texts: list[str] = []
+
+        def get_sentence_vector(self, text: str) -> list[float]:
+            self.texts.append(text)
+            return [float(len(text)), 1.0]
+
+    model = RecordingFastText()
+    result = compare_query(
+        "2024 climate",
+        [{"id": 2, "title": "Unrelated", "content": "2024 climate"}],
+        model,
+        uploaded_content=True,
+    )[0]
+
+    assert model.texts == ["2024 climate", "2024 climate"]
+    assert result["fasttext_support_score"] is not None
+    assert result["matched_terms"] == ["climate"]
 
 
 def test_preprocessing_and_score_precision_are_preserved() -> None:
     assert title_tokens("The AI in Education") == ["ai", "education"]
-    assert preprocess_title("The AI & WATER-based Study: an Overview") == ["ai", "water", "based", "study", "overview"]
+    assert preprocess_title("The AI & WATER-based Study: an Overview") == [
+        "ai",
+        "water",
+        "based",
+        "study",
+        "overview",
+    ]
     assert decimal_score(0.1234567890127) == "0.123456789013"
 
 
 def test_preprocessing_keeps_unicode_and_removes_only_versioned_stopwords() -> None:
-    assert title_tokens("The Café and Éducation Study") == ["café", "éducation", "study"]
+    assert title_tokens("The Café and Éducation Study") == [
+        "café",
+        "éducation",
+        "study",
+    ]
     assert title_tokens("the and with") == []
 
 
-def test_preprocessing_removes_filipino_function_words_but_keeps_subject_terms() -> None:
+def test_preprocessing_removes_filipino_function_words_but_keeps_subject_terms() -> (
+    None
+):
     assert title_tokens("Ang Wika at Panitikan ng mga Mag-aaral sa Paaralan") == [
-        "wika", "panitikan", "mag", "aaral", "paaralan"
+        "wika",
+        "panitikan",
+        "mag",
+        "aaral",
+        "paaralan",
     ]
     assert title_tokens("ang at ay mga ng sa upang") == []
 
@@ -144,7 +326,12 @@ def test_cli_accepts_missing_content_for_a_title_only_safeguard() -> None:
     cli = Path(__file__).resolve().parents[1] / "cli.py"
     completed = subprocess.run(
         [sys.executable, str(cli)],
-        input=json.dumps({"source": {"id": 1, "title": "Source"}, "candidates": [{"id": 2, "title": "Candidate"}]}),
+        input=json.dumps(
+            {
+                "source": {"id": 1, "title": "Source"},
+                "candidates": [{"id": 2, "title": "Candidate"}],
+            }
+        ),
         capture_output=True,
         text=True,
         check=False,
@@ -159,7 +346,10 @@ def test_cli_accepts_missing_content_for_a_title_only_safeguard() -> None:
 def test_cli_rejects_duplicate_identifiers_and_unexpected_protocol_keys() -> None:
     cli = Path(__file__).resolve().parents[1] / "cli.py"
     for payload in (
-        {"query": "climate", "candidates": [{"id": 2, "title": "one"}, {"id": 2, "title": "two"}]},
+        {
+            "query": "climate",
+            "candidates": [{"id": 2, "title": "one"}, {"id": 2, "title": "two"}],
+        },
         {"query": "climate", "candidates": [], "unexpected": True},
     ):
         completed = subprocess.run(
@@ -183,7 +373,9 @@ def test_cli_keeps_typed_queries_bounded_and_accepts_uploaded_content() -> None:
         input=json.dumps(
             {
                 "uploaded_content": "abcdefghij",
-                "candidates": [{"id": 2, "title": "Candidate", "content": "abcdefghij"}],
+                "candidates": [
+                    {"id": 2, "title": "Candidate", "content": "abcdefghij"}
+                ],
             }
         ),
         capture_output=True,
@@ -192,7 +384,31 @@ def test_cli_keeps_typed_queries_bounded_and_accepts_uploaded_content() -> None:
         env=environment,
     )
     assert accepted.returncode == 0
-    assert json.loads(accepted.stdout)["results"][0]["content_similarity_score"] == "1.000000000000"
+    assert (
+        json.loads(accepted.stdout)["results"][0]["content_similarity_score"]
+        == "1.000000000000"
+    )
+
+    numeric_only = subprocess.run(
+        [sys.executable, str(cli)],
+        input=json.dumps(
+            {
+                "uploaded_content": "2024 03 climate",
+                "candidates": [
+                    {"id": 2, "title": "2024 climate", "content": "2024 03 astronomy"}
+                ],
+            }
+        ),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert numeric_only.returncode == 0
+    assert json.loads(numeric_only.stdout)["results"][0]["matched_terms"] == []
+    assert (
+        json.loads(numeric_only.stdout)["results"][0]["content_similarity_score"]
+        != "0.000000000000"
+    )
 
     for payload in (
         {"query": "x" * 201, "candidates": []},

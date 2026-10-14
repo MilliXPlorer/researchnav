@@ -219,11 +219,7 @@ class ResearchService
 
     private function ensureMetadataEditable(ResearchDocument $research): void
     {
-        if (! in_array(
-            $research->submission_status,
-            ['draft', 'submitted', 'under_review', 'revision_required'],
-            true
-        )) {
+        if (! in_array($research->submission_status, ['draft', 'revision_required'], true)) {
             throw ValidationException::withMessages([
                 'submission_status' => ['Research metadata cannot be edited at this stage.'],
             ]);

@@ -463,7 +463,6 @@ export default function DocumentFeedbackPanel({
                           }}
                         >
                           <textarea
-                            // eslint-disable-next-line jsx-a11y/no-autofocus
                             autoFocus
                             required
                             aria-label="What did you address?"

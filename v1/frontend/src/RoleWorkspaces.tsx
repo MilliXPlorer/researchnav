@@ -1223,7 +1223,7 @@ function DashboardAnalytics({
           </tr>
         </thead>
         <tbody>
-          {labels.map((point, pointIndex) => (
+          {labels.map((point) => (
             <tr key={point.key}>
               <th>{point.label}</th>
               {analytics.series.map((series) => (

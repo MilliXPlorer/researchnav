@@ -58,7 +58,15 @@ class PublicRepositoryController extends Controller
     public function similarity(PublicRepositorySimilarityRequest $request, PublicRepositorySimilarityService $service)
     {
         try {
-            return PublicRepositorySimilarityResource::collection($service->compare($request->string('q')->toString()));
+            $filters = $request->validated();
+            if (isset($filters['year_from'], $filters['year_to']) && $filters['year_from'] > $filters['year_to']) {
+                throw ValidationException::withMessages([
+                    'year_from' => ['The from year must not be later than the to year.'],
+                    'year_to' => ['The to year must not be earlier than the from year.'],
+                ]);
+            }
+
+            return PublicRepositorySimilarityResource::collection($service->compare($filters));
         } catch (PublicRepositorySimilarityCapacityException) {
             return response()->json(['error' => 'SIMILARITY_CAPACITY_EXCEEDED'], 503);
         } catch (PublicRepositorySimilarityCatalogChangedException) {
