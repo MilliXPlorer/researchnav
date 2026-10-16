@@ -1,5 +1,6 @@
 import type { SdgResource } from "./api";
 import { sustainableDevelopmentGoals } from "./sdgs";
+import { SdgIcon } from "./SdgIcon";
 
 export function SdgBadges({
   sdgs,
@@ -19,7 +20,7 @@ export function SdgBadges({
           aria-label={`${sdg.code}: ${sdg.title}`}
           style={{ "--sdg-color": sdg.color_hex } as React.CSSProperties}
         >
-          <b>{sdg.id}</b>
+          <SdgIcon id={sdg.id} />
           {sdg.short_title}
         </span>
       ))}
@@ -54,6 +55,7 @@ export function SdgSelector({
           >
             <input
               type="checkbox"
+              aria-label={`${sdg.code}: ${sdg.title}`}
               checked={selected.has(sdg.id)}
               onChange={(event) =>
                 onChange(
@@ -63,7 +65,7 @@ export function SdgSelector({
                 )
               }
             />
-            <b>{sdg.id}</b>
+            <SdgIcon id={sdg.id} />
             <span>
               <strong>{sdg.short_title}</strong>
               <small>{sdg.title}</small>

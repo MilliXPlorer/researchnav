@@ -149,6 +149,7 @@ import { filterUserRows } from "./userManagement";
 import { useClientSorting } from "./useClientSorting";
 import { matchesStudySearch } from "./studySearch";
 import { SdgSelector } from "./SdgMetadata";
+import { SdgIcon } from "./SdgIcon";
 import {
   buildOfficeReportCsv,
   officeReportOptions,
@@ -5528,7 +5529,12 @@ function CoordinatorAccountRoles({ role }: { role: Role }) {
     setNotice("");
     setProvisioning(true);
     try {
-      await provisionAccount("/api/coordinator/instructors", email.trim(), undefined, undefined);
+      await provisionAccount(
+        "/api/coordinator/instructors",
+        email.trim(),
+        undefined,
+        undefined,
+      );
       setEmail("");
       setNotice("Instructor account added.");
       reload();
@@ -5669,9 +5675,7 @@ function CoordinatorReports({ role }: { role: Role }) {
     reloadRef.current = reload;
   });
   useEffect(() => {
-    if (
-      appliedFilters.current.program !== programFilter
-    ) {
+    if (appliedFilters.current.program !== programFilter) {
       appliedFilters.current = {
         program: programFilter,
       };
@@ -5681,11 +5685,16 @@ function CoordinatorReports({ role }: { role: Role }) {
   const reportIsCurrent =
     state.status === "ready" &&
     (state.data.filters?.program ?? "") === programFilter;
-  const assignedInstitute = state.status === "ready" ? state.data.filters?.institute ?? "" : "";
+  const assignedInstitute =
+    state.status === "ready" ? (state.data.filters?.institute ?? "") : "";
   const programOptions =
     assignedInstitute &&
-    instituteNames.includes(assignedInstitute as (typeof instituteNames)[number])
-      ? programsByInstitute[assignedInstitute as keyof typeof programsByInstitute]
+    instituteNames.includes(
+      assignedInstitute as (typeof instituteNames)[number],
+    )
+      ? programsByInstitute[
+          assignedInstitute as keyof typeof programsByInstitute
+        ]
       : [];
   return (
     <div className="workspace-content admin-sidebar-page coordinator-report-page">
@@ -5732,7 +5741,11 @@ function CoordinatorReports({ role }: { role: Role }) {
           </div>
         </div>
         <div className="admin-filters coordinator-report-filters">
-          <div className="coordinator-report-scope" role="group" aria-label="Assigned institute">
+          <div
+            className="coordinator-report-scope"
+            role="group"
+            aria-label="Assigned institute"
+          >
             <span className="coordinator-report-filter-label">Institute</span>
             <div className="coordinator-report-readonly">
               {assignedInstitute || "Assigned institute"}
@@ -8028,11 +8041,7 @@ function OfficeReports({ role }: { role: Role }) {
       <Button type="button" onClick={openCurrentPdf}>
         <Printer aria-hidden="true" /> Print report
       </Button>
-      <Button
-        type="button"
-        variant="secondary"
-        onClick={exportCurrentCsv}
-      >
+      <Button type="button" variant="secondary" onClick={exportCurrentCsv}>
         <Download aria-hidden="true" /> Export CSV
       </Button>
     </div>
@@ -8168,11 +8177,9 @@ function OfficeReports({ role }: { role: Role }) {
                     {(state.data.by_sdg ?? []).map((row) => (
                       <tr key={row.id}>
                         <td>
-                          <span
-                            className="report-sdg-number"
-                            style={{ backgroundColor: row.color_hex }}
-                          >
-                            {row.id}
+                          <span className="report-sdg-icon">
+                            <SdgIcon id={row.id} />
+                            <span className="sr-only">SDG {row.id}: </span>
                           </span>{" "}
                           {row.title}
                         </td>

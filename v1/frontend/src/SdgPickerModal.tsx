@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button } from "./components";
 import { Modal } from "./Modal";
 import { sustainableDevelopmentGoals } from "./sdgs";
+import { SdgIcon } from "./SdgIcon";
 
 export default function SdgPickerModal({
   onClose,
@@ -35,6 +36,7 @@ export default function SdgPickerModal({
                 className={`sdg-option${selected ? " sdg-option-selected" : ""}`}
                 style={{ "--sdg-color": sdg.color_hex } as React.CSSProperties}
                 aria-pressed={selected}
+                aria-label={`${sdg.code}: ${sdg.title}`}
                 onClick={() =>
                   setPendingIds(
                     selected
@@ -43,7 +45,7 @@ export default function SdgPickerModal({
                   )
                 }
               >
-                <b>{sdg.id}</b>
+                <SdgIcon id={sdg.id} />
                 <span>
                   <strong>{sdg.short_title}</strong>
                   <small>{sdg.title}</small>
