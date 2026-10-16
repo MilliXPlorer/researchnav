@@ -127,6 +127,9 @@ class DocumentService
 
             $file->original_filename = $this->safeOriginalFilename($filename);
             $file->saveOrFail();
+            if ($file->is_current && $file->document_type === 'final_manuscript') {
+                $this->manuscriptSearch->invalidate((int) $research->id);
+            }
             $this->audit->log($actor, 'DOCUMENT_RENAMED', $file, 'Renamed a private research document.', $request);
 
             return $file->refresh();
@@ -139,6 +142,7 @@ class DocumentService
             [$research, $file] = $this->lockFileWithParent($file);
             $actor = $this->currentActor($actor);
             $this->authorizeManagement($actor, $research, $file);
+            $invalidatesManuscriptSearch = $file->is_current && $file->document_type === 'final_manuscript';
             if ($file->pdfAnnotations()->exists()) {
                 throw ValidationException::withMessages(['document_file_id' => ['A PDF version with annotations cannot be deleted.']]);
             }
@@ -170,6 +174,10 @@ class DocumentService
                     : $currentQuery->where('relative_path', $file->relative_path);
                 $currentQuery->update(['is_current' => false]);
                 $replacement->update(['is_current' => true]);
+            }
+
+            if ($invalidatesManuscriptSearch) {
+                $this->manuscriptSearch->invalidate((int) $research->id);
             }
 
             $pending = PendingPrivateFileDeletion::query()->create([

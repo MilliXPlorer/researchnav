@@ -164,9 +164,29 @@ class ManuscriptSearchTest extends TestCase
             'file_size' => strlen($contents),
         ]);
         $extractor = $this->mock(ManuscriptTextExtractor::class);
-        $extractor->shouldNotReceive('extract');
+        $extractor->shouldReceive('extract')->once()->andReturn('recovered body');
+        $service = app(ManuscriptSearchProjectionService::class);
 
-        $this->assertSame('no_source', app(ManuscriptSearchProjectionService::class)->reindex($document->id));
+        $this->assertSame('failed', $service->reindex($document->id));
+        $this->assertSame('skipped', $service->reindex($document->id));
+        $this->assertSame('skipped', $service->reindex($document->id, false, true));
+        $this->assertSame('failed', $service->reindex($document->id, true));
+        $this->assertDatabaseHas('manuscript_search_documents', [
+            'research_document_id' => $document->id,
+            'extraction_status' => 'failed',
+            'error_code' => 'INVALID_SOURCE',
+        ]);
+
+        $path = 'research/'.$document->id.'/final.pdf';
+        Storage::disk('researchnav_private')->put($path, $contents);
+        DocumentFile::query()->where('research_document_id', $document->id)->update(['file_path' => $path]);
+
+        $this->assertSame('indexed', $service->reindex($document->id));
+        $this->assertDatabaseHas('manuscript_search_documents', [
+            'research_document_id' => $document->id,
+            'extraction_status' => 'ready',
+            'body_text' => 'recovered body',
+        ]);
     }
 
     public function test_reindex_downloads_extracts_and_persists_a_manuscript_projection(): void
@@ -196,6 +216,222 @@ class ManuscriptSearchTest extends TestCase
             'source_sha256' => hash('sha256', $contents),
             'body_text' => 'durably cached manuscript body',
             'extraction_status' => 'ready',
+        ]);
+    }
+
+    public function test_reindex_combines_every_current_final_manuscript_in_persisted_order(): void
+    {
+        $document = $this->document();
+        Storage::fake('researchnav_private');
+        $files = [];
+        foreach ([
+            ['file_order' => 1, 'original_filename' => 'z-first.pdf', 'contents' => 'z bytes'],
+            ['file_order' => 1, 'original_filename' => 'a-first.docx', 'contents' => 'a bytes'],
+            ['file_order' => 2, 'original_filename' => 'second.pdf', 'contents' => 'second bytes'],
+        ] as $index => $attributes) {
+            $path = 'research/'.$document->id.'/part-'.$index.'.'.pathinfo($attributes['original_filename'], PATHINFO_EXTENSION);
+            Storage::disk('researchnav_private')->put($path, $attributes['contents']);
+            $files[] = $this->file($document, [
+                'document_type' => 'final_manuscript',
+                'version_number' => $index + 1,
+                'file_order' => $attributes['file_order'],
+                'original_filename' => $attributes['original_filename'],
+                'stored_filename' => basename($path),
+                'file_path' => $path,
+                'file_extension' => pathinfo($path, PATHINFO_EXTENSION),
+                'mime_type' => str_ends_with($path, '.pdf') ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'file_size' => strlen($attributes['contents']),
+            ]);
+        }
+        $extractor = $this->mock(ManuscriptTextExtractor::class);
+        $extractor->shouldReceive('extract')->times(3)->andReturn('a text', 'z text', 'second text');
+
+        $this->assertSame('indexed', app(ManuscriptSearchProjectionService::class)->reindex($document->id));
+
+        $projection = ManuscriptSearchDocument::query()->where('research_document_id', $document->id)->sole();
+        $ordered = [$files[1], $files[0], $files[2]];
+        $this->assertNull($projection->source_document_file_id);
+        $this->assertNull($projection->source_extension);
+        $this->assertSame($this->aggregateSourceHash($ordered), $projection->source_sha256);
+        $this->assertSame('a text'."\n\n".'z text'."\n\n".'second text', $projection->body_text);
+    }
+
+    public function test_adding_a_current_final_manuscript_reindexes_the_complete_source_set(): void
+    {
+        $document = $this->document();
+        $first = $this->finalFile($document);
+        $extractor = $this->mock(ManuscriptTextExtractor::class);
+        $extractor->shouldReceive('extract')->times(3)->andReturn('first text', 'updated first text', 'second text');
+        $service = app(ManuscriptSearchProjectionService::class);
+
+        $this->assertSame('indexed', $service->reindex($document->id));
+        $firstHash = ManuscriptSearchDocument::query()->where('research_document_id', $document->id)->value('source_sha256');
+        $path = 'research/'.$document->id.'/second.pdf';
+        Storage::disk('researchnav_private')->put($path, 'second bytes');
+        $this->file($document, [
+            'document_type' => 'final_manuscript',
+            'version_number' => 2,
+            'file_order' => 2,
+            'original_filename' => 'second.pdf',
+            'stored_filename' => 'second.pdf',
+            'file_path' => $path,
+            'file_extension' => 'pdf',
+            'mime_type' => 'application/pdf',
+            'file_size' => strlen('second bytes'),
+        ]);
+
+        $this->assertSame('indexed', $service->reindex($document->id));
+        $projection = ManuscriptSearchDocument::query()->where('research_document_id', $document->id)->sole();
+        $this->assertNull($projection->source_document_file_id);
+        $this->assertNotSame($firstHash, $projection->source_sha256);
+        $this->assertSame('updated first text'."\n\n".'second text', $projection->body_text);
+        $this->assertSame($first->file_size + strlen('second bytes'), $projection->source_size_bytes);
+    }
+
+    public function test_failed_aggregate_extraction_never_persists_partial_text(): void
+    {
+        $document = $this->document();
+        $this->finalFile($document);
+        $path = 'research/'.$document->id.'/second.pdf';
+        Storage::disk('researchnav_private')->put($path, 'second bytes');
+        $this->file($document, [
+            'document_type' => 'final_manuscript',
+            'version_number' => 2,
+            'file_order' => 2,
+            'original_filename' => 'second.pdf',
+            'stored_filename' => 'second.pdf',
+            'file_path' => $path,
+            'file_extension' => 'pdf',
+            'mime_type' => 'application/pdf',
+            'file_size' => strlen('second bytes'),
+        ]);
+        $projection = $this->projection($document, 'stale complete body');
+        $extractor = $this->mock(ManuscriptTextExtractor::class);
+        $extractor->shouldReceive('extract')->once()->andReturn('first extracted text');
+        $extractor->shouldReceive('extract')->once()->andThrow(new ManuscriptTextExtractionException('failed'));
+
+        $this->assertSame('failed', app(ManuscriptSearchProjectionService::class)->reindex($document->id, true));
+        $this->assertDatabaseHas('manuscript_search_documents', [
+            'id' => $projection->id,
+            'extraction_status' => 'failed',
+            'body_text' => null,
+            'error_code' => 'EXTRACTION_FAILED',
+        ]);
+    }
+
+    public function test_invalid_member_of_a_final_manuscript_aggregate_fails_without_partial_text(): void
+    {
+        $document = $this->document();
+        $first = $this->finalFile($document);
+        $this->file($document, [
+            'document_type' => 'final_manuscript',
+            'version_number' => 2,
+            'file_order' => 2,
+            'original_filename' => 'missing.pdf',
+            'stored_filename' => 'missing.pdf',
+            'file_path' => 'research/'.$document->id.'/missing.pdf',
+            'file_extension' => 'pdf',
+            'mime_type' => 'application/pdf',
+            'file_size' => 1,
+        ]);
+        $projection = $this->projection($document, 'stale aggregate body', $first);
+        $extractor = $this->mock(ManuscriptTextExtractor::class);
+        $extractor->shouldNotReceive('extract');
+
+        $this->assertSame('failed', app(ManuscriptSearchProjectionService::class)->reindex($document->id, true));
+        $this->assertDatabaseHas('manuscript_search_documents', [
+            'id' => $projection->id,
+            'extraction_status' => 'failed',
+            'body_text' => null,
+            'error_code' => 'INVALID_SOURCE',
+        ]);
+    }
+
+    public function test_no_current_source_is_classified_as_no_source(): void
+    {
+        $document = $this->document();
+        $extractor = $this->mock(ManuscriptTextExtractor::class);
+        $extractor->shouldNotReceive('extract');
+
+        $this->assertSame('no_source', app(ManuscriptSearchProjectionService::class)->reindex($document->id));
+        $this->assertDatabaseHas('manuscript_search_documents', [
+            'research_document_id' => $document->id,
+            'extraction_status' => 'no_source',
+            'error_code' => 'NO_SOURCE',
+        ]);
+    }
+
+    public function test_final_manuscript_aggregate_fails_when_it_exceeds_the_source_file_limit(): void
+    {
+        $document = $this->document();
+        for ($index = 1; $index <= 21; $index++) {
+            $this->file($document, [
+                'document_type' => 'final_manuscript',
+                'version_number' => $index,
+                'file_order' => $index,
+                'original_filename' => "part-{$index}.pdf",
+                'stored_filename' => "part-{$index}.pdf",
+                'file_path' => 'research/'.$document->id."/part-{$index}.pdf",
+                'file_extension' => 'pdf',
+                'mime_type' => 'application/pdf',
+                'file_size' => 1,
+            ]);
+        }
+        $extractor = $this->mock(ManuscriptTextExtractor::class);
+        $extractor->shouldNotReceive('extract');
+
+        $service = app(ManuscriptSearchProjectionService::class);
+        $this->assertSame('failed', $service->reindex($document->id));
+        $this->assertSame('skipped', $service->reindex($document->id));
+        $this->assertSame('skipped', $service->reindex($document->id, false, true));
+        $this->assertSame('failed', $service->reindex($document->id, true));
+        $this->assertDatabaseHas('manuscript_search_documents', [
+            'research_document_id' => $document->id,
+            'extraction_status' => 'failed',
+            'error_code' => 'SOURCE_LIMIT_EXCEEDED',
+        ]);
+
+        DocumentFile::query()->where('research_document_id', $document->id)->firstOrFail()->delete();
+        $this->assertSame('failed', $service->reindex($document->id));
+        $this->assertDatabaseHas('manuscript_search_documents', [
+            'research_document_id' => $document->id,
+            'error_code' => 'INVALID_SOURCE',
+        ]);
+    }
+
+    public function test_aggregate_source_change_during_extraction_does_not_persist_stale_text(): void
+    {
+        $document = $this->document();
+        $first = $this->finalFile($document);
+        $path = 'research/'.$document->id.'/second.pdf';
+        Storage::disk('researchnav_private')->put($path, 'second bytes');
+        $this->file($document, [
+            'document_type' => 'final_manuscript',
+            'version_number' => 2,
+            'file_order' => 2,
+            'original_filename' => 'second.pdf',
+            'stored_filename' => 'second.pdf',
+            'file_path' => $path,
+            'file_extension' => 'pdf',
+            'mime_type' => 'application/pdf',
+            'file_size' => strlen('second bytes'),
+        ]);
+        $calls = 0;
+        $extractor = $this->mock(ManuscriptTextExtractor::class);
+        $extractor->shouldReceive('extract')->twice()->andReturnUsing(function () use (&$calls, $first): string {
+            $calls++;
+            if ($calls === 1) {
+                Storage::disk('researchnav_private')->put($first->file_path, str_repeat('x', strlen('%PDF-1.4 final')));
+            }
+
+            return "part {$calls}";
+        });
+
+        $this->assertSame('skipped', app(ManuscriptSearchProjectionService::class)->reindex($document->id));
+        $this->assertDatabaseHas('manuscript_search_documents', [
+            'research_document_id' => $document->id,
+            'extraction_status' => 'pending',
+            'body_text' => null,
         ]);
     }
 
@@ -281,6 +517,135 @@ class ManuscriptSearchTest extends TestCase
             'extraction_status' => 'pending',
             'body_text' => null,
         ]);
+    }
+
+    public function test_deleting_a_current_final_manuscript_invalidates_its_projection(): void
+    {
+        $document = $this->document(['submission_status' => 'approved']);
+        $file = $this->finalFile($document);
+        $path = 'research/'.$document->id.'/second.pdf';
+        Storage::disk('researchnav_private')->put($path, 'second bytes');
+        $this->file($document, [
+            'document_type' => 'final_manuscript',
+            'version_number' => 2,
+            'file_order' => 2,
+            'original_filename' => 'second.pdf',
+            'stored_filename' => 'second.pdf',
+            'file_path' => $path,
+            'file_extension' => 'pdf',
+            'mime_type' => 'application/pdf',
+            'file_size' => strlen('second bytes'),
+        ]);
+        $extractor = $this->mock(ManuscriptTextExtractor::class);
+        $extractor->shouldReceive('extract')->twice()->andReturn('first body', 'second body');
+        $this->assertSame('indexed', app(ManuscriptSearchProjectionService::class)->reindex($document->id));
+        $this->assertDatabaseHas('manuscript_search_documents', [
+            'research_document_id' => $document->id,
+            'source_document_file_id' => null,
+            'extraction_status' => 'ready',
+        ]);
+        $office = User::factory()->create(['role' => 'research-office']);
+
+        app(DocumentService::class)->delete($office, $file);
+
+        $this->assertDatabaseHas('manuscript_search_documents', [
+            'research_document_id' => $document->id,
+            'extraction_status' => 'pending',
+            'body_text' => null,
+        ]);
+    }
+
+    public function test_renaming_a_current_final_manuscript_invalidates_an_aggregate_projection(): void
+    {
+        $document = $this->document(['submission_status' => 'approved']);
+        $renamed = $this->finalFile($document)->refresh();
+        $path = 'research/'.$document->id.'/a-first.pdf';
+        Storage::disk('researchnav_private')->put($path, 'a bytes');
+        $this->file($document, [
+            'document_type' => 'final_manuscript',
+            'version_number' => 2,
+            'file_order' => $renamed->file_order,
+            'original_filename' => 'a-first.pdf',
+            'stored_filename' => 'a-first.pdf',
+            'file_path' => $path,
+            'file_extension' => 'pdf',
+            'mime_type' => 'application/pdf',
+            'file_size' => strlen('a bytes'),
+        ]);
+        $extractor = $this->mock(ManuscriptTextExtractor::class);
+        $extractor->shouldReceive('extract')->twice()->andReturn('a body', 'final body');
+        $this->assertSame('indexed', app(ManuscriptSearchProjectionService::class)->reindex($document->id));
+        $projection = ManuscriptSearchDocument::query()->where('research_document_id', $document->id)->sole();
+        $this->assertNull($projection->source_document_file_id);
+        $this->assertSame('ready', $projection->extraction_status);
+        $this->assertSame('a body'."\n\n".'final body', $projection->body_text);
+
+        app(DocumentService::class)->rename(User::factory()->create(['role' => 'research-office']), $renamed, '0-final.pdf');
+
+        $this->assertDatabaseHas('manuscript_search_documents', [
+            'id' => $projection->id,
+            'research_document_id' => $document->id,
+            'source_document_file_id' => null,
+            'extraction_status' => 'pending',
+            'body_text' => null,
+        ]);
+    }
+
+    public function test_aggregate_output_budget_overflow_clears_stale_text(): void
+    {
+        config()->set('researchnav.manuscript_search.maximum_output_bytes', 10);
+        config()->set('researchnav.manuscript_search.maximum_text_characters', 10);
+        $document = $this->document();
+        $first = $this->finalFile($document);
+        $path = 'research/'.$document->id.'/second.pdf';
+        Storage::disk('researchnav_private')->put($path, 'second bytes');
+        $this->file($document, [
+            'document_type' => 'final_manuscript',
+            'version_number' => 2,
+            'file_order' => 2,
+            'original_filename' => 'second.pdf',
+            'stored_filename' => 'second.pdf',
+            'file_path' => $path,
+            'file_extension' => 'pdf',
+            'mime_type' => 'application/pdf',
+            'file_size' => strlen('second bytes'),
+        ]);
+        $projection = $this->projection($document, 'stale body', $first);
+        $extractor = $this->mock(ManuscriptTextExtractor::class);
+        $extractor->shouldReceive('extract')->twice()->andReturn('abcdef', 'abcdef');
+
+        $this->assertSame('failed', app(ManuscriptSearchProjectionService::class)->reindex($document->id, true));
+        $this->assertDatabaseHas('manuscript_search_documents', [
+            'id' => $projection->id,
+            'extraction_status' => 'failed',
+            'body_text' => null,
+            'error_code' => 'AGGREGATE_OUTPUT_LIMIT_EXCEEDED',
+        ]);
+    }
+
+    public function test_unchanged_unsupported_projection_is_skipped_unless_forced(): void
+    {
+        $document = $this->document();
+        Storage::fake('researchnav_private');
+        $path = 'research/'.$document->id.'/legacy.doc';
+        Storage::disk('researchnav_private')->put($path, 'legacy document');
+        $this->file($document, [
+            'document_type' => 'final_manuscript',
+            'original_filename' => 'legacy.doc',
+            'stored_filename' => 'legacy.doc',
+            'file_path' => $path,
+            'file_extension' => 'doc',
+            'mime_type' => 'application/msword',
+            'file_size' => strlen('legacy document'),
+        ]);
+        $extractor = $this->mock(ManuscriptTextExtractor::class);
+        $extractor->shouldNotReceive('extract');
+        $service = app(ManuscriptSearchProjectionService::class);
+
+        $this->assertSame('unsupported', $service->reindex($document->id));
+        $this->assertSame('skipped', $service->reindex($document->id));
+        $this->assertSame('skipped', $service->reindex($document->id, false, true));
+        $this->assertSame('unsupported', $service->reindex($document->id, true));
     }
 
     public function test_cli_runner_uses_argv_and_accepts_only_normalized_json_protocol(): void
@@ -406,5 +771,22 @@ class ManuscriptSearchTest extends TestCase
             'last_attempted_at' => now(),
             'indexed_at' => now(),
         ]);
+    }
+
+    /** @param array<int, DocumentFile> $files */
+    private function aggregateSourceHash(array $files): string
+    {
+        $manifest = array_map(fn (DocumentFile $file): array => [
+            'id' => $file->id,
+            'file_order' => $file->file_order,
+            'original_filename' => $file->original_filename,
+            'path' => $file->file_path,
+            'extension' => $file->file_extension,
+            'sha256' => hash_file('sha256', Storage::disk('researchnav_private')->path($file->file_path)),
+            'size' => $file->file_size,
+            'updated_at' => $file->updated_at?->format('Y-m-d H:i:s.u'),
+        ], $files);
+
+        return hash('sha256', json_encode($manifest, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
     }
 }
