@@ -10,6 +10,7 @@ use App\Models\ResearchDocument;
 use App\Services\OfficeRepositoryService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 
 class OfficeRepositoryController extends DomainController
@@ -21,7 +22,10 @@ class OfficeRepositoryController extends DomainController
         $query = $bucket === 'recycle'
             ? ResearchDocument::onlyTrashed()
             : ResearchDocument::query();
-        $query->with('authors');
+        $query->select([
+            'id', 'submission_reference', 'title', 'publication_year', 'institute', 'research_stage',
+            'submission_status', 'archive_status', 'visibility', 'updated_at', 'deleted_at',
+        ])->with('authors:id,research_document_id,author_name,author_order');
 
         if ($bucket === 'ongoing') {
             $query->where('archive_status', '!=', 'archived');
@@ -73,10 +77,10 @@ class OfficeRepositoryController extends DomainController
             return response()->json(['error' => 'REPOSITORY_RECORD_TRASHED'], 409);
         }
 
-        return $this->detailResponse($document->load($this->detailRelations()));
+        return $this->detailResponse($this->documentDetail((string) $document->id));
     }
 
-    public function destroy(OfficeRepositoryUpdateRequest $request, string $researchDocument, OfficeRepositoryService $repository): JsonResponse|Response
+    public function destroy(Request $request, string $researchDocument, OfficeRepositoryService $repository): JsonResponse|Response
     {
         ResearchDocument::withTrashed()->findOrFail($researchDocument);
         if (! $repository->delete($this->actor($request), (int) $researchDocument, $request)) {
@@ -86,7 +90,7 @@ class OfficeRepositoryController extends DomainController
         return response()->noContent();
     }
 
-    public function restore(OfficeRepositoryUpdateRequest $request, string $researchDocument, OfficeRepositoryService $repository): JsonResponse
+    public function restore(Request $request, string $researchDocument, OfficeRepositoryService $repository): JsonResponse
     {
         ResearchDocument::withTrashed()->findOrFail($researchDocument);
         $document = $repository->restore($this->actor($request), (int) $researchDocument, $request);
@@ -94,18 +98,31 @@ class OfficeRepositoryController extends DomainController
             return response()->json(['error' => 'REPOSITORY_RECORD_NOT_TRASHED'], 409);
         }
 
-        return $this->detailResponse($document->load($this->detailRelations()));
+        return $this->detailResponse($this->documentDetail((string) $document->id));
     }
 
     private function documentDetail(string $id): ResearchDocument
     {
-        return ResearchDocument::withTrashed()->with($this->detailRelations())->findOrFail($id);
+        return ResearchDocument::withTrashed()
+            ->select([
+                'id', 'submission_reference', 'category_id', 'title', 'normalized_title', 'abstract', 'keywords',
+                'publication_year', 'institute', 'degree_program', 'manuscript_date_label', 'research_stage',
+                'submission_status', 'archive_status', 'visibility', 'submitted_at', 'approved_at', 'archived_at',
+                'updated_at', 'deleted_at',
+            ])
+            ->with($this->detailRelations())
+            ->findOrFail($id);
     }
 
     /** @return list<string> */
     private function detailRelations(): array
     {
-        return ['category', 'sdgs', 'authors', 'files'];
+        return [
+            'category:id,name,slug',
+            'sdgs:id,code,title,short_title,color_hex',
+            'authors:id,research_document_id,author_name,author_order,is_corresponding_author',
+            'files:id,research_document_id,document_type,upload_purpose,version_number,file_order,original_filename,file_extension,mime_type,file_size,is_current,uploaded_at',
+        ];
     }
 
     private function detailResponse(ResearchDocument $document): JsonResponse
