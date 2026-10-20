@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
   getSystemStatus,
+  getOfficeRepositoryDetail,
   getRoleDashboard,
   getNotificationUnreadCount,
   getInternalResearch,
@@ -58,8 +59,12 @@ import {
   decideCompliance,
   getInstitutionalReport,
   listOfficeUsers,
+  listOfficeRepository,
   listRepositoryCatalog,
   updateOfficeUserAccess,
+  updateOfficeRepository,
+  deleteOfficeRepository,
+  restoreOfficeRepository,
   updateOwnProfile,
   updateInternalResearch,
   updateAdminUser,
@@ -566,6 +571,90 @@ describe("administrator API", () => {
       "/api/admin/users/uuid%2Fwith%20space",
       expect.objectContaining({ method: "DELETE" }),
     );
+  });
+});
+
+describe("office repository API", () => {
+  it("uses only the shared office routes and unwraps safe resource envelopes", async () => {
+    const detail = { id: 12, title: "Safe record" };
+    const page = {
+      data: [detail],
+      links: { first: null, last: null, prev: null, next: null },
+      meta: {
+        current_page: 2,
+        from: 26,
+        last_page: 2,
+        links: [],
+        path: "/api/office/repository",
+        per_page: 25,
+        to: 26,
+        total: 26,
+      },
+    };
+    const fetchMock = vi.fn(
+      async (path: RequestInfo | URL, _init?: RequestInit) => {
+        void _init;
+        return new Response(
+          JSON.stringify(
+            String(path).includes("?bucket") ? page : { data: detail },
+          ),
+        );
+      },
+    );
+
+    await expect(
+      listOfficeRepository(
+        {
+          bucket: "archived",
+          search: " coastal study ",
+          institute: "ICS",
+          publication_year: 2026,
+          sort: "title",
+          direction: "asc",
+          page: 2,
+          per_page: 25,
+        },
+        fetchMock,
+      ),
+    ).resolves.toEqual(page);
+    await expect(getOfficeRepositoryDetail("12/3", fetchMock)).resolves.toEqual(
+      detail,
+    );
+    await expect(
+      updateOfficeRepository(12, { title: "Updated", sdg_ids: [4] }, fetchMock),
+    ).resolves.toEqual(detail);
+    await expect(
+      deleteOfficeRepository(12, fetchMock),
+    ).resolves.toBeUndefined();
+    await expect(restoreOfficeRepository(12, fetchMock)).resolves.toEqual(
+      detail,
+    );
+
+    expect(
+      fetchMock.mock.calls.map(([path, init]) => ({
+        path: String(path),
+        method: (init as RequestInit).method ?? "GET",
+        body: (init as RequestInit).body,
+      })),
+    ).toEqual([
+      {
+        path: "/api/office/repository?bucket=archived&search=coastal+study&institute=ICS&publication_year=2026&sort=title&direction=asc&page=2&per_page=25",
+        method: "GET",
+        body: undefined,
+      },
+      { path: "/api/office/repository/12%2F3", method: "GET", body: undefined },
+      {
+        path: "/api/office/repository/12",
+        method: "PATCH",
+        body: JSON.stringify({ title: "Updated", sdg_ids: [4] }),
+      },
+      { path: "/api/office/repository/12", method: "DELETE", body: undefined },
+      {
+        path: "/api/office/repository/12/restore",
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    ]);
   });
 });
 
