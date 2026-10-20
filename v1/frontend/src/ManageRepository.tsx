@@ -91,14 +91,49 @@ function initialDraft(
   };
 }
 
+function normalizedDraftValue(
+  field: keyof OfficeRepositoryUpdateInput,
+  value: OfficeRepositoryUpdateInput[keyof OfficeRepositoryUpdateInput],
+) {
+  if (field === "sdg_ids") {
+    return [...((value as number[] | undefined) ?? [])].sort(
+      (first, second) => first - second,
+    );
+  }
+  if (field === "title") return (value as string | undefined)?.trim() ?? "";
+  return value ?? null;
+}
+
+function valuesMatch(left: unknown, right: unknown) {
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return (
+      left.length === right.length &&
+      left.every((value, index) => value === right[index])
+    );
+  }
+  return left === right;
+}
+
+function changedDraft(
+  draft: OfficeRepositoryUpdateInput,
+  detail: OfficeRepositoryDetailResource,
+) {
+  const initial = initialDraft(detail);
+  return (
+    Object.keys(initial) as Array<keyof OfficeRepositoryUpdateInput>
+  ).reduce((changes, field) => {
+    const next = normalizedDraftValue(field, draft[field]);
+    const previous = normalizedDraftValue(field, initial[field]);
+    if (!valuesMatch(next, previous)) changes[field] = next as never;
+    return changes;
+  }, {} as OfficeRepositoryUpdateInput);
+}
+
 function draftIsDirty(
   draft: OfficeRepositoryUpdateInput,
   detail: OfficeRepositoryDetailResource | null,
 ) {
-  return (
-    detail !== null &&
-    JSON.stringify(draft) !== JSON.stringify(initialDraft(detail))
-  );
+  return detail !== null && Object.keys(changedDraft(draft, detail)).length > 0;
 }
 
 function FieldError({ messages }: { messages?: string[] }) {
@@ -160,6 +195,7 @@ export default function ManageRepository({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<OfficeRepositoryUpdateInput>({});
   const [saving, setSaving] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
   const [confirming, setConfirming] = useState<"delete" | "restore" | null>(
     null,
   );
@@ -335,14 +371,19 @@ export default function ManageRepository({
       setDetailError("A title is required.");
       return;
     }
+    const changes = changedDraft(draft, selected);
+    if (Object.keys(changes).length === 0) {
+      setDraft(initialDraft(selected));
+      setEditing(false);
+      setDetailError("");
+      setDetailFieldErrors({});
+      return;
+    }
     setSaving(true);
     setDetailError("");
     setDetailFieldErrors({});
     try {
-      const updated = await updateOfficeRepository(selected.id, {
-        ...draft,
-        title: draft.title.trim(),
-      });
+      const updated = await updateOfficeRepository(selected.id, changes);
       setSelected(updated);
       setDraft(initialDraft(updated));
       setEditing(false);
@@ -360,6 +401,14 @@ export default function ManageRepository({
     }
   }
 
+  function requestDetailClose() {
+    if (editing && draftIsDirty(draft, selected)) {
+      setDiscarding(true);
+      return;
+    }
+    setSelectedId(null);
+  }
+
   async function mutate(action: "delete" | "restore") {
     if (!selected || saving) return;
     setSaving(true);
@@ -374,6 +423,7 @@ export default function ManageRepository({
           ? `Moved ${selected.title} to the Recycle Bin.`
           : `Restored ${selected.title}.`,
       );
+      setPage(1);
       reload();
     } catch (requestError) {
       setConfirming(null);
@@ -658,6 +708,7 @@ export default function ManageRepository({
                   meta={meta}
                   noun="records"
                   onPage={(nextPage) => {
+                    if (nextPage === meta.current_page) return;
                     setLoading(true);
                     setPage(nextPage);
                   }}
@@ -671,9 +722,8 @@ export default function ManageRepository({
       {selectedId !== null && (
         <Modal
           label="Repository record details"
-          onClose={() => setSelectedId(null)}
+          onClose={requestDetailClose}
           busy={saving}
-          dirty={editing && draftIsDirty(draft, selected)}
           size="large"
           className="manage-repository-modal"
         >
@@ -709,6 +759,7 @@ export default function ManageRepository({
                   setCategories(null);
                   setCategoryOptionsError("");
                   setDetailFieldErrors({});
+                  setDiscarding(false);
                   setEditing(true);
                 }}
                 onCancel={() => {
@@ -744,6 +795,30 @@ export default function ManageRepository({
           onConfirm={() => void mutate(confirming)}
           onCancel={() => setConfirming(null)}
         />
+      )}
+      {discarding && (
+        <Modal
+          label="Discard unsaved changes"
+          onClose={() => setDiscarding(false)}
+        >
+          <div className="confirm-card">
+            <p>You have unsaved changes. Discard them and close?</p>
+            <div className="modal-actions">
+              <Button variant="secondary" onClick={() => setDiscarding(false)}>
+                Keep editing
+              </Button>
+              <Button
+                variant="rust"
+                onClick={() => {
+                  setDiscarding(false);
+                  setSelectedId(null);
+                }}
+              >
+                Discard changes
+              </Button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );
