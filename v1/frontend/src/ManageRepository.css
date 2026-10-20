@@ -77,6 +77,10 @@
   font-size: 10px;
 }
 
+.manage-repository-mobile-sort {
+  display: none;
+}
+
 .manage-repository-field-error {
   color: var(--rust);
   font-size: 11px;
@@ -232,12 +236,27 @@
     box-sizing: border-box;
   }
 
+  .manage-repository-mobile-sort {
+    display: grid;
+    gap: 6px;
+    margin: 0 0 12px;
+    color: var(--canopy);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .manage-repository-mobile-sort select {
+    min-height: 40px;
+    padding: 9px 10px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    color: var(--ink);
+    background: var(--paper);
+    font: inherit;
+  }
+
   .manage-repository-table-wrap thead {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
+    display: none;
   }
 
   .manage-repository-table-wrap tr {
