@@ -9,12 +9,16 @@ use App\Models\ResearchDocument;
 use App\Models\ResearchProjectTeamMember;
 use App\Models\User;
 use App\Services\ManuscriptSearchProjectionService;
+use App\Services\OfficeRepositoryService;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 use Mockery;
+use RuntimeException;
 use Tests\TestCase;
 
 class OfficeRepositoryManagementTest extends TestCase
@@ -53,6 +57,10 @@ class OfficeRepositoryManagementTest extends TestCase
             if (in_array($route->methods()[0], ['PATCH', 'DELETE', 'POST'], true)) {
                 $this->assertContains('origin.allowed', $middleware);
                 $this->assertContains('throttle:domain-mutations', $middleware);
+            }
+
+            if ($route->parameterNames() !== []) {
+                $this->assertSame('[0-9]+', $route->wheres['researchDocument'] ?? null);
             }
         }
     }
@@ -186,6 +194,24 @@ class OfficeRepositoryManagementTest extends TestCase
             ->assertExactJson(['error' => 'NOT_FOUND']);
     }
 
+    public function test_record_routes_reject_non_integer_and_overflowing_identifiers(): void
+    {
+        $office = $this->actor('research-office');
+
+        $this->as($office)->getJson('/api/office/repository/1suffix')
+            ->assertNotFound()
+            ->assertExactJson(['error' => 'NOT_FOUND']);
+        $this->as($office)->patchJson('/api/office/repository/1.5', ['title' => 'Nope'], $this->origin())
+            ->assertNotFound()
+            ->assertExactJson(['error' => 'NOT_FOUND']);
+        $this->as($office)->deleteJson('/api/office/repository/'.str_repeat('9', 100), [], $this->origin())
+            ->assertNotFound()
+            ->assertExactJson(['error' => 'NOT_FOUND']);
+        $this->as($office)->postJson('/api/office/repository/1e2/restore', [], $this->origin())
+            ->assertNotFound()
+            ->assertExactJson(['error' => 'NOT_FOUND']);
+    }
+
     public function test_update_is_allowlisted_normalizes_title_syncs_sdgs_and_records_evidence(): void
     {
         $document = $this->document(['title' => 'Original title', 'import_source_sha256' => str_repeat('b', 64)]);
@@ -222,6 +248,37 @@ class OfficeRepositoryManagementTest extends TestCase
             'institute' => 'Institute of Computer Studies',
             'degree_program' => 'Bachelor of Science in Midwifery',
         ], $this->origin())->assertUnprocessable();
+    }
+
+    public function test_patch_only_revalidates_institute_program_when_the_pair_is_changed_and_rechecks_it_under_lock(): void
+    {
+        $office = $this->actor('research-office');
+        $legacy = $this->document([
+            'institute' => 'Legacy imported institute',
+            'degree_program' => 'Legacy imported program',
+        ]);
+
+        $this->as($office)->patchJson('/api/office/repository/'.$legacy->id, ['title' => 'Corrected legacy title'], $this->origin())
+            ->assertOk()
+            ->assertJsonPath('data.title', 'Corrected legacy title');
+        $this->as($office)->patchJson('/api/office/repository/'.$legacy->id, ['institute' => 'Institute of Computer Studies'], $this->origin())
+            ->assertUnprocessable()
+            ->assertJsonPath('error', 'VALIDATION_FAILED');
+        $this->as($office)->patchJson('/api/office/repository/'.$legacy->id, [
+            'institute' => 'Institute of Computer Studies',
+            'degree_program' => 'Bachelor of Science in Computer Science',
+        ], $this->origin())->assertOk();
+
+        $document = $this->document();
+        try {
+            app(OfficeRepositoryService::class)->update($office, $document->id, [
+                'institute' => 'Institute of Health Sciences',
+            ]);
+            $this->fail('The locked effective institute/program pair must be validated.');
+        } catch (ValidationException $exception) {
+            $this->assertSame(['Select a program offered by the chosen institute.'], $exception->errors()['degree_program']);
+        }
+        $this->assertSame('Institute of Computer Studies', $document->fresh()->institute);
     }
 
     public function test_delete_and_restore_preserve_source_data_timestamps_and_lifecycle_fields(): void
@@ -328,12 +385,28 @@ class OfficeRepositoryManagementTest extends TestCase
         $this->assertSame(1, AuditLog::query()->where('action', 'OFFICE_REPOSITORY_RESTORED')->where('entity_id', (string) $document->id)->count());
     }
 
+    public function test_delete_and_restore_accept_legacy_noncanonical_institute_program_metadata(): void
+    {
+        $document = $this->document([
+            'institute' => 'Legacy imported institute',
+            'degree_program' => 'Legacy imported program',
+        ]);
+        $office = $this->actor('research-office');
+
+        $this->as($office)->deleteJson('/api/office/repository/'.$document->id, [], $this->origin())
+            ->assertNoContent();
+        $this->as($office)->postJson('/api/office/repository/'.$document->id.'/restore', [], $this->origin())
+            ->assertOk()
+            ->assertJsonPath('data.institute', 'Legacy imported institute')
+            ->assertJsonPath('data.degree_program', 'Legacy imported program');
+    }
+
     public function test_restore_succeeds_when_best_effort_reindex_fails_and_no_permanent_delete_route_exists(): void
     {
         $document = $this->document(['archive_status' => 'archived', 'submission_status' => 'archived', 'visibility' => 'public']);
         $document->delete();
         $projection = Mockery::mock(ManuscriptSearchProjectionService::class);
-        $projection->shouldReceive('reindex')->once()->with((int) $document->id, true, true)->andThrow(new \RuntimeException('unavailable'));
+        $projection->shouldReceive('reindex')->once()->with((int) $document->id, true, true)->andThrow(new RuntimeException('unavailable'));
         $this->app->instance(ManuscriptSearchProjectionService::class, $projection);
 
         $this->as($this->actor('admin'))->postJson('/api/office/repository/'.$document->id.'/restore', [], $this->origin())
@@ -341,6 +414,63 @@ class OfficeRepositoryManagementTest extends TestCase
             ->assertJsonPath('data.id', $document->id);
         $this->assertNull($document->fresh()->deleted_at);
         $this->assertFalse(collect(Route::getRoutes()->getRoutes())->contains(fn ($route) => str_contains($route->uri(), 'office/repository') && in_array('DELETE', $route->methods(), true) && str_contains($route->uri(), 'permanent')));
+    }
+
+    public function test_eligible_reindex_runs_only_after_the_containing_transaction_commits_and_not_after_rollback(): void
+    {
+        $office = $this->actor('research-office');
+        $document = $this->document(['archive_status' => 'archived', 'submission_status' => 'archived', 'visibility' => 'public']);
+        $document->delete();
+        $calls = 0;
+        $projection = Mockery::mock(ManuscriptSearchProjectionService::class);
+        $projection->shouldReceive('reindex')->once()->with((int) $document->id, true, true)->andReturnUsing(function () use (&$calls): void {
+            $calls++;
+        });
+        $this->app->instance(ManuscriptSearchProjectionService::class, $projection);
+        $service = app(OfficeRepositoryService::class);
+
+        DB::transaction(function () use ($service, $office, $document, &$calls): void {
+            $service->restore($office, $document->id);
+            $this->assertSame(0, $calls);
+        });
+        $this->assertSame(1, $calls);
+
+        $document->delete();
+        try {
+            DB::transaction(function () use ($service, $office, $document): void {
+                $service->restore($office, $document->id);
+                throw new RuntimeException('Force rollback.');
+            });
+        } catch (RuntimeException) {
+            // The rollback is intentional; its callback must be discarded.
+        }
+        $this->assertSame(1, $calls);
+        $this->assertNotNull(ResearchDocument::onlyTrashed()->find($document->id));
+    }
+
+    public function test_repository_queries_select_only_resource_columns_and_relation_keys(): void
+    {
+        $document = $this->document(['archive_status' => 'archived']);
+        $this->file($document, ['file_path' => 'research/'.$document->id.'/private.pdf', 'content_sha256' => str_repeat('e', 64)]);
+        ResearchAuthor::query()->create(['research_document_id' => $document->id, 'author_name' => 'Projected author', 'author_order' => 1]);
+        $office = $this->actor('research-office');
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        $this->as($office)->getJson('/api/office/repository?bucket=archived')->assertOk();
+        $listQuery = collect(DB::getQueryLog())->pluck('query')->first(fn (string $query) => str_contains($query, 'select "id", "submission_reference"') && str_contains($query, 'from "research_documents"'));
+        $this->assertNotNull($listQuery);
+        $this->assertStringContainsString('select "id", "submission_reference", "title"', $listQuery);
+        $this->assertStringNotContainsString('select *', strtolower($listQuery));
+
+        DB::flushQueryLog();
+        $this->as($office)->getJson('/api/office/repository/'.$document->id)->assertOk();
+        $fileQuery = collect(DB::getQueryLog())->pluck('query')->first(fn (string $query) => str_contains($query, 'from "document_files"'));
+        $this->assertNotNull($fileQuery);
+        $this->assertStringContainsString('"research_document_id"', $fileQuery);
+        $this->assertStringNotContainsString('"file_path"', $fileQuery);
+        $this->assertStringNotContainsString('"content_sha256"', $fileQuery);
+        DB::disableQueryLog();
     }
 
     /** @param array<string, mixed> $attributes */

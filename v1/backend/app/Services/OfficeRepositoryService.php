@@ -7,6 +7,7 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Throwable;
 
@@ -22,12 +23,13 @@ class OfficeRepositoryService
     public function update(User $actor, int $documentId, array $data, ?Request $request = null): ?ResearchDocument
     {
         return DB::transaction(function () use ($actor, $documentId, $data, $request): ?ResearchDocument {
-            $actor = $this->currentOfficeActor($actor);
             $document = ResearchDocument::withTrashed()->whereKey($documentId)->lockForUpdate()->firstOrFail();
+            $actor = $this->currentOfficeActor($actor);
             if ($document->trashed()) {
                 return null;
             }
 
+            $this->ensureInstituteProgramPair($document, $data);
             $metadata = $this->metadata($data);
             if (array_key_exists('abstract', $metadata)
                 && $document->import_source_sha256 !== null
@@ -52,8 +54,8 @@ class OfficeRepositoryService
     public function delete(User $actor, int $documentId, ?Request $request = null): bool
     {
         return DB::transaction(function () use ($actor, $documentId, $request): bool {
-            $actor = $this->currentOfficeActor($actor);
             $document = ResearchDocument::withTrashed()->whereKey($documentId)->lockForUpdate()->firstOrFail();
+            $actor = $this->currentOfficeActor($actor);
             if ($document->trashed()) {
                 return false;
             }
@@ -69,9 +71,9 @@ class OfficeRepositoryService
 
     public function restore(User $actor, int $documentId, ?Request $request = null): ?ResearchDocument
     {
-        $document = DB::transaction(function () use ($actor, $documentId, $request): ?ResearchDocument {
-            $actor = $this->currentOfficeActor($actor);
+        return DB::transaction(function () use ($actor, $documentId, $request): ?ResearchDocument {
             $document = ResearchDocument::onlyTrashed()->whereKey($documentId)->lockForUpdate()->first();
+            $actor = $this->currentOfficeActor($actor);
             if ($document === null) {
                 return null;
             }
@@ -81,21 +83,21 @@ class OfficeRepositoryService
             $this->monitoring->log($document, 'OFFICE_REPOSITORY_RESTORED', $actor, $description, $document->submission_status, $document->submission_status, 'open');
             $this->audit->log($actor, 'OFFICE_REPOSITORY_RESTORED', $document, $description, $request);
 
+            if ($this->isEligibleForReindex($document)) {
+                DB::afterCommit(function () use ($document): void {
+                    try {
+                        $this->manuscriptSearch->reindex((int) $document->id, true, true);
+                    } catch (Throwable $exception) {
+                        Log::warning('Office repository restore projection reindex failed.', [
+                            'research_document_id' => (int) $document->id,
+                            'exception' => $exception::class,
+                        ]);
+                    }
+                });
+            }
+
             return $document;
         });
-
-        if ($document !== null && $this->isEligibleForReindex($document)) {
-            try {
-                $this->manuscriptSearch->reindex((int) $document->id, true, true);
-            } catch (Throwable $exception) {
-                Log::warning('Office repository restore projection reindex failed.', [
-                    'research_document_id' => (int) $document->id,
-                    'exception' => $exception::class,
-                ]);
-            }
-        }
-
-        return $document;
     }
 
     /** @param array<string, mixed> $data @return array<string, mixed> */
@@ -120,6 +122,22 @@ class OfficeRepositoryService
         }
 
         return $current;
+    }
+
+    /** @param array<string, mixed> $data */
+    private function ensureInstituteProgramPair(ResearchDocument $document, array $data): void
+    {
+        if (! array_key_exists('institute', $data) && ! array_key_exists('degree_program', $data)) {
+            return;
+        }
+
+        $institute = array_key_exists('institute', $data) ? $data['institute'] : $document->institute;
+        $program = array_key_exists('degree_program', $data) ? $data['degree_program'] : $document->degree_program;
+        if ($program !== null && ! in_array($program, ResearchDocument::PROGRAMS_BY_INSTITUTE[$institute] ?? [], true)) {
+            throw ValidationException::withMessages([
+                'degree_program' => ['Select a program offered by the chosen institute.'],
+            ]);
+        }
     }
 
     private function isEligibleForReindex(ResearchDocument $document): bool
