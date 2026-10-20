@@ -175,7 +175,10 @@ export interface OfficeRepositoryFileResource {
   uploaded_at: string | null;
 }
 
-export interface OfficeRepositoryDetailResource extends OfficeRepositoryItemResource {
+export interface OfficeRepositoryDetailResource extends Omit<
+  OfficeRepositoryItemResource,
+  "author_names"
+> {
   category_id: number | null;
   category: { id: number; name: string } | null;
   abstract: string | null;

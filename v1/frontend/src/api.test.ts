@@ -73,7 +73,7 @@ import {
   uploadResearchFile,
   uploadOwnProfilePhoto,
 } from "./api";
-import type { RoleDashboard } from "./api";
+import type { OfficeRepositoryDetailResource, RoleDashboard } from "./api";
 
 const profileSession = {
   email: "ada@example.test",
@@ -592,7 +592,34 @@ describe("office repository API", () => {
   });
 
   it("uses only the shared office routes and unwraps safe resource envelopes", async () => {
-    const detail = { id: 12, title: "Safe record" };
+    const detail: OfficeRepositoryDetailResource = {
+      id: 12,
+      submission_reference: null,
+      title: "Safe record",
+      publication_year: 2026,
+      institute: "Institute of Computer Studies",
+      research_stage: "ongoing",
+      submission_status: "approved",
+      archive_status: "not_archived",
+      visibility: "private",
+      updated_at: null,
+      deleted_at: null,
+      can_edit: true,
+      can_delete: true,
+      can_restore: false,
+      category_id: null,
+      category: null,
+      abstract: null,
+      keywords: null,
+      degree_program: null,
+      manuscript_date_label: null,
+      sdgs: [],
+      authors: [{ id: 4, author_name: "Ada Researcher", author_order: 1 }],
+      submitted_at: null,
+      approved_at: null,
+      archived_at: null,
+      files: [],
+    };
     const page = {
       data: [detail],
       links: { first: null, last: null, prev: null, next: null },

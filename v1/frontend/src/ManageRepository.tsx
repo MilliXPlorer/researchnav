@@ -157,6 +157,18 @@ function normalizeFieldErrors(fields?: FieldErrors): FieldErrors {
   );
 }
 
+function normalizeFilterFieldErrors(fields?: FieldErrors): FieldErrors {
+  const normalized = normalizeFieldErrors(fields);
+  if (normalized.publication_year) {
+    normalized.year = [
+      ...(normalized.year ?? []),
+      ...normalized.publication_year,
+    ];
+    delete normalized.publication_year;
+  }
+  return normalized;
+}
+
 /** Shared Admin and Research Office repository management workspace. */
 export default function ManageRepository({
   contextLabel = "Research Office",
@@ -192,6 +204,7 @@ export default function ManageRepository({
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
   const [detailFieldErrors, setDetailFieldErrors] = useState<FieldErrors>({});
+  const [filterFieldErrors, setFilterFieldErrors] = useState<FieldErrors>({});
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<OfficeRepositoryUpdateInput>({});
   const [saving, setSaving] = useState(false);
@@ -259,6 +272,9 @@ export default function ManageRepository({
           return;
         setRows(null);
         setMeta(null);
+        if (requestError instanceof ApiError) {
+          setFilterFieldErrors(normalizeFilterFieldErrors(requestError.fields));
+        }
         setError(
           friendlyError(requestError, "Repository records are unavailable"),
         );
@@ -332,11 +348,23 @@ export default function ManageRepository({
 
   function applyFilters(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setAppliedFilters({
+    const nextFilters = {
       search: filterDraft.search.trim(),
       institute: filterDraft.institute.trim(),
       year: filterDraft.year.trim(),
-    });
+    };
+    const year = Number(nextFilters.year);
+    if (
+      nextFilters.year &&
+      (!/^\d{4}$/.test(nextFilters.year) || year < 1901 || year > 2155)
+    ) {
+      setFilterFieldErrors({
+        year: ["Enter a publication year from 1901 through 2155."],
+      });
+      return;
+    }
+    setFilterFieldErrors({});
+    setAppliedFilters(nextFilters);
     setPage(1);
     setLoading(true);
     setError("");
@@ -347,6 +375,7 @@ export default function ManageRepository({
     const empty = { search: "", institute: "", year: "" };
     setFilterDraft(empty);
     setAppliedFilters(empty);
+    setFilterFieldErrors({});
     setPage(1);
     setLoading(true);
     setError("");
@@ -363,6 +392,18 @@ export default function ManageRepository({
       setSort(next);
       setDirection(next === "updated_at" ? "desc" : "asc");
     }
+  }
+
+  function changeMobileSort(value: string) {
+    const [nextSort, nextDirection] = value.split(":") as [
+      Sort,
+      "asc" | "desc",
+    ];
+    if (sort === nextSort && direction === nextDirection) return;
+    setPage(1);
+    setLoading(true);
+    setSort(nextSort);
+    setDirection(nextDirection);
   }
 
   async function save() {
@@ -547,7 +588,7 @@ export default function ManageRepository({
             </label>
             <label>
               Institute
-              <input
+              <select
                 value={filterDraft.institute}
                 onChange={(event) =>
                   setFilterDraft((current) => ({
@@ -555,23 +596,36 @@ export default function ManageRepository({
                     institute: event.target.value,
                   }))
                 }
-                placeholder="All institutes"
-              />
+                aria-invalid={Boolean(filterFieldErrors.institute)}
+              >
+                <option value="">All institutes</option>
+                {instituteNames.map((institute) => (
+                  <option key={institute} value={institute}>
+                    {institute}
+                  </option>
+                ))}
+              </select>
+              <FieldError messages={filterFieldErrors.institute} />
             </label>
             <label>
               Publication year
               <input
+                type="number"
                 inputMode="numeric"
-                pattern="[0-9]*"
+                min={1901}
+                max={2155}
+                step={1}
                 value={filterDraft.year}
                 onChange={(event) =>
                   setFilterDraft((current) => ({
                     ...current,
-                    year: event.target.value.replace(/\D/g, ""),
+                    year: event.target.value,
                   }))
                 }
                 placeholder="All years"
+                aria-invalid={Boolean(filterFieldErrors.year)}
               />
+              <FieldError messages={filterFieldErrors.year} />
             </label>
             <Button type="submit" variant="secondary">
               Apply filters
@@ -606,6 +660,30 @@ export default function ManageRepository({
             </p>
           ) : (
             <>
+              {bucket !== "recycle" && (
+                <label className="manage-repository-mobile-sort">
+                  Sort records
+                  <select
+                    value={`${sort}:${direction}`}
+                    onChange={(event) => changeMobileSort(event.target.value)}
+                  >
+                    <option value="title:asc">Title (A–Z)</option>
+                    <option value="title:desc">Title (Z–A)</option>
+                    <option value="publication_year:asc">
+                      Year (oldest first)
+                    </option>
+                    <option value="publication_year:desc">
+                      Year (newest first)
+                    </option>
+                    <option value="updated_at:desc">
+                      Updated (newest first)
+                    </option>
+                    <option value="updated_at:asc">
+                      Updated (oldest first)
+                    </option>
+                  </select>
+                </label>
+              )}
               <div className="admin-table-wrap manage-repository-table-wrap">
                 <table>
                   <caption className="sr-only">
@@ -855,6 +933,19 @@ function RepositoryDetail({
   onDelete: () => void;
   onRestore: () => void;
 }) {
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  const editButtonRef = useRef<HTMLSpanElement>(null);
+  const wasEditing = useRef(editing);
+
+  useEffect(() => {
+    if (editing) titleInputRef.current?.focus();
+    else if (wasEditing.current)
+      editButtonRef.current
+        ?.querySelector<HTMLButtonElement>("button")
+        ?.focus();
+    wasEditing.current = editing;
+  }, [editing]);
+
   const update = <K extends keyof OfficeRepositoryUpdateInput>(
     key: K,
     value: OfficeRepositoryUpdateInput[K],
@@ -897,6 +988,7 @@ function RepositoryDetail({
           <label>
             Title
             <input
+              ref={titleInputRef}
               value={draft.title ?? ""}
               maxLength={500}
               required
@@ -1150,9 +1242,11 @@ function RepositoryDetail({
           </section>
           <div className="modal-actions manage-repository-detail-actions">
             {detail.can_edit && !detail.deleted_at && (
-              <Button variant="secondary" onClick={onEdit}>
-                <Pencil aria-hidden="true" /> Edit metadata
-              </Button>
+              <span ref={editButtonRef}>
+                <Button variant="secondary" onClick={onEdit}>
+                  <Pencil aria-hidden="true" /> Edit metadata
+                </Button>
+              </span>
             )}
             {detail.can_delete && !detail.deleted_at && (
               <Button variant="rust" onClick={onDelete}>

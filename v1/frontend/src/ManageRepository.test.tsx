@@ -29,8 +29,10 @@ const item: OfficeRepositoryItemResource = {
   can_restore: false,
 };
 
+const detailItem = { ...item };
+Reflect.deleteProperty(detailItem, "author_names");
 const detail = {
-  ...item,
+  ...detailItem,
   category_id: 3,
   category: { id: 3, name: "Computing" },
   abstract: "A safe abstract.",
@@ -230,7 +232,7 @@ describe("ManageRepository", () => {
       target: { value: " coastal " },
     });
     fireEvent.change(screen.getByLabelText("Institute"), {
-      target: { value: " Institute of Computer Studies " },
+      target: { value: "Institute of Computer Studies" },
     });
     fireEvent.change(screen.getByLabelText("Publication year"), {
       target: { value: "2026" },
@@ -248,9 +250,60 @@ describe("ManageRepository", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
     expect(screen.getByLabelText("Search")).toHaveValue("");
     expect(screen.getByLabelText("Institute")).toHaveValue("");
-    expect(screen.getByLabelText("Publication year")).toHaveValue("");
+    expect(screen.getByLabelText("Publication year")).toHaveValue(null);
     expect(String(fetchMock.mock.calls[2][0])).not.toContain("search=");
     expect(String(fetchMock.mock.calls[2][0])).not.toContain("institute=");
+  });
+
+  it("limits filters to valid institute and year values and shows rejected filter errors", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("publication_year=2026")) {
+        return new Response(
+          JSON.stringify({
+            error: "VALIDATION_FAILED",
+            errors: {
+              institute: ["Select a valid institute."],
+              publication_year: ["The publication year is not available."],
+            },
+          }),
+          { status: 422 },
+        );
+      }
+      return new Response(JSON.stringify(page()));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ManageRepository />);
+    await screen.findByText(item.title);
+
+    const institute = screen.getByLabelText("Institute");
+    const year = screen.getByLabelText("Publication year");
+    expect(institute.tagName).toBe("SELECT");
+    expect(institute).toHaveDisplayValue("All institutes");
+    expect(year).toHaveAttribute("min", "1901");
+    expect(year).toHaveAttribute("max", "2155");
+
+    fireEvent.change(institute, {
+      target: { value: "Institute of Computer Studies" },
+    });
+    fireEvent.change(year, { target: { value: "2026" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    expect(
+      await screen.findByText("Select a valid institute."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("The publication year is not available."),
+    ).toBeInTheDocument();
+    expect(institute).toHaveAttribute("aria-invalid", "true");
+    expect(year).toHaveAttribute("aria-invalid", "true");
+
+    fireEvent.change(year, { target: { value: "2156" } });
+    fireEvent.submit(year.closest("form")!);
+    expect(
+      await screen.findByText(
+        "Enter a publication year from 1901 through 2155.",
+      ),
+    ).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("keeps recycle records in the server-defined removal order", async () => {
@@ -273,6 +326,7 @@ describe("ManageRepository", () => {
     expect(
       within(table.querySelector("thead")!).queryAllByRole("button"),
     ).toHaveLength(0);
+    expect(screen.queryByLabelText("Sort records")).not.toBeInTheDocument();
   });
 
   it("does not reload or enter loading when the current pagination page is clicked", async () => {
@@ -941,6 +995,77 @@ describe("ManageRepository", () => {
     await waitFor(() => expect(view).toHaveFocus());
   });
 
+  it("moves focus between Edit metadata and Title for edit transitions", async () => {
+    const updated = { ...detail, title: "Updated coastal study" };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === "PATCH") {
+          return new Response(JSON.stringify({ data: updated }));
+        }
+        if (String(input) === "/api/office/repository/7") {
+          return new Response(JSON.stringify({ data: detail }));
+        }
+        if (String(input) === "/api/categories") {
+          return new Response(JSON.stringify({ data: [] }));
+        }
+        return new Response(JSON.stringify(page()));
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ManageRepository />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: `View ${item.title}` }),
+    );
+    const edit = await screen.findByRole("button", { name: "Edit metadata" });
+    edit.focus();
+    fireEvent.click(edit);
+    const dialog = screen.getByRole("dialog", {
+      name: "Repository record details",
+    });
+    let title = within(dialog).getByLabelText("Title");
+    await waitFor(() => expect(title).toHaveFocus());
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Edit metadata" }),
+      ).toHaveFocus(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit metadata" }));
+    title = within(dialog).getByLabelText("Title");
+    await waitFor(() => expect(title).toHaveFocus());
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Save metadata" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Edit metadata" }),
+      ).toHaveFocus(),
+    );
+    expect(
+      fetchMock.mock.calls.filter(
+        ([, init]) => (init as RequestInit)?.method === "PATCH",
+      ),
+    ).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit metadata" }));
+    title = within(dialog).getByLabelText("Title");
+    fireEvent.change(title, {
+      target: { value: updated.title },
+    });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Save metadata" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Edit metadata" }),
+      ).toHaveFocus(),
+    );
+    expect(dialog).toBeInTheDocument();
+  });
+
   it("keeps responsive table hooks and accessible view tabs in the rendered structure", async () => {
     installRepositoryFetch();
     const { container } = render(<ManageRepository />);
@@ -957,5 +1082,22 @@ describe("ManageRepository", () => {
         "td[data-label='Title'], td[data-label='Authors'], td[data-label='Year'], td[data-label='Institute'], td[data-label='Updated'], td[data-label='Actions']",
       ),
     ).toHaveLength(6);
+    const mobileSort = screen.getByLabelText("Sort records");
+    expect(mobileSort).toHaveDisplayValue("Updated (newest first)");
+    expect(
+      container.querySelectorAll("thead .sortable-header-button"),
+    ).toHaveLength(3);
+
+    mobileSort.focus();
+    fireEvent.keyDown(mobileSort, { key: "ArrowDown" });
+    expect(mobileSort).toHaveFocus();
+    fireEvent.change(mobileSort, {
+      target: { value: "title:asc" },
+    });
+    await waitFor(() =>
+      expect(screen.getByLabelText("Sort records")).toHaveDisplayValue(
+        "Title (A–Z)",
+      ),
+    );
   });
 });
