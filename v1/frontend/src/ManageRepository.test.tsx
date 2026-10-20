@@ -59,14 +59,18 @@ const detail = {
   ],
 };
 
-function page(rows: OfficeRepositoryItemResource[] = [item]) {
+function page(
+  rows: OfficeRepositoryItemResource[] = [item],
+  currentPage = 1,
+  lastPage = 1,
+) {
   return {
     data: rows,
     links: { first: null, last: null, prev: null, next: null },
     meta: {
-      current_page: 1,
+      current_page: currentPage,
       from: rows.length ? 1 : null,
-      last_page: 1,
+      last_page: lastPage,
       links: [],
       path: "/api/office/repository",
       per_page: 25,
@@ -166,6 +170,57 @@ describe("ManageRepository", () => {
     ).toBeInTheDocument();
   });
 
+  it("reloads page one exactly once after deleting the final record from a later page", async () => {
+    let deleted = false;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        if (init?.method === "DELETE") {
+          deleted = true;
+          return new Response(null, { status: 204 });
+        }
+        if (path === "/api/office/repository/7") {
+          return new Response(JSON.stringify({ data: detail }));
+        }
+        const currentPage =
+          new URL(path, "http://localhost").searchParams.get("page") === "2"
+            ? 2
+            : 1;
+        return new Response(
+          JSON.stringify(page(deleted ? [] : [item], currentPage, 2)),
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ManageRepository />);
+
+    await screen.findByText(item.title);
+    fireEvent.click(screen.getByRole("button", { name: "Page 2" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole("button", { name: `View ${item.title}` }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Move to Recycle Bin" }),
+    );
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "Move to Recycle Bin" })[1],
+    );
+
+    await screen.findByText(
+      /Moved Coastal resilience study to the Recycle Bin/,
+    );
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter(([path]) =>
+          String(path).startsWith("/api/office/repository?"),
+        ),
+      ).toHaveLength(3),
+    );
+    const repositoryQueries = fetchMock.mock.calls.filter(([path]) =>
+      String(path).startsWith("/api/office/repository?"),
+    );
+    expect(String(repositoryQueries[2][0])).toContain("page=1");
+  });
+
   it("uses submitted filters only, trims them, and resets them to page one", async () => {
     const fetchMock = installRepositoryFetch();
     render(<ManageRepository />);
@@ -218,6 +273,21 @@ describe("ManageRepository", () => {
     expect(
       within(table.querySelector("thead")!).queryAllByRole("button"),
     ).toHaveLength(0);
+  });
+
+  it("does not reload or enter loading when the current pagination page is clicked", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify(page([item], 2, 3))),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ManageRepository />);
+
+    await screen.findByText(item.title);
+    fireEvent.click(screen.getByRole("button", { name: "Page 2" }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByText("Loading repository records…"),
+    ).not.toBeInTheDocument();
   });
 
   it("resets sort direction to descending updated time when changing buckets", async () => {
@@ -295,7 +365,7 @@ describe("ManageRepository", () => {
     );
   });
 
-  it("edits only allowed metadata, submits the complete safe request body, and validates a title", async () => {
+  it("edits only allowed metadata, submits only changed safe fields, and validates a title", async () => {
     const updated = {
       ...detail,
       title: "Revised coastal study",
@@ -437,7 +507,6 @@ describe("ManageRepository", () => {
       ([, init]) => (init as RequestInit)?.method === "PATCH",
     )!;
     expect(JSON.parse(String((updateInit as RequestInit).body))).toEqual({
-      category_id: 3,
       title: "Revised coastal study",
       abstract: "A revised abstract.",
       keywords: "coastal, revised",
@@ -462,6 +531,107 @@ describe("ManageRepository", () => {
         .closest("form")!,
     );
     expect(await screen.findByText("A title is required.")).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.filter(
+        ([, init]) => (init as RequestInit)?.method === "PATCH",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("patches only a title change and skips legacy fields, normalized nulls, and reordered SDGs", async () => {
+    const legacyDetail = {
+      ...detail,
+      abstract: null,
+      keywords: null,
+      institute: "Legacy institute",
+      degree_program: "Legacy program",
+      sdgs: [
+        {
+          id: 13,
+          code: "SDG 13",
+          title: "Climate Action",
+          short_title: "Climate Action",
+          color_hex: "#3f7e44",
+        },
+        {
+          id: 4,
+          code: "SDG 4",
+          title: "Quality Education",
+          short_title: "Quality Education",
+          color_hex: "#c5192d",
+        },
+      ],
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === "PATCH") {
+          return new Response(
+            JSON.stringify({
+              data: { ...legacyDetail, title: "Legacy revised" },
+            }),
+          );
+        }
+        if (String(input) === "/api/office/repository/7") {
+          return new Response(JSON.stringify({ data: legacyDetail }));
+        }
+        return new Response(JSON.stringify(page()));
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ManageRepository />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: `View ${item.title}` }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Edit metadata" }),
+    );
+    const dialog = screen.getByRole("dialog", {
+      name: "Repository record details",
+    });
+    fireEvent.change(within(dialog).getByLabelText("Title"), {
+      target: { value: "Legacy revised" },
+    });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Save metadata" }),
+    );
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter(
+          ([, init]) => (init as RequestInit)?.method === "PATCH",
+        ),
+      ).toHaveLength(1),
+    );
+    const [, updateInit] = fetchMock.mock.calls.find(
+      ([, init]) => (init as RequestInit)?.method === "PATCH",
+    )!;
+    expect(JSON.parse(String((updateInit as RequestInit).body))).toEqual({
+      title: "Legacy revised",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit metadata" }));
+    fireEvent.change(within(dialog).getByLabelText("Abstract"), {
+      target: { value: "" },
+    });
+    fireEvent.click(
+      within(dialog).getByRole("checkbox", {
+        name: "SDG 4: Quality Education",
+      }),
+    );
+    fireEvent.click(
+      within(dialog).getByRole("checkbox", {
+        name: "SDG 4: Quality Education",
+      }),
+    );
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Save metadata" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Edit metadata" }),
+      ).toBeInTheDocument(),
+    );
     expect(
       fetchMock.mock.calls.filter(
         ([, init]) => (init as RequestInit)?.method === "PATCH",
@@ -542,6 +712,18 @@ describe("ManageRepository", () => {
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
     expect(dialog).toBeInTheDocument();
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(
+      screen.getByText("You have unsaved changes. Discard them and close?"),
+    ).toBeInTheDocument();
+    expect(dialog).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    fireEvent.mouseDown(dialog.parentElement!);
+    expect(
+      screen.getByText("You have unsaved changes. Discard them and close?"),
+    ).toBeInTheDocument();
+    expect(dialog).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
     fireEvent.click(
       screen.getByRole("button", { name: "Close Repository record details" }),
     );
@@ -648,12 +830,25 @@ describe("ManageRepository", () => {
       if (path === "/api/office/repository/7") {
         return new Response(JSON.stringify({ data: recycledDetail }));
       }
-      return new Response(JSON.stringify(page([recycled])));
+      return new Response(
+        JSON.stringify(
+          page(
+            [recycled],
+            new URL(path, "http://localhost").searchParams.get("page") === "2"
+              ? 2
+              : 1,
+            2,
+          ),
+        ),
+      );
     });
     vi.stubGlobal("fetch", fetchMock);
     render(<ManageRepository />);
 
     fireEvent.click(screen.getByRole("tab", { name: "Recycle Bin" }));
+    await screen.findByRole("button", { name: "Page 2" });
+    fireEvent.click(screen.getByRole("button", { name: "Page 2" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
     fireEvent.click(
       await screen.findByRole("button", { name: `View ${recycled.title}` }),
     );
@@ -676,9 +871,13 @@ describe("ManageRepository", () => {
       expect(
         fetchMock.mock.calls.filter(([path]) =>
           String(path).includes("bucket=recycle"),
-        ).length,
-      ).toBeGreaterThanOrEqual(2),
+        ),
+      ).toHaveLength(3),
     );
+    const recycleQueries = fetchMock.mock.calls.filter(([path]) =>
+      String(path).includes("bucket=recycle"),
+    );
+    expect(String(recycleQueries[2][0])).toContain("page=1");
   });
 
   it("does not let a stale detail response replace the newest selected record", async () => {
