@@ -577,6 +577,8 @@ export default function ManageRepository({
               Search
               <input
                 value={filterDraft.search}
+                maxLength={200}
+                aria-invalid={Boolean(filterFieldErrors.search)}
                 onChange={(event) =>
                   setFilterDraft((current) => ({
                     ...current,
@@ -585,6 +587,7 @@ export default function ManageRepository({
                 }
                 placeholder="Title, reference, or author"
               />
+              <FieldError messages={filterFieldErrors.search} />
             </label>
             <label>
               Institute
