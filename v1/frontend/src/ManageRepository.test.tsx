@@ -35,7 +35,7 @@ const detail = {
   category: { id: 3, name: "Computing" },
   abstract: "A safe abstract.",
   keywords: "coastal, resilience",
-  degree_program: "BSCS",
+  degree_program: "Bachelor of Science in Computer Science",
   manuscript_date_label: "October 2026",
   sdgs: [],
   authors: [{ id: 2, author_name: "Ada Researcher", author_order: 1 }],
@@ -166,6 +166,109 @@ describe("ManageRepository", () => {
     ).toBeInTheDocument();
   });
 
+  it("uses submitted filters only, trims them, and resets them to page one", async () => {
+    const fetchMock = installRepositoryFetch();
+    render(<ManageRepository />);
+    await screen.findByText(item.title);
+
+    fireEvent.change(screen.getByLabelText("Search"), {
+      target: { value: " coastal " },
+    });
+    fireEvent.change(screen.getByLabelText("Institute"), {
+      target: { value: " Institute of Computer Studies " },
+    });
+    fireEvent.change(screen.getByLabelText("Publication year"), {
+      target: { value: "2026" },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(String(fetchMock.mock.calls[1][0])).toContain(
+      "search=coastal&institute=Institute+of+Computer+Studies&publication_year=2026",
+    );
+    expect(String(fetchMock.mock.calls[1][0])).toContain("page=1");
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset filters" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(screen.getByLabelText("Search")).toHaveValue("");
+    expect(screen.getByLabelText("Institute")).toHaveValue("");
+    expect(screen.getByLabelText("Publication year")).toHaveValue("");
+    expect(String(fetchMock.mock.calls[2][0])).not.toContain("search=");
+    expect(String(fetchMock.mock.calls[2][0])).not.toContain("institute=");
+  });
+
+  it("keeps recycle records in the server-defined removal order", async () => {
+    const fetchMock = installRepositoryFetch();
+    render(<ManageRepository />);
+    await screen.findByText(item.title);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Recycle Bin" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const recycleQuery = String(fetchMock.mock.calls[1][0]);
+    expect(recycleQuery).toContain("bucket=recycle");
+    expect(recycleQuery).not.toContain("sort=");
+    expect(recycleQuery).not.toContain("direction=");
+    const table = screen.getByRole("table");
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map(({ textContent }) => textContent),
+    ).toEqual(["Title", "Authors", "Year", "Institute", "Removed", "Actions"]);
+    expect(
+      within(table.querySelector("thead")!).queryAllByRole("button"),
+    ).toHaveLength(0);
+  });
+
+  it("resets sort direction to descending updated time when changing buckets", async () => {
+    const fetchMock = installRepositoryFetch();
+    render(<ManageRepository />);
+    await screen.findByText(item.title);
+
+    fireEvent.click(screen.getByRole("button", { name: "Sort by Title" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(String(fetchMock.mock.calls[1][0])).toContain(
+      "sort=title&direction=asc",
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Archived" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(String(fetchMock.mock.calls[2][0])).toContain(
+      "sort=updated_at&direction=desc",
+    );
+  });
+
+  it("implements associated keyboard-operable tabs and ignores an already active tab", async () => {
+    const fetchMock = installRepositoryFetch();
+    render(<ManageRepository />);
+    await screen.findByText(item.title);
+
+    const ongoing = screen.getByRole("tab", { name: "Ongoing" });
+    expect(ongoing).toHaveAttribute(
+      "aria-controls",
+      "repository-view-ongoing-panel",
+    );
+    expect(screen.getByRole("tabpanel")).toHaveAttribute(
+      "aria-labelledby",
+      "repository-view-ongoing-tab",
+    );
+    fireEvent.click(ongoing);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByText("Loading repository records…"),
+    ).not.toBeInTheDocument();
+
+    fireEvent.keyDown(ongoing, { key: "ArrowRight" });
+    expect(await screen.findByRole("tabpanel")).toHaveAttribute(
+      "aria-labelledby",
+      "repository-view-archived-tab",
+    );
+    expect(screen.getByRole("tab", { name: "Archived" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
   it("does not let a stale bucket response replace the current view", async () => {
     let resolveOngoing!: (response: Response) => void;
     const archived = { ...item, id: 9, title: "Archived record" };
@@ -208,8 +311,8 @@ describe("ManageRepository", () => {
           color_hex: "#c5192d",
         },
       ],
-      institute: "Updated institute",
-      degree_program: "MSCS",
+      institute: "Institute of Health Sciences",
+      degree_program: "Bachelor of Science in Midwifery",
       manuscript_date_label: "November 2027",
       research_stage: "completed",
     };
@@ -224,6 +327,21 @@ describe("ManageRepository", () => {
         const path = String(input);
         if (init?.method === "PATCH") {
           return new Response(JSON.stringify({ data: updated }));
+        }
+        if (path === "/api/categories") {
+          return new Response(
+            JSON.stringify({
+              data: [
+                {
+                  id: 3,
+                  name: "Computing",
+                  slug: "computing",
+                  description: null,
+                  is_active: true,
+                },
+              ],
+            }),
+          );
         }
         if (path === "/api/office/repository/7") {
           return new Response(JSON.stringify({ data: unsafeDetail }));
@@ -250,6 +368,23 @@ describe("ManageRepository", () => {
     const detailDialog = screen.getByRole("dialog", {
       name: "Repository record details",
     });
+    expect(within(detailDialog).getByLabelText("Institute").tagName).toBe(
+      "SELECT",
+    );
+    expect(within(detailDialog).getByLabelText("Degree program").tagName).toBe(
+      "SELECT",
+    );
+    expect(
+      within(detailDialog).getByRole("option", {
+        name: "Bachelor of Science in Information Technology",
+      }),
+    ).toHaveValue("Bachelor of Science in Information Technology");
+    expect(
+      within(detailDialog).getByLabelText("Publication year"),
+    ).toHaveAttribute("min", "1901");
+    expect(
+      within(detailDialog).queryByLabelText(/SDG IDs/),
+    ).not.toBeInTheDocument();
     fireEvent.change(within(detailDialog).getByLabelText("Title"), {
       target: { value: "Revised coastal study" },
     });
@@ -263,10 +398,10 @@ describe("ManageRepository", () => {
       target: { value: "2027" },
     });
     fireEvent.change(within(detailDialog).getByLabelText("Institute"), {
-      target: { value: "Updated institute" },
+      target: { value: "Institute of Health Sciences" },
     });
     fireEvent.change(within(detailDialog).getByLabelText("Degree program"), {
-      target: { value: "MSCS" },
+      target: { value: "Bachelor of Science in Midwifery" },
     });
     fireEvent.change(
       within(detailDialog).getByLabelText("Manuscript date label"),
@@ -277,9 +412,16 @@ describe("ManageRepository", () => {
     fireEvent.change(within(detailDialog).getByLabelText("Research stage"), {
       target: { value: "completed" },
     });
-    fireEvent.change(within(detailDialog).getByLabelText(/SDG IDs/), {
-      target: { value: "4, invalid, 13" },
-    });
+    fireEvent.click(
+      within(detailDialog).getByRole("checkbox", {
+        name: "SDG 4: Quality Education",
+      }),
+    );
+    fireEvent.click(
+      within(detailDialog).getByRole("checkbox", {
+        name: "SDG 13: Climate Action",
+      }),
+    );
     fireEvent.click(
       within(detailDialog).getByRole("button", { name: "Save metadata" }),
     );
@@ -301,8 +443,8 @@ describe("ManageRepository", () => {
       keywords: "coastal, revised",
       publication_year: 2027,
       sdg_ids: [4, 13],
-      institute: "Updated institute",
-      degree_program: "MSCS",
+      institute: "Institute of Health Sciences",
+      degree_program: "Bachelor of Science in Midwifery",
       manuscript_date_label: "November 2027",
       research_stage: "completed",
     });
@@ -325,6 +467,86 @@ describe("ManageRepository", () => {
         ([, init]) => (init as RequestInit)?.method === "PATCH",
       ),
     ).toHaveLength(1);
+  });
+
+  it("renders server field errors and confirms before discarding a dirty edit", async () => {
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        if (init?.method === "PATCH") {
+          return new Response(
+            JSON.stringify({
+              error: "VALIDATION_FAILED",
+              errors: {
+                title: ["Choose a more specific title."],
+                "sdg_ids.0": ["Select a valid sustainable development goal."],
+              },
+            }),
+            { status: 422 },
+          );
+        }
+        if (path === "/api/categories") {
+          return new Response(
+            JSON.stringify({
+              data: [
+                {
+                  id: 3,
+                  name: "Computing",
+                  slug: "computing",
+                  description: null,
+                  is_active: true,
+                },
+              ],
+            }),
+          );
+        }
+        if (path === "/api/office/repository/7") {
+          return new Response(JSON.stringify({ data: detail }));
+        }
+        return new Response(JSON.stringify(page()));
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ManageRepository />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: `View ${item.title}` }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Edit metadata" }),
+    );
+    const dialog = screen.getByRole("dialog", {
+      name: "Repository record details",
+    });
+    const title = within(dialog).getByLabelText("Title");
+    fireEvent.change(title, { target: { value: "A revised title" } });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Save metadata" }),
+    );
+    expect(
+      await screen.findByText("Choose a more specific title."),
+    ).toBeInTheDocument();
+    expect(title).toHaveAttribute("aria-invalid", "true");
+    expect(
+      await screen.findByText("Select a valid sustainable development goal."),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole("group", { name: "SDG selection" }),
+    ).toHaveAttribute("aria-invalid", "true");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close Repository record details" }),
+    );
+    expect(
+      screen.getByText("You have unsaved changes. Discard them and close?"),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect(dialog).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close Repository record details" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
   });
 
   it("shows loading, empty, failed, and retried list states", async () => {
