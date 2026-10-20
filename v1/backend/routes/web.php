@@ -15,6 +15,7 @@ use App\Http\Controllers\InstructorController;
 use App\Http\Controllers\LibrarianController;
 use App\Http\Controllers\MonitoringController;
 use App\Http\Controllers\NotificationController;
+use App\Http\Controllers\OfficeRepositoryController;
 use App\Http\Controllers\PanelController;
 use App\Http\Controllers\PdfAnnotationController;
 use App\Http\Controllers\ProfileController;
@@ -209,6 +210,14 @@ Route::prefix('api')
         });
 
         Route::prefix('office')->middleware(['current.user', 'account.active', 'office.authority'])->group(function (): void {
+            Route::get('repository', [OfficeRepositoryController::class, 'index']);
+            Route::get('repository/{researchDocument}', [OfficeRepositoryController::class, 'show']);
+            Route::patch('repository/{researchDocument}', [OfficeRepositoryController::class, 'update'])
+                ->middleware(['origin.allowed', 'throttle:domain-mutations']);
+            Route::delete('repository/{researchDocument}', [OfficeRepositoryController::class, 'destroy'])
+                ->middleware(['origin.allowed', 'throttle:domain-mutations']);
+            Route::post('repository/{researchDocument}/restore', [OfficeRepositoryController::class, 'restore'])
+                ->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('compliance', [ResearchOfficeController::class, 'compliance']);
             Route::put('compliance/{researchDocument}', [ResearchOfficeController::class, 'decideCompliance'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('users', [ResearchOfficeController::class, 'users']);
