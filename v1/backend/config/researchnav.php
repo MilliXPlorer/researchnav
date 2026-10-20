@@ -66,7 +66,7 @@ return [
         'python_binary' => env('MANUSCRIPT_SEARCH_PYTHON_BINARY', 'python'),
         'cli_path' => env('MANUSCRIPT_SEARCH_CLI_PATH', app_path('Services/manuscript_text_cli.py')),
         'timeout_seconds' => (int) env('MANUSCRIPT_SEARCH_TIMEOUT_SECONDS', 30),
-        'maximum_input_bytes' => (int) env('MANUSCRIPT_SEARCH_MAXIMUM_INPUT_BYTES', 26214400),
+        'maximum_input_bytes' => (int) env('MANUSCRIPT_SEARCH_MAXIMUM_INPUT_BYTES', 31457280),
         'maximum_output_bytes' => (int) env('MANUSCRIPT_SEARCH_MAXIMUM_OUTPUT_BYTES', 8388608),
         'maximum_text_characters' => (int) env('MANUSCRIPT_SEARCH_MAXIMUM_TEXT_CHARACTERS', 1000000),
         'part_characters' => (int) env('MANUSCRIPT_SEARCH_PART_CHARACTERS', 100000),

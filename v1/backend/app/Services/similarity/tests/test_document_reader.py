@@ -3,44 +3,33 @@ import warnings
 from unittest.mock import MagicMock, patch
 
 import pytest
-from docx import Document
 from pypdf import PdfWriter
 
 from similarity.document_reader import DocumentReadError, _parts_from_units, extract_text
 
 
-def test_extract_text_reads_docx_paragraphs_and_tables(tmp_path: Path) -> None:
+def test_extract_text_rejects_docx(tmp_path: Path) -> None:
     path = tmp_path / "private-manuscript.docx"
-    document = Document()
-    document.add_paragraph("Research findings")
-    table = document.add_table(rows=1, cols=1)
-    table.cell(0, 0).text = "Table evidence"
-    document.save(str(path))
+    path.write_bytes(b"legacy-docx")
 
-    assert extract_text(path) == "Research findings\nTable evidence"
+    with pytest.raises(DocumentReadError):
+        extract_text(path)
 
 
-@pytest.mark.parametrize("suffix", [".pdf", ".docx"])
-def test_extract_text_returns_an_empty_string_for_valid_empty_documents(
-    tmp_path: Path, suffix: str
-) -> None:
-    path = tmp_path / f"private-empty{suffix}"
-    if suffix == ".pdf":
-        writer = PdfWriter()
-        writer.add_blank_page(width=72, height=72)
-        with path.open("wb") as stream:
-            writer.write(stream)
-    else:
-        Document().save(str(path))
+def test_extract_text_returns_an_empty_string_for_a_valid_empty_pdf(tmp_path: Path) -> None:
+    path = tmp_path / "private-empty.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    with path.open("wb") as stream:
+        writer.write(stream)
 
     assert extract_text(path) == ""
 
 
-@pytest.mark.parametrize("suffix", [".pdf", ".docx"])
-def test_malformed_documents_do_not_disclose_private_paths(
-    tmp_path: Path, suffix: str, caplog: pytest.LogCaptureFixture
+def test_malformed_pdfs_do_not_disclose_private_paths(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    path = tmp_path / f"private-manuscript{suffix}"
+    path = tmp_path / "private-manuscript.pdf"
     path.write_bytes(b"not a document")
 
     with pytest.raises(DocumentReadError) as raised:

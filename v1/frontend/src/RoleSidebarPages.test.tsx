@@ -269,7 +269,9 @@ describe("role workspace pages", () => {
       "_blank",
       "noopener,noreferrer",
     );
-    fireEvent.click(screen.getByRole("button", { name: "Research instructors" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Research instructors" }),
+    );
     fireEvent.click(printButton);
     expect(open).toHaveBeenLastCalledWith(
       "/api/coordinator/reports/instructors/pdf",
@@ -1265,7 +1267,7 @@ describe("role workspace pages", () => {
     const manuscript = new File(["%PDF test"], "proposal.pdf", {
       type: "application/pdf",
     });
-    fireEvent.change(screen.getByLabelText("PDF or DOCX (maximum 25 MB)"), {
+    fireEvent.change(screen.getByLabelText("PDF (maximum 25 MB)"), {
       target: { files: [manuscript] },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save and submit" }));
@@ -1376,13 +1378,13 @@ describe("role workspace pages", () => {
     fireEvent.change(screen.getByLabelText("Author name"), {
       target: { value: "Ada Lovelace" },
     });
-    fireEvent.change(screen.getByLabelText("PDF or DOCX (maximum 25 MB)"), {
+    fireEvent.change(screen.getByLabelText("PDF (maximum 25 MB)"), {
       target: { files: [new File(["bad"], "payload.exe")] },
     });
     fireEvent.click(screen.getByRole("button", { name: "Update draft" }));
 
     expect(
-      await screen.findByText("The manuscript must be a PDF or DOCX file."),
+      await screen.findByText("The manuscript must be a PDF file."),
     ).toBeInTheDocument();
     expect(
       fetchMock.mock.calls.filter(

@@ -9,9 +9,21 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 try:
-    from .engine import InvalidWorkerInput, compare_query, compare_titles
+    from .engine import (
+        InvalidUploadedContentScope,
+        InvalidWorkerInput,
+        SimilarityCapacityExceeded,
+        compare_query,
+        compare_titles,
+    )
 except ImportError:  # Direct script execution from Laravel's fixed command.
-    from engine import compare_query, compare_titles, InvalidWorkerInput  # type: ignore[import-not-found,no-redef]
+    from engine import (  # type: ignore[import-not-found,no-redef]
+        InvalidUploadedContentScope,
+        InvalidWorkerInput,
+        SimilarityCapacityExceeded,
+        compare_query,
+        compare_titles,
+    )
 
 
 def _bounded_environment_integer(name: str, default: int, maximum: int) -> int:
@@ -74,11 +86,10 @@ def _payload(raw: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     if not isinstance(value, dict) or set(value) != {"source", "candidates"}:
         raise InvalidWorkerInput("Invalid worker payload.")
     source = _record(value["source"], "source", optional_content=True)
-    if (
-        not isinstance(value["candidates"], list)
-        or len(value["candidates"]) > MAX_CANDIDATES
-    ):
+    if not isinstance(value["candidates"], list):
         raise InvalidWorkerInput("Invalid candidates.")
+    if len(value["candidates"]) > MAX_CANDIDATES:
+        raise SimilarityCapacityExceeded("Candidate capacity exceeded.")
     candidates = [
         _record(candidate, "candidate", optional_content=True)
         for candidate in value["candidates"]
@@ -98,11 +109,10 @@ def _query_payload(raw: str) -> tuple[str, list[dict[str, Any]]]:
     query = value["query"]
     if not isinstance(query, str) or not 2 <= len(query) <= 200:
         raise InvalidWorkerInput("Invalid public query.")
-    if (
-        not isinstance(value["candidates"], list)
-        or len(value["candidates"]) > MAX_CANDIDATES
-    ):
+    if not isinstance(value["candidates"], list):
         raise InvalidWorkerInput("Invalid candidates.")
+    if len(value["candidates"]) > MAX_CANDIDATES:
+        raise SimilarityCapacityExceeded("Candidate capacity exceeded.")
     candidates = [
         _record(candidate, "candidate", optional_content=True)
         for candidate in value["candidates"]
@@ -124,11 +134,10 @@ def _uploaded_content_payload(raw: str) -> tuple[str, list[dict[str, Any]]]:
         or len(uploaded_content) > MAX_CONTENT_LENGTH
     ):
         raise InvalidWorkerInput("Invalid uploaded content.")
-    if (
-        not isinstance(value["candidates"], list)
-        or len(value["candidates"]) > MAX_CANDIDATES
-    ):
+    if not isinstance(value["candidates"], list):
         raise InvalidWorkerInput("Invalid candidates.")
+    if len(value["candidates"]) > MAX_CANDIDATES:
+        raise SimilarityCapacityExceeded("Candidate capacity exceeded.")
     candidates = [
         _record(candidate, "candidate", optional_content=True)
         for candidate in value["candidates"]
@@ -166,28 +175,43 @@ def main() -> None:
             query, candidates = _query_payload(raw)
             is_public_query = True
             is_uploaded_content = False
-        elif isinstance(value, dict) and set(value) == {"uploaded_content", "candidates"}:
+        elif isinstance(value, dict) and set(value) == {
+            "uploaded_content",
+            "candidates",
+        }:
             query, candidates = _uploaded_content_payload(raw)
             is_public_query = True
             is_uploaded_content = True
         else:
             source, candidates = _payload(raw)
             is_public_query = False
+    except SimilarityCapacityExceeded:
+        _error("CAPACITY_EXCEEDED", 3)
     except (InvalidWorkerInput, TypeError, ValueError, json.JSONDecodeError):
         _error("INVALID_INPUT", 2)
 
     try:
         if is_public_query:
-            # TF-IDF/cosine remains the official rank. FastText contributes an
-            # independent semantic support score when a model is configured.
-            results = compare_query(
-                query, candidates, _optional_fasttext_model(),
-                uploaded_content=is_uploaded_content,
-            )
+            if is_uploaded_content:
+                # Upload content is fully deterministic and must not even load
+                # optional FastText support.
+                results = compare_query(query, candidates, None, uploaded_content=True)
+            else:
+                # TF-IDF/cosine remains the official rank. FastText contributes
+                # an independent semantic support score when configured.
+                results = compare_query(
+                    query,
+                    candidates,
+                    _optional_fasttext_model(),
+                )
         else:
             # FastText is contextual support only on both protocols. Its model,
             # package, or runtime must never make official TF-IDF unavailable.
             results = compare_titles(source, candidates, _optional_fasttext_model())
+    except SimilarityCapacityExceeded:
+        _error("CAPACITY_EXCEEDED", 3)
+    except InvalidUploadedContentScope:
+        _error("INVALID_UPLOAD_SCOPE", 2)
     except ArithmeticError:
         _error("PROCESSING_FAILED", 4)
     except (TypeError, ValueError):

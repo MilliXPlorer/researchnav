@@ -1882,7 +1882,7 @@ function InstructorAssignedSubmissions({
                 </span>
               </div>
               <div className="admin-table-wrap">
-                <table>
+                <table className="checker-results-table">
                   <caption className="sr-only">
                     {titleOnly ? "Title" : "Manuscript"} review assignments
                   </caption>
@@ -8480,7 +8480,7 @@ type AuthorDraft = {
 };
 
 const MAX_SUBMISSION_FILE_BYTES = 25 * 1024 * 1024;
-const submissionFileExtensions = new Set(["pdf", "docx"]);
+const submissionFileExtensions = new Set(["pdf"]);
 const submissionDocumentTypes: Array<{
   value: DocumentFileResource["document_type"];
   label: string;
@@ -8629,7 +8629,7 @@ export function ResearcherNewSubmission({
     if (file === null) return null;
     const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
     if (!submissionFileExtensions.has(extension)) {
-      return "The manuscript must be a PDF or DOCX file.";
+      return "The manuscript must be a PDF file.";
     }
     if (file.size > MAX_SUBMISSION_FILE_BYTES) {
       return "The manuscript must not exceed 25 MB.";
@@ -9030,10 +9030,10 @@ export function ResearcherNewSubmission({
                   </select>
                 </label>
                 <ManuscriptFilePicker
-                  label="PDF or DOCX (maximum 25 MB)"
-                  help="PDF or DOCX, maximum 25 MB"
+                  label="PDF (maximum 25 MB)"
+                  help="PDF only, maximum 25 MB"
                   inputRef={fileInput}
-                  accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  accept=".pdf,application/pdf"
                   file={manuscript}
                   onChange={(event) =>
                     setManuscript(event.target.files?.[0] ?? null)
@@ -9101,9 +9101,8 @@ export function ResearcherNewSubmission({
 }
 
 const MAX_SIMILARITY_QUERY_LENGTH = 200;
-const MAX_CONTENT_UPLOAD_BYTES = 25 * 1024 * 1024;
-const CONTENT_UPLOAD_ACCEPT =
-  ".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const MAX_CONTENT_UPLOAD_BYTES = 30 * 1024 * 1024;
+const CONTENT_UPLOAD_ACCEPT = ".pdf,application/pdf";
 
 /**
  * Pre-submission duplicate check.
@@ -9122,12 +9121,20 @@ function ResearcherSimilarityCheck({
   const mode = initialMode;
   const [draft, setDraft] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const folderInput = useRef<HTMLInputElement>(null);
   const [fileError, setFileError] = useState("");
+  const [checkProgress, setCheckProgress] = useState(0);
   const [submitted, setSubmitted] = useState("");
   const [state, setState] = useState<
     | { status: "idle" }
     | { status: "checking" }
-    | { status: "ready"; matches: ResearchRecord[] }
+    | {
+        status: "ready";
+        matches: ResearchRecord[];
+        extractedText: string;
+        fileName: string;
+      }
     | { status: "error"; message: string }
   >({ status: "idle" });
   const [metadataResearchId, setMetadataResearchId] = useState<
@@ -9135,23 +9142,62 @@ function ResearcherSimilarityCheck({
   >(null);
 
   const trimmed = draft.trim();
+
+  useEffect(() => {
+    if (state.status !== "checking") return;
+    const timer = window.setInterval(() => {
+      setCheckProgress((current) =>
+        Math.min(92, current + Math.max(1, Math.round((92 - current) / 7))),
+      );
+    }, 700);
+    return () => window.clearInterval(timer);
+  }, [state.status]);
   const tooShort = trimmed.length > 0 && trimmed.length < 2;
   const canCheck =
     state.status !== "checking" &&
     (mode === "title"
       ? trimmed.length >= 2 && trimmed.length <= MAX_SIMILARITY_QUERY_LENGTH
-      : file !== null && fileError === "");
+      : files.length > 0 && fileError === "");
 
   function runCheck() {
     if (!canCheck) return;
     setSubmitted(mode === "title" ? trimmed : (file?.name ?? "manuscript"));
+    setCheckProgress(8);
     setState({ status: "checking" });
     const request =
       mode === "title"
         ? checkTitleQuerySimilarity(trimmed)
-        : checkContentUploadSimilarity(file as File);
+        : checkContentUploadSimilarity(files);
     void request
-      .then((matches) => setState({ status: "ready", matches }))
+      .then((result) =>
+        setState(
+          mode === "title"
+            ? {
+                status: "ready",
+                matches: result as ResearchRecord[],
+                extractedText: "",
+                fileName: "",
+              }
+            : {
+                status: "ready",
+                matches: (
+                  result as Awaited<
+                    ReturnType<typeof checkContentUploadSimilarity>
+                  >
+                ).matches,
+                extractedText: (
+                  result as Awaited<
+                    ReturnType<typeof checkContentUploadSimilarity>
+                  >
+                ).extractedText,
+                fileName: (
+                  result as Awaited<
+                    ReturnType<typeof checkContentUploadSimilarity>
+                  >
+                ).fileName,
+              },
+        ),
+      )
       .catch((requestError: unknown) =>
         setState({
           status: "error",
@@ -9205,23 +9251,40 @@ function ResearcherSimilarityCheck({
                 value={draft}
                 maxLength={MAX_SIMILARITY_QUERY_LENGTH}
                 placeholder="e.g. web-based inventory management system for small business"
-                onChange={(event) => setDraft(event.target.value)}
+                onChange={(event) => {
+                  setDraft(event.target.value);
+                  const input = event.currentTarget;
+                  window.requestAnimationFrame(() => {
+                    const end = input.value.length;
+                    input.setSelectionRange(end, end);
+                  });
+                }}
               />
             </label>
           ) : (
             <>
               <ManuscriptFilePicker
                 label="Manuscript file"
-                help="PDF or DOCX · Maximum 25 MiB"
+                help="Choose one PDF, or select a folder containing PDF parts"
                 accept={CONTENT_UPLOAD_ACCEPT}
                 file={file}
                 disabled={state.status === "checking"}
+                onChooseFolder={() => {
+                  const input = folderInput.current;
+                  if (!input) return;
+                  Object.assign(input, {
+                    webkitdirectory: true,
+                    directory: true,
+                  });
+                  input.click();
+                }}
                 onChange={(event) => {
                   const selected = event.target.files?.[0] ?? null;
                   setState({ status: "idle" });
                   setSubmitted("");
                   if (!selected) {
                     setFile(null);
+                    setFiles([]);
                     setFileError("");
                     return;
                   }
@@ -9229,20 +9292,88 @@ function ResearcherSimilarityCheck({
                     .split(".")
                     .pop()
                     ?.toLowerCase();
-                  if (!extension || !["pdf", "docx"].includes(extension)) {
+                  if (extension !== "pdf") {
                     setFile(null);
-                    setFileError("Choose one PDF or DOCX file.");
+                    setFiles([]);
+                    setFileError("Choose one PDF file.");
                     return;
                   }
                   if (selected.size > MAX_CONTENT_UPLOAD_BYTES) {
                     setFile(null);
-                    setFileError("Choose a file no larger than 25 MiB.");
+                    setFiles([]);
+                    setFileError("Choose a file no larger than 30 MiB.");
                     return;
                   }
                   setFile(selected);
+                  setFiles([selected]);
                   setFileError("");
                 }}
               />
+              <input
+                ref={folderInput}
+                className="manuscript-folder-input"
+                aria-label="Manuscript folder"
+                type="file"
+                accept="application/pdf,.pdf"
+                multiple
+                {...({
+                  webkitdirectory: "",
+                  directory: "",
+                } as React.InputHTMLAttributes<HTMLInputElement>)}
+                disabled={state.status === "checking"}
+                onChange={(event) => {
+                  const selected = Array.from(event.target.files ?? []);
+                  setState({ status: "idle" });
+                  setSubmitted("");
+                  if (!selected.length) return;
+                  if (selected.length > 20) {
+                    setFile(null);
+                    setFiles([]);
+                    setFileError("Choose no more than 20 PDF files.");
+                    return;
+                  }
+                  if (
+                    selected.some(
+                      (item) => !item.name.toLowerCase().endsWith(".pdf"),
+                    )
+                  ) {
+                    setFile(null);
+                    setFiles([]);
+                    setFileError("Folder uploads may contain PDF files only.");
+                    return;
+                  }
+                  if (
+                    selected.some(
+                      (item) => item.size > MAX_CONTENT_UPLOAD_BYTES,
+                    )
+                  ) {
+                    setFile(null);
+                    setFiles([]);
+                    setFileError("Each PDF must be no larger than 30 MiB.");
+                    return;
+                  }
+                  if (
+                    selected.reduce((total, item) => total + item.size, 0) >
+                    100 * 1024 * 1024
+                  ) {
+                    setFile(null);
+                    setFiles([]);
+                    setFileError(
+                      "The selected PDFs may not exceed 100 MiB together.",
+                    );
+                    return;
+                  }
+                  setFile(null);
+                  setFiles(selected);
+                  setFileError("");
+                }}
+              />
+              {files.length > 0 && !file && (
+                <p className="content-folder-summary">
+                  {files.length} PDF {files.length === 1 ? "file" : "files"}{" "}
+                  selected
+                </p>
+              )}
               <div className="content-upload-guidance" id="content-upload-help">
                 <p>
                   Scanned or image-only PDFs are not supported because this
@@ -9268,7 +9399,7 @@ function ResearcherSimilarityCheck({
             )}
             <Button type="submit" disabled={!canCheck}>
               {state.status === "checking"
-                ? "Checking…"
+                ? "Checking"
                 : mode === "title"
                   ? "Check Title"
                   : "Check content"}
@@ -9281,162 +9412,216 @@ function ResearcherSimilarityCheck({
       </section>
 
       {state.status === "checking" ? (
-        <Loading
-          label={
-            mode === "title"
-              ? "Comparing title with the repository"
-              : "Comparing manuscript content with the repository"
-          }
-        />
+        <div className="content-check-loading-backdrop">
+          <section
+            className="content-check-loading"
+            role="status"
+            aria-live="polite"
+            aria-busy="true"
+          >
+            <div>
+              <span>
+                {mode === "title"
+                  ? "Title similarity check"
+                  : "Content similarity check"}
+              </span>
+              <h2>
+                {mode === "title"
+                  ? "Checking your proposed title"
+                  : "Processing your manuscript"}
+              </h2>
+              <p>
+                {mode === "title"
+                  ? "Comparing the title with archived research titles. This may take a moment."
+                  : "Extracting text and comparing it with archived research. This may take a moment."}
+              </p>
+            </div>
+            <div
+              className="content-check-loading-track"
+              role="progressbar"
+              aria-label={`${mode === "title" ? "Title" : "Content"} similarity progress`}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={checkProgress}
+            >
+              <i style={{ width: `${checkProgress}%` }} />
+            </div>
+            <div className="content-check-loading-meta">
+              <p>
+                {mode === "title"
+                  ? "Ranking matching research titles"
+                  : "Extracting and comparing files"}
+              </p>
+              <strong>{checkProgress}%</strong>
+            </div>
+          </section>
+        </div>
       ) : state.status === "error" ? (
         <InlineError message={state.message} retry={runCheck} />
       ) : state.status === "ready" ? (
-        <section className="panel-card admin-data-card">
-          <div className="admin-card-heading">
-            <div>
-              <h2>
-                {mode === "title"
-                  ? `Title results for “${submitted}”`
-                  : `Content results for “${submitted}”`}
-              </h2>
-              <p>
-                {scored.length === 0
-                  ? mode === "title"
-                    ? "No archived study shares any terms with these keywords."
-                    : `No archived study shares extracted terms with “${submitted}”.`
-                  : reviewRequired.length > 0
-                    ? `${reviewRequired.length} archived ${reviewRequired.length === 1 ? "study requires" : "studies require"} adviser review. Discuss these results with your adviser before proceeding.`
-                    : "No archived study requires adviser review."}
-              </p>
-            </div>
-            {reviewRequired.length > 0 && (
-              <span className="pending-invite-count">
-                {reviewRequired.length} require review
-              </span>
-            )}
-          </div>
-          {scored.length > 0 && (
-            <>
-              <div
-                className="checker-legend"
-                aria-label="Similarity classification legend"
-              >
-                <span>
-                  <strong>Low</strong> Below 40%
-                </span>
-                <span>
-                  <strong>Moderate</strong> 40% to 69.99%
-                </span>
-                <span>
-                  <strong>High</strong> 70% and above
-                </span>
+        <div className={mode === "content" ? "content-check-results-grid" : ""}>
+          <section className="panel-card admin-data-card content-check-ranking">
+            <div className="admin-card-heading">
+              <div>
+                <h2>
+                  {mode === "title"
+                    ? `Title results for “${submitted}”`
+                    : "Top Repository Matches"}
+                </h2>
+                <p>
+                  {mode === "content" && scored.length > 0
+                    ? `Ranked content similarity results for “${submitted}”.`
+                    : scored.length === 0
+                      ? mode === "title"
+                        ? "No archived study shares any terms with these keywords."
+                        : `No archived study shares extracted terms with “${submitted}”.`
+                      : reviewRequired.length > 0
+                        ? `${reviewRequired.length} archived ${reviewRequired.length === 1 ? "study requires" : "studies require"} adviser review. Discuss these results with your adviser before proceeding.`
+                        : "No archived study requires adviser review."}
+                </p>
               </div>
-              <div
-                className={`admin-table-wrap checker-results-scroll${mode === "content" && scored.length > 6 ? " is-scrollable" : ""}`}
-              >
-                <table>
-                  <caption className="sr-only">
-                    Archived studies ranked by similarity to your keywords
-                  </caption>
-                  <thead>
-                    <tr>
-                      <th scope="col">Archived title</th>
-                      <th scope="col">Year</th>
-                      <th scope="col">Shared terms</th>
-                      <th scope="col">Similarity</th>
-                      <th scope="col">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {scored.map((match) => {
-                      const overall = formatSimilarityPercentage(
-                        mode === "title"
-                          ? match.titleSimilarityPercentage
-                          : match.contentSimilarityPercentage,
-                      );
-                      const classification = classificationLabel(
-                        match.classification,
-                      );
-                      const content = formatSimilarityPercentage(
-                        match.contentSimilarityPercentage,
-                      );
-                      const contentUnavailable =
-                        match.scoreStatus === "content_unavailable" || !content;
-                      return (
-                        <tr key={match.id}>
-                          <td className="serif-cell checker-title-cell">
-                            {match.title}
-                          </td>
-                          <td className="checker-year-cell">{match.year}</td>
-                          <td className="checker-terms-cell">
-                            {match.matchedTerms && match.matchedTerms.length > 0
-                              ? match.matchedTerms.map((term) => (
-                                  <span className="checker-term" key={term}>
-                                    {term}
-                                  </span>
-                                ))
-                              : "—"}
-                          </td>
-                          <td className="checker-similarity-cell">
-                            <span className="score-cell checker-score-cell">
-                              <strong>
-                                {overall ??
-                                  `${mode === "title" ? "Title" : "Content"} similarity unavailable`}
-                              </strong>
-                              <span className="sr-only">
-                                {mode === "title" ? "Title" : "Content"}{" "}
-                                similarity
-                              </span>
-                              <span
+              {reviewRequired.length > 0 && (
+                <span className="pending-invite-count">
+                  {reviewRequired.length} require review
+                </span>
+              )}
+              {mode === "content" && scored.length > 0 && (
+                <span className="checker-result-total">
+                  {scored.length} results
+                </span>
+              )}
+            </div>
+            {scored.length > 0 && (
+              <>
+                <div
+                  className="checker-legend"
+                  aria-label="Similarity classification legend"
+                >
+                  <span>
+                    <strong>Low</strong> Below 40%
+                  </span>
+                  <span>
+                    <strong>Moderate</strong> 40% to 69.99%
+                  </span>
+                  <span>
+                    <strong>High</strong> 70% and above
+                  </span>
+                </div>
+                <ol
+                  className={`checker-match-list${scored.length > 6 ? " is-scrollable" : ""}`}
+                  aria-label="Archived studies ranked by similarity"
+                >
+                  {scored.map((match, index) => {
+                    const overall = formatSimilarityPercentage(
+                      mode === "title"
+                        ? match.titleSimilarityPercentage
+                        : match.contentSimilarityPercentage,
+                    );
+                    const classification = classificationLabel(
+                      match.classification,
+                    );
+                    const content = formatSimilarityPercentage(
+                      match.contentSimilarityPercentage,
+                    );
+                    const contentUnavailable =
+                      match.scoreStatus === "content_unavailable" || !content;
+                    return (
+                      <li key={match.id}>
+                        <span
+                          className="checker-match-rank"
+                          aria-label={`Rank ${index + 1}`}
+                        >
+                          {String(index + 1).padStart(2, "0")}
+                        </span>
+                        <div className="checker-match-copy">
+                          <h3>{match.title}</h3>
+                          <div className="checker-match-details">
+                            <span>
+                              Study ID <strong>{match.id}</strong>
+                            </span>
+                            <span>
+                              Year <strong>{match.year}</strong>
+                            </span>
+                            <span>
+                              Classification{" "}
+                              <strong
                                 className={
-                                  match.classification === "low"
-                                    ? "sr-only"
-                                    : "checker-score-classification"
+                                  match.classification
+                                    ? `checker-classification-${match.classification}`
+                                    : undefined
                                 }
                               >
                                 {classification ?? "Unavailable"}
-                              </span>
-                              {match.adviserReviewRequired && (
-                                <span>
-                                  This result has been flagged for adviser
-                                  review. The system does not automatically
-                                  reject the research.
-                                </span>
-                              )}
-                              {match.titleMatchAlert && (
-                                <span>Near-exact title match alert</span>
-                              )}
-                              {mode === "content" && contentUnavailable && (
-                                <span>Content similarity unavailable</span>
-                              )}
+                              </strong>
                             </span>
-                          </td>
-                          <td>
-                            <button
-                              className="icon-button"
-                              aria-label={`Open metadata for ${match.title}`}
-                              title="Open metadata"
-                              onClick={() => setMetadataResearchId(match.id)}
-                            >
-                              <ExternalLink size={17} aria-hidden="true" />
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                          </div>
+                          {match.adviserReviewRequired && (
+                            <p>
+                              This result has been flagged for adviser review.
+                              The system does not automatically reject the
+                              research.
+                            </p>
+                          )}
+                          {match.titleMatchAlert && (
+                            <p>Near-exact title match alert</p>
+                          )}
+                          {mode === "content" && contentUnavailable && (
+                            <p>Content similarity unavailable</p>
+                          )}
+                        </div>
+                        <div
+                          className={`checker-match-score${match.classification ? ` is-${match.classification}` : ""}`}
+                        >
+                          <span>
+                            {mode === "title" ? "Title" : "Content"} similarity
+                          </span>
+                          <strong>{overall ?? "Unavailable"}</strong>
+                        </div>
+                        <button
+                          className="icon-button checker-match-action"
+                          aria-label={`Open metadata for ${match.title}`}
+                          title="Open metadata"
+                          onClick={() => setMetadataResearchId(match.id)}
+                        >
+                          <ExternalLink size={17} aria-hidden="true" />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ol>
+                {hasLowResult && (
+                  <p className="admin-empty">
+                    <strong>Note:</strong> The system detected low similarity
+                    based on the configured comparison method. Low similarity
+                    does not prove originality.
+                  </p>
+                )}
+              </>
+            )}
+          </section>
+          {mode === "content" && (
+            <section
+              className="panel-card content-check-extraction"
+              aria-labelledby="content-extraction-title"
+            >
+              <div className="content-check-extraction-heading">
+                <span aria-hidden="true">TXT</span>
+                <div>
+                  <h2 id="content-extraction-title">Extracted PDF Text</h2>
+                  <p>
+                    {state.fileName} ·{" "}
+                    {state.extractedText.length.toLocaleString()} characters
+                  </p>
+                </div>
               </div>
-              {hasLowResult && (
-                <p className="admin-empty">
-                  <strong>Note:</strong> The system detected low similarity
-                  based on the configured comparison method. Low similarity does
-                  not prove originality.
-                </p>
-              )}
-            </>
+              <pre tabIndex={0}>{state.extractedText}</pre>
+              <p className="content-check-extraction-note">
+                Some archived studies contain multiple files. Their extracted
+                text is combined into one study before similarity is calculated.
+              </p>
+            </section>
           )}
-        </section>
+        </div>
       ) : null}
       {metadataResearchId !== null && (
         <PublicResearchMetadataDialog
@@ -9451,13 +9636,15 @@ function ResearcherSimilarityCheck({
 function similarityQueryError(error: unknown, mode: "title" | "content") {
   if (error instanceof ApiError) {
     if (error.code === "CONTENT_UPLOAD_UNREADABLE")
-      return "We could not read text from this file. Use a text-based PDF or DOCX; scanned or image-only PDFs are not supported.";
+      return "We could not read text from this file. Use a text-based PDF; scanned or image-only PDFs are not supported.";
+    if (error.code === "CONTENT_UPLOAD_INVALID_SCOPE")
+      return "We could not find a valid Chapter 1–5 section in this file. Use a manuscript with a clearly labeled Chapter 1 heading.";
     if (error.status === 429)
       return "Too many checks in a short time. Wait a moment and try again.";
     if (error.status === 422)
       return mode === "title"
         ? "Enter between 2 and 200 characters to check a title."
-        : "Choose one PDF or DOCX file no larger than 25 MiB.";
+        : "Choose one PDF file no larger than 30 MiB.";
     if (error.code === "SIMILARITY_UNAVAILABLE")
       return "The similarity engine is not available right now.";
     if (error.code === "SIMILARITY_PROCESS_FAILED")

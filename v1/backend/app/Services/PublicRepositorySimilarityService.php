@@ -143,7 +143,7 @@ class PublicRepositorySimilarityService
             default => $query->orderByDesc('publication_year'),
         };
 
-        $maximumCandidates = min(1000, max(1, (int) config('researchnav.similarity.maximum_candidates')));
+        $maximumCandidates = $this->maximumCandidates();
         $candidates = $query->orderBy('title')->orderBy('research_documents.id')->limit($maximumCandidates + 1)->get();
         if ($candidates->count() > $maximumCandidates) {
             throw new PublicRepositorySimilarityCapacityException('Public similarity candidate limit exceeded.');
@@ -155,7 +155,7 @@ class PublicRepositorySimilarityService
     /** @return array<int, array<string, mixed>> */
     public function compareTitle(string $query): array
     {
-        $candidates = $this->eligibleCandidates(min(1000, max(1, (int) config('researchnav.similarity.maximum_candidates'))));
+        $candidates = $this->eligibleCandidates($this->maximumCandidates());
         $results = $this->process->runTitleQuery($query, $candidates);
         $results = array_values(array_filter(
             $results,
@@ -178,7 +178,7 @@ class PublicRepositorySimilarityService
                 'overall_similarity_percentage' => SimilarityScorePolicy::percentage($score),
                 'algorithm_version' => 'title-only-v1',
             ];
-        }, $results);
+        }, array_slice($results, 0, 10));
     }
 
     /** @return array<int, array<string, mixed>> */
@@ -197,7 +197,10 @@ class PublicRepositorySimilarityService
     private function compareStandaloneContent(string $content, bool $uploaded): array
     {
         $this->configureMemoryLimit();
-        $candidates = $this->eligibleCandidates(min(250, max(1, (int) config('researchnav.similarity.maximum_candidates'))));
+        $candidates = $uploaded
+            ? $this->eligibleUploadedContentCandidates()
+            : $this->eligibleContentQueryCandidates();
+        $candidateSnapshots = $uploaded ? $this->candidateSnapshots($candidates) : [];
         $results = array_values(array_filter(
             $uploaded
                 ? $this->process->runUploadedContentQuery($content, $candidates)
@@ -205,6 +208,15 @@ class PublicRepositorySimilarityService
             fn (array $result): bool => $result['content_similarity_score'] !== null
                 && $result['content_similarity_score'] !== '0.000000000000',
         ));
+        if ($uploaded) {
+            $candidateIds = $candidates->pluck('id')->map(fn ($id): int => (int) $id)->all();
+            $currentCandidates = $this->eligibleUploadedContentCandidatesById($candidateIds);
+            if ($currentCandidates->pluck('id')->sort()->values()->all() !== collect($candidateIds)->sort()->values()->all()
+                || $this->candidateSnapshots($currentCandidates) !== $candidateSnapshots) {
+                throw new PublicRepositorySimilarityCatalogChangedException('Public similarity catalog changed during scoring.');
+            }
+            $candidates = $currentCandidates;
+        }
         $byId = $candidates->keyBy('id');
 
         return array_map(function (array $result) use ($byId): array {
@@ -226,11 +238,59 @@ class PublicRepositorySimilarityService
                 'overall_similarity_percentage' => $score === null ? null : SimilarityScorePolicy::percentage($score),
                 'algorithm_version' => 'content-only-v1',
             ];
-        }, $results);
+        }, $uploaded ? array_slice($results, 0, 10) : $results);
+    }
+
+    /**
+     * Uploaded manuscript matching has a separate, strict catalog: only public
+     * archived studies with a current trusted text projection are comparable.
+     * A deterministic fixed source set bounds one worker invocation. The worker
+     * skips projections it cannot chapter-scope.
+     *
+     * @return Collection<int, ResearchDocument>
+     */
+    private function eligibleUploadedContentCandidates(): Collection
+    {
+        $candidates = $this->uploadedContentCandidatesQuery()
+            ->orderBy('research_documents.id')
+            ->get()
+            ->filter(fn (ResearchDocument $candidate): bool => app(ManuscriptSimilarityContentService::class)
+                ->isTrustedReadyProjection($candidate->manuscriptSearchDocument))
+            ->values();
+        if ($candidates->count() > $this->maximumCandidates()) {
+            throw new PublicRepositorySimilarityCapacityException('Public similarity candidate limit exceeded.');
+        }
+
+        return $candidates;
+    }
+
+    private function uploadedContentCandidatesQuery(): Builder
+    {
+        $query = ResearchDocument::query()
+            ->with($this->candidateRelations())
+            ->whereNull('research_documents.deleted_at')
+            ->whereIn('research_documents.submission_status', ['approved', 'archived'])
+            ->where('research_documents.archive_status', 'archived')
+            ->where('research_documents.visibility', 'public')
+            ->whereHas('manuscriptSearchDocument', function (Builder $projection): void {
+                $projection->where('extraction_status', 'ready')
+                    ->whereNotNull('body_text')
+                    ->whereRaw('TRIM(body_text) <> ?', [''])
+                    ->where('extractor_version', config('researchnav.manuscript_search.extractor_version'));
+            });
+
+        return $query->whereHas('manuscriptSearchDocument', function (Builder $projection): void {
+            if ($projection->getConnection()->getDriverName() === 'sqlite') {
+                $projection->whereRaw("source_sha256 NOT GLOB '*[^0-9a-f]*'")
+                    ->whereRaw('LENGTH(source_sha256) = ?', [64]);
+            } else {
+                $projection->whereRaw("BINARY source_sha256 REGEXP BINARY '^[0-9a-f]{64}$'");
+            }
+        });
     }
 
     /** @return Collection<int, ResearchDocument> */
-    private function eligibleCandidates(int $maximumCandidates): Collection
+    private function eligibleContentQueryCandidates(): Collection
     {
         return ResearchDocument::query()
             ->with($this->candidateRelations())
@@ -239,8 +299,49 @@ class PublicRepositorySimilarityService
             ->where('archive_status', 'archived')
             ->where('visibility', 'public')
             ->orderBy('id')
+            ->limit(250)
+            ->get();
+    }
+
+    /** @param array<int, int> $candidateIds
+     * @return Collection<int, ResearchDocument>
+     */
+    private function eligibleUploadedContentCandidatesById(array $candidateIds): Collection
+    {
+        if ($candidateIds === []) {
+            return new Collection;
+        }
+
+        return ResearchDocument::query()
+            ->with($this->candidateRelations())
+            ->whereIn('research_documents.id', $candidateIds)
+            ->whereNull('research_documents.deleted_at')
+            ->whereIn('research_documents.submission_status', ['approved', 'archived'])
+            ->where('research_documents.archive_status', 'archived')
+            ->where('research_documents.visibility', 'public')
+            ->get()
+            ->filter(fn (ResearchDocument $candidate): bool => app(ManuscriptSimilarityContentService::class)
+                ->isTrustedReadyProjection($candidate->manuscriptSearchDocument))
+            ->values();
+    }
+
+    /** @return Collection<int, ResearchDocument> */
+    private function eligibleCandidates(int $maximumCandidates): Collection
+    {
+        $candidates = ResearchDocument::query()
+            ->with($this->candidateRelations())
+            ->whereNull('deleted_at')
+            ->where('submission_status', 'archived')
+            ->where('archive_status', 'archived')
+            ->where('visibility', 'public')
+            ->orderBy('id')
             ->limit($maximumCandidates + 1)
             ->get();
+        if ($candidates->count() > $maximumCandidates) {
+            throw new PublicRepositorySimilarityCapacityException('Public similarity candidate limit exceeded.');
+        }
+
+        return $candidates;
     }
 
     /** @param array<int, int> $candidateIds
@@ -295,6 +396,11 @@ class PublicRepositorySimilarityService
             $limit = '512M';
         }
         ini_set('memory_limit', $limit);
+    }
+
+    private function maximumCandidates(): int
+    {
+        return min(1000, max(1, (int) config('researchnav.similarity.maximum_candidates')));
     }
 
     private function like(string $value): string

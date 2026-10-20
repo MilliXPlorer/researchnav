@@ -55,6 +55,7 @@ import RoleWorkspace, { type RoleDashboardLoadState } from "./RoleWorkspaces";
 import type { ResearchWorkspaceDestination } from "./researchWorkspaceRoute";
 import type { Role, UserSession } from "./types";
 import { useDialogFocus } from "./useDialogFocus";
+import { useNotificationUnreadCount } from "./useNotificationUnreadCount";
 
 const primaryNav: Record<Role, string> = {
   admin: "Dashboard",
@@ -153,6 +154,7 @@ export default function Dashboard({
   const [similarityMenuOpen, setSimilarityMenuOpen] = useState(false);
   const similarityMode = initialSimilarityMode ?? "title";
   const [accountOpen, setAccountOpen] = useState(false);
+  const [loggingOutScope, setLoggingOutScope] = useState<string | null>(null);
   const [notificationState, setNotificationState] = useState({
     scope: dashboardScope,
     status: "loading" as "loading" | "ready" | "error",
@@ -232,17 +234,35 @@ export default function Dashboard({
           source: "live" as const,
         };
   const notifications = scopedNotificationState.items;
-  const unreadCount = notifications.filter(
-    (item) =>
-      scopedNotificationState.source === "live" && item.read_at === null,
-  ).length;
   const notificationDrawerOpen = drawer.open && drawer.scope === dashboardScope;
+  const notificationsEnabled =
+    session.accessStatus === "active" &&
+    loggingOutScope !== dashboardScope &&
+    !(
+      scopedDashboardState.status === "error" &&
+      [401, 403, 419].includes(scopedDashboardState.error.status)
+    );
+  const {
+    unreadCount,
+    replaceUnreadCount,
+    markRead,
+    stopPolling,
+    pauseCountRequests,
+    active: notificationsActive,
+  } = useNotificationUnreadCount(dashboardScope, notificationsEnabled);
+
+  async function signOut() {
+    setLoggingOutScope(dashboardScope);
+    stopPolling();
+    await onLogout?.();
+  }
 
   useEffect(() => {
-    if (session.accessStatus !== "active") return;
+    if (!notificationsActive || !notificationDrawerOpen) return;
 
     const requestScope = dashboardScope;
-    let cancelled = false;
+    const controller = new AbortController();
+    const resumeCountRequests = pauseCountRequests();
     setNotificationState({
       scope: requestScope,
       status: "loading",
@@ -250,9 +270,12 @@ export default function Dashboard({
       error: "",
       source: "live",
     });
-    void listNotifications()
+    void listNotifications(controller.signal)
       .then((items) => {
-        if (!cancelled)
+        if (!controller.signal.aborted) {
+          replaceUnreadCount(
+            items.filter((item) => item.read_at === null).length,
+          );
           setNotificationState({
             scope: requestScope,
             status: "ready",
@@ -260,9 +283,10 @@ export default function Dashboard({
             error: "",
             source: "live",
           });
+        }
       })
       .catch((error: unknown) => {
-        if (!cancelled)
+        if (!controller.signal.aborted) {
           setNotificationState({
             scope: requestScope,
             status: "error",
@@ -270,21 +294,28 @@ export default function Dashboard({
             error: notificationErrorMessage(error),
             source: "live",
           });
-      });
+          if (
+            error instanceof ApiError &&
+            [401, 403, 419].includes(error.status)
+          )
+            stopPolling();
+        }
+      })
+      .finally(resumeCountRequests);
 
     return () => {
-      cancelled = true;
+      controller.abort();
+      resumeCountRequests();
     };
-  }, [dashboardScope, notificationAttempt, role, session.accessStatus]);
-
-  useEffect(() => {
-    if (session.accessStatus !== "active") return;
-    const interval = window.setInterval(
-      () => setNotificationAttempt((attempt) => attempt + 1),
-      30_000,
-    );
-    return () => window.clearInterval(interval);
-  }, [dashboardScope, session.accessStatus]);
+  }, [
+    dashboardScope,
+    notificationAttempt,
+    notificationDrawerOpen,
+    notificationsActive,
+    replaceUnreadCount,
+    stopPolling,
+    pauseCountRequests,
+  ]);
 
   useEffect(() => {
     if (session.accessStatus !== "active") return;
@@ -351,7 +382,7 @@ export default function Dashboard({
         session={session}
         navigate={navigate}
         onSessionChange={onSessionChange}
-        onLogout={onLogout}
+        onLogout={onLogout ? signOut : undefined}
       />
     );
   }
@@ -649,12 +680,18 @@ export default function Dashboard({
       {notificationDrawerOpen && (
         <NotificationsDrawer
           notifications={notifications}
-          state={scopedNotificationState.status}
-          error={scopedNotificationState.error}
+          state={notificationsActive ? scopedNotificationState.status : "error"}
+          error={
+            scopedNotificationState.error ||
+            (!notificationsActive
+              ? "Session expired or notification access is unavailable. Sign out and sign in again."
+              : "")
+          }
           source={scopedNotificationState.source}
           onRetry={() => setNotificationAttempt((attempt) => attempt + 1)}
           onMarkAll={async () => {
             const requestScope = dashboardScope;
+            const resumeCountRequests = pauseCountRequests();
             const results = await Promise.allSettled(
               notifications
                 .filter((item) => item.read_at === null)
@@ -669,6 +706,22 @@ export default function Dashboard({
               )
               .map((result) => result.value);
             const failures = results.length - marked.length;
+            if (dashboardScopeRef.current === requestScope) {
+              markRead(
+                marked
+                  .filter((item) => item.read_at !== null)
+                  .map((item) => item.id),
+              );
+              if (
+                results.some(
+                  (result) =>
+                    result.status === "rejected" &&
+                    result.reason instanceof ApiError &&
+                    [401, 403, 419].includes(result.reason.status),
+                )
+              )
+                stopPolling();
+            }
             setNotificationState((current) =>
               current.scope === requestScope
                 ? {
@@ -682,12 +735,19 @@ export default function Dashboard({
                   }
                 : current,
             );
+            resumeCountRequests();
           }}
           onOpen={async (item) => {
             const requestScope = dashboardScope;
             if (item.read_at === null) {
+              const resumeCountRequests = pauseCountRequests();
               try {
                 const marked = await markNotificationRead(item.id);
+                if (
+                  dashboardScopeRef.current === requestScope &&
+                  marked.read_at !== null
+                )
+                  markRead([marked.id]);
                 setNotificationState((current) =>
                   current.scope === requestScope
                     ? {
@@ -699,12 +759,20 @@ export default function Dashboard({
                     : current,
                 );
               } catch (error) {
+                if (
+                  dashboardScopeRef.current === requestScope &&
+                  error instanceof ApiError &&
+                  [401, 403, 419].includes(error.status)
+                )
+                  stopPolling();
                 setNotificationState((current) =>
                   current.scope === requestScope
                     ? { ...current, error: notificationErrorMessage(error) }
                     : current,
                 );
                 return;
+              } finally {
+                resumeCountRequests();
               }
             }
             if (dashboardScopeRef.current !== requestScope) return;
@@ -796,7 +864,7 @@ export default function Dashboard({
           onSessionChange={onSessionChange}
           onClose={() => setAccountOpen(false)}
           onOpenWorkspace={() => setAccountOpen(false)}
-          onLogout={onLogout}
+          onLogout={onLogout ? signOut : undefined}
         />
       )}
     </div>

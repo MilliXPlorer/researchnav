@@ -29,53 +29,53 @@ class FeedbackService
 
         try {
             return DB::transaction(function () use ($actor, $research, $data, $request, $attachment, &$storedPath): FeedbackComment {
-            $locked = ResearchDocument::query()->whereKey($research->id)->lockForUpdate()->firstOrFail();
-            $actor = $this->currentActor($actor);
-            if (! (new FeedbackCommentPolicy)->create($actor, $locked)) {
-                throw $this->notAuthorized();
-            }
-            $file = null;
-            if (isset($data['document_file_id'])) {
-                $file = DocumentFile::query()->whereKey($data['document_file_id'])->lockForUpdate()->firstOrFail();
-                if ($file->research_document_id !== $locked->id) {
-                    throw ValidationException::withMessages(['document_file_id' => ['The file does not belong to this research.']]);
+                $locked = ResearchDocument::query()->whereKey($research->id)->lockForUpdate()->firstOrFail();
+                $actor = $this->currentActor($actor);
+                if (! (new FeedbackCommentPolicy)->create($actor, $locked)) {
+                    throw $this->notAuthorized();
                 }
-            }
-            if ($attachment !== null) {
-                $this->validateConversationAttachment($attachment);
-            }
-
-            $feedbackData = array_merge($data, ['research_document_id' => $locked->id, 'user_id' => $actor->id, 'feedback_status' => 'open']);
-            unset($feedbackData['attachment']);
-            if ((new FeedbackComment)->usesFinalStorage()) {
-                $feedbackData['reviewer_role'] = $actor->role;
-                $feedbackData['reviewed_at'] = now();
-                if (($data['feedback_type'] ?? null) === 'revision_request') {
-                    $feedbackData['required_action'] = $data['comment'];
+                $file = null;
+                if (isset($data['document_file_id'])) {
+                    $file = DocumentFile::query()->whereKey($data['document_file_id'])->lockForUpdate()->firstOrFail();
+                    if ($file->research_document_id !== $locked->id) {
+                        throw ValidationException::withMessages(['document_file_id' => ['The file does not belong to this research.']]);
+                    }
                 }
-            }
-            $feedback = FeedbackComment::query()->create($feedbackData);
-            if ($attachment !== null) {
-                $storedPath = $this->storeConversationAttachment($locked, $feedback, $actor, $attachment);
-            }
-            $this->shadow->mirrorFeedback($feedback);
-            $this->monitoring->log($locked, 'FEEDBACK_CREATED', $actor, 'Feedback created.', null, null, 'open');
-            $this->audit->log($actor, 'FEEDBACK_CREATED', $feedback, 'Created feedback.', $request);
-            $actionUrl = '/research/'.$locked->id.'?'.http_build_query(array_filter([
-                'tab' => 'documents',
-                'folder' => $file?->relative_path ?? ($file ? 'Unfiled' : null),
-                'file' => $file?->id,
-                'panel' => $file ? 'feedback' : null,
-            ], static fn (mixed $value): bool => $value !== null), '', '&', PHP_QUERY_RFC3986);
-            if (DomainAuthorization::isResearcherParticipant($actor, $locked)
-                && ! DocumentReviewAuthorization::canAuthor($actor, $locked)) {
-                $this->notifyReviewersOfResearcherReply($locked, $actor, $actionUrl);
-            } else {
-                $this->notifyResearcher($locked, new ResearchActivityNotification($locked, 'FEEDBACK_CREATED', 'New feedback', 'New feedback was added to your research.', $actionUrl));
-            }
+                if ($attachment !== null) {
+                    $this->validateConversationAttachment($attachment);
+                }
 
-            return $feedback->load(['user', 'documentFile', 'attachment']);
-        });
+                $feedbackData = array_merge($data, ['research_document_id' => $locked->id, 'user_id' => $actor->id, 'feedback_status' => 'open']);
+                unset($feedbackData['attachment']);
+                if ((new FeedbackComment)->usesFinalStorage()) {
+                    $feedbackData['reviewer_role'] = $actor->role;
+                    $feedbackData['reviewed_at'] = now();
+                    if (($data['feedback_type'] ?? null) === 'revision_request') {
+                        $feedbackData['required_action'] = $data['comment'];
+                    }
+                }
+                $feedback = FeedbackComment::query()->create($feedbackData);
+                if ($attachment !== null) {
+                    $storedPath = $this->storeConversationAttachment($locked, $feedback, $actor, $attachment);
+                }
+                $this->shadow->mirrorFeedback($feedback);
+                $this->monitoring->log($locked, 'FEEDBACK_CREATED', $actor, 'Feedback created.', null, null, 'open');
+                $this->audit->log($actor, 'FEEDBACK_CREATED', $feedback, 'Created feedback.', $request);
+                $actionUrl = '/research/'.$locked->id.'?'.http_build_query(array_filter([
+                    'tab' => 'documents',
+                    'folder' => $file?->relative_path ?? ($file ? 'Unfiled' : null),
+                    'file' => $file?->id,
+                    'panel' => $file ? 'feedback' : null,
+                ], static fn (mixed $value): bool => $value !== null), '', '&', PHP_QUERY_RFC3986);
+                if (DomainAuthorization::isResearcherParticipant($actor, $locked)
+                    && ! DocumentReviewAuthorization::canAuthor($actor, $locked)) {
+                    $this->notifyReviewersOfResearcherReply($locked, $actor, $actionUrl);
+                } else {
+                    $this->notifyResearcher($locked, new ResearchActivityNotification($locked, 'FEEDBACK_CREATED', 'New feedback', 'New feedback was added to your research.', $actionUrl));
+                }
+
+                return $feedback->load(['user', 'documentFile', 'attachment']);
+            });
         } catch (\Throwable $exception) {
             if ($storedPath !== null) {
                 try {
@@ -161,7 +161,7 @@ class FeedbackService
         $extension = $this->extensionForAttachmentMime((string) $attachment->getMimeType());
         if ($extension === null) {
             $clientExtension = strtolower((string) $attachment->getClientOriginalExtension());
-            if (! in_array($clientExtension, ['pdf', 'docx'], true)) {
+            if ($clientExtension !== 'pdf') {
                 throw ValidationException::withMessages(['attachment' => ['The attached file type is not supported.']]);
             }
         }
@@ -187,7 +187,7 @@ class FeedbackService
             'stored_filename' => $filename,
             'file_path' => $path,
             'file_extension' => $extension,
-            'mime_type' => $attachment->getMimeType() ?: ($extension === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
+            'mime_type' => $attachment->getMimeType() ?: 'application/pdf',
             'file_size' => $attachment->getSize() ?? 0,
         ]);
 
@@ -198,7 +198,6 @@ class FeedbackService
     {
         return match (strtolower($mime)) {
             'application/pdf' => 'pdf',
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
             default => null,
         };
     }

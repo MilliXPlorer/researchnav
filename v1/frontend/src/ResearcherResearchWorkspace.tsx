@@ -3,7 +3,6 @@ import {
   ArrowLeft,
   Download,
   ExternalLink,
-  Eye,
   FileText,
   Folder,
   MessageSquareText,
@@ -48,7 +47,6 @@ import SharedMonitoring from "./SharedMonitoring";
 import DefenseTeamRoster from "./DefenseTeamRoster";
 import PdfAnnotationWorkspace from "./PdfAnnotationWorkspace";
 import DocumentFeedbackPanel from "./DocumentFeedbackPanel";
-import DocxPreviewWorkspace from "./DocxPreviewWorkspace";
 import type {
   ResearchWorkspaceDestination,
   ResearchWorkspaceTab,
@@ -77,7 +75,7 @@ const supportRoles: Array<{ role: SupportRole; label: string }> = [
 ];
 
 const maxFileBytes = 25 * 1024 * 1024;
-const allowedExtensions = new Set(["pdf", "docx"]);
+const allowedExtensions = new Set(["pdf"]);
 const uploadPurposes: Array<{
   value: NonNullable<DocumentFileResource["upload_purpose"]>;
   label: string;
@@ -101,7 +99,7 @@ function formatDate(value: string | null) {
 function fileError(file: File | null) {
   if (!file) return "Choose a file to upload.";
   const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
-  if (!allowedExtensions.has(extension)) return "Choose a PDF or DOCX file.";
+  if (!allowedExtensions.has(extension)) return "Choose a PDF file.";
   if (file.size > maxFileBytes) return "The file must not exceed 25 MB.";
   return null;
 }
@@ -630,9 +628,25 @@ export default function ResearcherResearchWorkspace({
             {(research.sdgs?.length ?? 0) > 0 && (
               <SdgBadges sdgs={research.sdgs ?? []} />
             )}
-            <p>Research Instructor: <span>{context.people.section?.instructor_name ?? "Unassigned"}</span></p>
-            {context.people.reviewers.find((person) => person.review_role === "adviser")?.name && (
-              <p>Research Adviser: <span>{context.people.reviewers.find((person) => person.review_role === "adviser")?.name}</span></p>
+            <p>
+              Research Instructor:{" "}
+              <span>
+                {context.people.section?.instructor_name ?? "Unassigned"}
+              </span>
+            </p>
+            {context.people.reviewers.find(
+              (person) => person.review_role === "adviser",
+            )?.name && (
+              <p>
+                Research Adviser:{" "}
+                <span>
+                  {
+                    context.people.reviewers.find(
+                      (person) => person.review_role === "adviser",
+                    )?.name
+                  }
+                </span>
+              </p>
             )}
           </section>
           <section className="project-overview-card">
@@ -724,7 +738,11 @@ export default function ResearcherResearchWorkspace({
               </p>
             </div>
           </div>
-          <DefenseTeamRoster researchDocumentId={research.id} people={context.people} refreshKey={attempt} />
+          <DefenseTeamRoster
+            researchDocumentId={research.id}
+            people={context.people}
+            refreshKey={attempt}
+          />
           <div className="researcher-support-grid">
             {supportRoles.map(
               ({ role: supportActorRole, label: actorLabel }) => {
@@ -938,7 +956,7 @@ export default function ResearcherResearchWorkspace({
                           </div>
                           <div className="project-document-actions">
                             {filesAreLive &&
-                              (file.mime_type === "application/pdf" ? (
+                              file.mime_type === "application/pdf" && (
                                 <a
                                   className="icon-link-button"
                                   href={researchFilePreviewUrl(
@@ -952,17 +970,7 @@ export default function ResearcherResearchWorkspace({
                                 >
                                   <ExternalLink aria-hidden="true" />
                                 </a>
-                              ) : (
-                                <button
-                                  type="button"
-                                  className="icon-button"
-                                  aria-label="Open document"
-                                  title="Open document"
-                                  onClick={() => setFeedbackFile(file)}
-                                >
-                                  <Eye aria-hidden="true" />
-                                </button>
-                              ))}
+                              )}
                             {filesAreLive && (
                               <button
                                 type="button"
@@ -1028,22 +1036,13 @@ export default function ResearcherResearchWorkspace({
                   className="modal-panel-document"
                   showClose={false}
                 >
-                  {feedbackFile.mime_type === "application/pdf" ? (
-                    <PdfAnnotationWorkspace
-                      key={feedbackFile.id}
-                      researchDocumentId={research.id}
-                      file={feedbackFile}
-                      canAnnotate={false}
-                      onClose={() => setFeedbackFile(null)}
-                    />
-                  ) : (
-                    <DocxPreviewWorkspace
-                      key={feedbackFile.id}
-                      researchDocumentId={research.id}
-                      file={feedbackFile}
-                      onClose={() => setFeedbackFile(null)}
-                    />
-                  )}
+                  <PdfAnnotationWorkspace
+                    key={feedbackFile.id}
+                    researchDocumentId={research.id}
+                    file={feedbackFile}
+                    canAnnotate={false}
+                    onClose={() => setFeedbackFile(null)}
+                  />
                 </Modal>
               )}
               {commentFile && (
@@ -1089,8 +1088,8 @@ export default function ResearcherResearchWorkspace({
                   <div className="researcher-file-upload-fields">
                     <ManuscriptFilePicker
                       label="Manuscript file"
-                      help="PDF or DOCX, maximum 25 MB"
-                      accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                      help="PDF only, maximum 25 MB"
+                      accept=".pdf,application/pdf"
                       file={upload}
                       onChange={(event) =>
                         setUpload(event.target.files?.[0] ?? null)

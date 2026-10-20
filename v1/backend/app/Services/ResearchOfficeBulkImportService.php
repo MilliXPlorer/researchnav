@@ -62,7 +62,7 @@ class ResearchOfficeBulkImportService
 
         try {
             foreach ($items as &$item) {
-                $item['mime'] = strtolower($item['file']->getClientOriginalExtension()) === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+                $item['mime'] = 'application/pdf';
                 $item['path'] = $this->objectPath($metadata['institute'], (int) $metadata['year'], $metadata['title'], $item['name']);
                 if (Storage::disk(self::DISK)->exists($item['path'])) {
                     $item['path'] = $this->withHashSuffix($item['path'], substr($item['hash'], 0, 12));

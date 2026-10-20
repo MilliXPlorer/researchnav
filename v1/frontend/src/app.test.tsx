@@ -672,7 +672,9 @@ describe("role workspaces", () => {
       expect(
         screen.getByRole("heading", { level: 2, name: "Statistics" }),
       ).toBeInTheDocument();
-      const workloadMeter = screen.queryByRole("meter", { name: sectionHeading });
+      const workloadMeter = screen.queryByRole("meter", {
+        name: sectionHeading,
+      });
       if (workloadMeter) {
         expect(workloadMeter).toHaveAttribute("aria-valuenow", "7");
         expect(
@@ -711,8 +713,12 @@ describe("role workspaces", () => {
       />,
     );
 
-    expect(screen.getByRole("meter", { name: "Assigned manuscripts" })).toBeInTheDocument();
-    expect(screen.queryByRole("meter", { name: "Defense schedule" })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("meter", { name: "Assigned manuscripts" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("meter", { name: "Defense schedule" }),
+    ).not.toBeInTheDocument();
   });
 
   it("hides legacy schedules and duplicate flags on the coordinator overview", () => {
@@ -864,14 +870,18 @@ describe("role workspaces", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(250);
     });
-    expect(screen.queryByText("Community Health Study")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Community Health Study"),
+    ).not.toBeInTheDocument();
     expect(screen.getByText("Nutrition Research")).toBeInTheDocument();
     expect(screen.getByText("1 of 2")).toBeInTheDocument();
     fireEvent.change(search, { target: { value: "missing study" } });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(250);
     });
-    expect(screen.getByText("No studies match your search.")).toBeInTheDocument();
+    expect(
+      screen.getByText("No studies match your search."),
+    ).toBeInTheDocument();
     vi.useRealTimers();
   });
 
@@ -1667,7 +1677,7 @@ describe("authenticated notifications", () => {
     render(<Dashboard session={activeSession} navigate={vi.fn()} />);
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/notifications",
+        "/api/notifications/unread-count",
         expect.anything(),
       );
     });
@@ -1769,6 +1779,15 @@ describe("authenticated notifications", () => {
       resolveAdviserBNotifications = resolve;
     });
     const fetchMock = vi.fn((input: string | URL | Request) => {
+      if (String(input) === "/api/notifications/unread-count") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              unread_count: notificationRequests === 0 ? 1 : 0,
+            }),
+          ),
+        );
+      }
       if (String(input) === "/api/notifications") {
         notificationRequests += 1;
         return notificationRequests === 1
@@ -1825,6 +1844,8 @@ describe("authenticated notifications", () => {
       screen.getByRole("button", { name: "Open notifications" }),
     ).not.toHaveTextContent("1");
 
+    expect(notificationRequests).toBe(1);
+    fireEvent.click(screen.getByRole("button", { name: "Open notifications" }));
     await waitFor(() => expect(notificationRequests).toBe(2));
     resolveAdviserBNotifications(
       new Response(JSON.stringify({ data: [], links: { next: null } })),
@@ -1841,8 +1862,8 @@ describe("authenticated notifications", () => {
       screen.queryByText(sensitiveNotification.message),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("dialog", { name: "Notifications" }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("dialog", { name: "Notifications" }),
+    ).toBeInTheDocument();
   });
 
   it("does not apply a stale mark-read response to the next account", async () => {
@@ -1872,6 +1893,11 @@ describe("authenticated notifications", () => {
       resolveMarked = resolve;
     });
     const fetchMock = vi.fn((input: string | URL | Request) => {
+      if (String(input) === "/api/notifications/unread-count") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ unread_count: 1 })),
+        );
+      }
       if (String(input) === "/api/notifications") {
         notificationRequests += 1;
         return Promise.resolve(
@@ -1915,13 +1941,14 @@ describe("authenticated notifications", () => {
     fireEvent.click(screen.getByText(adviserANotification.title));
 
     rerender(<Dashboard session={adviserB} navigate={vi.fn()} />);
-    await waitFor(() => expect(notificationRequests).toBe(2));
+    expect(notificationRequests).toBe(1);
     await waitFor(() =>
       expect(
         screen.getByRole("button", { name: "Open notifications" }),
       ).toHaveTextContent("1"),
     );
     fireEvent.click(screen.getByRole("button", { name: "Open notifications" }));
+    await waitFor(() => expect(notificationRequests).toBe(2));
     expect(
       await screen.findByText(adviserBNotification.title),
     ).toBeInTheDocument();

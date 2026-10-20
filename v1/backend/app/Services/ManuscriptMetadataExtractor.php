@@ -34,12 +34,10 @@ class ManuscriptMetadataExtractor
         );
 
         return match ($extension) {
-            'docx' => $this->extractFromDocx($filePath),
-
             'pdf' => $this->extractFromPdf($filePath),
 
             default => throw new \InvalidArgumentException(
-                'Unsupported manuscript format. Please upload a DOCX or text-based PDF.'
+                'Unsupported manuscript format. Please upload a text-based PDF.'
             ),
         };
     }
@@ -733,7 +731,7 @@ class ManuscriptMetadataExtractor
 
     /*
      * Split multiple researchers that were flattened
-     * by PDF or DOCX extraction.
+     * by PDF extraction.
      */
     private function splitFlattenedResearcherLine(
         string $line

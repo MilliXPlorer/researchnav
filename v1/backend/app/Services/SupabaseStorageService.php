@@ -94,7 +94,7 @@ class SupabaseStorageService
                     'extension' => strtolower(pathinfo($name, PATHINFO_EXTENSION)),
                 ];
             })
-            ->filter(fn (array $file): bool => in_array($file['extension'], ['pdf', 'doc', 'docx'], true))
+            ->filter(fn (array $file): bool => $file['extension'] === 'pdf')
             ->sortBy(fn (array $file): string => strtolower($file['name']), SORT_NATURAL)
             ->values()
             ->all();

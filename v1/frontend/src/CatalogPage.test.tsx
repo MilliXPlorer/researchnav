@@ -342,6 +342,28 @@ describe("CatalogPage public similarity search", () => {
     );
   });
 
+  it("orders the normal catalog by Study ID while displaying sequence numbers", () => {
+    renderCatalog("", null, [
+      { ...fallbackRecord, id: "9", title: "Ninth study" },
+      { ...fallbackRecord, id: "2", title: "Second study" },
+      { ...fallbackRecord, id: "5", title: "Fifth study" },
+    ]);
+
+    const resultTitles = screen
+      .getAllByRole("heading", { level: 2 })
+      .map((heading) => heading.textContent);
+    expect(resultTitles).toEqual([
+      "Second study",
+      "Fifth study",
+      "Ninth study",
+    ]);
+    expect(
+      Array.from(
+        document.querySelectorAll(".result-accession > span:first-child"),
+      ).map((item) => item.textContent),
+    ).toEqual(["1", "2", "3"]);
+  });
+
   it("allows similarity results to be sorted by publication year", async () => {
     vi.stubGlobal(
       "fetch",

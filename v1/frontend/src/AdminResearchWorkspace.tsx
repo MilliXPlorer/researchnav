@@ -1122,8 +1122,8 @@ export default function AdminResearchWorkspace({
           <div className="admin-inline-form">
             <ManuscriptFilePicker
               label="File"
-              help="PDF, DOC, or DOCX"
-              accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              help="PDF only"
+              accept=".pdf,application/pdf"
               file={uploadFile}
               disabled={isMutating}
               onChange={(event) =>

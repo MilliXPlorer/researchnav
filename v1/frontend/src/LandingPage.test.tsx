@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import LandingPage from "./LandingPage";
 import type { ResearchRecord } from "./types";
@@ -19,6 +25,82 @@ const record: ResearchRecord = {
 };
 
 describe("LandingPage", () => {
+  it("opens the selected study metadata without navigating to search", async () => {
+    const navigate = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              data: {
+                id: 1,
+                title: record.title,
+                authors: [{ author_name: "Example Author" }],
+                publication_year: 2026,
+                institution_name: record.institutionName,
+                institute: record.institute,
+                degree_program: record.program,
+                category: { name: record.category },
+                abstract: record.abstract,
+                keywords: record.keywords,
+                research_stage: "completed",
+                sdgs: [],
+              },
+            }),
+          ),
+      ),
+    );
+    render(
+      <LandingPage
+        onSignIn={vi.fn()}
+        session={null}
+        onSessionChange={vi.fn()}
+        onLogout={vi.fn()}
+        navigate={navigate}
+        records={[record]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /View metadata/ }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByRole("heading", { name: record.title }),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "/api/repository/1",
+        expect.objectContaining({ credentials: "include" }),
+      ),
+    );
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("shows public records by Study ID ascending", () => {
+    render(
+      <LandingPage
+        onSignIn={vi.fn()}
+        session={null}
+        onSessionChange={vi.fn()}
+        onLogout={vi.fn()}
+        navigate={vi.fn()}
+        records={[
+          { ...record, id: "12", title: "Twelfth study" },
+          { ...record, id: "3", title: "Third study" },
+          { ...record, id: "8", title: "Eighth study" },
+          { ...record, id: "1", title: "First study" },
+        ]}
+      />,
+    );
+
+    const cards = screen.getAllByRole("article");
+    expect(within(cards[0]).getByText("First study")).toBeInTheDocument();
+    expect(within(cards[1]).getByText("Third study")).toBeInTheDocument();
+    expect(within(cards[2]).getByText("Eighth study")).toBeInTheDocument();
+    expect(screen.queryByText("Twelfth study")).not.toBeInTheDocument();
+  });
+
   it("opens an exact catalog year as a range", () => {
     const navigate = vi.fn();
     render(

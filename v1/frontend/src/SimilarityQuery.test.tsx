@@ -139,9 +139,9 @@ describe("researcher similarity check", () => {
     expect(screen.getByText("84.21%")).toBeInTheDocument();
     expect(screen.getByText("Title similarity")).toBeInTheDocument();
     expect(screen.queryByText(/Content similarity/)).not.toBeInTheDocument();
-    expect(screen.getByText("inventory")).toBeInTheDocument();
-    expect(screen.getByText("management")).toBeInTheDocument();
-    expect(screen.getByText("system")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("columnheader", { name: "Shared terms" }),
+    ).not.toBeInTheDocument();
   });
 
   it("uses the backend review decision rather than applying a local threshold", async () => {
@@ -244,7 +244,12 @@ describe("researcher similarity check", () => {
     expect(
       screen.queryByText("A GEOGRAPHIC MAPPING TOOL FOR EXTENSION"),
     ).not.toBeInTheDocument();
-    expect(screen.getAllByRole("row")).toHaveLength(2);
+    expect(
+      screen.getByRole("list", {
+        name: "Archived studies ranked by similarity",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
     expect(
       screen.getAllByText(/Low similarity does not prove originality/),
     ).toHaveLength(1);
@@ -297,6 +302,8 @@ describe("researcher similarity check", () => {
           return new Response(
             JSON.stringify({
               data: [archived(1, "ARCHIVED MANUSCRIPT", "0.120000")],
+              extracted_text: "CHAPTER 1\nExtracted manuscript content",
+              file_name: "machine-learning.pdf",
             }),
           );
         }
@@ -309,8 +316,8 @@ describe("researcher similarity check", () => {
       screen.getByRole("heading", { name: "Content checker" }),
     ).toBeInTheDocument();
     expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
-    const file = new File(["manuscript"], "machine-learning.docx", {
-      type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    const file = new File(["manuscript"], "machine-learning.pdf", {
+      type: "application/pdf",
     });
     fireEvent.change(screen.getByLabelText("Manuscript file"), {
       target: { files: [file] },
@@ -324,9 +331,50 @@ describe("researcher similarity check", () => {
     expect(submittedBody).toBeInstanceOf(FormData);
     expect(submittedBody?.get("file")).toBe(file);
     expect(
-      await screen.findByText("Content results for “machine-learning.docx”"),
+      await screen.findByText("Top Repository Matches"),
     ).toBeInTheDocument();
     expect(screen.getByText("Content similarity")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Extracted PDF Text" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Extracted manuscript content/),
+    ).toBeInTheDocument();
+  });
+
+  it("uploads an ordered PDF folder as files[]", async () => {
+    let contentBody: FormData | null = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        contentBody = init?.body as FormData;
+        return new Response(
+          JSON.stringify({
+            data: [],
+            extracted_text: "CHAPTER 1\nBody",
+            file_name: "2 PDF files",
+          }),
+        );
+      }),
+    );
+    renderCheck("content");
+    const files = [
+      new File(["cover"], "00-cover.pdf", { type: "application/pdf" }),
+      new File(["chapter"], "chapter-1.pdf", { type: "application/pdf" }),
+    ];
+
+    const folderInput = screen.getByLabelText("Manuscript folder");
+    expect(folderInput).toHaveAttribute("webkitdirectory");
+
+    fireEvent.change(folderInput, {
+      target: { files },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Check content" }));
+
+    await waitFor(() => expect(contentBody).toBeInstanceOf(FormData));
+    const submittedBody = contentBody as FormData | null;
+    expect(submittedBody?.get("mode")).toBe("folder");
+    expect(submittedBody?.getAll("files[]")).toEqual(files);
   });
 
   it("rejects unsupported content files before making a request", () => {
@@ -338,12 +386,39 @@ describe("researcher similarity check", () => {
       target: { files: [new File(["notes"], "notes.txt")] },
     });
 
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "Choose one PDF or DOCX file.",
-    );
+    expect(screen.getByRole("alert")).toHaveTextContent("Choose one PDF file.");
     expect(
       screen.getByRole("button", { name: "Check content" }),
     ).toBeDisabled();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("explains how to fix an upload with no valid chapter scope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({ error: "CONTENT_UPLOAD_INVALID_SCOPE" }),
+            {
+              status: 422,
+            },
+          ),
+      ),
+    );
+    renderCheck("content");
+
+    fireEvent.change(screen.getByLabelText("Manuscript file"), {
+      target: {
+        files: [
+          new File(["manuscript"], "chapters.pdf", { type: "application/pdf" }),
+        ],
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Check content" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "We could not find a valid Chapter 1–5 section in this file. Use a manuscript with a clearly labeled Chapter 1 heading.",
+    );
   });
 });

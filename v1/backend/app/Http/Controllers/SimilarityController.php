@@ -15,6 +15,7 @@ use App\Services\PublicRepositorySimilarityService;
 use App\Services\SimilarityProcessException;
 use App\Services\SimilarityService;
 use App\Services\SimilarityUnavailableException;
+use App\Services\UploadedContentInvalidScopeException;
 use App\Services\UploadedContentSimilarityService;
 use App\Services\UploadedContentUnreadableException;
 use Illuminate\Http\Request;
@@ -36,6 +37,8 @@ class SimilarityController extends DomainController
             return SimilarityResultResource::collection($service->check($this->actor($request), $researchDocument, $request))
                 ->response()
                 ->setStatusCode(201);
+        } catch (PublicRepositorySimilarityCapacityException) {
+            return response()->json(['error' => 'SIMILARITY_CAPACITY_EXCEEDED'], 503);
         } catch (SimilarityUnavailableException) {
             return response()->json(['error' => 'SIMILARITY_UNAVAILABLE'], 503);
         } catch (SimilarityProcessException) {
@@ -77,6 +80,8 @@ class SimilarityController extends DomainController
             return PublicRepositorySimilarityResource::collection(
                 $service->compareContent($request->string('q')->toString())
             );
+        } catch (PublicRepositorySimilarityCapacityException) {
+            return response()->json(['error' => 'SIMILARITY_CAPACITY_EXCEEDED'], 503);
         } catch (SimilarityUnavailableException) {
             return response()->json(['error' => 'SIMILARITY_UNAVAILABLE'], 503);
         } catch (SimilarityProcessException) {
@@ -87,11 +92,18 @@ class SimilarityController extends DomainController
     public function contentUpload(ContentUploadSimilarityRequest $request, UploadedContentSimilarityService $service)
     {
         try {
-            return PublicRepositorySimilarityResource::collection(
-                $service->compare($request->file('file'))
-            );
+            $uploads = $request->hasFile('files') ? $request->file('files') : [$request->file('file')];
+            $result = $service->compare($uploads);
+
+            return response()->json([
+                'data' => PublicRepositorySimilarityResource::collection($result['matches'])->resolve($request),
+                'extracted_text' => $result['extracted_text'],
+                'file_name' => count($uploads) === 1 ? $uploads[0]->getClientOriginalName() : count($uploads).' PDF files',
+            ]);
         } catch (UploadedContentUnreadableException) {
             return response()->json(['error' => 'CONTENT_UPLOAD_UNREADABLE'], 422);
+        } catch (UploadedContentInvalidScopeException) {
+            return response()->json(['error' => 'CONTENT_UPLOAD_INVALID_SCOPE'], 422);
         } catch (PublicRepositorySimilarityCapacityException) {
             return response()->json(['error' => 'SIMILARITY_CAPACITY_EXCEEDED'], 503);
         } catch (PublicRepositorySimilarityCatalogChangedException) {

@@ -111,7 +111,11 @@ export async function createApp(options = {}) {
     180_000,
   );
   const maxBodyBytes = configuredInteger(
-    options.maxBodyBytes ?? process.env.SSR_MAX_BODY_BYTES ?? 27 * 1024 * 1024,
+    options.maxBodyBytes ??
+      Math.min(
+        Number(process.env.SSR_MAX_BODY_BYTES) || 100 * 1024 * 1024,
+        100 * 1024 * 1024,
+      ),
     "SSR_MAX_BODY_BYTES",
     32 * 1024,
     100 * 1024 * 1024,

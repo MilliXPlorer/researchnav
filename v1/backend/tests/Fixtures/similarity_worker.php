@@ -3,6 +3,11 @@
 $payload = json_decode(stream_get_contents(STDIN), true, 512, JSON_THROW_ON_ERROR);
 $secretWasPassed = getenv('TEST_SECRET') !== false;
 if (array_key_exists('query', $payload) || array_key_exists('uploaded_content', $payload)) {
+    if (str_contains((string) ($payload['uploaded_content'] ?? ''), 'WORKER_CAPACITY')) {
+        echo json_encode(['error' => ['code' => 'CAPACITY_EXCEEDED']], JSON_THROW_ON_ERROR);
+
+        exit(3);
+    }
     $score = $secretWasPassed ? '1.000000000000' : '0.000000000000';
     echo json_encode(['results' => array_map(static fn (array $candidate): array => [
         'matched_research_id' => $candidate['id'],

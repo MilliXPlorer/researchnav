@@ -10,7 +10,7 @@ import sys
 from similarity.document_reader import DocumentReadError, extract_parts
 
 
-for parser_logger in ("pymupdf", "docx", "pdfminer"):
+for parser_logger in ("pymupdf", "pdfminer"):
     logging.getLogger(parser_logger).setLevel(logging.CRITICAL)
 
 

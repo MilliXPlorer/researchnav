@@ -222,7 +222,6 @@ class DocumentService
     {
         return match ($mime) {
             'application/pdf' => 'pdf',
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
             default => null,
         };
     }

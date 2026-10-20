@@ -842,7 +842,7 @@ export default function ResearchOfficeBulkImport({
     const allowed = selectedFiles.filter((file) => {
       const extension = file.name.split(".").pop()?.toLowerCase();
 
-      return extension === "docx" || extension === "pdf";
+      return extension === "pdf";
     });
     const skipped = selectedFiles
       .filter((file) => !allowed.includes(file))
@@ -1871,7 +1871,7 @@ export default function ResearchOfficeBulkImport({
             <h2 style={styles.sectionTitle}>Upload Manuscripts</h2>
 
             <p style={styles.sectionDescription}>
-              Select DOCX or text-based PDF manuscript files.
+              Select text-based PDF manuscript files.
             </p>
           </div>
         </div>
@@ -1879,7 +1879,7 @@ export default function ResearchOfficeBulkImport({
         <input
           ref={fileInputRef}
           type="file"
-          accept=".docx,.pdf"
+          accept=".pdf,application/pdf"
           multiple
           onChange={handleFileChange}
           style={{
@@ -1954,7 +1954,7 @@ export default function ResearchOfficeBulkImport({
           </div>
 
           <span style={styles.uploadHelp}>
-            Supports DOCX and text-based PDF • Maximum 20 MB per file
+            Supports text-based PDF only • Maximum 20 MB per file
           </span>
         </div>
         {files.length > 0 && (
@@ -2340,7 +2340,7 @@ export default function ResearchOfficeBulkImport({
 
                           <p style={styles.failedText}>
                             {result.error ||
-                              "Please upload a valid DOCX or text-based PDF copy."}
+                              "Please upload a valid text-based PDF copy."}
                           </p>
                         </div>
 

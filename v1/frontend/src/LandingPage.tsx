@@ -12,6 +12,7 @@ import {
 import { Button, Logo, SearchBox } from "./components";
 import SdgPickerModal from "./SdgPickerModal";
 import ProfileDialog, { ProfileAvatar } from "./ProfileDialog";
+import PublicResearchMetadataDialog from "./PublicResearchMetadataDialog";
 import { instituteNames, roleConfigs } from "./data";
 import type { ResearchRecord, UserSession } from "./types";
 
@@ -37,7 +38,12 @@ export default function LandingPage({
   const [query, setQuery] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
   const [sdgPickerOpen, setSdgPickerOpen] = useState(false);
-  const recent = records.slice(0, 3);
+  const [metadataResearchId, setMetadataResearchId] = useState<
+    string | number | null
+  >(null);
+  const recent = [...records]
+    .sort((a, b) => Number(a.id) - Number(b.id))
+    .slice(0, 3);
   const instituteCount = instituteNames.length;
   const earliestYear = records.length
     ? Math.min(...records.map((record) => record.year))
@@ -233,11 +239,7 @@ export default function LandingPage({
                       {record.year} · {record.program}
                     </span>
                   </div>
-                  <button
-                    onClick={() =>
-                      navigate(`/catalog?q=${encodeURIComponent(record.title)}`)
-                    }
-                  >
+                  <button onClick={() => setMetadataResearchId(record.id)}>
                     View metadata <ArrowRight />
                   </button>
                 </article>
@@ -254,6 +256,13 @@ export default function LandingPage({
             </Button>
           </div>
         </section>
+
+        {metadataResearchId !== null && (
+          <PublicResearchMetadataDialog
+            researchDocumentId={metadataResearchId}
+            onClose={() => setMetadataResearchId(null)}
+          />
+        )}
 
         <section className="trust-section" id="about">
           <div>

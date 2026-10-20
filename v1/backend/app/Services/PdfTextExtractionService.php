@@ -78,7 +78,7 @@ class PdfTextExtractionService
             str_contains($lower, 'xref table not found')
         ) {
             throw new \RuntimeException(
-                'Invalid or corrupted PDF file. Please upload a valid text-based PDF or DOCX copy.'
+                'Invalid or corrupted PDF file. Please upload a valid text-based PDF copy.'
             );
         }
 
@@ -113,7 +113,7 @@ class PdfTextExtractionService
          * Generic PDF error.
          */
         throw new \RuntimeException(
-            'Unable to process this PDF file. Please upload a valid text-based PDF or DOCX copy.'
+            'Unable to process this PDF file. Please upload a valid text-based PDF copy.'
         );
     }
 

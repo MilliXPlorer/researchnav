@@ -94,8 +94,8 @@ export default function DocumentFeedbackPanel({
     if (!feedbackText.trim()) return;
     if (replyFile) {
       const extension = replyFile.name.split(".").pop()?.toLowerCase() ?? "";
-      if (!["pdf", "docx"].includes(extension)) {
-        setError("Choose a PDF or DOCX file to attach.");
+      if (extension !== "pdf") {
+        setError("Choose a PDF file to attach.");
         return;
       }
       if (replyFile.size > 25 * 1024 * 1024) {
@@ -169,8 +169,8 @@ export default function DocumentFeedbackPanel({
     if (!remarks) return;
     if (addressFile) {
       const extension = addressFile.name.split(".").pop()?.toLowerCase() ?? "";
-      if (!["pdf", "docx"].includes(extension)) {
-        setError("Choose a PDF or DOCX file to attach.");
+      if (extension !== "pdf") {
+        setError("Choose a PDF file to attach.");
         return;
       }
       if (addressFile.size > 25 * 1024 * 1024) {
@@ -231,9 +231,7 @@ export default function DocumentFeedbackPanel({
             <span>v{file.version_number}</span>
             <span
               className={
-                file.is_current
-                  ? "file-version is-current"
-                  : "file-version"
+                file.is_current ? "file-version is-current" : "file-version"
               }
             >
               {file.is_current ? "Current" : "Previous"}
@@ -278,36 +276,23 @@ export default function DocumentFeedbackPanel({
             {feedback.map((item) => {
               const resolved = item.feedback_status === "resolved";
               const addressed = item.researcher_addressed_at != null;
-              const acknowledged =
-                item.researcher_acknowledged_at != null;
+              const acknowledged = item.researcher_acknowledged_at != null;
               return (
-                <article
-                  className="document-feedback-item"
-                  key={item.id}
-                >
-                  <span
-                    className="project-person-avatar"
-                    aria-hidden="true"
-                  >
+                <article className="document-feedback-item" key={item.id}>
+                  <span className="project-person-avatar" aria-hidden="true">
                     {(item.reviewer_name ?? "R").slice(0, 1).toUpperCase()}
                   </span>
                   <div className="document-feedback-item-main">
                     <div className="document-feedback-item-head">
                       <span className="document-feedback-reviewer">
-                        <strong>
-                          {item.reviewer_name ?? "Reviewer"}
-                        </strong>
+                        <strong>{item.reviewer_name ?? "Reviewer"}</strong>
                         {item.reviewer_role && (
                           <small>{label(item.reviewer_role)}</small>
                         )}
                       </span>
-                      <time>
-                        {formatPhilippineDateTime(item.created_at)}
-                      </time>
+                      <time>{formatPhilippineDateTime(item.created_at)}</time>
                     </div>
-                    <p className="document-feedback-comment">
-                      {item.comment}
-                    </p>
+                    <p className="document-feedback-comment">{item.comment}</p>
                     {item.attachment && (
                       <a
                         className="document-feedback-attachment"
@@ -368,14 +353,10 @@ export default function DocumentFeedbackPanel({
                             type="button"
                             className="feedback-icon-btn"
                             aria-label={
-                              resolved
-                                ? "Reopen feedback"
-                                : "Resolve feedback"
+                              resolved ? "Reopen feedback" : "Resolve feedback"
                             }
                             title={
-                              resolved
-                                ? "Reopen feedback"
-                                : "Resolve feedback"
+                              resolved ? "Reopen feedback" : "Resolve feedback"
                             }
                             disabled={busy}
                             onClick={() => void changeStatus(item)}
@@ -407,8 +388,7 @@ export default function DocumentFeedbackPanel({
                                   : "Acknowledge"
                               }
                               disabled={
-                                busy ||
-                                item.researcher_acknowledged_at != null
+                                busy || item.researcher_acknowledged_at != null
                               }
                               onClick={() => void acknowledgeFeedback(item)}
                             >
@@ -432,8 +412,7 @@ export default function DocumentFeedbackPanel({
                                   : "Mark addressed"
                               }
                               disabled={
-                                busy ||
-                                item.researcher_addressed_at != null
+                                busy || item.researcher_addressed_at != null
                               }
                               onClick={() => {
                                 setAddressingId(
@@ -501,19 +480,17 @@ export default function DocumentFeedbackPanel({
                               type="file"
                               className="document-feedback-file-input"
                               aria-label="Attach a file to this reply"
-                              accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                              accept=".pdf,application/pdf"
                               disabled={busy}
                               onChange={(event) =>
-                                setAddressFile(
-                                  event.target.files?.[0] ?? null,
-                                )
+                                setAddressFile(event.target.files?.[0] ?? null)
                               }
                             />
                             <button
                               type="button"
                               className="feedback-icon-btn"
                               aria-label="Attach a file"
-                              title="Attach a file (PDF or DOCX, max 25 MB)"
+                              title="Attach a PDF file (max 25 MB)"
                               disabled={busy}
                               onClick={() =>
                                 addressFileInputRef.current?.click()
@@ -555,10 +532,7 @@ export default function DocumentFeedbackPanel({
       </div>
 
       {(canPostFeedback || canReply) && (
-        <form
-          className="document-feedback-composer"
-          onSubmit={submitFeedback}
-        >
+        <form className="document-feedback-composer" onSubmit={submitFeedback}>
           <textarea
             required
             aria-label="Feedback"
@@ -617,7 +591,7 @@ export default function DocumentFeedbackPanel({
                     type="file"
                     className="document-feedback-file-input"
                     aria-label="Attach a file to this reply"
-                    accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    accept=".pdf,application/pdf"
                     disabled={busy}
                     onChange={(event) =>
                       setReplyFile(event.target.files?.[0] ?? null)
@@ -627,7 +601,7 @@ export default function DocumentFeedbackPanel({
                     type="button"
                     className="feedback-icon-btn"
                     aria-label="Attach a file"
-                    title="Attach a file (PDF or DOCX, max 25 MB)"
+                    title="Attach a PDF file (max 25 MB)"
                     disabled={busy}
                     onClick={() => fileInputRef.current?.click()}
                   >
@@ -641,9 +615,7 @@ export default function DocumentFeedbackPanel({
               className="feedback-send-btn"
               aria-label="Post feedback"
               title={
-                canReply && !canPostFeedback
-                  ? "Post reply"
-                  : "Post feedback"
+                canReply && !canPostFeedback ? "Post reply" : "Post feedback"
               }
               disabled={busy || !feedbackText.trim()}
             >

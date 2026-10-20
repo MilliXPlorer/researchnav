@@ -273,7 +273,6 @@ Route::prefix('api')
             Route::post('research/{researchDocument}/files', [DocumentFileController::class, 'store'])->middleware(['origin.allowed', 'throttle:research-upload']);
             Route::get('research/{researchDocument}/files/{documentFile}/download', [DocumentFileController::class, 'download'])->middleware('throttle:research-file-access');
             Route::get('research/{researchDocument}/files/{documentFile}/preview', [DocumentFileController::class, 'preview'])->middleware('throttle:research-file-access');
-            Route::get('research/{researchDocument}/files/{documentFile}/preview-content', [DocumentFileController::class, 'previewContent'])->middleware('throttle:research-file-access');
             Route::get('research/{researchDocument}/files/{documentFile}/annotations', [PdfAnnotationController::class, 'index'])->middleware('throttle:research-file-access');
             Route::post('research/{researchDocument}/files/{documentFile}/annotations', [PdfAnnotationController::class, 'store'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::patch('research/{researchDocument}/files/{documentFile}', [DocumentFileController::class, 'update'])->middleware(['origin.allowed', 'throttle:researcher-file-mutations']);
@@ -302,6 +301,7 @@ Route::prefix('api')
             Route::post('research/{researchDocument}/recommendation', [TitleValidationController::class, 'recommend'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::patch('research/{researchDocument}/validation/{titleValidation}', [TitleValidationController::class, 'update'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('notifications', [NotificationController::class, 'index']);
+            Route::get('notifications/unread-count', [NotificationController::class, 'unreadCount']);
             Route::patch('notifications/{notification}/read', [NotificationController::class, 'read'])->middleware('origin.allowed');
 
             Route::post('categories', [CategoryController::class, 'store'])->middleware(['origin.allowed', 'throttle:domain-mutations']);

@@ -112,7 +112,7 @@ different or incomplete manuscript content lowers the weighted result.
 
 ## Manuscript Processing
 
-The current pipeline supports text extraction from PDF and DOCX. Legacy DOC is
+The current upload and scoring pipeline supports text extraction from PDF only. Legacy DOC and DOCX are
 unsupported. Scanned PDFs require a separate OCR process and can produce a
 no-text or failed status.
 

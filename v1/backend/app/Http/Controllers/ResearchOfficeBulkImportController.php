@@ -44,7 +44,7 @@ class ResearchOfficeBulkImportController extends Controller
 
         if ($validator->fails()) {
             return response()->json([
-                'message' => 'Please upload valid DOCX or text-based PDF manuscript files.',
+                'message' => 'Please upload valid text-based PDF manuscript files.',
                 'errors' => $validator->errors(),
             ], 422);
         }
@@ -58,13 +58,9 @@ class ResearchOfficeBulkImportController extends Controller
                 );
 
                 /*
-                 * Only DOCX and PDF manuscript files are supported.
-                 *
-                 * We validate the extension manually instead of relying only
-                 * on Laravel's mimes rule because DOCX files can sometimes
-                 * be detected by PHP as ZIP archives.
+                 * Only text-based PDF manuscript files are supported.
                  */
-                if (! in_array($extension, ['docx', 'pdf'], true)) {
+                if ($extension !== 'pdf') {
                     $results[] = [
                         'file_name' => $file->getClientOriginalName(),
                         'file_size' => $file->getSize(),
@@ -84,7 +80,7 @@ class ResearchOfficeBulkImportController extends Controller
                             'institute' => 'Unclassified',
                         ],
 
-                        'error' => 'Unsupported file type. Please upload a DOCX or text-based PDF manuscript.',
+                        'error' => 'Unsupported file type. Please upload a text-based PDF manuscript.',
                     ];
 
                     continue;
@@ -176,7 +172,7 @@ class ResearchOfficeBulkImportController extends Controller
                         'institute' => 'Unclassified',
                     ],
 
-                    'error' => 'This manuscript could not be read. Please upload a valid DOCX or text-based PDF file.',
+                    'error' => 'This manuscript could not be read. Please upload a valid text-based PDF file.',
                 ];
             }
         }
@@ -304,8 +300,8 @@ class ResearchOfficeBulkImportController extends Controller
             ], 422);
         }
 
-        if (collect($uploadedFiles)->contains(fn ($file) => ! in_array(strtolower($file->getClientOriginalExtension()), ['pdf', 'docx'], true))) {
-            return response()->json(['message' => 'Only DOCX and text-based PDF manuscripts can be uploaded.'], 422);
+        if (collect($uploadedFiles)->contains(fn ($file) => strtolower($file->getClientOriginalExtension()) !== 'pdf')) {
+            return response()->json(['message' => 'Only text-based PDF manuscripts can be uploaded.'], 422);
         }
 
         try {

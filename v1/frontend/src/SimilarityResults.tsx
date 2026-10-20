@@ -181,7 +181,7 @@ export default function SimilarityResults({
       {!hasSelectedResearch ? (
         <EmptyState
           title="Select a research record to review manuscript similarity"
-          message="Select a research record with a current PDF or DOCX manuscript before running the combined title and content check."
+          message="Select a research record with a current PDF manuscript before running the combined title and content check."
         />
       ) : loading ? (
         <p className="similarity-status" role="status">
@@ -348,7 +348,7 @@ export default function SimilarityResults({
       {checkErrorFor === researchDocumentId && (
         <p className="similarity-error" role="alert">
           The manuscript similarity check could not be completed. Confirm that a
-          current text-based PDF or DOCX is available, then try again.
+          current text-based PDF is available, then try again.
         </p>
       )}
       {metadataResearchId !== null && (

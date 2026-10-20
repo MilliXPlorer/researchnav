@@ -111,7 +111,7 @@ npm run start:web
 
 `PUBLIC_ORIGIN` is the public HTTPS origin. `SSR_API_ORIGIN` is the private Laravel origin and must never use a `VITE_` prefix. `SSR_API_TIMEOUT_MS` defaults to `5000`; only `POST /api/similarity/content-upload` uses `SSR_CONTENT_UPLOAD_TIMEOUT_MS`, which defaults to `120000`. `SSR_MAX_BODY_BYTES` defaults to 27 MiB to accommodate Laravel's 25 MiB document limit. Development defaults to `127.0.0.1:5173`; production containers should set `HOST=0.0.0.0` and expose the service through their public HTTPS endpoint.
 
-The Content Checker accepts PDF and DOCX files up to 25 MiB. The PHP web SAPI and reverse proxy must allow the same request: `backend/public/.user.ini` requests `upload_max_filesize=26M`, `post_max_size=27M`, `memory_limit=512M`, and a 120-second execution limit. Confirm that the deployed PHP server honors these values and keep Laravel reachable only through the request-limited SSR/reverse-proxy path.
+The Content Checker accepts text-based PDF files up to 30 MiB each. Folder checks accept up to 20 PDFs and 100 MiB combined. The PHP web SAPI and reverse proxy must allow the same request: `backend/public/.user.ini` requests `upload_max_filesize=31M`, `post_max_size=105M`, `memory_limit=512M`, and a 120-second execution limit. Confirm that the deployed PHP server honors these values and keep Laravel reachable only through the request-limited SSR/reverse-proxy path.
 
 The gateway exposes `/_health`, sends `Cache-Control: no-store` and a restrictive CSP on SSR HTML, serves hashed assets from `frontend/dist/client`, and imports the SSR bundle from `frontend/dist/server`. Laravel should use a production PHP server rather than `artisan serve`.
 
@@ -163,7 +163,7 @@ eligible.
 On MariaDB, body matches use the `manuscript_search_documents` FULLTEXT index in
 natural-language mode (BM25-family relevance). The authoritative source is the
 latest current `final_manuscript`; a cryptographically and path-verified
-canonical import is used only as the fallback. PDF and DOCX are supported. DOC
+canonical import is used only as a legacy fallback for the existing corpus. New uploads and active extraction support PDF only. DOC
 files and scanned/OCR-dependent PDFs produce no searchable body text. See
 `backend/DATABASE_SETUP.md` for indexing, scheduler, environment, privacy, and
 deployment requirements.

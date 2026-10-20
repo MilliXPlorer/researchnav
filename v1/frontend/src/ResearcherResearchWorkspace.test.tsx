@@ -290,9 +290,10 @@ describe("researcher research workspace", () => {
     expect(
       screen.getByRole("button", { name: "Rename revision-v2.pdf" }),
     ).toBeEnabled();
-    expect(
-      screen.getByRole("link", { name: "Open document" }),
-    ).toHaveAttribute("href", "/api/research/42/files/10/preview");
+    expect(screen.getByRole("link", { name: "Open document" })).toHaveAttribute(
+      "href",
+      "/api/research/42/files/10/preview",
+    );
     expect(screen.getByRole("link", { name: "Open document" })).toHaveAttribute(
       "target",
       "_blank",
@@ -307,7 +308,7 @@ describe("researcher research workspace", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("opens a DOCX file in a preview pop-up window", async () => {
+  it("keeps a legacy DOCX file download-only", async () => {
     installApi([
       {
         id: 11,
@@ -344,16 +345,10 @@ describe("researcher research workspace", () => {
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Documents" }));
     fireEvent.click(screen.getByRole("button", { name: /^Chapter 2/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Open document" }));
-
     expect(
-      await screen.findByRole("dialog", {
-        name: "Preview of chapter-two.docx",
-      }),
-    ).toBeInTheDocument();
-    expect(
-      await screen.findByText("Read this paragraph in the app."),
-    ).toBeInTheDocument();
+      screen.queryByRole("button", { name: "Open document" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Download" })).toBeInTheDocument();
   });
 
   it("does not expose legacy pending title-validation requests", async () => {
@@ -561,8 +556,14 @@ describe("researcher research workspace", () => {
       screen.queryByRole("button", { name: "Save and submit" }),
     ).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("PDF or DOCX (maximum 25 MB)"), {
-      target: { files: [new File(["revision"], "revision.docx")] },
+    fireEvent.change(screen.getByLabelText("PDF (maximum 25 MB)"), {
+      target: {
+        files: [
+          new File(["%PDF revision"], "revision.pdf", {
+            type: "application/pdf",
+          }),
+        ],
+      },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => {

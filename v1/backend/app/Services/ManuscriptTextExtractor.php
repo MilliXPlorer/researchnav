@@ -12,10 +12,51 @@ class ManuscriptTextExtractor
         return implode('', $this->extractParts($canonicalPath));
     }
 
+    public function extractRaw(string $canonicalPath): string
+    {
+        $maximumInputBytes = min(30 * 1024 * 1024, (int) config('researchnav.manuscript_search.maximum_input_bytes'));
+        if (! is_file($canonicalPath) || is_link($canonicalPath) || filesize($canonicalPath) === false || filesize($canonicalPath) > $maximumInputBytes) {
+            throw new ManuscriptTextExtractionException('Manuscript extraction failed.');
+        }
+
+        $process = new Process([
+            (string) config('researchnav.manuscript_search.python_binary'),
+            '-c',
+            'import sys; from similarity.document_reader import extract_text; sys.stdout.write(extract_text(sys.argv[1]))',
+            $canonicalPath,
+        ], app_path('Services'), $this->workerEnvironment(), null, (float) config('researchnav.manuscript_search.timeout_seconds'));
+        $maximumOutputBytes = (int) config('researchnav.manuscript_search.maximum_output_bytes');
+        $outputBytes = 0;
+
+        try {
+            $process->run(function (string $type, string $buffer) use (&$outputBytes, $maximumOutputBytes): void {
+                $outputBytes += strlen($buffer);
+                if ($outputBytes > $maximumOutputBytes) {
+                    throw new ManuscriptTextExtractionException('Manuscript extraction failed.');
+                }
+            });
+        } catch (ManuscriptTextExtractionException $exception) {
+            $process->stop();
+            throw $exception;
+        } catch (\Throwable) {
+            $process->stop();
+            throw new ManuscriptTextExtractionException('Manuscript extraction failed.');
+        }
+
+        $text = $process->getOutput();
+        if (! $process->isSuccessful() || $process->getErrorOutput() !== '' || trim($text) === ''
+            || str_contains($text, "\0") || strlen($text) > $maximumOutputBytes
+            || mb_strlen($text) > (int) config('researchnav.manuscript_search.maximum_text_characters')) {
+            throw new ManuscriptTextExtractionException('Manuscript extraction failed.');
+        }
+
+        return str_replace(["\r\n", "\r"], "\n", $text);
+    }
+
     /** @return list<string> */
     public function extractParts(string $canonicalPath): array
     {
-        $maximumInputBytes = min(25 * 1024 * 1024, (int) config('researchnav.manuscript_search.maximum_input_bytes'));
+        $maximumInputBytes = min(30 * 1024 * 1024, (int) config('researchnav.manuscript_search.maximum_input_bytes'));
         if (! is_file($canonicalPath) || is_link($canonicalPath) || filesize($canonicalPath) === false || filesize($canonicalPath) > $maximumInputBytes) {
             throw new ManuscriptTextExtractionException('Manuscript extraction failed.');
         }

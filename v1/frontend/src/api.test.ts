@@ -3,6 +3,7 @@ import {
   ApiError,
   getSystemStatus,
   getRoleDashboard,
+  getNotificationUnreadCount,
   getInternalResearch,
   archiveInternalResearch,
   checkContentUploadSimilarity,
@@ -382,6 +383,67 @@ describe("notification API", () => {
     );
 
     await expect(listNotifications()).resolves.toEqual([notification]);
+  });
+
+  it("fetches only the authenticated unread count and forwards cancellation", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ unread_count: 3 })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+    await expect(getNotificationUnreadCount(controller.signal)).resolves.toBe(
+      3,
+    );
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
+      "/api/notifications/unread-count",
+      expect.objectContaining({
+        credentials: "include",
+        signal: controller.signal,
+      }),
+    );
+  });
+
+  it("preserves notification pagination and cancels the remaining pages", async () => {
+    const controller = new AbortController();
+    const second = { ...notification, id: "second" };
+    const fetchMock = vi.fn(
+      async (input: unknown) =>
+        new Response(
+          JSON.stringify({
+            data: [String(input).includes("page=2") ? second : notification],
+            links: {
+              next: String(input).includes("page=2")
+                ? null
+                : "/api/notifications?page=2",
+            },
+          }),
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(listNotifications(controller.signal)).resolves.toEqual([
+      notification,
+      second,
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/notifications?page=2",
+      expect.objectContaining({ signal: controller.signal }),
+    );
+
+    fetchMock.mockClear();
+    fetchMock.mockImplementation(async () => {
+      controller.abort();
+      return new Response(
+        JSON.stringify({
+          data: [notification],
+          links: { next: "/api/notifications?page=2" },
+        }),
+      );
+    });
+    await expect(listNotifications(controller.signal)).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("marks the UUID notification through its Laravel read endpoint", async () => {
@@ -1217,7 +1279,13 @@ describe("similarity API", () => {
       async (input: RequestInfo | URL, init?: RequestInit) => {
         void input;
         void init;
-        return new Response(JSON.stringify({ data: [] }));
+        return new Response(
+          JSON.stringify({
+            data: [],
+            extracted_text: "CHAPTER 1\nManuscript text",
+            file_name: "draft.pdf",
+          }),
+        );
       },
     );
     const file = new File(["manuscript"], "draft.pdf", {
@@ -1225,8 +1293,12 @@ describe("similarity API", () => {
     });
 
     await expect(
-      checkContentUploadSimilarity(file, fetchMock),
-    ).resolves.toEqual([]);
+      checkContentUploadSimilarity([file], fetchMock),
+    ).resolves.toEqual({
+      matches: [],
+      extractedText: "CHAPTER 1\nManuscript text",
+      fileName: "draft.pdf",
+    });
 
     const [, init] = fetchMock.mock.calls[0];
     expect(fetchMock).toHaveBeenCalledWith(
@@ -1235,6 +1307,7 @@ describe("similarity API", () => {
     );
     expect(init?.body).toBeInstanceOf(FormData);
     expect((init?.body as FormData).get("file")).toBe(file);
+    expect((init?.body as FormData).get("mode")).toBe("file");
     expect(init?.headers).not.toHaveProperty("Content-Type");
   });
 });

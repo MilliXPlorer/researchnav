@@ -9,6 +9,7 @@ export default function ManuscriptFilePicker({
   disabled = false,
   inputRef,
   onChange,
+  onChooseFolder,
 }: {
   label: string;
   help: string;
@@ -17,6 +18,7 @@ export default function ManuscriptFilePicker({
   disabled?: boolean;
   inputRef?: Ref<HTMLInputElement>;
   onChange: ChangeEventHandler<HTMLInputElement>;
+  onChooseFolder?: () => void;
 }) {
   return (
     <label className={`manuscript-picker${disabled ? " is-disabled" : ""}`}>
@@ -29,8 +31,23 @@ export default function ManuscriptFilePicker({
           <strong>{file ? file.name : "Choose manuscript file"}</strong>
           <small>{file ? `${formatFileSize(file.size)} selected` : help}</small>
         </span>
-        <span className="manuscript-picker-action">
-          {file ? "Replace" : "Browse"}
+        <span className="manuscript-picker-actions">
+          {onChooseFolder && (
+            <button
+              type="button"
+              className="manuscript-picker-folder-action"
+              disabled={disabled}
+              onClick={(event) => {
+                event.preventDefault();
+                onChooseFolder();
+              }}
+            >
+              Select PDF folder
+            </button>
+          )}
+          <span className="manuscript-picker-action">
+            {file ? "Replace file" : "Select one file"}
+          </span>
         </span>
       </span>
       <input

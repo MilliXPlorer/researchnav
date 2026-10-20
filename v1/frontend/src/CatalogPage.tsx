@@ -338,7 +338,7 @@ export default function CatalogPage({
       return [...filtered].sort((a, b) => b.year - a.year);
     if (searchParams.get("sort") === "oldest")
       return [...filtered].sort((a, b) => a.year - b.year);
-    return filtered;
+    return [...filtered].sort((a, b) => Number(a.id) - Number(b.id));
   }, [
     records,
     similarityRecords,
@@ -576,10 +576,10 @@ export default function CatalogPage({
                 />
               )
             ) : (
-              results.map((record) => (
+              results.map((record, index) => (
                 <article className="result-card" key={record.id}>
                   <div className="result-accession">
-                    <span>{record.id}</span>
+                    <span>{index + 1}</span>
                     <span>{record.category}</span>
                   </div>
                   <h2>{record.title}</h2>

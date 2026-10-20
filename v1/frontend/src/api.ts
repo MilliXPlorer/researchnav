@@ -410,17 +410,6 @@ export interface FeedbackResource {
   created_at: string | null;
 }
 
-export interface DocxPreviewResource {
-  schema_version: 1;
-  research_document_id: number;
-  document_file_id: number;
-  document_file_version: number;
-  filename: string;
-  mime_type: string;
-  paragraphs: Array<{ index: number; text: string; truncated: boolean }>;
-  truncated: boolean;
-}
-
 export interface FeedbackInput {
   comment: string;
   feedback_type: FeedbackResource["feedback_type"];
@@ -895,20 +884,6 @@ export function researchFilePreviewUrl(
   return `${researchPath(researchDocumentId)}/files/${encodeURIComponent(String(fileId))}/preview`;
 }
 
-export async function getDocxPreview(
-  researchDocumentId: string | number,
-  fileId: string | number,
-  fetcher: ApiFetch = globalThis.fetch,
-): Promise<DocxPreviewResource> {
-  return (
-    await apiRequest<{ data: DocxPreviewResource }>(
-      `${researchPath(researchDocumentId)}/files/${encodeURIComponent(String(fileId))}/preview-content`,
-      undefined,
-      fetcher,
-    )
-  ).data;
-}
-
 export function repositoryDownloadUrl(researchDocumentId: string | number) {
   return `/api/repository/${encodeURIComponent(String(researchDocumentId))}/download`;
 }
@@ -1133,16 +1108,29 @@ export async function listProvisionedAccounts(
   ).users;
 }
 
-export async function listNotifications(): Promise<NotificationResource[]> {
+export async function getNotificationUnreadCount(
+  signal?: AbortSignal,
+): Promise<number> {
+  const response = await apiRequest<{ unread_count: number }>(
+    "/api/notifications/unread-count",
+    { signal },
+  );
+  return response.unread_count;
+}
+
+export async function listNotifications(
+  signal?: AbortSignal,
+): Promise<NotificationResource[]> {
   const notifications: NotificationResource[] = [];
   let next: string | null = "/api/notifications";
   const maxPages = 100;
 
   for (let page = 0; next && page < maxPages; page += 1) {
+    signal?.throwIfAborted();
     const response = await apiRequest<{
       data?: NotificationResource[];
       links?: { next?: string | null };
-    }>(next);
+    }>(next, { signal });
     notifications.push(...(response.data ?? []));
     next = normalizeNextPath(response.links?.next ?? null);
   }
@@ -1428,6 +1416,12 @@ export interface PublicRepositorySimilarityResponse {
   data?: PublicRepositorySimilarityResource[];
   links?: LaravelPaginationLinks;
   meta?: LaravelPaginationMeta;
+}
+
+export interface ContentUploadSimilarityResult {
+  matches: ResearchRecord[];
+  extractedText: string;
+  fileName: string;
 }
 
 export interface PublicRepositorySimilaritySearch {
@@ -1723,18 +1717,35 @@ export async function checkContentQuerySimilarity(
 }
 
 export async function checkContentUploadSimilarity(
-  file: File,
+  files: File[],
   fetcher: ApiFetch = globalThis.fetch,
   signal?: AbortSignal,
-): Promise<ResearchRecord[]> {
+): Promise<ContentUploadSimilarityResult> {
   const body = new FormData();
-  body.append("file", file);
-  const response = await apiRequest<PublicRepositorySimilarityResponse>(
+  if (files.length === 1) {
+    body.append("file", files[0]);
+    body.append("mode", "file");
+  } else {
+    body.append("mode", "folder");
+    files.forEach((file) => body.append("files[]", file));
+  }
+  const response = await apiRequest<
+    PublicRepositorySimilarityResponse & {
+      extracted_text?: string;
+      file_name?: string;
+    }
+  >(
     "/api/similarity/content-upload",
     { method: "POST", body, signal },
     fetcher,
   );
-  return (response.data ?? []).map(toResearchRecord);
+  return {
+    matches: (response.data ?? []).map(toResearchRecord),
+    extractedText: response.extracted_text ?? "",
+    fileName:
+      response.file_name ??
+      (files.length === 1 ? files[0].name : `${files.length} PDF files`),
+  };
 }
 
 export async function listPersistedSimilarityResults(

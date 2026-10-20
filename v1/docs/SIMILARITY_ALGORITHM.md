@@ -122,7 +122,7 @@ MariaDB uses the private `manuscript_search_documents.body_text` FULLTEXT index
 with natural-language mode for BM25-family relevance ordering. SQLite uses a
 LIKE fallback and therefore has different ranking behavior. The latest current
 `final_manuscript` is authoritative; a canonical import is used only as a
-cryptographically and path-verified fallback. PDF and DOCX are supported. DOC
+cryptographically and path-verified legacy fallback. New uploads and active extraction support PDF only. DOC and DOCX
 is unsupported, and scanned/OCR-dependent PDFs produce no extractable text.
 
 The projection stores private derived `LONGTEXT`, never a public body or

@@ -14,6 +14,8 @@ class ManuscriptSearchProjectionService
 
     private const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
+    private const DOC_MIME = 'application/msword';
+
     private const MAX_FINAL_SOURCE_FILES = 20;
 
     private const MAX_FINAL_SOURCE_BYTES = 400 * 1024 * 1024;
@@ -403,7 +405,7 @@ class ManuscriptSearchProjectionService
     {
         return ($extension === 'pdf' && $mime === self::PDF_MIME)
             || ($extension === 'docx' && $mime === self::DOCX_MIME)
-            || ($extension === 'doc' && $mime === 'application/msword');
+            || ($extension === 'doc' && $mime === self::DOC_MIME);
     }
 
     private function isEligible(ResearchDocument $document): bool
