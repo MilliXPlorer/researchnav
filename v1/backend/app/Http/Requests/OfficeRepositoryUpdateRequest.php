@@ -51,8 +51,16 @@ class OfficeRepositoryUpdateRequest extends FormRequest
                 return;
             }
 
+            if ($validator->errors()->has('institute') || $validator->errors()->has('degree_program')) {
+                return;
+            }
+
             $institute = $this->has('institute') ? $this->input('institute') : $current->institute;
             $program = $this->has('degree_program') ? $this->input('degree_program') : $current->degree_program;
+            if (! is_string($institute) || ! is_string($program)) {
+                return;
+            }
+
             if ($program !== null && ! in_array($program, ResearchDocument::PROGRAMS_BY_INSTITUTE[$institute] ?? [], true)) {
                 $validator->errors()->add('degree_program', 'Select a program offered by the chosen institute.');
             }
