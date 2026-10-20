@@ -306,6 +306,38 @@ describe("ManageRepository", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("shows rejected search errors on the search field", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("search=coastal")) {
+        return new Response(
+          JSON.stringify({
+            error: "VALIDATION_FAILED",
+            errors: {
+              search: ["The search field must not exceed 200 characters."],
+            },
+          }),
+          { status: 422 },
+        );
+      }
+      return new Response(JSON.stringify(page()));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ManageRepository />);
+    await screen.findByText(item.title);
+
+    const search = screen.getByLabelText("Search");
+    expect(search).toHaveAttribute("maxlength", "200");
+    fireEvent.change(search, { target: { value: "coastal" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+
+    expect(
+      await screen.findByText(
+        "The search field must not exceed 200 characters.",
+      ),
+    ).toBeInTheDocument();
+    expect(search).toHaveAttribute("aria-invalid", "true");
+  });
+
   it("keeps recycle records in the server-defined removal order", async () => {
     const fetchMock = installRepositoryFetch();
     render(<ManageRepository />);
