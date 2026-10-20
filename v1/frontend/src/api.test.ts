@@ -575,6 +575,22 @@ describe("administrator API", () => {
 });
 
 describe("office repository API", () => {
+  it("leaves the recycle bucket in its server-defined removal order", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => {
+      void _input;
+      return new Response(JSON.stringify({ data: [], links: {}, meta: {} }));
+    });
+
+    await listOfficeRepository(
+      { bucket: "recycle", sort: "updated_at", direction: "desc" },
+      fetchMock,
+    );
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "/api/office/repository?bucket=recycle",
+    );
+  });
+
   it("uses only the shared office routes and unwraps safe resource envelopes", async () => {
     const detail = { id: 12, title: "Safe record" };
     const page = {

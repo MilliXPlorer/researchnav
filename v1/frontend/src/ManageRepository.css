@@ -77,6 +77,12 @@
   font-size: 10px;
 }
 
+.manage-repository-field-error {
+  color: var(--rust);
+  font-size: 11px;
+  font-weight: 600;
+}
+
 .manage-repository-modal {
   width: min(820px, 100%);
 }
@@ -213,6 +219,7 @@
   }
 
   .manage-repository-table-wrap {
+    min-width: 0;
     overflow: visible;
   }
 
@@ -248,6 +255,13 @@
     padding: 7px 12px;
     border: 0;
     overflow-wrap: anywhere;
+    min-width: 0;
+  }
+
+  .manage-repository-table-wrap table,
+  .manage-repository-table-wrap tbody,
+  .manage-repository-table-wrap tr {
+    min-width: 0;
   }
 
   .manage-repository-table-wrap td::before {

@@ -1318,14 +1318,19 @@ export function listOfficeRepository(
   fetcher: ApiFetch = globalThis.fetch,
   signal?: AbortSignal,
 ): Promise<LaravelPaginatedResponse<OfficeRepositoryItemResource>> {
+  // The recycle bucket's server-defined order is by removal time. `updated_at`
+  // is not a meaningful replacement for that order and is not a supported
+  // default sort for this bucket.
+  const omitRecycleDefaultSort =
+    input.bucket === "recycle" && input.sort === "updated_at";
   return apiRequest(
     adminQuery(officeRepositoryPath(), {
       bucket: input.bucket ?? "ongoing",
       search: input.search?.trim(),
       institute: input.institute,
       publication_year: input.publication_year,
-      sort: input.sort,
-      direction: input.direction,
+      sort: omitRecycleDefaultSort ? undefined : input.sort,
+      direction: omitRecycleDefaultSort ? undefined : input.direction,
       page: input.page,
       per_page: input.per_page,
     }),

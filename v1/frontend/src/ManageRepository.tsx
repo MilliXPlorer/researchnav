@@ -10,22 +10,28 @@ import {
   ApiError,
   deleteOfficeRepository,
   getOfficeRepositoryDetail,
+  listCategories,
   listOfficeRepository,
   restoreOfficeRepository,
   updateOfficeRepository,
   type OfficeRepositoryBucket,
+  type CategoryResource,
   type OfficeRepositoryDetailResource,
   type OfficeRepositoryItemResource,
   type OfficeRepositoryUpdateInput,
 } from "./api";
 import { Button, Pagination, SortableHeader } from "./components";
+import { instituteNames, programsByInstitute } from "./data";
 import { formatPhilippineDateTime } from "./dateTime";
 import { ConfirmDialog, Modal } from "./Modal";
 import ResearchOfficeBulkImport from "./ResearchOfficeBulkImport";
+import { SdgSelector } from "./SdgMetadata";
 import "./ManageRepository.css";
 
 type View = OfficeRepositoryBucket | "import";
 type Sort = "title" | "publication_year" | "updated_at";
+type FilterValues = { search: string; institute: string; year: string };
+type FieldErrors = Record<string, string[]>;
 
 const views: Array<{ value: View; label: string }> = [
   { value: "ongoing", label: "Ongoing" },
@@ -33,6 +39,17 @@ const views: Array<{ value: View; label: string }> = [
   { value: "recycle", label: "Recycle Bin" },
   { value: "import", label: "Import manuscripts" },
 ];
+
+// This view must offer every pair accepted by ResearchDocument::PROGRAMS_BY_INSTITUTE.
+// Shared data is missing the Information Technology program, so correct it locally
+// without changing choices used by unrelated screens.
+const repositoryProgramsByInstitute = {
+  ...programsByInstitute,
+  "Institute of Computer Studies": [
+    ...programsByInstitute["Institute of Computer Studies"],
+    "Bachelor of Science in Information Technology",
+  ],
+} satisfies Record<(typeof instituteNames)[number], readonly string[]>;
 
 function friendlyError(error: unknown, fallback: string) {
   if (!(error instanceof ApiError)) return fallback;
@@ -74,6 +91,37 @@ function initialDraft(
   };
 }
 
+function draftIsDirty(
+  draft: OfficeRepositoryUpdateInput,
+  detail: OfficeRepositoryDetailResource | null,
+) {
+  return (
+    detail !== null &&
+    JSON.stringify(draft) !== JSON.stringify(initialDraft(detail))
+  );
+}
+
+function FieldError({ messages }: { messages?: string[] }) {
+  if (!messages?.length) return null;
+  return (
+    <span className="manage-repository-field-error" role="alert">
+      {messages.join(" ")}
+    </span>
+  );
+}
+
+function normalizeFieldErrors(fields?: FieldErrors): FieldErrors {
+  if (!fields) return {};
+  return Object.entries(fields).reduce<FieldErrors>(
+    (normalized, [key, messages]) => {
+      const field = key.split(".", 1)[0];
+      normalized[field] = [...(normalized[field] ?? []), ...messages];
+      return normalized;
+    },
+    {},
+  );
+}
+
 /** Shared Admin and Research Office repository management workspace. */
 export default function ManageRepository({
   contextLabel = "Research Office",
@@ -85,9 +133,16 @@ export default function ManageRepository({
   const [meta, setMeta] = useState<
     Awaited<ReturnType<typeof listOfficeRepository>>["meta"] | null
   >(null);
-  const [search, setSearch] = useState("");
-  const [institute, setInstitute] = useState("");
-  const [year, setYear] = useState("");
+  const [filterDraft, setFilterDraft] = useState<FilterValues>({
+    search: "",
+    institute: "",
+    year: "",
+  });
+  const [appliedFilters, setAppliedFilters] = useState<FilterValues>({
+    search: "",
+    institute: "",
+    year: "",
+  });
   const [sort, setSort] = useState<Sort>("updated_at");
   const [direction, setDirection] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
@@ -101,6 +156,7 @@ export default function ManageRepository({
   const [detailVersion, setDetailVersion] = useState(0);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
+  const [detailFieldErrors, setDetailFieldErrors] = useState<FieldErrors>({});
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<OfficeRepositoryUpdateInput>({});
   const [saving, setSaving] = useState(false);
@@ -109,6 +165,8 @@ export default function ManageRepository({
   );
   const requestGeneration = useRef(0);
   const detailGeneration = useRef(0);
+  const [categories, setCategories] = useState<CategoryResource[] | null>(null);
+  const [categoryOptionsError, setCategoryOptionsError] = useState("");
 
   const isImport = view === "import";
   const bucket = isImport ? "ongoing" : view;
@@ -122,6 +180,9 @@ export default function ManageRepository({
   function openDetail(id: number) {
     setDetailLoading(true);
     setDetailError("");
+    setDetailFieldErrors({});
+    setCategories(null);
+    setCategoryOptionsError("");
     setSelected(null);
     setEditing(false);
     setDetailVersion((version) => version + 1);
@@ -135,11 +196,13 @@ export default function ManageRepository({
     void listOfficeRepository(
       {
         bucket,
-        search,
-        institute,
-        publication_year: year ? Number(year) : undefined,
-        sort,
-        direction,
+        search: appliedFilters.search,
+        institute: appliedFilters.institute,
+        publication_year: appliedFilters.year
+          ? Number(appliedFilters.year)
+          : undefined,
+        sort: bucket === "recycle" ? undefined : sort,
+        direction: bucket === "recycle" ? undefined : direction,
         page,
         per_page: 25,
       },
@@ -168,17 +231,7 @@ export default function ManageRepository({
         if (generation === requestGeneration.current) setLoading(false);
       });
     return () => controller.abort();
-  }, [
-    bucket,
-    direction,
-    institute,
-    isImport,
-    page,
-    reloadVersion,
-    search,
-    sort,
-    year,
-  ]);
+  }, [bucket, appliedFilters, direction, isImport, page, reloadVersion, sort]);
 
   useEffect(() => {
     if (selectedId === null) return;
@@ -206,23 +259,66 @@ export default function ManageRepository({
     return () => controller.abort();
   }, [detailVersion, selectedId]);
 
+  useEffect(() => {
+    if (!editing) return;
+    let cancelled = false;
+    void listCategories()
+      .then((values) => {
+        if (!cancelled) {
+          setCategories(values.filter((category) => category.is_active));
+          setCategoryOptionsError("");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCategories(null);
+          setCategoryOptionsError(
+            "Category options are unavailable. The current category is preserved; refresh and try again before changing it.",
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [editing]);
+
   function changeView(next: View) {
+    if (next === view) return;
     setView(next);
     setPage(1);
     setSelectedId(null);
     setConfirming(null);
     setError("");
     setLoading(true);
+    setSort("updated_at");
+    setDirection("desc");
   }
 
   function applyFilters(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setAppliedFilters({
+      search: filterDraft.search.trim(),
+      institute: filterDraft.institute.trim(),
+      year: filterDraft.year.trim(),
+    });
     setPage(1);
     setLoading(true);
-    reload();
+    setError("");
+    setReloadVersion((version) => version + 1);
+  }
+
+  function resetFilters() {
+    const empty = { search: "", institute: "", year: "" };
+    setFilterDraft(empty);
+    setAppliedFilters(empty);
+    setPage(1);
+    setLoading(true);
+    setError("");
+    setReloadVersion((version) => version + 1);
   }
 
   function changeSort(next: Sort) {
+    if (bucket === "recycle") return;
     setPage(1);
     setLoading(true);
     if (sort === next)
@@ -241,6 +337,7 @@ export default function ManageRepository({
     }
     setSaving(true);
     setDetailError("");
+    setDetailFieldErrors({});
     try {
       const updated = await updateOfficeRepository(selected.id, {
         ...draft,
@@ -252,6 +349,9 @@ export default function ManageRepository({
       setNotice(`Saved metadata for ${updated.title}.`);
       reload();
     } catch (requestError) {
+      if (requestError instanceof ApiError) {
+        setDetailFieldErrors(normalizeFieldErrors(requestError.fields));
+      }
       setDetailError(
         friendlyError(requestError, "Metadata could not be saved"),
       );
@@ -318,9 +418,32 @@ export default function ManageRepository({
             key={item.value}
             type="button"
             role="tab"
+            id={`repository-view-${item.value}-tab`}
+            aria-controls={`repository-view-${item.value}-panel`}
             aria-selected={view === item.value}
+            tabIndex={view === item.value ? 0 : -1}
             className={view === item.value ? "is-active" : ""}
             onClick={() => changeView(item.value)}
+            onKeyDown={(event) => {
+              const current = views.findIndex(({ value }) => value === view);
+              const nextIndex =
+                event.key === "ArrowRight"
+                  ? (current + 1) % views.length
+                  : event.key === "ArrowLeft"
+                    ? (current - 1 + views.length) % views.length
+                    : event.key === "Home"
+                      ? 0
+                      : event.key === "End"
+                        ? views.length - 1
+                        : null;
+              if (nextIndex === null) return;
+              event.preventDefault();
+              const nextView = views[nextIndex];
+              changeView(nextView.value);
+              document
+                .getElementById(`repository-view-${nextView.value}-tab`)
+                ?.focus();
+            }}
           >
             {item.label}
           </button>
@@ -328,9 +451,18 @@ export default function ManageRepository({
       </div>
 
       {isImport ? (
-        <ResearchOfficeBulkImport contextLabel={contextLabel} />
+        <section
+          id="repository-view-import-panel"
+          role="tabpanel"
+          aria-labelledby="repository-view-import-tab"
+        >
+          <ResearchOfficeBulkImport contextLabel={contextLabel} />
+        </section>
       ) : (
         <section
+          id={`repository-view-${view}-panel`}
+          role="tabpanel"
+          aria-labelledby={`repository-view-${view}-tab`}
           className="panel-card admin-data-card manage-repository-card"
           aria-busy={loading}
         >
@@ -353,22 +485,26 @@ export default function ManageRepository({
             <label>
               Search
               <input
-                value={search}
-                onChange={(event) => {
-                  setLoading(true);
-                  setSearch(event.target.value);
-                }}
+                value={filterDraft.search}
+                onChange={(event) =>
+                  setFilterDraft((current) => ({
+                    ...current,
+                    search: event.target.value,
+                  }))
+                }
                 placeholder="Title, reference, or author"
               />
             </label>
             <label>
               Institute
               <input
-                value={institute}
-                onChange={(event) => {
-                  setLoading(true);
-                  setInstitute(event.target.value);
-                }}
+                value={filterDraft.institute}
+                onChange={(event) =>
+                  setFilterDraft((current) => ({
+                    ...current,
+                    institute: event.target.value,
+                  }))
+                }
                 placeholder="All institutes"
               />
             </label>
@@ -377,16 +513,21 @@ export default function ManageRepository({
               <input
                 inputMode="numeric"
                 pattern="[0-9]*"
-                value={year}
-                onChange={(event) => {
-                  setLoading(true);
-                  setYear(event.target.value.replace(/\D/g, ""));
-                }}
+                value={filterDraft.year}
+                onChange={(event) =>
+                  setFilterDraft((current) => ({
+                    ...current,
+                    year: event.target.value.replace(/\D/g, ""),
+                  }))
+                }
                 placeholder="All years"
               />
             </label>
             <Button type="submit" variant="secondary">
               Apply filters
+            </Button>
+            <Button type="button" variant="secondary" onClick={resetFilters}>
+              Reset filters
             </Button>
           </form>
           {notice && (
@@ -422,32 +563,44 @@ export default function ManageRepository({
                   </caption>
                   <thead>
                     <tr>
-                      <SortableHeader
-                        sortKey="title"
-                        activeSort={sort}
-                        direction={direction}
-                        onSort={() => changeSort("title")}
-                      >
-                        Title
-                      </SortableHeader>
+                      {view === "recycle" ? (
+                        <th>Title</th>
+                      ) : (
+                        <SortableHeader
+                          sortKey="title"
+                          activeSort={sort}
+                          direction={direction}
+                          onSort={() => changeSort("title")}
+                        >
+                          Title
+                        </SortableHeader>
+                      )}
                       <th>Authors</th>
-                      <SortableHeader
-                        sortKey="publication_year"
-                        activeSort={sort}
-                        direction={direction}
-                        onSort={() => changeSort("publication_year")}
-                      >
-                        Year
-                      </SortableHeader>
+                      {view === "recycle" ? (
+                        <th>Year</th>
+                      ) : (
+                        <SortableHeader
+                          sortKey="publication_year"
+                          activeSort={sort}
+                          direction={direction}
+                          onSort={() => changeSort("publication_year")}
+                        >
+                          Year
+                        </SortableHeader>
+                      )}
                       <th>Institute</th>
-                      <SortableHeader
-                        sortKey="updated_at"
-                        activeSort={sort}
-                        direction={direction}
-                        onSort={() => changeSort("updated_at")}
-                      >
-                        {view === "recycle" ? "Removed" : "Updated"}
-                      </SortableHeader>
+                      {view === "recycle" ? (
+                        <th>Removed</th>
+                      ) : (
+                        <SortableHeader
+                          sortKey="updated_at"
+                          activeSort={sort}
+                          direction={direction}
+                          onSort={() => changeSort("updated_at")}
+                        >
+                          Updated
+                        </SortableHeader>
+                      )}
                       <th>Actions</th>
                     </tr>
                   </thead>
@@ -520,6 +673,7 @@ export default function ManageRepository({
           label="Repository record details"
           onClose={() => setSelectedId(null)}
           busy={saving}
+          dirty={editing && draftIsDirty(draft, selected)}
           size="large"
           className="manage-repository-modal"
         >
@@ -547,12 +701,21 @@ export default function ManageRepository({
                 draft={draft}
                 setDraft={setDraft}
                 error={detailError}
+                fieldErrors={detailFieldErrors}
+                categories={categories}
+                categoryOptionsError={categoryOptionsError}
                 saving={saving}
-                onEdit={() => setEditing(true)}
+                onEdit={() => {
+                  setCategories(null);
+                  setCategoryOptionsError("");
+                  setDetailFieldErrors({});
+                  setEditing(true);
+                }}
                 onCancel={() => {
                   setDraft(initialDraft(selected));
                   setEditing(false);
                   setDetailError("");
+                  setDetailFieldErrors({});
                 }}
                 onSave={() => void save()}
                 onDelete={() => setConfirming("delete")}
@@ -592,6 +755,9 @@ function RepositoryDetail({
   draft,
   setDraft,
   error,
+  fieldErrors,
+  categories,
+  categoryOptionsError,
   saving,
   onEdit,
   onCancel,
@@ -604,6 +770,9 @@ function RepositoryDetail({
   draft: OfficeRepositoryUpdateInput;
   setDraft: Dispatch<SetStateAction<OfficeRepositoryUpdateInput>>;
   error: string;
+  fieldErrors: FieldErrors;
+  categories: CategoryResource[] | null;
+  categoryOptionsError: string;
   saving: boolean;
   onEdit: () => void;
   onCancel: () => void;
@@ -615,6 +784,14 @@ function RepositoryDetail({
     key: K,
     value: OfficeRepositoryUpdateInput[K],
   ) => setDraft((current) => ({ ...current, [key]: value }));
+  const selectedInstitute = draft.institute ?? "";
+  const programOptions =
+    repositoryProgramsByInstitute[
+      selectedInstitute as keyof typeof programsByInstitute
+    ] ?? [];
+  const selectedCategory = categories?.find(
+    (category) => category.id === draft.category_id,
+  );
   return (
     <div className="manage-repository-detail">
       <header>
@@ -648,26 +825,35 @@ function RepositoryDetail({
               value={draft.title ?? ""}
               maxLength={500}
               required
+              aria-invalid={Boolean(fieldErrors.title)}
               onChange={(event) => update("title", event.target.value)}
             />
+            <FieldError messages={fieldErrors.title} />
           </label>
           <label>
             Abstract
             <textarea
               value={draft.abstract ?? ""}
+              maxLength={50000}
+              rows={5}
+              aria-invalid={Boolean(fieldErrors.abstract)}
               onChange={(event) =>
                 update("abstract", event.target.value || null)
               }
             />
+            <FieldError messages={fieldErrors.abstract} />
           </label>
           <label>
             Keywords
             <input
               value={draft.keywords ?? ""}
+              maxLength={5000}
+              aria-invalid={Boolean(fieldErrors.keywords)}
               onChange={(event) =>
                 update("keywords", event.target.value || null)
               }
             />
+            <FieldError messages={fieldErrors.keywords} />
           </label>
           <div className="manage-repository-field-grid">
             <label>
@@ -675,6 +861,10 @@ function RepositoryDetail({
               <input
                 type="number"
                 value={draft.publication_year ?? ""}
+                min={1901}
+                max={2155}
+                step={1}
+                aria-invalid={Boolean(fieldErrors.publication_year)}
                 onChange={(event) =>
                   update(
                     "publication_year",
@@ -682,51 +872,111 @@ function RepositoryDetail({
                   )
                 }
               />
+              <FieldError messages={fieldErrors.publication_year} />
             </label>
             <label>
-              Category ID
-              <input
-                type="number"
+              Category
+              <select
                 value={draft.category_id ?? ""}
+                disabled={saving || categories === null}
+                aria-invalid={Boolean(fieldErrors.category_id)}
                 onChange={(event) =>
                   update(
                     "category_id",
                     event.target.value ? Number(event.target.value) : null,
                   )
                 }
-              />
+              >
+                <option value="">Uncategorized</option>
+                {draft.category_id !== null &&
+                  draft.category_id !== undefined &&
+                  !selectedCategory && (
+                    <option value={draft.category_id}>
+                      {detail.category?.name ??
+                        `Current category (${draft.category_id})`}
+                    </option>
+                  )}
+                {categories?.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+              {categories === null && !categoryOptionsError && (
+                <small>Loading category options…</small>
+              )}
+              {categoryOptionsError && <small>{categoryOptionsError}</small>}
+              <FieldError messages={fieldErrors.category_id} />
             </label>
             <label>
               Institute
-              <input
-                value={draft.institute ?? ""}
-                onChange={(event) =>
-                  update("institute", event.target.value || null)
-                }
-              />
+              <select
+                value={selectedInstitute}
+                aria-invalid={Boolean(fieldErrors.institute)}
+                onChange={(event) => {
+                  update("institute", event.target.value || null);
+                  update("degree_program", null);
+                }}
+              >
+                <option value="">Unclassified</option>
+                {selectedInstitute &&
+                  !instituteNames.includes(selectedInstitute as never) && (
+                    <option value={selectedInstitute} disabled>
+                      {selectedInstitute} (unavailable)
+                    </option>
+                  )}
+                {instituteNames.map((institute) => (
+                  <option key={institute} value={institute}>
+                    {institute}
+                  </option>
+                ))}
+              </select>
+              <FieldError messages={fieldErrors.institute} />
             </label>
             <label>
               Degree program
-              <input
+              <select
                 value={draft.degree_program ?? ""}
+                disabled={
+                  saving || !selectedInstitute || programOptions.length === 0
+                }
+                aria-invalid={Boolean(fieldErrors.degree_program)}
                 onChange={(event) =>
                   update("degree_program", event.target.value || null)
                 }
-              />
+              >
+                <option value="">Not specified</option>
+                {draft.degree_program &&
+                  !programOptions.includes(draft.degree_program) && (
+                    <option value={draft.degree_program} disabled>
+                      {draft.degree_program} (not offered by this institute)
+                    </option>
+                  )}
+                {programOptions.map((program) => (
+                  <option key={program} value={program}>
+                    {program}
+                  </option>
+                ))}
+              </select>
+              <FieldError messages={fieldErrors.degree_program} />
             </label>
             <label>
               Manuscript date label
               <input
                 value={draft.manuscript_date_label ?? ""}
+                maxLength={50}
+                aria-invalid={Boolean(fieldErrors.manuscript_date_label)}
                 onChange={(event) =>
                   update("manuscript_date_label", event.target.value || null)
                 }
               />
+              <FieldError messages={fieldErrors.manuscript_date_label} />
             </label>
             <label>
               Research stage
               <select
                 value={draft.research_stage ?? "ongoing"}
+                aria-invalid={Boolean(fieldErrors.research_stage)}
                 onChange={(event) =>
                   update(
                     "research_stage",
@@ -739,24 +989,21 @@ function RepositoryDetail({
                 <option value="ongoing">Ongoing</option>
                 <option value="completed">Completed</option>
               </select>
+              <FieldError messages={fieldErrors.research_stage} />
             </label>
           </div>
-          <label>
-            SDG IDs <small>Comma-separated goal IDs</small>
-            <input
-              value={(draft.sdg_ids ?? []).join(", ")}
-              inputMode="numeric"
-              onChange={(event) =>
-                update(
-                  "sdg_ids",
-                  event.target.value
-                    .split(",")
-                    .map((value) => Number(value.trim()))
-                    .filter((value) => Number.isInteger(value) && value > 0),
-                )
-              }
+          <div
+            role="group"
+            aria-label="SDG selection"
+            aria-invalid={Boolean(fieldErrors.sdg_ids)}
+          >
+            <SdgSelector
+              selectedIds={draft.sdg_ids ?? []}
+              onChange={(sdgIds) => update("sdg_ids", sdgIds)}
+              disabled={saving}
             />
-          </label>
+          </div>
+          <FieldError messages={fieldErrors.sdg_ids} />
           <div className="modal-actions">
             <Button
               type="button"
