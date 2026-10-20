@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
   getSystemStatus,
+  getOfficeRepositoryDetail,
   getRoleDashboard,
   getNotificationUnreadCount,
   getInternalResearch,
@@ -58,8 +59,12 @@ import {
   decideCompliance,
   getInstitutionalReport,
   listOfficeUsers,
+  listOfficeRepository,
   listRepositoryCatalog,
   updateOfficeUserAccess,
+  updateOfficeRepository,
+  deleteOfficeRepository,
+  restoreOfficeRepository,
   updateOwnProfile,
   updateInternalResearch,
   updateAdminUser,
@@ -68,7 +73,7 @@ import {
   uploadResearchFile,
   uploadOwnProfilePhoto,
 } from "./api";
-import type { RoleDashboard } from "./api";
+import type { OfficeRepositoryDetailResource, RoleDashboard } from "./api";
 
 const profileSession = {
   email: "ada@example.test",
@@ -566,6 +571,133 @@ describe("administrator API", () => {
       "/api/admin/users/uuid%2Fwith%20space",
       expect.objectContaining({ method: "DELETE" }),
     );
+  });
+});
+
+describe("office repository API", () => {
+  it("leaves the recycle bucket in its server-defined removal order", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => {
+      void _input;
+      return new Response(JSON.stringify({ data: [], links: {}, meta: {} }));
+    });
+
+    await listOfficeRepository(
+      { bucket: "recycle", sort: "updated_at", direction: "desc" },
+      fetchMock,
+    );
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "/api/office/repository?bucket=recycle",
+    );
+  });
+
+  it("uses only the shared office routes and unwraps safe resource envelopes", async () => {
+    const detail: OfficeRepositoryDetailResource = {
+      id: 12,
+      submission_reference: null,
+      title: "Safe record",
+      publication_year: 2026,
+      institute: "Institute of Computer Studies",
+      research_stage: "ongoing",
+      submission_status: "approved",
+      archive_status: "not_archived",
+      visibility: "private",
+      updated_at: null,
+      deleted_at: null,
+      can_edit: true,
+      can_delete: true,
+      can_restore: false,
+      category_id: null,
+      category: null,
+      abstract: null,
+      keywords: null,
+      degree_program: null,
+      manuscript_date_label: null,
+      sdgs: [],
+      authors: [{ id: 4, author_name: "Ada Researcher", author_order: 1 }],
+      submitted_at: null,
+      approved_at: null,
+      archived_at: null,
+      files: [],
+    };
+    const page = {
+      data: [detail],
+      links: { first: null, last: null, prev: null, next: null },
+      meta: {
+        current_page: 2,
+        from: 26,
+        last_page: 2,
+        links: [],
+        path: "/api/office/repository",
+        per_page: 25,
+        to: 26,
+        total: 26,
+      },
+    };
+    const fetchMock = vi.fn(
+      async (path: RequestInfo | URL, _init?: RequestInit) => {
+        void _init;
+        return new Response(
+          JSON.stringify(
+            String(path).includes("?bucket") ? page : { data: detail },
+          ),
+        );
+      },
+    );
+
+    await expect(
+      listOfficeRepository(
+        {
+          bucket: "archived",
+          search: " coastal study ",
+          institute: "ICS",
+          publication_year: 2026,
+          sort: "title",
+          direction: "asc",
+          page: 2,
+          per_page: 25,
+        },
+        fetchMock,
+      ),
+    ).resolves.toEqual(page);
+    await expect(getOfficeRepositoryDetail("12/3", fetchMock)).resolves.toEqual(
+      detail,
+    );
+    await expect(
+      updateOfficeRepository(12, { title: "Updated", sdg_ids: [4] }, fetchMock),
+    ).resolves.toEqual(detail);
+    await expect(
+      deleteOfficeRepository(12, fetchMock),
+    ).resolves.toBeUndefined();
+    await expect(restoreOfficeRepository(12, fetchMock)).resolves.toEqual(
+      detail,
+    );
+
+    expect(
+      fetchMock.mock.calls.map(([path, init]) => ({
+        path: String(path),
+        method: (init as RequestInit).method ?? "GET",
+        body: (init as RequestInit).body,
+      })),
+    ).toEqual([
+      {
+        path: "/api/office/repository?bucket=archived&search=coastal+study&institute=ICS&publication_year=2026&sort=title&direction=asc&page=2&per_page=25",
+        method: "GET",
+        body: undefined,
+      },
+      { path: "/api/office/repository/12%2F3", method: "GET", body: undefined },
+      {
+        path: "/api/office/repository/12",
+        method: "PATCH",
+        body: JSON.stringify({ title: "Updated", sdg_ids: [4] }),
+      },
+      { path: "/api/office/repository/12", method: "DELETE", body: undefined },
+      {
+        path: "/api/office/repository/12/restore",
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    ]);
   });
 });
 

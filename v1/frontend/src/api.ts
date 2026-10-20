@@ -142,6 +142,84 @@ export interface LaravelPaginatedResponse<T> {
   meta: LaravelPaginationMeta;
 }
 
+/** Safe, office-only representation used by the Manage Repository workspace. */
+export interface OfficeRepositoryItemResource {
+  id: number;
+  submission_reference: string | null;
+  title: string;
+  publication_year: number | null;
+  institute: string | null;
+  research_stage: string | null;
+  submission_status: string | null;
+  archive_status: string | null;
+  visibility: string | null;
+  author_names: string[];
+  updated_at: string | null;
+  deleted_at: string | null;
+  can_edit: boolean;
+  can_delete: boolean;
+  can_restore: boolean;
+}
+
+export interface OfficeRepositoryFileResource {
+  id: number;
+  document_type: string;
+  upload_purpose: string | null;
+  version_number: number;
+  file_order: number | null;
+  original_filename: string;
+  file_extension: string;
+  mime_type: string;
+  file_size: number;
+  is_current: boolean;
+  uploaded_at: string | null;
+}
+
+export interface OfficeRepositoryDetailResource extends Omit<
+  OfficeRepositoryItemResource,
+  "author_names"
+> {
+  category_id: number | null;
+  category: { id: number; name: string } | null;
+  abstract: string | null;
+  keywords: string | null;
+  degree_program: string | null;
+  manuscript_date_label: string | null;
+  sdgs: SdgResource[];
+  authors: Array<{ id: number; author_name: string; author_order: number }>;
+  submitted_at: string | null;
+  approved_at: string | null;
+  archived_at: string | null;
+  files: OfficeRepositoryFileResource[];
+}
+
+export type OfficeRepositoryBucket = "ongoing" | "archived" | "recycle";
+
+export interface OfficeRepositoryListInput {
+  bucket?: OfficeRepositoryBucket;
+  search?: string;
+  institute?: string;
+  publication_year?: number;
+  sort?: "title" | "publication_year" | "updated_at";
+  direction?: "asc" | "desc";
+  page?: number;
+  per_page?: 10 | 25 | 50 | 100;
+}
+
+/** The only metadata fields accepted by the office repository update route. */
+export interface OfficeRepositoryUpdateInput {
+  category_id?: number | null;
+  title?: string;
+  abstract?: string | null;
+  keywords?: string | null;
+  publication_year?: number | null;
+  sdg_ids?: number[];
+  institute?: string | null;
+  degree_program?: string | null;
+  manuscript_date_label?: string | null;
+  research_stage?: "title_proposal" | "ongoing" | "completed";
+}
+
 /** The exact public representation from AdminAuditLogResource. */
 export interface AdminAuditLogResource {
   id: number;
@@ -1228,6 +1306,92 @@ function adminQuery(
   });
   const serialized = query.toString();
   return serialized ? `${path}?${serialized}` : path;
+}
+
+function officeRepositoryPath(researchDocumentId?: string | number) {
+  const base = "/api/office/repository";
+  return researchDocumentId === undefined
+    ? base
+    : `${base}/${encodeURIComponent(String(researchDocumentId))}`;
+}
+
+/** Lists one server-defined repository bucket. This endpoint is shared by Admin and Research Office. */
+export function listOfficeRepository(
+  input: OfficeRepositoryListInput = {},
+  fetcher: ApiFetch = globalThis.fetch,
+  signal?: AbortSignal,
+): Promise<LaravelPaginatedResponse<OfficeRepositoryItemResource>> {
+  // The recycle bucket's server-defined order is by removal time. `updated_at`
+  // is not a meaningful replacement for that order and is not a supported
+  // default sort for this bucket.
+  const omitRecycleDefaultSort =
+    input.bucket === "recycle" && input.sort === "updated_at";
+  return apiRequest(
+    adminQuery(officeRepositoryPath(), {
+      bucket: input.bucket ?? "ongoing",
+      search: input.search?.trim(),
+      institute: input.institute,
+      publication_year: input.publication_year,
+      sort: omitRecycleDefaultSort ? undefined : input.sort,
+      direction: omitRecycleDefaultSort ? undefined : input.direction,
+      page: input.page,
+      per_page: input.per_page,
+    }),
+    { signal },
+    fetcher,
+  );
+}
+
+export async function getOfficeRepositoryDetail(
+  researchDocumentId: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+  signal?: AbortSignal,
+): Promise<OfficeRepositoryDetailResource> {
+  return (
+    await apiRequest<{ data: OfficeRepositoryDetailResource }>(
+      officeRepositoryPath(researchDocumentId),
+      { signal },
+      fetcher,
+    )
+  ).data;
+}
+
+export async function updateOfficeRepository(
+  researchDocumentId: string | number,
+  input: OfficeRepositoryUpdateInput,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<OfficeRepositoryDetailResource> {
+  return (
+    await apiRequest<{ data: OfficeRepositoryDetailResource }>(
+      officeRepositoryPath(researchDocumentId),
+      { method: "PATCH", body: JSON.stringify(input) },
+      fetcher,
+    )
+  ).data;
+}
+
+export async function deleteOfficeRepository(
+  researchDocumentId: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<void> {
+  await apiRequest<void>(
+    officeRepositoryPath(researchDocumentId),
+    { method: "DELETE" },
+    fetcher,
+  );
+}
+
+export async function restoreOfficeRepository(
+  researchDocumentId: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<OfficeRepositoryDetailResource> {
+  return (
+    await apiRequest<{ data: OfficeRepositoryDetailResource }>(
+      `${officeRepositoryPath(researchDocumentId)}/restore`,
+      { method: "POST", body: JSON.stringify({}) },
+      fetcher,
+    )
+  ).data;
 }
 
 export function listAdminUsers(
