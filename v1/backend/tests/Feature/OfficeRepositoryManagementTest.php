@@ -281,6 +281,24 @@ class OfficeRepositoryManagementTest extends TestCase
         $this->assertSame('Institute of Computer Studies', $document->fresh()->institute);
     }
 
+    public function test_update_returns_the_validation_envelope_for_malformed_institute_and_degree_program_values(): void
+    {
+        $document = $this->document();
+        $office = $this->actor('research-office');
+
+        foreach ([
+            'institute' => [['unexpected' => 'value'], (object) ['unexpected' => 'value']],
+            'degree_program' => [['unexpected' => 'value'], (object) ['unexpected' => 'value']],
+        ] as $field => $malformedValues) {
+            foreach ($malformedValues as $value) {
+                $this->as($office)->patchJson('/api/office/repository/'.$document->id, [$field => $value], $this->origin())
+                    ->assertUnprocessable()
+                    ->assertJsonPath('error', 'VALIDATION_FAILED')
+                    ->assertJsonStructure(['error', 'errors' => [$field]]);
+            }
+        }
+    }
+
     public function test_delete_and_restore_preserve_source_data_timestamps_and_lifecycle_fields(): void
     {
         $document = $this->document([
