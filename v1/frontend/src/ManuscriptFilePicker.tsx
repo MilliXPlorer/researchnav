@@ -1,3 +1,4 @@
+import { useId, useState } from "react";
 import type { ChangeEventHandler, Ref } from "react";
 import { FileText, Upload } from "lucide-react";
 
@@ -10,6 +11,7 @@ export default function ManuscriptFilePicker({
   inputRef,
   onChange,
   onChooseFolder,
+  onDropFiles,
 }: {
   label: string;
   help: string;
@@ -19,9 +21,52 @@ export default function ManuscriptFilePicker({
   inputRef?: Ref<HTMLInputElement>;
   onChange: ChangeEventHandler<HTMLInputElement>;
   onChooseFolder?: () => void;
+  onDropFiles?: (files: File[]) => void;
 }) {
+  const inputId = useId();
+  const [dragging, setDragging] = useState(false);
+
   return (
-    <label className={`manuscript-picker${disabled ? " is-disabled" : ""}`}>
+    <div
+      className={`manuscript-picker${disabled ? " is-disabled" : ""}${dragging ? " is-dragging" : ""}`}
+      onDragEnter={(event) => {
+        event.preventDefault();
+        if (!disabled) setDragging(true);
+      }}
+      onDragOver={(event) => event.preventDefault()}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null))
+          setDragging(false);
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        setDragging(false);
+        if (disabled) return;
+        const handleFiles = (files: File[]) => {
+          if (!files.length) return;
+          if (onDropFiles) {
+            onDropFiles(files);
+            return;
+          }
+          const transfer = new DataTransfer();
+          transfer.items.add(files[0]);
+          const input = document.getElementById(
+            inputId,
+          ) as HTMLInputElement | null;
+          if (!input) return;
+          input.files = transfer.files;
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+        };
+        const directoryEntries = dropEntries(event.dataTransfer);
+        if (directoryEntries.some((entry) => entry.isDirectory)) {
+          void Promise.all(directoryEntries.map(readEntry)).then((files) =>
+            handleFiles(files.flat()),
+          );
+          return;
+        }
+        handleFiles(Array.from(event.dataTransfer.files));
+      }}
+    >
       <span className="manuscript-picker-label">{label}</span>
       <span className="manuscript-picker-surface">
         <span className="manuscript-picker-icon" aria-hidden="true">
@@ -29,7 +74,13 @@ export default function ManuscriptFilePicker({
         </span>
         <span className="manuscript-picker-copy">
           <strong>{file ? file.name : "Choose manuscript file"}</strong>
-          <small>{file ? `${formatFileSize(file.size)} selected` : help}</small>
+          <small>
+            {dragging
+              ? "Drop file here"
+              : file
+                ? `${formatFileSize(file.size)} selected · Drop to replace`
+                : `${help} · Or drop file here`}
+          </small>
         </span>
         <span className="manuscript-picker-actions">
           {onChooseFolder && (
@@ -45,12 +96,22 @@ export default function ManuscriptFilePicker({
               Select PDF folder
             </button>
           )}
-          <span className="manuscript-picker-action">
+          <button
+            type="button"
+            className="manuscript-picker-action"
+            disabled={disabled}
+            onClick={() =>
+              (
+                document.getElementById(inputId) as HTMLInputElement | null
+              )?.click()
+            }
+          >
             {file ? "Replace file" : "Select one file"}
-          </span>
+          </button>
         </span>
       </span>
       <input
+        id={inputId}
         ref={inputRef}
         aria-label={label}
         type="file"
@@ -58,8 +119,55 @@ export default function ManuscriptFilePicker({
         disabled={disabled}
         onChange={onChange}
       />
-    </label>
+    </div>
   );
+}
+
+type LegacyFileSystemEntry = {
+  isFile: boolean;
+  isDirectory: boolean;
+  file: (callback: (file: File) => void) => void;
+  createReader: () => {
+    readEntries: (callback: (entries: LegacyFileSystemEntry[]) => void) => void;
+  };
+};
+
+function dropEntries(dataTransfer: DataTransfer): LegacyFileSystemEntry[] {
+  const entries: LegacyFileSystemEntry[] = [];
+  for (const item of Array.from(dataTransfer.items ?? [])) {
+    const getEntry = (
+      item as DataTransferItem & {
+        webkitGetAsEntry?: () => unknown;
+      }
+    ).webkitGetAsEntry;
+    const entry = getEntry?.call(item);
+    if (entry) entries.push(entry as LegacyFileSystemEntry);
+  }
+  return entries;
+}
+
+function readEntry(entry: LegacyFileSystemEntry): Promise<File[]> {
+  if (entry.isFile) {
+    return new Promise((resolve) => entry.file((file) => resolve([file])));
+  }
+  if (!entry.isDirectory) return Promise.resolve([]);
+  const reader = entry.createReader();
+  return new Promise((resolve) => {
+    const entries: LegacyFileSystemEntry[] = [];
+    const readBatch = () => {
+      reader.readEntries((batch) => {
+        if (batch.length) {
+          entries.push(...batch);
+          readBatch();
+          return;
+        }
+        void Promise.all(entries.map(readEntry)).then((files) =>
+          resolve(files.flat()),
+        );
+      });
+    };
+    readBatch();
+  });
 }
 
 function formatFileSize(bytes: number): string {

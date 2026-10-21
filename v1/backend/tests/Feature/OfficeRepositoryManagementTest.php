@@ -105,15 +105,43 @@ class OfficeRepositoryManagementTest extends TestCase
             ->assertOk()
             ->assertJsonCount(2, 'data')
             ->assertJsonMissing(['id' => $archived->id])
-            ->assertJsonMissing(['id' => $recycledArchived->id]);
+            ->assertJsonMissing(['id' => $recycledArchived->id])
+            ->assertJsonPath('summary.all', 3)
+            ->assertJsonPath('summary.ongoing', 2)
+            ->assertJsonPath('summary.archived', 1)
+            ->assertJsonPath('summary.recycle', 1);
         $this->as($office)->getJson('/api/office/repository?bucket=archived')
             ->assertOk()
             ->assertJsonCount(1, 'data')
-            ->assertJsonPath('data.0.id', $archived->id);
+            ->assertJsonPath('data.0.id', $archived->id)
+            ->assertJsonPath('summary.all', 3)
+            ->assertJsonPath('summary.ongoing', 2)
+            ->assertJsonPath('summary.archived', 1)
+            ->assertJsonPath('summary.recycle', 1);
+        $this->as($office)->getJson('/api/office/repository?bucket=all')
+            ->assertOk()
+            ->assertJsonCount(3, 'data')
+            ->assertJsonMissing(['id' => $recycledArchived->id])
+            ->assertJsonPath('summary.all', 3)
+            ->assertJsonPath('summary.ongoing', 2)
+            ->assertJsonPath('summary.archived', 1)
+            ->assertJsonPath('summary.recycle', 1);
+        $this->as($office)->getJson('/api/office/repository?bucket=all&search=Pending')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $pending->id)
+            ->assertJsonPath('summary.all', 3)
+            ->assertJsonPath('summary.ongoing', 2)
+            ->assertJsonPath('summary.archived', 1)
+            ->assertJsonPath('summary.recycle', 1);
         $this->as($office)->getJson('/api/office/repository?bucket=recycle')
             ->assertOk()
             ->assertJsonCount(1, 'data')
-            ->assertJsonPath('data.0.id', $recycledArchived->id);
+            ->assertJsonPath('data.0.id', $recycledArchived->id)
+            ->assertJsonPath('summary.all', 3)
+            ->assertJsonPath('summary.ongoing', 2)
+            ->assertJsonPath('summary.archived', 1)
+            ->assertJsonPath('summary.recycle', 1);
 
         $this->as($office)->getJson('/api/office/repository?search=100%25%20Complete_Study')
             ->assertOk()
@@ -143,7 +171,7 @@ class OfficeRepositoryManagementTest extends TestCase
             ['search' => str_repeat('a', 201)],
             ['institute' => 'Unknown Institute'],
             ['publication_year' => 1900],
-            ['sort' => 'archive_status'],
+            ['sort' => 'unsupported_status'],
             ['direction' => 'sideways'],
             ['page' => 0],
             ['per_page' => 0],
@@ -223,6 +251,7 @@ class OfficeRepositoryManagementTest extends TestCase
             'institute' => 'Institute of Computer Studies',
             'degree_program' => 'Bachelor of Science in Computer Science',
             'sdg_ids' => [1, 2],
+            'authors' => ['Updated Researcher', 'Second Researcher'],
         ], $this->origin());
         $response->assertOk()
             ->assertHeader('Cache-Control', 'no-store, private')
@@ -232,6 +261,10 @@ class OfficeRepositoryManagementTest extends TestCase
         $document->refresh();
         $this->assertSame('Manually corrected by authorized Research Office personnel.', $document->abstract_provenance);
         $this->assertSame([1, 2], $document->sdgs()->pluck('sdgs.id')->all());
+        $this->assertSame(
+            ['Updated Researcher', 'Second Researcher'],
+            $document->authors()->orderBy('author_order')->pluck('author_name')->all(),
+        );
         $this->assertDatabaseHas('audit_logs', ['action' => 'OFFICE_REPOSITORY_UPDATED', 'entity_id' => (string) $document->id]);
         $this->assertDatabaseHas('monitoring_logs', ['activity_type' => 'OFFICE_REPOSITORY_UPDATED', 'research_document_id' => $document->id]);
         $auditDescription = AuditLog::query()
@@ -248,6 +281,63 @@ class OfficeRepositoryManagementTest extends TestCase
             'institute' => 'Institute of Computer Studies',
             'degree_program' => 'Bachelor of Science in Midwifery',
         ], $this->origin())->assertUnprocessable();
+    }
+
+    public function test_update_authors_preserves_existing_metadata_when_rows_are_renamed_or_reordered(): void
+    {
+        $document = $this->document();
+        $firstUser = $this->actor('researcher');
+        $secondUser = $this->actor('researcher');
+        $first = ResearchAuthor::query()->create([
+            'research_document_id' => $document->id,
+            'user_id' => $firstUser->id,
+            'author_name' => 'First Researcher',
+            'author_order' => 1,
+            'is_corresponding_author' => true,
+        ]);
+        $second = ResearchAuthor::query()->create([
+            'research_document_id' => $document->id,
+            'user_id' => $secondUser->id,
+            'author_name' => 'Second Researcher',
+            'author_order' => 2,
+            'is_corresponding_author' => false,
+        ]);
+        $this->as($this->actor('research-office'))->patchJson('/api/office/repository/'.$document->id, [
+            'authors' => ['Second Researcher', 'Renamed First Researcher', 'Added Researcher'],
+        ], $this->origin())->assertOk();
+
+        $this->assertDatabaseHas('research_authors', [
+            'id' => $second->id,
+            'author_name' => 'Second Researcher',
+            'author_order' => 1,
+            'user_id' => $secondUser->id,
+            'is_corresponding_author' => false,
+        ]);
+        $this->assertDatabaseHas('research_authors', [
+            'id' => $first->id,
+            'author_name' => 'Renamed First Researcher',
+            'author_order' => 2,
+            'user_id' => $firstUser->id,
+            'is_corresponding_author' => true,
+        ]);
+        $this->assertDatabaseHas('research_authors', [
+            'author_name' => 'Added Researcher',
+            'author_order' => 3,
+            'user_id' => null,
+            'is_corresponding_author' => false,
+        ]);
+
+        $this->as($this->actor('research-office'))->patchJson('/api/office/repository/'.$document->id, [
+            'authors' => ['Second Researcher'],
+        ], $this->origin())->assertOk();
+
+        $this->assertDatabaseHas('research_authors', [
+            'id' => $second->id,
+            'user_id' => $secondUser->id,
+            'is_corresponding_author' => false,
+        ]);
+        $this->assertDatabaseMissing('research_authors', ['id' => $first->id]);
+        $this->assertDatabaseMissing('research_authors', ['author_name' => 'Added Researcher']);
     }
 
     public function test_patch_only_revalidates_institute_program_when_the_pair_is_changed_and_rechecks_it_under_lock(): void

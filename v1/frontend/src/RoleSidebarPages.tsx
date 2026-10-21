@@ -168,7 +168,7 @@ const roles: AdminRole[] = [
   "research_editor",
   "research-office",
 ];
-import ResearchOfficeBulkImport from "./ResearchOfficeBulkImport";
+import ManageRepository from "./ManageRepository";
 
 const accessStatuses: AccessStatus[] = ["active", "invited", "blocked"];
 const researchStages = ["title_proposal", "ongoing", "completed"];
@@ -419,8 +419,8 @@ export default function RoleSidebarPage({
               initialMode={similarityMode}
             />
           );
-        case "Upload Manuscript":
-          return <ResearchOfficeBulkImport />;
+        case "Manage Repository":
+          return <ManageRepository contextLabel="Research Office" />;
 
         case "User & Role Management":
           return <OfficeUsers role={role} />;
@@ -9277,6 +9277,67 @@ function ResearcherSimilarityCheck({
                     directory: true,
                   });
                   input.click();
+                }}
+                onDropFiles={(selected) => {
+                  setState({ status: "idle" });
+                  setSubmitted("");
+                  const actualFiles = selected.filter(
+                    (item) =>
+                      item.name !== "" || item.type !== "" || item.size > 0,
+                  );
+                  if (
+                    actualFiles.some(
+                      (item) =>
+                        !item.name.toLowerCase().endsWith(".pdf") &&
+                        item.type.toLowerCase() !== "application/pdf",
+                    )
+                  ) {
+                    setFile(null);
+                    setFiles([]);
+                    setFileError(
+                      "Folder uploads are accepted only when every file is a PDF.",
+                    );
+                    return;
+                  }
+                  selected = actualFiles;
+                  if (!selected.length) {
+                    setFile(null);
+                    setFiles([]);
+                    setFileError(
+                      "No PDF files were found. Use Select PDF folder if your browser cannot read a dropped folder.",
+                    );
+                    return;
+                  }
+                  if (selected.length > 20) {
+                    setFile(null);
+                    setFiles([]);
+                    setFileError("Choose no more than 20 PDF files.");
+                    return;
+                  }
+                  if (
+                    selected.some(
+                      (item) => item.size > MAX_CONTENT_UPLOAD_BYTES,
+                    )
+                  ) {
+                    setFile(null);
+                    setFiles([]);
+                    setFileError("Each PDF must be no larger than 30 MiB.");
+                    return;
+                  }
+                  if (
+                    selected.reduce((total, item) => total + item.size, 0) >
+                    100 * 1024 * 1024
+                  ) {
+                    setFile(null);
+                    setFiles([]);
+                    setFileError(
+                      "The selected PDFs may not exceed 100 MiB together.",
+                    );
+                    return;
+                  }
+                  setFile(selected.length === 1 ? selected[0] : null);
+                  setFiles(selected);
+                  setFileError("");
                 }}
                 onChange={(event) => {
                   const selected = event.target.files?.[0] ?? null;

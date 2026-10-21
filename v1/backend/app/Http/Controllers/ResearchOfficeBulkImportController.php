@@ -307,13 +307,14 @@ class ResearchOfficeBulkImportController extends Controller
         try {
             // The ordered front file is metadata authority; reviewed metadata remains authoritative.
             $extractor->extract($uploadedFiles[0]->getRealPath(), strtolower($uploadedFiles[0]->getClientOriginalExtension()));
-            $document = $service->import(
+            $import = $service->import(
                 $request->attributes->get('current_user'),
                 count($uploadedFiles) === 1 ? $uploadedFiles[0] : $uploadedFiles,
                 $validator->validated()['metadata'],
                 $request,
                 $relativePaths === [] ? null : $relativePaths,
             );
+            $document = $import['document'];
 
             return response()->json([
                 'message' => 'The manuscript was uploaded successfully.',
@@ -323,6 +324,7 @@ class ResearchOfficeBulkImportController extends Controller
                     'submission_status' => $document->submission_status,
                     'archive_status' => $document->archive_status,
                     'visibility' => $document->visibility,
+                    'content_indexing_outcome' => $import['content_indexing_outcome'],
                 ],
             ], 201);
         } catch (QueryException) {

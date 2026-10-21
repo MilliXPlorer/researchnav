@@ -779,7 +779,7 @@ describe("role workspaces", () => {
       "Dashboard",
       "Assigned Research",
       "Similarity Check",
-      "Upload Manuscript",
+      "Manage Repository",
       "User & Role Management",
       "Reports & Exports",
     ]);

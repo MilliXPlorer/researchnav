@@ -2,11 +2,13 @@
 
 namespace App\Services;
 
+use App\Models\ResearchAuthor;
 use App\Models\ResearchDocument;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Throwable;
@@ -41,6 +43,9 @@ class OfficeRepositoryService
             $document->save();
             if (array_key_exists('sdg_ids', $data)) {
                 $document->sdgs()->sync($data['sdg_ids']);
+            }
+            if (array_key_exists('authors', $data)) {
+                $this->syncAuthors($document, $data['authors']);
             }
 
             $description = "Updated repository metadata for {$document->submission_reference}.";
@@ -145,5 +150,82 @@ class OfficeRepositoryService
         return in_array($document->submission_status, ['approved', 'archived'], true)
             && $document->archive_status === 'archived'
             && $document->visibility === 'public';
+    }
+
+    /**
+     * Preserve an existing author's relationship metadata whenever possible.
+     * Unchanged names keep their row when reordered; otherwise, remaining rows
+     * are treated as renamed in their existing order. Excess rows are removed
+     * and new names are created without a linked user or correspondence flag.
+     *
+     * @param  array<int, string>  $authorNames
+     */
+    private function syncAuthors(ResearchDocument $document, array $authorNames): void
+    {
+        $authorNames = array_values($authorNames);
+        $existingAuthors = $document->authors()
+            ->orderBy('author_order')
+            ->orderBy('id')
+            ->get()
+            ->values();
+        $availableAuthors = $existingAuthors->keyBy('id');
+        $authorsByName = $existingAuthors->keyBy(
+            fn (ResearchAuthor $author): string => mb_strtolower(trim($author->author_name)),
+        );
+        $assignments = [];
+
+        foreach ($authorNames as $index => $authorName) {
+            $matchingAuthor = $authorsByName->get(mb_strtolower(trim($authorName)));
+            if ($matchingAuthor === null || ! $availableAuthors->has($matchingAuthor->id)) {
+                continue;
+            }
+
+            $assignments[$index] = $matchingAuthor;
+            $availableAuthors->forget($matchingAuthor->id);
+        }
+
+        foreach (array_keys($authorNames) as $index) {
+            if (array_key_exists($index, $assignments)) {
+                continue;
+            }
+
+            $matchingAuthor = $availableAuthors->shift();
+            if ($matchingAuthor !== null) {
+                $assignments[$index] = $matchingAuthor;
+            }
+        }
+
+        ResearchAuthor::query()
+            ->where('research_document_id', $document->id)
+            ->whereKey($availableAuthors->keys())
+            ->delete();
+
+        $temporaryOrder = ((int) $existingAuthors->max('author_order')) + $existingAuthors->count() + 1;
+        $temporaryPrefix = '__office_repository_author_'.Str::uuid().'_';
+        foreach ($assignments as $index => $author) {
+            $author->update([
+                'author_name' => $temporaryPrefix.$author->id,
+                'author_order' => $temporaryOrder + $index,
+            ]);
+        }
+
+        foreach ($authorNames as $index => $authorName) {
+            if (isset($assignments[$index])) {
+                $assignments[$index]->update([
+                    'author_name' => trim($authorName),
+                    'author_order' => $index + 1,
+                ]);
+
+                continue;
+            }
+
+            ResearchAuthor::query()->create([
+                'research_document_id' => $document->id,
+                'user_id' => null,
+                'author_name' => trim($authorName),
+                'author_order' => $index + 1,
+                'is_corresponding_author' => false,
+            ]);
+        }
     }
 }

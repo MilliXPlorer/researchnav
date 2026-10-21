@@ -127,6 +127,8 @@ describe("administrator sidebar pages", () => {
             ]),
           ),
         );
+      if (path.startsWith("/api/office/repository"))
+        return new Response(JSON.stringify(page([])));
       return new Response(
         JSON.stringify({
           data: {
@@ -202,9 +204,9 @@ describe("administrator sidebar pages", () => {
     expect(await screen.findByText("member@example.test")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Audit Logs" }));
     expect(await screen.findByText("Signed in.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Upload Manuscript" }));
+    fireEvent.click(screen.getByRole("button", { name: "Manage Repository" }));
     expect(
-      await screen.findByRole("heading", { name: "Upload Manuscript" }),
+      await screen.findByRole("heading", { name: "Manage Repository" }),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "System Settings" }));
     expect(

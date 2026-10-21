@@ -742,8 +742,12 @@ const styles = {
 
 export default function ResearchOfficeBulkImport({
   contextLabel = "Research Office",
+  compact = false,
+  onComplete,
 }: {
   contextLabel?: string;
+  compact?: boolean;
+  onComplete?: () => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
@@ -767,6 +771,7 @@ export default function ResearchOfficeBulkImport({
   const [uploadReport, setUploadReport] = useState<{
     uploaded: number;
     failed: Array<{ name: string; message: string }>;
+    indexingWarnings: Array<{ name: string; outcome: string }>;
   } | null>(null);
   const uploadLock = useRef(false);
   const [editingMetadata, setEditingMetadata] = useState<number | null>(null);
@@ -774,6 +779,9 @@ export default function ResearchOfficeBulkImport({
     {},
   );
   const [metadataNotice, setMetadataNotice] = useState("");
+  const [researcherDrafts, setResearcherDrafts] = useState<
+    Record<number, string>
+  >({});
 
   const [activeFilter, setActiveFilter] = useState<FilterType>("all");
 
@@ -1128,6 +1136,14 @@ export default function ResearchOfficeBulkImport({
     }
 
     setResults(extractedResults);
+    setResearcherDrafts(
+      Object.fromEntries(
+        extractedResults.map((result) => [
+          result.source_file_index,
+          result.metadata.researchers?.join("\n") ?? "",
+        ]),
+      ),
+    );
     setExtracting(false);
     setExtractionProgress(null);
   }
@@ -1294,6 +1310,7 @@ export default function ResearchOfficeBulkImport({
     });
     let uploaded = 0;
     const failed: Array<{ name: string; message: string }> = [];
+    const indexingWarnings: Array<{ name: string; outcome: string }> = [];
 
     for (const result of readyForImport) {
       const indexes = result.source_file_indices ?? [result.source_file_index];
@@ -1396,6 +1413,24 @@ export default function ResearchOfficeBulkImport({
           throw new Error(message);
         }
 
+        try {
+          const responseData = await response.json();
+          const outcome = responseData?.data?.content_indexing_outcome;
+          if (
+            typeof outcome === "string" &&
+            ["failed", "no_source", "unsupported", "ineligible"].includes(
+              outcome,
+            )
+          ) {
+            indexingWarnings.push({
+              name: result.folder_name ?? result.file_name,
+              outcome,
+            });
+          }
+        } catch {
+          // Older deployments may return a successful response without this field.
+        }
+
         setResults((current) =>
           current.map((item) =>
             item.source_file_index === result.source_file_index
@@ -1436,7 +1471,12 @@ export default function ResearchOfficeBulkImport({
 
     setImporting(false);
     setUploadProgress(null);
-    setUploadReport({ uploaded, failed });
+    setUploadReport({ uploaded, failed, indexingWarnings });
+    if (failed.length === 0 && indexingWarnings.length === 0 && onComplete) {
+      onComplete();
+      uploadLock.current = false;
+      return;
+    }
     if (failed.length === 0) {
       resetSelection();
     }
@@ -1544,7 +1584,17 @@ export default function ResearchOfficeBulkImport({
   }
 
   return (
-    <div style={styles.page}>
+    <div
+      style={
+        compact
+          ? {
+              ...styles.page,
+              maxWidth: "960px",
+              padding: "0",
+            }
+          : styles.page
+      }
+    >
       {extractionProgress && (
         <Modal
           label="Extracting manuscript metadata"
@@ -1775,7 +1825,8 @@ export default function ResearchOfficeBulkImport({
                 fontSize: "21px",
               }}
             >
-              {uploadReport.failed.length === 0
+              {uploadReport.failed.length === 0 &&
+              uploadReport.indexingWarnings.length === 0
                 ? "All manuscripts uploaded"
                 : "Some manuscripts need attention"}
             </h2>
@@ -1785,6 +1836,39 @@ export default function ResearchOfficeBulkImport({
               {uploadReport.uploaded} uploaded · {uploadReport.failed.length}{" "}
               not uploaded
             </p>
+            {uploadReport.indexingWarnings.length > 0 && (
+              <div
+                role="status"
+                style={{ display: "grid", gap: "8px", marginBottom: "12px" }}
+              >
+                {uploadReport.indexingWarnings.map((item) => (
+                  <div
+                    key={`${item.name}-${item.outcome}`}
+                    style={{
+                      padding: "11px 12px",
+                      border: "1px solid #ead3a6",
+                      borderRadius: "7px",
+                      background: "#fffaf0",
+                    }}
+                  >
+                    <strong
+                      style={{
+                        display: "block",
+                        color: "#765515",
+                        fontSize: "13px",
+                      }}
+                    >
+                      {item.name}
+                    </strong>
+                    <span style={{ color: "#806529", fontSize: "12px" }}>
+                      Study uploaded successfully, but manuscript content
+                      extraction failed. It will not appear in Content Checker
+                      until it is reindexed.
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
             {uploadReport.failed.length > 0 && (
               <div
                 style={{
@@ -1852,7 +1936,10 @@ export default function ResearchOfficeBulkImport({
           </div>
         </Modal>
       )}
-      <header className="workspace-header">
+      <header
+        className="workspace-header"
+        style={compact ? { marginBottom: "18px" } : undefined}
+      >
         <div>
           <p className="eyebrow">{contextLabel}</p>
           <h1>Upload Manuscript</h1>
@@ -1863,7 +1950,17 @@ export default function ResearchOfficeBulkImport({
         </div>
       </header>
 
-      <section style={styles.section}>
+      <section
+        style={
+          compact
+            ? {
+                ...styles.section,
+                padding: "18px",
+                marginBottom: 0,
+              }
+            : styles.section
+        }
+      >
         <div style={styles.sectionHeading}>
           <span style={styles.stepNumber}>1</span>
 
@@ -1901,6 +1998,7 @@ export default function ResearchOfficeBulkImport({
         <div
           style={{
             ...styles.uploadArea,
+            ...(compact ? { minHeight: "160px", padding: "20px" } : {}),
             ...(dragActive ? styles.uploadAreaActive : {}),
           }}
           onDragEnter={(event) => {
@@ -2427,15 +2525,21 @@ export default function ResearchOfficeBulkImport({
                               importing || result.import_state === "imported"
                             }
                             value={
-                              result.metadata.researchers?.join("\n") || ""
+                              researcherDrafts[originalIndex] ??
+                              result.metadata.researchers?.join("\n") ??
+                              ""
                             }
-                            onChange={(event) =>
+                            onChange={(event) => {
+                              setResearcherDrafts((current) => ({
+                                ...current,
+                                [originalIndex]: event.target.value,
+                              }));
                               updateMetadata(
                                 originalIndex,
                                 "researchers",
                                 event.target.value,
-                              )
-                            }
+                              );
+                            }}
                           />
                         </div>
 

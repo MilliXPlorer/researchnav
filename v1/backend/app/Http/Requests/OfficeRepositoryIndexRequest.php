@@ -16,11 +16,11 @@ class OfficeRepositoryIndexRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'bucket' => ['nullable', 'string', Rule::in(['ongoing', 'archived', 'recycle'])],
+            'bucket' => ['nullable', 'string', Rule::in(['all', 'ongoing', 'archived', 'recycle'])],
             'search' => ['nullable', 'string', 'max:200'],
             'institute' => ['nullable', 'string', Rule::in(ResearchDocument::INSTITUTES)],
             'publication_year' => ['nullable', 'integer', 'between:1901,2155'],
-            'sort' => ['nullable', 'string', Rule::in(['title', 'publication_year', 'updated_at'])],
+            'sort' => ['nullable', 'string', Rule::in(['title', 'publication_year', 'updated_at', 'archive_status'])],
             'direction' => ['nullable', 'string', Rule::in(['asc', 'desc'])],
             'page' => ['nullable', 'integer', 'min:1'],
             'per_page' => ['nullable', 'integer', 'between:1,100'],

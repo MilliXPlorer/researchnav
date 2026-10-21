@@ -351,7 +351,7 @@ class ManuscriptSearchProjectionService
     private function extractSource(array $source): array
     {
         if (! isset($source['files'])) {
-            return [$this->extractor->extract($source['path']), $source];
+            return [$this->extractor->extractRaw($source['path']), $source];
         }
 
         $bodyText = '';
@@ -360,7 +360,7 @@ class ManuscriptSearchProjectionService
         $maximumOutputBytes = (int) config('researchnav.manuscript_search.maximum_output_bytes');
         $maximumTextCharacters = (int) config('researchnav.manuscript_search.maximum_text_characters');
         foreach ($source['files'] as $file) {
-            $text = $this->extractor->extract($file['path']);
+            $text = $this->extractor->extractRaw($file['path']);
             if ($text === '') {
                 return ['', $source];
             }

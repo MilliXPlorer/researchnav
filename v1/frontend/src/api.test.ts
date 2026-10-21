@@ -575,6 +575,33 @@ describe("administrator API", () => {
 });
 
 describe("office repository API", () => {
+  it("requests the all bucket and retains its global summary", async () => {
+    const response = {
+      data: [],
+      links: { first: null, last: null, prev: null, next: null },
+      meta: {
+        current_page: 1,
+        from: null,
+        last_page: 1,
+        links: [],
+        path: "/api/office/repository",
+        per_page: 10,
+        to: null,
+        total: 0,
+      },
+      summary: { all: 9, ongoing: 6, archived: 3, recycle: 2 },
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(response)));
+
+    await expect(
+      listOfficeRepository({ bucket: "all", per_page: 10 }, fetchMock),
+    ).resolves.toEqual(response);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/office/repository?bucket=all&per_page=10",
+      expect.anything(),
+    );
+  });
+
   it("leaves the recycle bucket in its server-defined removal order", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL) => {
       void _input;
@@ -633,6 +660,7 @@ describe("office repository API", () => {
         to: 26,
         total: 26,
       },
+      summary: { all: 26, ongoing: 20, archived: 6, recycle: 2 },
     };
     const fetchMock = vi.fn(
       async (path: RequestInfo | URL, _init?: RequestInit) => {

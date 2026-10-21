@@ -31,6 +31,8 @@ class OfficeRepositoryUpdateRequest extends FormRequest
             'degree_program' => ['sometimes', 'nullable', 'string', 'max:255'],
             'manuscript_date_label' => ['sometimes', 'nullable', 'string', 'max:50'],
             'research_stage' => ['sometimes', Rule::in(ResearchDocument::RESEARCH_STAGES)],
+            'authors' => ['sometimes', 'array', 'min:1', 'max:50'],
+            'authors.*' => ['required', 'string', 'max:255', 'distinct:ignore_case'],
         ];
     }
 
@@ -39,7 +41,7 @@ class OfficeRepositoryUpdateRequest extends FormRequest
         $validator->after(function () use ($validator): void {
             $this->rejectUnknownFields($validator, [
                 'category_id', 'title', 'abstract', 'keywords', 'publication_year', 'sdg_ids',
-                'institute', 'degree_program', 'manuscript_date_label', 'research_stage',
+                'institute', 'degree_program', 'manuscript_date_label', 'research_stage', 'authors',
             ]);
 
             if (! $this->has('institute') && ! $this->has('degree_program')) {

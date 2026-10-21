@@ -101,8 +101,6 @@ class ManuscriptMetadataExtractor
             ),
 
             'institute' => $this->extractInstitute($text),
-
-            'raw_text' => $text,
         ];
     }
 

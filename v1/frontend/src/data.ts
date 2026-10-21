@@ -13,9 +13,7 @@ export const programsByInstitute: Record<
   (typeof instituteNames)[number],
   readonly string[]
 > = {
-  "Institute of Computer Studies": [
-    "Bachelor of Science in Computer Science",
-  ],
+  "Institute of Computer Studies": ["Bachelor of Science in Computer Science"],
   "Institute of Health Sciences": ["Bachelor of Science in Midwifery"],
   "Institute of Business and Financial Management": [
     "Bachelor of Science in Business Administration major in Human Resource Management",
@@ -65,7 +63,7 @@ export const roleConfigs: RoleConfig[] = [
       "Access Requests",
       "User & Role Management",
       "Audit Logs",
-      "Upload Manuscript",
+      "Manage Repository",
       "System Settings",
     ],
   },
@@ -81,44 +79,28 @@ export const roleConfigs: RoleConfig[] = [
     label: "Research Adviser",
     shortLabel: "Adviser",
     description: "Review advisee drafts and similarity alerts.",
-    nav: [
-      "Dashboard",
-      "Assigned Research",
-      "User Logs",
-    ],
+    nav: ["Dashboard", "Assigned Research", "User Logs"],
   },
   {
     id: "instructor",
     label: "Research Instructor",
     shortLabel: "Instructor",
     description: "Oversee class proposals and similarity trends.",
-    nav: [
-      "Dashboard",
-      "My Sections",
-      "User Logs",
-    ],
+    nav: ["Dashboard", "My Sections", "User Logs"],
   },
   {
     id: "panel",
     label: "Research Panel",
     shortLabel: "Panel member",
     description: "Read manuscripts and submit evaluations.",
-    nav: [
-      "Dashboard",
-      "Assigned Research",
-      "User Logs",
-    ],
+    nav: ["Dashboard", "Assigned Research", "User Logs"],
   },
   {
     id: "statistician",
     label: "Statistician",
     shortLabel: "Statistician",
     description: "Review methodology and issue sign-offs.",
-    nav: [
-      "Dashboard",
-      "Assigned Research",
-      "User Logs",
-    ],
+    nav: ["Dashboard", "Assigned Research", "User Logs"],
   },
   {
     id: "research_editor",
@@ -126,23 +108,14 @@ export const roleConfigs: RoleConfig[] = [
     shortLabel: "Editor",
     description:
       "Review manuscript language, clarity, organization, and formatting.",
-    nav: [
-      "Dashboard",
-      "Assigned Research",
-      "User Logs",
-    ],
+    nav: ["Dashboard", "Assigned Research", "User Logs"],
   },
   {
     id: "coordinator",
     label: "Research Coordinator",
     shortLabel: "Coordinator",
     description: "Monitor the program.",
-    nav: [
-      "Program Overview",
-      "Adviser Load",
-      "Account Roles",
-      "Reports",
-    ],
+    nav: ["Program Overview", "Adviser Load", "Account Roles", "Reports"],
   },
   {
     id: "librarian",
@@ -150,11 +123,7 @@ export const roleConfigs: RoleConfig[] = [
     shortLabel: "Librarian",
     description:
       "Review references, citations, links, and source documentation.",
-    nav: [
-      "Dashboard",
-      "Assigned Research",
-      "User Logs",
-    ],
+    nav: ["Dashboard", "Assigned Research", "User Logs"],
   },
   {
     id: "research-office",
@@ -169,7 +138,7 @@ export const roleConfigs: RoleConfig[] = [
       "Dashboard",
       "Assigned Research",
       "Similarity Check",
-      "Upload Manuscript",
+      "Manage Repository",
       "User & Role Management",
       "Reports & Exports",
     ],

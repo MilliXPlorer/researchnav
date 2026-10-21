@@ -57,9 +57,21 @@ class OfficeRepositoryController extends DomainController
             $query->orderByDesc('updated_at')->orderByDesc('id');
         }
 
+        $summary = [
+            'all' => ResearchDocument::query()->count(),
+            'ongoing' => ResearchDocument::query()->where('archive_status', '!=', 'archived')->count(),
+            'archived' => ResearchDocument::query()->where('archive_status', 'archived')->count(),
+            'recycle' => ResearchDocument::onlyTrashed()->count(),
+        ];
+
         return OfficeRepositoryItemResource::collection(
             $query->paginate($input['per_page'] ?? 25)->appends($request->query()),
-        )->additional(['schema_version' => 1])->response()->header('Cache-Control', 'private, no-store');
+        )->additional([
+            'schema_version' => 1,
+            // These counts intentionally ignore the current bucket and filters so
+            // the management summary remains authoritative while browsing.
+            'summary' => $summary,
+        ])->response()->header('Cache-Control', 'private, no-store');
     }
 
     public function show(string $researchDocument): JsonResponse

@@ -5,7 +5,15 @@ import {
   useRef,
   useState,
 } from "react";
-import { Eye, Pencil, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
+import {
+  Archive,
+  Eye,
+  FolderOpen,
+  Pencil,
+  RefreshCw,
+  RotateCcw,
+  Trash2,
+} from "lucide-react";
 import {
   ApiError,
   deleteOfficeRepository,
@@ -28,16 +36,16 @@ import ResearchOfficeBulkImport from "./ResearchOfficeBulkImport";
 import { SdgSelector } from "./SdgMetadata";
 import "./ManageRepository.css";
 
-type View = OfficeRepositoryBucket | "import";
-type Sort = "title" | "publication_year" | "updated_at";
-type FilterValues = { search: string; institute: string; year: string };
+type View = OfficeRepositoryBucket;
+type FilterValues = { search: string; institute: string };
 type FieldErrors = Record<string, string[]>;
+type Sort = "title" | "publication_year" | "updated_at" | "archive_status";
 
 const views: Array<{ value: View; label: string }> = [
+  { value: "all", label: "All Studies" },
   { value: "ongoing", label: "Ongoing" },
   { value: "archived", label: "Archived" },
   { value: "recycle", label: "Recycle Bin" },
-  { value: "import", label: "Import manuscripts" },
 ];
 
 // This view must offer every pair accepted by ResearchDocument::PROGRAMS_BY_INSTITUTE.
@@ -88,6 +96,9 @@ function initialDraft(
     manuscript_date_label: detail.manuscript_date_label,
     research_stage:
       detail.research_stage as OfficeRepositoryUpdateInput["research_stage"],
+    authors: [...detail.authors]
+      .sort((a, b) => a.author_order - b.author_order)
+      .map((author) => author.author_name),
   };
 }
 
@@ -98,6 +109,11 @@ function normalizedDraftValue(
   if (field === "sdg_ids") {
     return [...((value as number[] | undefined) ?? [])].sort(
       (first, second) => first - second,
+    );
+  }
+  if (field === "authors") {
+    return ((value as string[] | undefined) ?? []).map((author) =>
+      author.trim(),
     );
   }
   if (field === "title") return (value as string | undefined)?.trim() ?? "";
@@ -175,24 +191,26 @@ export default function ManageRepository({
 }: {
   contextLabel?: string;
 }) {
-  const [view, setView] = useState<View>("ongoing");
+  const [view, setView] = useState<View>("all");
   const [rows, setRows] = useState<OfficeRepositoryItemResource[] | null>(null);
   const [meta, setMeta] = useState<
     Awaited<ReturnType<typeof listOfficeRepository>>["meta"] | null
   >(null);
+  const [summary, setSummary] = useState<
+    Awaited<ReturnType<typeof listOfficeRepository>>["summary"] | null
+  >(null);
   const [filterDraft, setFilterDraft] = useState<FilterValues>({
     search: "",
     institute: "",
-    year: "",
   });
   const [appliedFilters, setAppliedFilters] = useState<FilterValues>({
     search: "",
     institute: "",
-    year: "",
   });
+  const [page, setPage] = useState(1);
+  const [addStudyOpen, setAddStudyOpen] = useState(false);
   const [sort, setSort] = useState<Sort>("updated_at");
   const [direction, setDirection] = useState<"asc" | "desc">("desc");
-  const [page, setPage] = useState(1);
   const [reloadVersion, setReloadVersion] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -212,13 +230,15 @@ export default function ManageRepository({
   const [confirming, setConfirming] = useState<"delete" | "restore" | null>(
     null,
   );
+  const [pendingDetailAction, setPendingDetailAction] = useState<
+    "edit" | "delete" | "restore" | null
+  >(null);
   const requestGeneration = useRef(0);
   const detailGeneration = useRef(0);
   const [categories, setCategories] = useState<CategoryResource[] | null>(null);
   const [categoryOptionsError, setCategoryOptionsError] = useState("");
 
-  const isImport = view === "import";
-  const bucket = isImport ? "ongoing" : view;
+  const bucket = view;
 
   function reload() {
     setError("");
@@ -226,7 +246,21 @@ export default function ManageRepository({
     setReloadVersion((version) => version + 1);
   }
 
-  function openDetail(id: number) {
+  function closeDetail() {
+    detailGeneration.current += 1;
+    setSelectedId(null);
+    setSelected(null);
+    setEditing(false);
+    setPendingDetailAction(null);
+    setDetailLoading(false);
+    setDetailError("");
+    setDetailFieldErrors({});
+  }
+
+  function openDetail(
+    id: number,
+    action: "edit" | "delete" | "restore" | null = null,
+  ) {
     setDetailLoading(true);
     setDetailError("");
     setDetailFieldErrors({});
@@ -234,12 +268,12 @@ export default function ManageRepository({
     setCategoryOptionsError("");
     setSelected(null);
     setEditing(false);
+    setPendingDetailAction(action);
     setDetailVersion((version) => version + 1);
     setSelectedId(id);
   }
 
   useEffect(() => {
-    if (isImport) return;
     const generation = ++requestGeneration.current;
     const controller = new AbortController();
     void listOfficeRepository(
@@ -247,13 +281,10 @@ export default function ManageRepository({
         bucket,
         search: appliedFilters.search,
         institute: appliedFilters.institute,
-        publication_year: appliedFilters.year
-          ? Number(appliedFilters.year)
-          : undefined,
         sort: bucket === "recycle" ? undefined : sort,
         direction: bucket === "recycle" ? undefined : direction,
         page,
-        per_page: 25,
+        per_page: 10,
       },
       undefined,
       controller.signal,
@@ -262,6 +293,7 @@ export default function ManageRepository({
         if (generation !== requestGeneration.current) return;
         setRows(response.data);
         setMeta(response.meta);
+        setSummary(response.summary);
         setError("");
       })
       .catch((requestError: unknown) => {
@@ -272,6 +304,7 @@ export default function ManageRepository({
           return;
         setRows(null);
         setMeta(null);
+        setSummary(null);
         if (requestError instanceof ApiError) {
           setFilterFieldErrors(normalizeFilterFieldErrors(requestError.fields));
         }
@@ -283,7 +316,7 @@ export default function ManageRepository({
         if (generation === requestGeneration.current) setLoading(false);
       });
     return () => controller.abort();
-  }, [bucket, appliedFilters, direction, isImport, page, reloadVersion, sort]);
+  }, [bucket, appliedFilters, direction, page, reloadVersion, sort]);
 
   useEffect(() => {
     if (selectedId === null) return;
@@ -294,6 +327,13 @@ export default function ManageRepository({
         if (generation !== detailGeneration.current) return;
         setSelected(detail);
         setDraft(initialDraft(detail));
+        if (pendingDetailAction === "edit") setEditing(true);
+        if (
+          pendingDetailAction === "delete" ||
+          pendingDetailAction === "restore"
+        )
+          setConfirming(pendingDetailAction);
+        setPendingDetailAction(null);
       })
       .catch((requestError: unknown) => {
         if (
@@ -309,7 +349,7 @@ export default function ManageRepository({
         if (generation === detailGeneration.current) setDetailLoading(false);
       });
     return () => controller.abort();
-  }, [detailVersion, selectedId]);
+  }, [detailVersion, pendingDetailAction, selectedId]);
 
   useEffect(() => {
     if (!editing) return;
@@ -342,68 +382,40 @@ export default function ManageRepository({
     setConfirming(null);
     setError("");
     setLoading(true);
-    setSort("updated_at");
-    setDirection("desc");
   }
 
-  function applyFilters(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const nextFilters = {
-      search: filterDraft.search.trim(),
-      institute: filterDraft.institute.trim(),
-      year: filterDraft.year.trim(),
-    };
-    const year = Number(nextFilters.year);
-    if (
-      nextFilters.year &&
-      (!/^\d{4}$/.test(nextFilters.year) || year < 1901 || year > 2155)
-    ) {
-      setFilterFieldErrors({
-        year: ["Enter a publication year from 1901 through 2155."],
-      });
-      return;
-    }
+  useEffect(() => {
+    const search = filterDraft.search.trim();
+    if (search === appliedFilters.search) return;
+    const timeout = window.setTimeout(() => {
+      setFilterFieldErrors({});
+      setAppliedFilters((current) => ({ ...current, search }));
+      setPage(1);
+      setLoading(true);
+      setError("");
+    }, 325);
+    return () => window.clearTimeout(timeout);
+  }, [appliedFilters.search, filterDraft.search]);
+
+  function changeInstitute(institute: string) {
+    setFilterDraft((current) => ({ ...current, institute }));
     setFilterFieldErrors({});
-    setAppliedFilters(nextFilters);
+    setAppliedFilters((current) => ({ ...current, institute }));
     setPage(1);
     setLoading(true);
     setError("");
-    setReloadVersion((version) => version + 1);
-  }
-
-  function resetFilters() {
-    const empty = { search: "", institute: "", year: "" };
-    setFilterDraft(empty);
-    setAppliedFilters(empty);
-    setFilterFieldErrors({});
-    setPage(1);
-    setLoading(true);
-    setError("");
-    setReloadVersion((version) => version + 1);
   }
 
   function changeSort(next: Sort) {
     if (bucket === "recycle") return;
     setPage(1);
     setLoading(true);
-    if (sort === next)
+    if (sort === next) {
       setDirection((current) => (current === "asc" ? "desc" : "asc"));
-    else {
-      setSort(next);
-      setDirection(next === "updated_at" ? "desc" : "asc");
+      return;
     }
-  }
-
-  function changeMobileSort(value: string) {
-    const [nextSort, nextDirection] = value.split(":") as [
-      Sort,
-      "asc" | "desc",
-    ];
-    if (sort === nextSort && direction === nextDirection) return;
-    setPage(1);
-    setLoading(true);
-    setSort(nextSort);
-    setDirection(nextDirection);
+    setSort(next);
+    setDirection(next === "updated_at" ? "desc" : "asc");
   }
 
   async function save() {
@@ -414,10 +426,7 @@ export default function ManageRepository({
     }
     const changes = changedDraft(draft, selected);
     if (Object.keys(changes).length === 0) {
-      setDraft(initialDraft(selected));
-      setEditing(false);
-      setDetailError("");
-      setDetailFieldErrors({});
+      closeDetail();
       return;
     }
     setSaving(true);
@@ -425,9 +434,7 @@ export default function ManageRepository({
     setDetailFieldErrors({});
     try {
       const updated = await updateOfficeRepository(selected.id, changes);
-      setSelected(updated);
-      setDraft(initialDraft(updated));
-      setEditing(false);
+      closeDetail();
       setNotice(`Saved metadata for ${updated.title}.`);
       reload();
     } catch (requestError) {
@@ -447,7 +454,7 @@ export default function ManageRepository({
       setDiscarding(true);
       return;
     }
-    setSelectedId(null);
+    closeDetail();
   }
 
   async function mutate(action: "delete" | "restore") {
@@ -483,20 +490,15 @@ export default function ManageRepository({
 
   return (
     <div className="workspace-content manage-repository">
-      <header className="workspace-header">
+      <header className="workspace-header manage-repository-header">
         <div>
           <p className="eyebrow">{contextLabel}</p>
           <h1>Manage Repository</h1>
-          <p>
-            Review active records, safely update metadata, and recover records
-            from the Recycle Bin.
-          </p>
+          <p>Manage studies and archived manuscripts.</p>
         </div>
-        {!isImport && (
-          <Button variant="secondary" onClick={reload} disabled={loading}>
-            <RefreshCw aria-hidden="true" /> Refresh
-          </Button>
-        )}
+        <div className="manage-repository-header-actions">
+          <Button onClick={() => setAddStudyOpen(true)}>+ Add Study</Button>
+        </div>
       </header>
 
       <div
@@ -541,322 +543,343 @@ export default function ManageRepository({
         ))}
       </div>
 
-      {isImport ? (
-        <section
-          id="repository-view-import-panel"
-          role="tabpanel"
-          aria-labelledby="repository-view-import-tab"
-        >
-          <ResearchOfficeBulkImport contextLabel={contextLabel} />
-        </section>
-      ) : (
-        <section
-          id={`repository-view-${view}-panel`}
-          role="tabpanel"
-          aria-labelledby={`repository-view-${view}-tab`}
-          className="panel-card admin-data-card manage-repository-card"
-          aria-busy={loading}
-        >
-          <div className="admin-card-heading">
-            <div>
-              <h2>
-                {view === "recycle" ? "Recycle Bin" : `${label(view)} records`}
-              </h2>
-              <p>
-                {view === "recycle"
-                  ? "Records can be restored; they are never permanently deleted here."
-                  : "Open a record to review safe metadata or make an allowed change."}
-              </p>
-            </div>
-          </div>
-          <form
-            className="admin-filters manage-repository-filters"
-            onSubmit={applyFilters}
+      <section
+        id={`repository-view-${view}-panel`}
+        role="tabpanel"
+        aria-labelledby={`repository-view-${view}-tab`}
+        className="panel-card admin-data-card manage-repository-card"
+        aria-busy={loading}
+      >
+        {summary && (
+          <div
+            className="manage-repository-summary"
+            aria-label="Repository summary"
           >
-            <label>
-              Search
-              <input
-                value={filterDraft.search}
-                maxLength={200}
-                aria-invalid={Boolean(filterFieldErrors.search)}
-                onChange={(event) =>
-                  setFilterDraft((current) => ({
-                    ...current,
-                    search: event.target.value,
-                  }))
-                }
-                placeholder="Title, reference, or author"
-              />
-              <FieldError messages={filterFieldErrors.search} />
-            </label>
-            <label>
-              Institute
-              <select
-                value={filterDraft.institute}
-                onChange={(event) =>
-                  setFilterDraft((current) => ({
-                    ...current,
-                    institute: event.target.value,
-                  }))
-                }
-                aria-invalid={Boolean(filterFieldErrors.institute)}
-              >
-                <option value="">All institutes</option>
-                {instituteNames.map((institute) => (
-                  <option key={institute} value={institute}>
-                    {institute}
-                  </option>
-                ))}
-              </select>
-              <FieldError messages={filterFieldErrors.institute} />
-            </label>
-            <label>
-              Publication year
-              <input
-                type="number"
-                inputMode="numeric"
-                min={1901}
-                max={2155}
-                step={1}
-                value={filterDraft.year}
-                onChange={(event) =>
-                  setFilterDraft((current) => ({
-                    ...current,
-                    year: event.target.value,
-                  }))
-                }
-                placeholder="All years"
-                aria-invalid={Boolean(filterFieldErrors.year)}
-              />
-              <FieldError messages={filterFieldErrors.year} />
-            </label>
-            <Button type="submit" variant="secondary">
-              Apply filters
+            <button type="button" onClick={() => changeView("ongoing")}>
+              <FolderOpen aria-hidden="true" />
+              <span>Ongoing</span>
+              <strong>{summary.ongoing.toLocaleString()}</strong>
+            </button>
+            <button type="button" onClick={() => changeView("archived")}>
+              <Archive aria-hidden="true" />
+              <span>Archived</span>
+              <strong>{summary.archived.toLocaleString()}</strong>
+            </button>
+            <button type="button" onClick={() => changeView("recycle")}>
+              <Trash2 aria-hidden="true" />
+              <span>Recycle Bin</span>
+              <strong>{summary.recycle.toLocaleString()}</strong>
+            </button>
+          </div>
+        )}
+        <div className="manage-repository-filter-row">
+          <label>
+            Search
+            <input
+              value={filterDraft.search}
+              maxLength={200}
+              aria-invalid={Boolean(filterFieldErrors.search)}
+              onChange={(event) =>
+                setFilterDraft((current) => ({
+                  ...current,
+                  search: event.target.value,
+                }))
+              }
+              placeholder="Search studies..."
+            />
+            <FieldError messages={filterFieldErrors.search} />
+          </label>
+          <label>
+            Institute
+            <select
+              value={filterDraft.institute}
+              onChange={(event) => changeInstitute(event.target.value)}
+              aria-invalid={Boolean(filterFieldErrors.institute)}
+            >
+              <option value="">All institutes</option>
+              {instituteNames.map((institute) => (
+                <option key={institute} value={institute}>
+                  {institute}
+                </option>
+              ))}
+            </select>
+            <FieldError messages={filterFieldErrors.institute} />
+          </label>
+          <Button
+            type="button"
+            variant="secondary"
+            className="manage-repository-refresh"
+            onClick={reload}
+            disabled={loading}
+            aria-label="Refresh studies"
+            title="Refresh studies"
+          >
+            <RefreshCw aria-hidden="true" />
+          </Button>
+        </div>
+        {notice && (
+          <p role="status" className="admin-success manage-repository-notice">
+            {notice}
+          </p>
+        )}
+        {error ? (
+          <div className="admin-error manage-repository-error" role="alert">
+            <p>{error}</p>
+            <Button variant="secondary" onClick={reload}>
+              Retry
             </Button>
-            <Button type="button" variant="secondary" onClick={resetFilters}>
-              Reset filters
-            </Button>
-          </form>
-          {notice && (
-            <p role="status" className="admin-success manage-repository-notice">
-              {notice}
-            </p>
-          )}
-          {error ? (
-            <div className="admin-error manage-repository-error" role="alert">
-              <p>{error}</p>
-              <Button variant="secondary" onClick={reload}>
-                Retry
-              </Button>
-            </div>
-          ) : loading || rows === null ? (
-            <p className="admin-empty" aria-live="polite">
-              Loading repository records…
-            </p>
-          ) : rows.length === 0 ? (
-            <p className="admin-empty">
-              No{" "}
-              {view === "recycle"
-                ? "records in the Recycle Bin"
-                : "records match these filters"}
-              .
-            </p>
-          ) : (
-            <>
-              {bucket !== "recycle" && (
-                <label className="manage-repository-mobile-sort">
-                  Sort records
-                  <select
-                    value={`${sort}:${direction}`}
-                    onChange={(event) => changeMobileSort(event.target.value)}
-                  >
-                    <option value="title:asc">Title (A–Z)</option>
-                    <option value="title:desc">Title (Z–A)</option>
-                    <option value="publication_year:asc">
-                      Year (oldest first)
-                    </option>
-                    <option value="publication_year:desc">
-                      Year (newest first)
-                    </option>
-                    <option value="updated_at:desc">
-                      Updated (newest first)
-                    </option>
-                    <option value="updated_at:asc">
-                      Updated (oldest first)
-                    </option>
-                  </select>
-                </label>
-              )}
-              <div className="admin-table-wrap manage-repository-table-wrap">
-                <table>
-                  <caption className="sr-only">
-                    {label(view)} repository records
-                  </caption>
-                  <thead>
-                    <tr>
-                      {view === "recycle" ? (
-                        <th>Title</th>
-                      ) : (
-                        <SortableHeader
-                          sortKey="title"
-                          activeSort={sort}
-                          direction={direction}
-                          onSort={() => changeSort("title")}
-                        >
-                          Title
-                        </SortableHeader>
-                      )}
-                      <th>Authors</th>
-                      {view === "recycle" ? (
-                        <th>Year</th>
-                      ) : (
-                        <SortableHeader
-                          sortKey="publication_year"
-                          activeSort={sort}
-                          direction={direction}
-                          onSort={() => changeSort("publication_year")}
-                        >
-                          Year
-                        </SortableHeader>
-                      )}
-                      <th>Institute</th>
-                      {view === "recycle" ? (
-                        <th>Removed</th>
-                      ) : (
-                        <SortableHeader
-                          sortKey="updated_at"
-                          activeSort={sort}
-                          direction={direction}
-                          onSort={() => changeSort("updated_at")}
-                        >
-                          Updated
-                        </SortableHeader>
-                      )}
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((record) => (
-                      <tr key={record.id}>
-                        <td data-label="Title">
-                          <strong>{record.title}</strong>
+          </div>
+        ) : rows === null ? (
+          <p className="admin-empty" aria-live="polite">
+            Loading repository records…
+          </p>
+        ) : rows.length === 0 ? (
+          <p className="admin-empty">
+            No{" "}
+            {view === "recycle"
+              ? "records in the Recycle Bin"
+              : "records match these filters"}
+            .
+          </p>
+        ) : (
+          <>
+            <div
+              className={`admin-table-wrap manage-repository-table-wrap${loading ? " is-refreshing" : ""}`}
+            >
+              <table>
+                <caption className="sr-only">
+                  {label(view)} repository records
+                </caption>
+                <thead>
+                  <tr>
+                    {view === "recycle" ? (
+                      <th>Study Title</th>
+                    ) : (
+                      <SortableHeader
+                        sortKey="title"
+                        activeSort={sort}
+                        direction={direction}
+                        onSort={() => changeSort("title")}
+                      >
+                        Study Title
+                      </SortableHeader>
+                    )}
+                    <th>Researchers / Institute</th>
+                    {view === "recycle" ? (
+                      <th>Year</th>
+                    ) : (
+                      <SortableHeader
+                        sortKey="publication_year"
+                        activeSort={sort}
+                        direction={direction}
+                        onSort={() => changeSort("publication_year")}
+                      >
+                        Year
+                      </SortableHeader>
+                    )}
+                    {view === "recycle" ? (
+                      <th>Status</th>
+                    ) : (
+                      <SortableHeader
+                        sortKey="archive_status"
+                        activeSort={sort}
+                        direction={direction}
+                        onSort={() => changeSort("archive_status")}
+                      >
+                        Status
+                      </SortableHeader>
+                    )}
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((record) => (
+                    <tr key={record.id}>
+                      <td data-label="Study Title">
+                        <strong>{record.title}</strong>
+                        <small>
+                          {record.submission_reference ??
+                            "No submission reference"}
+                        </small>
+                        {view === "recycle" && (
                           <small>
-                            {record.submission_reference ??
-                              "No submission reference"}
+                            Deleted{" "}
+                            {formatPhilippineDateTime(record.deleted_at)}
                           </small>
-                        </td>
-                        <td data-label="Authors">
-                          {record.author_names.join(", ") || "—"}
-                        </td>
-                        <td data-label="Year">
-                          {record.publication_year ?? "—"}
-                        </td>
-                        <td data-label="Institute">
-                          {record.institute ?? "—"}
-                        </td>
-                        <td
-                          data-label={
-                            view === "recycle" ? "Removed" : "Updated"
-                          }
+                        )}
+                      </td>
+                      <td data-label="Researchers / Institute">
+                        <strong>{record.author_names.join(", ") || "—"}</strong>
+                        <small>{record.institute ?? "—"}</small>
+                      </td>
+                      <td data-label="Year">
+                        {record.publication_year ?? "—"}
+                      </td>
+                      <td data-label="Status">
+                        <span
+                          className={`manage-repository-status ${
+                            record.archive_status === "archived"
+                              ? "is-archived"
+                              : "is-ongoing"
+                          }`}
                         >
-                          {formatPhilippineDateTime(
-                            view === "recycle"
-                              ? record.deleted_at
-                              : record.updated_at,
-                          )}
-                        </td>
-                        <td data-label="Actions">
-                          <span className="row-actions">
+                          {view === "recycle" ? "Previous: " : ""}
+                          {record.archive_status === "archived"
+                            ? "Archived"
+                            : "Ongoing"}
+                        </span>
+                      </td>
+                      <td data-label="Actions">
+                        <div className="manage-repository-row-actions">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            className="icon-button"
+                            aria-label={`View ${record.title}`}
+                            title="View details"
+                            onClick={() => openDetail(record.id)}
+                          >
+                            <Eye aria-hidden="true" />
+                          </Button>
+                          {record.can_edit && (
                             <Button
                               type="button"
                               variant="secondary"
                               className="icon-button"
-                              aria-label={`View ${record.title}`}
-                              title="View safe details"
-                              onClick={() => openDetail(record.id)}
+                              aria-label={`Edit ${record.title}`}
+                              title="Edit metadata"
+                              onClick={() => openDetail(record.id, "edit")}
                             >
-                              <Eye />
+                              <Pencil aria-hidden="true" />
                             </Button>
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {meta && (
-                <Pagination
-                  meta={meta}
-                  noun="records"
-                  onPage={(nextPage) => {
-                    if (nextPage === meta.current_page) return;
-                    setLoading(true);
-                    setPage(nextPage);
-                  }}
-                />
-              )}
-            </>
-          )}
-        </section>
-      )}
-
-      {selectedId !== null && (
-        <Modal
-          label="Repository record details"
-          onClose={requestDetailClose}
-          busy={saving}
-          size="large"
-          className="manage-repository-modal"
-        >
-          {detailLoading ? (
-            <p className="admin-empty" aria-live="polite">
-              Loading safe record details…
-            </p>
-          ) : detailError && !selected ? (
-            <div className="admin-error" role="alert">
-              <p>{detailError}</p>
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  openDetail(selectedId);
-                }}
-              >
-                Retry
-              </Button>
+                          )}
+                          {record.can_delete && (
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              className="icon-button"
+                              aria-label={`Move ${record.title} to Recycle Bin`}
+                              title="Move to Recycle Bin"
+                              onClick={() => openDetail(record.id, "delete")}
+                            >
+                              <Trash2 aria-hidden="true" />
+                            </Button>
+                          )}
+                          {record.can_restore && (
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              className="icon-button"
+                              aria-label={`Restore ${record.title}`}
+                              title="Restore study"
+                              onClick={() => openDetail(record.id, "restore")}
+                            >
+                              <RotateCcw aria-hidden="true" />
+                            </Button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          ) : (
-            selected && (
-              <RepositoryDetail
-                detail={selected}
-                editing={editing}
-                draft={draft}
-                setDraft={setDraft}
-                error={detailError}
-                fieldErrors={detailFieldErrors}
-                categories={categories}
-                categoryOptionsError={categoryOptionsError}
-                saving={saving}
-                onEdit={() => {
-                  setCategories(null);
-                  setCategoryOptionsError("");
-                  setDetailFieldErrors({});
-                  setDiscarding(false);
-                  setEditing(true);
+            {meta && (
+              <Pagination
+                meta={meta}
+                noun="records"
+                onPage={(nextPage) => {
+                  if (nextPage === meta.current_page) return;
+                  setLoading(true);
+                  setPage(nextPage);
                 }}
-                onCancel={() => {
-                  setDraft(initialDraft(selected));
-                  setEditing(false);
-                  setDetailError("");
-                  setDetailFieldErrors({});
-                }}
-                onSave={() => void save()}
-                onDelete={() => setConfirming("delete")}
-                onRestore={() => setConfirming("restore")}
               />
-            )
-          )}
+            )}
+          </>
+        )}
+      </section>
+
+      {addStudyOpen && (
+        <Modal
+          label="Add study"
+          onClose={() => {
+            setAddStudyOpen(false);
+            reload();
+          }}
+          size="large"
+          className="manage-repository-add-study-modal"
+        >
+          <ResearchOfficeBulkImport
+            contextLabel={contextLabel}
+            compact
+            onComplete={() => {
+              setAddStudyOpen(false);
+              reload();
+            }}
+          />
         </Modal>
       )}
+
+      {selectedId !== null &&
+        pendingDetailAction !== "delete" &&
+        pendingDetailAction !== "restore" &&
+        !confirming && (
+          <Modal
+            label="Repository record details"
+            onClose={requestDetailClose}
+            busy={saving}
+            size="large"
+            className="manage-repository-modal"
+          >
+            {detailLoading ? (
+              <p className="admin-empty" aria-live="polite">
+                Loading safe record details…
+              </p>
+            ) : detailError && !selected ? (
+              <div className="admin-error" role="alert">
+                <p>{detailError}</p>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    openDetail(selectedId);
+                  }}
+                >
+                  Retry
+                </Button>
+              </div>
+            ) : (
+              selected && (
+                <RepositoryDetail
+                  detail={selected}
+                  editing={editing}
+                  draft={draft}
+                  setDraft={setDraft}
+                  error={detailError}
+                  fieldErrors={detailFieldErrors}
+                  categories={categories}
+                  categoryOptionsError={categoryOptionsError}
+                  saving={saving}
+                  onEdit={() => {
+                    setCategories(null);
+                    setCategoryOptionsError("");
+                    setDetailFieldErrors({});
+                    setDiscarding(false);
+                    setEditing(true);
+                  }}
+                  onCancel={() => {
+                    setDraft(initialDraft(selected));
+                    setEditing(false);
+                    setDetailError("");
+                    setDetailFieldErrors({});
+                  }}
+                  onSave={() => void save()}
+                  onDelete={() => setConfirming("delete")}
+                  onRestore={() => setConfirming("restore")}
+                />
+              )
+            )}
+          </Modal>
+        )}
       {confirming && selected && (
         <ConfirmDialog
           title={
@@ -874,7 +897,10 @@ export default function ManageRepository({
           }
           busy={saving}
           onConfirm={() => void mutate(confirming)}
-          onCancel={() => setConfirming(null)}
+          onCancel={() => {
+            setConfirming(null);
+            closeDetail();
+          }}
         />
       )}
       {discarding && (
@@ -999,6 +1025,27 @@ function RepositoryDetail({
               onChange={(event) => update("title", event.target.value)}
             />
             <FieldError messages={fieldErrors.title} />
+          </label>
+          <label>
+            Researchers
+            <small>Enter one researcher per line.</small>
+            <textarea
+              aria-label="Researchers"
+              defaultValue={(draft.authors ?? []).join("\n")}
+              rows={4}
+              required
+              aria-invalid={Boolean(fieldErrors.authors)}
+              onChange={(event) => {
+                update(
+                  "authors",
+                  event.target.value
+                    .split("\n")
+                    .map((author) => author.trim())
+                    .filter(Boolean),
+                );
+              }}
+            />
+            <FieldError messages={fieldErrors.authors} />
           </label>
           <label>
             Abstract
@@ -1258,7 +1305,7 @@ function RepositoryDetail({
             )}
             {detail.can_restore && (
               <Button onClick={onRestore}>
-                <RotateCcw aria-hidden="true" /> Restore record
+                <RotateCcw aria-hidden="true" /> Restore Study
               </Button>
             )}
           </div>

@@ -10496,6 +10496,7 @@ td strong {
   color: var(--moss);
   background: var(--paper);
   font-size: 10px;
+  font-weight: 700;
   white-space: nowrap;
 }
 .manuscript-picker-actions {
@@ -10508,7 +10509,7 @@ td strong {
   border: 1px solid var(--line);
   border-radius: 6px;
   color: var(--moss);
-  background: var(--mist);
+  background: var(--paper);
   font-size: 10px;
   font-weight: 700;
   white-space: nowrap;
@@ -10522,9 +10523,15 @@ td strong {
     justify-content: flex-end;
   }
 }
+.manuscript-picker-action:hover,
 .manuscript-picker-folder-action:hover {
   border-color: var(--fern);
   background: var(--fern-soft);
+}
+.manuscript-picker.is-dragging .manuscript-picker-surface {
+  border-color: var(--fern);
+  background: var(--fern-soft);
+  box-shadow: 0 0 0 3px var(--fern-soft);
 }
 .manuscript-picker.is-disabled {
   opacity: 0.55;

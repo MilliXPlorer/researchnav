@@ -982,7 +982,7 @@ describe("role workspace pages", () => {
       role: "research-office",
       destinations: [
         ["Similarity Check", "Title checker"],
-        ["Upload Manuscript", "Upload Manuscript"],
+        ["Manage Repository", "Manage Repository"],
         ["User & Role Management", "User & role management"],
         ["Reports & Exports", "Reports & exports"],
       ],

@@ -7,7 +7,6 @@ import AdminResearchWorkspace from "./AdminResearchWorkspace";
 import AssignedResearchFolders from "./AssignedResearchFolders";
 import ResearcherResearchWorkspace from "./ResearcherResearchWorkspace";
 import type { ResearchWorkspaceDestination } from "./researchWorkspaceRoute";
-import ResearchOfficeBulkImport from "./ResearchOfficeBulkImport";
 import iasLogo from "./institute_logo/ias.webp";
 import ibfsLogo from "./institute_logo/ibfs.webp";
 import icsLogo from "./institute_logo/ics.webp";
@@ -152,10 +151,6 @@ export default function RoleWorkspace({
         onRetry={onRetry}
       />
     );
-  }
-
-  if (role === "research-office" && dashboardScope === "bulk_import") {
-    return <ResearchOfficeBulkImport />;
   }
 
   return (
@@ -507,9 +502,9 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
         researchMetric: true,
       },
       bulk_import: {
-        title: "Upload Manuscript",
-        description:
-          "Upload multiple research manuscripts and extract metadata.",
+        title: "Manage Repository",
+        description: "Manage studies and import multiple research manuscripts.",
+        destination: "Manage Repository",
       },
       revision_requests: {
         title: "Revision requests",
@@ -802,9 +797,7 @@ function OfficeInstitutionalOverview({
   const selectedStudies = selectedInstitute
     ? studiesByInstitute[selectedInstitute]
     : undefined;
-  const normalizedStudyQuery = debouncedStudyQuery
-    .trim()
-    .toLocaleLowerCase();
+  const normalizedStudyQuery = debouncedStudyQuery.trim().toLocaleLowerCase();
   const filteredStudies = Array.isArray(selectedStudies)
     ? selectedStudies.filter((study) =>
         `${study.title} ${study.year}`
@@ -926,7 +919,10 @@ function OfficeInstitutionalOverview({
                       <a
                         className="office-study-item"
                         key={study.id}
-                        href={officeInstituteStudyOpenUrl(selectedInstitute, study)}
+                        href={officeInstituteStudyOpenUrl(
+                          selectedInstitute,
+                          study,
+                        )}
                         target="_blank"
                         rel="noreferrer"
                       >
@@ -1188,7 +1184,10 @@ function DashboardAnalytics({
                       <text
                         className="analytics-point-value"
                         x={x(index)}
-                        y={Math.max(CHART_TOP + 9, y(point.value) - 8 - seriesIndex * 10)}
+                        y={Math.max(
+                          CHART_TOP + 9,
+                          y(point.value) - 8 - seriesIndex * 10,
+                        )}
                       >
                         {point.value}
                       </text>
@@ -1228,7 +1227,8 @@ function DashboardAnalytics({
               <th>{point.label}</th>
               {analytics.series.map((series) => (
                 <td key={series.key}>
-                  {series.points.find((item) => item.key === point.key)?.value ?? 0}
+                  {series.points.find((item) => item.key === point.key)
+                    ?.value ?? 0}
                 </td>
               ))}
             </tr>

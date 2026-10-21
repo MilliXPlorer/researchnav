@@ -29,7 +29,8 @@ class ResearchOfficeBulkImportService
      * @param  UploadedFile|list<UploadedFile>  $file
      * @param  list<string>|null  $relativePaths
      */
-    public function import(User $actor, UploadedFile|array $file, array $metadata, ?Request $request = null, ?array $relativePaths = null): ResearchDocument
+    /** @return array{document: ResearchDocument, content_indexing_outcome: 'indexed'|'skipped'|'failed'|'no_source'|'unsupported'|'ineligible'} */
+    public function import(User $actor, UploadedFile|array $file, array $metadata, ?Request $request = null, ?array $relativePaths = null): array
     {
         $files = $file instanceof UploadedFile ? [$file] : array_values($file);
         $relativePaths ??= array_map(fn (UploadedFile $item) => $item->getClientOriginalName(), $files);
@@ -107,13 +108,14 @@ class ResearchOfficeBulkImportService
 
                 return $document->load(['authors', 'files', 'sdgs']);
             });
+            $contentIndexingOutcome = 'failed';
             try {
-                ($this->manuscriptSearch ?? app(ManuscriptSearchProjectionService::class))->reindex((int) $document->id, true, true);
+                $contentIndexingOutcome = ($this->manuscriptSearch ?? app(ManuscriptSearchProjectionService::class))->reindex((int) $document->id, true, true);
             } catch (\Throwable) {
                 Log::warning('Imported manuscript text indexing failed.', ['research_document_id' => $document->id]);
             }
 
-            return $document;
+            return ['document' => $document, 'content_indexing_outcome' => $contentIndexingOutcome];
         } catch (\Throwable $exception) {
             foreach ($uploadedPaths as $path) {
                 try {

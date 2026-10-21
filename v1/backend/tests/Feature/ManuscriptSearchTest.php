@@ -46,7 +46,7 @@ class ManuscriptSearchTest extends TestCase
         $file = $this->finalFile($document);
         $projection = $this->projection($document, 'stale secret text', $file);
         $extractor = $this->mock(ManuscriptTextExtractor::class);
-        $extractor->shouldReceive('extract')->once()->andThrow(new ManuscriptTextExtractionException('failed'));
+        $extractor->shouldReceive('extractRaw')->once()->andThrow(new ManuscriptTextExtractionException('failed'));
 
         $outcome = app(ManuscriptSearchProjectionService::class)->reindex($document->id, true);
 
@@ -67,7 +67,7 @@ class ManuscriptSearchTest extends TestCase
         $file = $this->finalFile($document);
         $projection = $this->projection($document, 'stale body', $file);
         $extractor = $this->mock(ManuscriptTextExtractor::class);
-        $extractor->shouldReceive('extract')->once()->andReturn('');
+        $extractor->shouldReceive('extractRaw')->once()->andReturn('');
 
         $this->assertSame('failed', app(ManuscriptSearchProjectionService::class)->reindex($document->id, true));
         $this->assertDatabaseHas('manuscript_search_documents', [
@@ -100,7 +100,7 @@ class ManuscriptSearchTest extends TestCase
             'file_size' => strlen($contents),
         ]);
         $extractor = $this->mock(ManuscriptTextExtractor::class);
-        $extractor->shouldReceive('extract')->once()->andReturn('canonical import body');
+        $extractor->shouldReceive('extractRaw')->once()->andReturn('canonical import body');
 
         $this->assertSame('indexed', app(ManuscriptSearchProjectionService::class)->reindex($document->id));
         $this->assertDatabaseHas('manuscript_search_documents', [
@@ -164,7 +164,7 @@ class ManuscriptSearchTest extends TestCase
             'file_size' => strlen($contents),
         ]);
         $extractor = $this->mock(ManuscriptTextExtractor::class);
-        $extractor->shouldReceive('extract')->once()->andReturn('recovered body');
+        $extractor->shouldReceive('extractRaw')->once()->andReturn('recovered body');
         $service = app(ManuscriptSearchProjectionService::class);
 
         $this->assertSame('failed', $service->reindex($document->id));
@@ -207,7 +207,7 @@ class ManuscriptSearchTest extends TestCase
         $disk = Storage::disk('researchnav_private');
         $disk->put($path, $contents);
         $extractor = $this->mock(ManuscriptTextExtractor::class);
-        $extractor->shouldReceive('extract')->once()->andReturn('durably cached manuscript body');
+        $extractor->shouldReceive('extractRaw')->once()->andReturn('durably cached manuscript body');
 
         $this->assertSame('indexed', app(ManuscriptSearchProjectionService::class)->reindex($document->id));
         $this->assertDatabaseHas('manuscript_search_documents', [
@@ -244,7 +244,7 @@ class ManuscriptSearchTest extends TestCase
             ]);
         }
         $extractor = $this->mock(ManuscriptTextExtractor::class);
-        $extractor->shouldReceive('extract')->times(3)->andReturn('a text', 'z text', 'second text');
+        $extractor->shouldReceive('extractRaw')->times(3)->andReturn('a text', 'z text', 'second text');
 
         $this->assertSame('indexed', app(ManuscriptSearchProjectionService::class)->reindex($document->id));
 
@@ -261,7 +261,7 @@ class ManuscriptSearchTest extends TestCase
         $document = $this->document();
         $first = $this->finalFile($document);
         $extractor = $this->mock(ManuscriptTextExtractor::class);
-        $extractor->shouldReceive('extract')->times(3)->andReturn('first text', 'updated first text', 'second text');
+        $extractor->shouldReceive('extractRaw')->times(3)->andReturn('first text', 'updated first text', 'second text');
         $service = app(ManuscriptSearchProjectionService::class);
 
         $this->assertSame('indexed', $service->reindex($document->id));
@@ -307,8 +307,8 @@ class ManuscriptSearchTest extends TestCase
         ]);
         $projection = $this->projection($document, 'stale complete body');
         $extractor = $this->mock(ManuscriptTextExtractor::class);
-        $extractor->shouldReceive('extract')->once()->andReturn('first extracted text');
-        $extractor->shouldReceive('extract')->once()->andThrow(new ManuscriptTextExtractionException('failed'));
+        $extractor->shouldReceive('extractRaw')->once()->andReturn('first extracted text');
+        $extractor->shouldReceive('extractRaw')->once()->andThrow(new ManuscriptTextExtractionException('failed'));
 
         $this->assertSame('failed', app(ManuscriptSearchProjectionService::class)->reindex($document->id, true));
         $this->assertDatabaseHas('manuscript_search_documents', [
@@ -418,7 +418,7 @@ class ManuscriptSearchTest extends TestCase
         ]);
         $calls = 0;
         $extractor = $this->mock(ManuscriptTextExtractor::class);
-        $extractor->shouldReceive('extract')->twice()->andReturnUsing(function () use (&$calls, $first): string {
+        $extractor->shouldReceive('extractRaw')->twice()->andReturnUsing(function () use (&$calls, $first): string {
             $calls++;
             if ($calls === 1) {
                 Storage::disk('researchnav_private')->put($first->file_path, str_repeat('x', strlen('%PDF-1.4 final')));
@@ -455,7 +455,7 @@ class ManuscriptSearchTest extends TestCase
         $document = $this->document();
         $this->finalFile($document);
         $extractor = $this->mock(ManuscriptTextExtractor::class);
-        $extractor->shouldReceive('extract')->twice()->andReturn('first body', 'second body');
+        $extractor->shouldReceive('extractRaw')->twice()->andReturn('first body', 'second body');
         $service = app(ManuscriptSearchProjectionService::class);
 
         $this->assertSame('indexed', $service->reindex($document->id));
@@ -475,8 +475,8 @@ class ManuscriptSearchTest extends TestCase
         $contents = '%PDF-1.4 final';
         $replacement = str_repeat('x', strlen($contents));
         $extractor = $this->mock(ManuscriptTextExtractor::class);
-        $extractor->shouldReceive('extract')->once()->andThrow(new ManuscriptTextExtractionException('failed'));
-        $extractor->shouldReceive('extract')->once()->andReturn('replacement body');
+        $extractor->shouldReceive('extractRaw')->once()->andThrow(new ManuscriptTextExtractionException('failed'));
+        $extractor->shouldReceive('extractRaw')->once()->andReturn('replacement body');
         $service = app(ManuscriptSearchProjectionService::class);
 
         $this->assertSame('failed', $service->reindex($document->id));
@@ -537,7 +537,7 @@ class ManuscriptSearchTest extends TestCase
             'file_size' => strlen('second bytes'),
         ]);
         $extractor = $this->mock(ManuscriptTextExtractor::class);
-        $extractor->shouldReceive('extract')->twice()->andReturn('first body', 'second body');
+        $extractor->shouldReceive('extractRaw')->twice()->andReturn('first body', 'second body');
         $this->assertSame('indexed', app(ManuscriptSearchProjectionService::class)->reindex($document->id));
         $this->assertDatabaseHas('manuscript_search_documents', [
             'research_document_id' => $document->id,
@@ -573,7 +573,7 @@ class ManuscriptSearchTest extends TestCase
             'file_size' => strlen('a bytes'),
         ]);
         $extractor = $this->mock(ManuscriptTextExtractor::class);
-        $extractor->shouldReceive('extract')->twice()->andReturn('a body', 'final body');
+        $extractor->shouldReceive('extractRaw')->twice()->andReturn('a body', 'final body');
         $this->assertSame('indexed', app(ManuscriptSearchProjectionService::class)->reindex($document->id));
         $projection = ManuscriptSearchDocument::query()->where('research_document_id', $document->id)->sole();
         $this->assertNull($projection->source_document_file_id);
@@ -612,7 +612,7 @@ class ManuscriptSearchTest extends TestCase
         ]);
         $projection = $this->projection($document, 'stale body', $first);
         $extractor = $this->mock(ManuscriptTextExtractor::class);
-        $extractor->shouldReceive('extract')->twice()->andReturn('abcdef', 'abcdef');
+        $extractor->shouldReceive('extractRaw')->twice()->andReturn('abcdef', 'abcdef');
 
         $this->assertSame('failed', app(ManuscriptSearchProjectionService::class)->reindex($document->id, true));
         $this->assertDatabaseHas('manuscript_search_documents', [
@@ -664,7 +664,7 @@ class ManuscriptSearchTest extends TestCase
         $document = $this->document();
         $this->finalFile($document);
         $extractor = $this->mock(ManuscriptTextExtractor::class);
-        $extractor->shouldReceive('extract')->once()->andReturn('reindexed body');
+        $extractor->shouldReceive('extractRaw')->once()->andReturn('reindexed body');
 
         $this->artisan('repository:reindex-manuscripts', ['--document' => [$document->id]])->assertExitCode(0);
         $this->artisan('repository:reindex-manuscripts', ['--document' => [$document->id]])->assertExitCode(0);
@@ -696,7 +696,7 @@ class ManuscriptSearchTest extends TestCase
         $document = $this->document();
         $this->finalFile($document);
         $extractor = $this->mock(ManuscriptTextExtractor::class);
-        $extractor->shouldReceive('extract')->once()->andThrow(new ManuscriptTextExtractionException('failed'));
+        $extractor->shouldReceive('extractRaw')->once()->andThrow(new ManuscriptTextExtractionException('failed'));
 
         $this->artisan('repository:reindex-manuscripts', ['--document' => [$document->id]])
             ->expectsOutputToContain('Failed: 1')

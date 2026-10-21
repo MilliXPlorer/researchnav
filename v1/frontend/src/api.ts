@@ -142,6 +142,18 @@ export interface LaravelPaginatedResponse<T> {
   meta: LaravelPaginationMeta;
 }
 
+export interface OfficeRepositorySummary {
+  /** All non-deleted records, regardless of the current list filters. */
+  all: number;
+  ongoing: number;
+  archived: number;
+  recycle: number;
+}
+
+export interface OfficeRepositoryListResponse extends LaravelPaginatedResponse<OfficeRepositoryItemResource> {
+  summary: OfficeRepositorySummary;
+}
+
 /** Safe, office-only representation used by the Manage Repository workspace. */
 export interface OfficeRepositoryItemResource {
   id: number;
@@ -193,14 +205,14 @@ export interface OfficeRepositoryDetailResource extends Omit<
   files: OfficeRepositoryFileResource[];
 }
 
-export type OfficeRepositoryBucket = "ongoing" | "archived" | "recycle";
+export type OfficeRepositoryBucket = "all" | "ongoing" | "archived" | "recycle";
 
 export interface OfficeRepositoryListInput {
   bucket?: OfficeRepositoryBucket;
   search?: string;
   institute?: string;
   publication_year?: number;
-  sort?: "title" | "publication_year" | "updated_at";
+  sort?: "title" | "publication_year" | "updated_at" | "archive_status";
   direction?: "asc" | "desc";
   page?: number;
   per_page?: 10 | 25 | 50 | 100;
@@ -218,6 +230,7 @@ export interface OfficeRepositoryUpdateInput {
   degree_program?: string | null;
   manuscript_date_label?: string | null;
   research_stage?: "title_proposal" | "ongoing" | "completed";
+  authors?: string[];
 }
 
 /** The exact public representation from AdminAuditLogResource. */
@@ -1320,7 +1333,7 @@ export function listOfficeRepository(
   input: OfficeRepositoryListInput = {},
   fetcher: ApiFetch = globalThis.fetch,
   signal?: AbortSignal,
-): Promise<LaravelPaginatedResponse<OfficeRepositoryItemResource>> {
+): Promise<OfficeRepositoryListResponse> {
   // The recycle bucket's server-defined order is by removal time. `updated_at`
   // is not a meaningful replacement for that order and is not a supported
   // default sort for this bucket.

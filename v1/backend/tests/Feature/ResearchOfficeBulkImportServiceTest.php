@@ -57,8 +57,10 @@ class ResearchOfficeBulkImportServiceTest extends TestCase
 
     public function test_reviewed_metadata_and_object_path_are_persisted(): void
     {
-        $document = $this->service()->import(User::factory()->create(), UploadedFile::fake()->createWithContent('study.pdf', '%PDF-test'), $this->metadata);
+        $result = $this->service()->import(User::factory()->create(), UploadedFile::fake()->createWithContent('study.pdf', '%PDF-test'), $this->metadata);
+        $document = $result['document'];
 
+        $this->assertSame('indexed', $result['content_indexing_outcome']);
         $this->assertSame('archived', $document->submission_status);
         $this->assertSame('archived', $document->archive_status);
         $this->assertSame('public', $document->visibility);
@@ -87,7 +89,7 @@ class ResearchOfficeBulkImportServiceTest extends TestCase
             User::factory()->create(),
             UploadedFile::fake()->createWithContent('study.pdf', '%PDF-test'),
             [...$this->metadata, 'year' => 2018, 'final_binding_date' => 'March 2019'],
-        );
+        )['document'];
 
         $this->assertSame(2018, $document->publication_year);
         $this->assertSame('March 2019', $document->manuscript_date_label);
@@ -99,7 +101,7 @@ class ResearchOfficeBulkImportServiceTest extends TestCase
             User::factory()->create(),
             UploadedFile::fake()->createWithContent('study.pdf', '%PDF-test'),
             $this->metadata,
-        );
+        )['document'];
 
         $this->getJson('/api/repository/'.$document->id)
             ->assertOk()
@@ -117,7 +119,7 @@ class ResearchOfficeBulkImportServiceTest extends TestCase
             UploadedFile::fake()->createWithContent('appendix.pdf', '%PDF-appendix'),
             UploadedFile::fake()->createWithContent('Manuscript.pdf', '%PDF-body'),
             UploadedFile::fake()->createWithContent('Front Matter.pdf', '%PDF-front'),
-        ], $this->metadata, null, ['Study A/appendix.pdf', 'Study A/Manuscript.pdf', 'Study A/Front Matter.pdf']);
+        ], $this->metadata, null, ['Study A/appendix.pdf', 'Study A/Manuscript.pdf', 'Study A/Front Matter.pdf'])['document'];
 
         $this->assertDatabaseCount('research_documents', 1);
         $this->assertSame('Study A', $document->import_group_name);
@@ -156,6 +158,22 @@ class ResearchOfficeBulkImportServiceTest extends TestCase
 
         $this->assertDatabaseCount('research_documents', 0);
         $this->assertDatabaseCount('document_files', 0);
+    }
+
+    public function test_indexing_exception_reports_failed_without_rolling_back_import(): void
+    {
+        $manuscriptSearch = $this->createMock(ManuscriptSearchProjectionService::class);
+        $manuscriptSearch->method('reindex')->willThrowException(new \RuntimeException('extractor unavailable'));
+        $service = new ResearchOfficeBulkImportService(
+            $this->createStub(AuditService::class),
+            $this->createStub(MonitoringService::class),
+            $manuscriptSearch,
+        );
+
+        $result = $service->import(User::factory()->create(), UploadedFile::fake()->createWithContent('study.pdf', '%PDF-test'), $this->metadata);
+
+        $this->assertSame('failed', $result['content_indexing_outcome']);
+        $this->assertDatabaseHas('research_documents', ['id' => $result['document']->id]);
     }
 
     private function service(?AuditService $audit = null): ResearchOfficeBulkImportService

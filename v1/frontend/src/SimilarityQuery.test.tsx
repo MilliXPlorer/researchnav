@@ -377,6 +377,58 @@ describe("researcher similarity check", () => {
     expect(submittedBody?.getAll("files[]")).toEqual(files);
   });
 
+  it("rejects a dropped folder when any file is not a PDF", () => {
+    renderCheck("content");
+    const pdf = new File(["pdf"], "manuscript", {
+      type: "application/pdf",
+    });
+    const extra = new File(["metadata"], ".drag-metadata", {
+      type: "application/octet-stream",
+    });
+
+    fireEvent.drop(screen.getByText("Choose manuscript file").closest("div")!, {
+      dataTransfer: { files: [pdf, extra] },
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Folder uploads are accepted only when every file is a PDF.",
+    );
+    expect(
+      screen.getByRole("button", { name: "Check content" }),
+    ).toBeDisabled();
+  });
+
+  it("accepts a dropped folder when every file is a PDF", () => {
+    renderCheck("content");
+    const files = [
+      new File(["cover"], "cover.pdf", { type: "application/pdf" }),
+      new File(["chapter"], "chapter.pdf", { type: "application/pdf" }),
+    ];
+
+    fireEvent.drop(screen.getByText("Choose manuscript file").closest("div")!, {
+      dataTransfer: { files },
+    });
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByText("2 PDF files selected")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check content" })).toBeEnabled();
+  });
+
+  it("ignores an empty browser folder placeholder when dropped PDFs are valid", () => {
+    renderCheck("content");
+    const pdf = new File(["chapter"], "chapter.pdf", {
+      type: "application/pdf",
+    });
+    const directoryPlaceholder = new File([], "", { type: "" });
+
+    fireEvent.drop(screen.getByText("Choose manuscript file").closest("div")!, {
+      dataTransfer: { files: [directoryPlaceholder, pdf] },
+    });
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check content" })).toBeEnabled();
+  });
+
   it("rejects unsupported content files before making a request", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

@@ -244,6 +244,157 @@ describe("ResearchOfficeBulkImport", () => {
     ).toHaveTextContent("2 uploaded · 0 not uploaded");
   });
 
+  it("closes its parent after a clean successful upload", async () => {
+    const onComplete = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const body = init?.body as FormData;
+        if (String(input).endsWith("/preview")) {
+          const file = body.get("files[]") as File;
+          return new Response(
+            JSON.stringify({
+              data: [
+                {
+                  file_name: file.name,
+                  file_size: file.size,
+                  mime_type: file.type,
+                  status: "ready",
+                  missing_fields: [],
+                  metadata: {
+                    ...extractedMetadata,
+                    institute: "Institute of Computer Studies",
+                  },
+                },
+              ],
+            }),
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            data: { id: 1, content_indexing_outcome: "indexed" },
+          }),
+          { status: 201 },
+        );
+      }),
+    );
+
+    render(<ResearchOfficeBulkImport onComplete={onComplete} />);
+    fireEvent.change(document.querySelector('input[type="file"]')!, {
+      target: {
+        files: [new File(["pdf"], "success.pdf", { type: "application/pdf" })],
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Extract Metadata" }));
+    await screen.findByLabelText("Institute");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Upload Selected Manuscripts" }),
+    );
+
+    await waitFor(() => expect(onComplete).toHaveBeenCalledOnce());
+  });
+
+  it("edits the title and researchers directly during review", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              data: [
+                {
+                  file_name: "study.pdf",
+                  file_size: 3,
+                  mime_type: "application/pdf",
+                  status: "ready",
+                  missing_fields: [],
+                  metadata: extractedMetadata,
+                },
+              ],
+            }),
+          ),
+      ),
+    );
+
+    render(<ResearchOfficeBulkImport />);
+    fireEvent.change(document.querySelector('input[type="file"]')!, {
+      target: {
+        files: [new File(["pdf"], "study.pdf", { type: "application/pdf" })],
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Extract Metadata" }));
+    const researchers = await screen.findByLabelText("Researchers");
+    const title = screen.getByLabelText("Research Title");
+    expect(title).not.toHaveAttribute("readonly");
+    expect(researchers).not.toHaveAttribute("readonly");
+    fireEvent.change(title, { target: { value: "Updated study title" } });
+
+    fireEvent.change(researchers, {
+      target: { value: "Researcher One\nResearcher Two" },
+    });
+
+    expect(title).toHaveValue("Updated study title");
+    expect(researchers).toHaveValue("Researcher One\nResearcher Two");
+  });
+
+  it("warns when content extraction fails without treating the import as failed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const body = init?.body as FormData;
+        if (String(input).endsWith("/preview")) {
+          const file = body.get("files[]") as File;
+          return new Response(
+            JSON.stringify({
+              data: [
+                {
+                  file_name: file.name,
+                  file_size: file.size,
+                  mime_type: file.type,
+                  status: "ready",
+                  missing_fields: [],
+                  metadata: {
+                    ...extractedMetadata,
+                    institute: "Institute of Computer Studies",
+                  },
+                },
+              ],
+            }),
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            data: { id: 1, content_indexing_outcome: "failed" },
+          }),
+          { status: 201 },
+        );
+      }),
+    );
+
+    render(<ResearchOfficeBulkImport />);
+    fireEvent.change(document.querySelector('input[type="file"]')!, {
+      target: {
+        files: [new File(["pdf"], "warning.pdf", { type: "application/pdf" })],
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Extract Metadata" }));
+    await screen.findByLabelText("Institute");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Upload Selected Manuscripts" }),
+    );
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Manuscript upload results",
+    });
+    expect(dialog).toHaveTextContent("1 uploaded · 0 not uploaded");
+    expect(dialog).toHaveTextContent(
+      "Study uploaded successfully, but manuscript content extraction failed.",
+    );
+    expect(
+      screen.queryByRole("button", { name: /Retry .* failed upload/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("previews a folder from its ordered front file and uploads the whole folder once", async () => {
     const requests: FormData[] = [];
     vi.stubGlobal(

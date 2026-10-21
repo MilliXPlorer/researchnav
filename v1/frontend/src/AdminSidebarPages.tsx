@@ -28,7 +28,7 @@ import {
 import { Button, Pagination, SortableHeader } from "./components";
 import { DatePickerInput } from "./dateControls";
 import { ConfirmDialog, Modal } from "./Modal";
-import ResearchOfficeBulkImport from "./ResearchOfficeBulkImport";
+import ManageRepository from "./ManageRepository";
 import { useLiveFilters } from "./useLiveFilters";
 import { useDebouncedValue } from "./useDebouncedValue";
 import { filterUserRows } from "./userManagement";
@@ -64,8 +64,8 @@ export default function AdminSidebarPage({
       return <AllUsers />;
     case "Audit Logs":
       return <AuditLogs />;
-    case "Upload Manuscript":
-      return <ResearchOfficeBulkImport contextLabel="System Administrator" />;
+    case "Manage Repository":
+      return <ManageRepository contextLabel="System Administrator" />;
     case "System Settings":
       return <SystemStatus />;
     default:
@@ -165,7 +165,9 @@ function useInstituteOptions(): [string[], () => void] {
       void listInstitutes()
         .then((values) => {
           const names = Array.isArray(values)
-            ? values.filter((value): value is string => typeof value === "string")
+            ? values.filter(
+                (value): value is string => typeof value === "string",
+              )
             : [];
           if (names.length > 0) setInstitutes(names);
         })
@@ -175,7 +177,8 @@ function useInstituteOptions(): [string[], () => void] {
     window.addEventListener(INSTITUTES_CHANGED_EVENT, load);
     return () => window.removeEventListener(INSTITUTES_CHANGED_EVENT, load);
   }, []);
-  const refresh = () => window.dispatchEvent(new Event(INSTITUTES_CHANGED_EVENT));
+  const refresh = () =>
+    window.dispatchEvent(new Event(INSTITUTES_CHANGED_EVENT));
   return [institutes, refresh];
 }
 
@@ -276,7 +279,9 @@ function AccessRequests() {
             <select
               value={status}
               onChange={(event) => {
-                setStatus(event.target.value as AccessRequestResource["status"]);
+                setStatus(
+                  event.target.value as AccessRequestResource["status"],
+                );
                 setPage(1);
               }}
             >
@@ -298,104 +303,104 @@ function AccessRequests() {
           <p className="admin-empty">No {status} access requests.</p>
         ) : (
           <>
-          <div className="admin-table-wrap">
-            <table>
-              <caption className="sr-only">Access requests</caption>
-              <thead>
-                <tr>
-                  <th>Applicant</th>
-                  <th>Requested role</th>
-                  <th>Details</th>
-                  <th>Requested</th>
-                  <th>{status === "pending" ? "Decision" : "Outcome"}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {result.data.map((request) => (
-                  <tr key={request.id}>
-                    <td>
-                      <strong>{request.email ?? "Unknown account"}</strong>
-                      {request.full_name && <div>{request.full_name}</div>}
-                    </td>
-                    <td>{request.requested_role}</td>
-                    <td>
-                      {request.program && <div>{request.program}</div>}
-                      {request.justification && (
-                        <div>{request.justification}</div>
-                      )}
-                      {!request.program && !request.justification && "—"}
-                    </td>
-                    <td>{request.requested_at ?? "—"}</td>
-                    <td>
-                      {request.status === "pending" ? (
-                        <span className="row-actions">
-                          <label
-                            className="sr-only"
-                            htmlFor={`role-${request.id}`}
-                          >
-                            Grant role
-                          </label>
-                          <select
-                            id={`role-${request.id}`}
-                            value={
-                              grantedRoles[request.id] ??
-                              (REQUESTABLE_ROLES.includes(
-                                request.requested_role as RequestableRole,
-                              )
-                                ? (request.requested_role as RequestableRole)
-                                : "researcher")
-                            }
-                            onChange={(event) =>
-                              setGrantedRoles((current) => ({
-                                ...current,
-                                [request.id]: event.target
-                                  .value as RequestableRole,
-                              }))
-                            }
-                          >
-                            {REQUESTABLE_ROLES.map((role) => (
-                              <option key={role} value={role}>
-                                {role}
-                              </option>
-                            ))}
-                          </select>
-                          <Button
-                            disabled={deciding === request.id}
-                            onClick={() => void decide(request, "approve")}
-                          >
-                            Approve
-                          </Button>
-                          <Button
-                            variant="secondary"
-                            disabled={deciding === request.id}
-                            onClick={() => void decide(request, "reject")}
-                          >
-                            Reject
-                          </Button>
-                        </span>
-                      ) : (
-                        <span>
-                          {request.status}
-                          {request.decided_by_email
-                            ? ` · ${request.decided_by_email}`
-                            : ""}
-                        </span>
-                      )}
-                    </td>
+            <div className="admin-table-wrap">
+              <table>
+                <caption className="sr-only">Access requests</caption>
+                <thead>
+                  <tr>
+                    <th>Applicant</th>
+                    <th>Requested role</th>
+                    <th>Details</th>
+                    <th>Requested</th>
+                    <th>{status === "pending" ? "Decision" : "Outcome"}</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {result.data.map((request) => (
+                    <tr key={request.id}>
+                      <td>
+                        <strong>{request.email ?? "Unknown account"}</strong>
+                        {request.full_name && <div>{request.full_name}</div>}
+                      </td>
+                      <td>{request.requested_role}</td>
+                      <td>
+                        {request.program && <div>{request.program}</div>}
+                        {request.justification && (
+                          <div>{request.justification}</div>
+                        )}
+                        {!request.program && !request.justification && "—"}
+                      </td>
+                      <td>{request.requested_at ?? "—"}</td>
+                      <td>
+                        {request.status === "pending" ? (
+                          <span className="row-actions">
+                            <label
+                              className="sr-only"
+                              htmlFor={`role-${request.id}`}
+                            >
+                              Grant role
+                            </label>
+                            <select
+                              id={`role-${request.id}`}
+                              value={
+                                grantedRoles[request.id] ??
+                                (REQUESTABLE_ROLES.includes(
+                                  request.requested_role as RequestableRole,
+                                )
+                                  ? (request.requested_role as RequestableRole)
+                                  : "researcher")
+                              }
+                              onChange={(event) =>
+                                setGrantedRoles((current) => ({
+                                  ...current,
+                                  [request.id]: event.target
+                                    .value as RequestableRole,
+                                }))
+                              }
+                            >
+                              {REQUESTABLE_ROLES.map((role) => (
+                                <option key={role} value={role}>
+                                  {role}
+                                </option>
+                              ))}
+                            </select>
+                            <Button
+                              disabled={deciding === request.id}
+                              onClick={() => void decide(request, "approve")}
+                            >
+                              Approve
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              disabled={deciding === request.id}
+                              onClick={() => void decide(request, "reject")}
+                            >
+                              Reject
+                            </Button>
+                          </span>
+                        ) : (
+                          <span>
+                            {request.status}
+                            {request.decided_by_email
+                              ? ` · ${request.decided_by_email}`
+                              : ""}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
-          <Pagination
-          meta={result.meta}
-          noun="requests"
-          onPage={(nextPage) => {
-            setPage(nextPage);
-            reload();
-          }}
-          />
+            <Pagination
+              meta={result.meta}
+              noun="requests"
+              onPage={(nextPage) => {
+                setPage(nextPage);
+                reload();
+              }}
+            />
           </>
         )}
       </section>
@@ -466,7 +471,11 @@ function AccountProvisioning({
     setNotice("");
     setProvisioning(true);
     try {
-      await provisionAdminAccount(email.trim(), role, role === "coordinator" ? institute : undefined);
+      await provisionAdminAccount(
+        email.trim(),
+        role,
+        role === "coordinator" ? institute : undefined,
+      );
       setEmail("");
       setNotice("Account provisioned.");
       if (onAdded) onAdded();
@@ -523,9 +532,17 @@ function AccountProvisioning({
           {role === "coordinator" && (
             <label>
               Institute
-              <select value={institute} onChange={(event) => setInstitute(event.target.value)} required>
+              <select
+                value={institute}
+                onChange={(event) => setInstitute(event.target.value)}
+                required
+              >
                 <option value="">Select institute</option>
-                {instituteOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+                {instituteOptions.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
               </select>
             </label>
           )}
@@ -645,14 +662,19 @@ function AllUsers({
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [drafts, setDrafts] = useState<
-    Record<string, { role: AdminRole; access_status: AccessStatus; institute: string | null }>
+    Record<
+      string,
+      { role: AdminRole; access_status: AccessStatus; institute: string | null }
+    >
   >({});
   const [saving, setSaving] = useState<string | null>(null);
   const [institutes, refreshInstitutes] = useInstituteOptions();
   const [managingInstitutes, setManagingInstitutes] = useState(false);
   const [newInstitute, setNewInstitute] = useState("");
   const [addingInstitute, setAddingInstitute] = useState(false);
-  const [removingInstitute, setRemovingInstitute] = useState<string | null>(null);
+  const [removingInstitute, setRemovingInstitute] = useState<string | null>(
+    null,
+  );
   const [editingUser, setEditingUser] = useState<AdminUserResource | null>(
     null,
   );
@@ -720,7 +742,11 @@ function AllUsers({
   }
   function draftFor(user: AdminUserResource) {
     return (
-      drafts[user.id] ?? { role: user.role, access_status: user.access_status, institute: user.institute }
+      drafts[user.id] ?? {
+        role: user.role,
+        access_status: user.access_status,
+        institute: user.institute,
+      }
     );
   }
   async function addInstitute() {
@@ -734,7 +760,9 @@ function AllUsers({
       setSaveMessage(`Added ${name}.`);
       refreshInstitutes();
     } catch (requestError) {
-      setSaveMessage(friendlyError(requestError, "Institute could not be added"));
+      setSaveMessage(
+        friendlyError(requestError, "Institute could not be added"),
+      );
     } finally {
       setAddingInstitute(false);
     }
@@ -745,12 +773,17 @@ function AllUsers({
     try {
       await deleteInstitute(name);
       if (editingUser && draftFor(editingUser).institute === name) {
-        setDrafts((current) => ({ ...current, [editingUser.id]: { ...draftFor(editingUser), institute: null } }));
+        setDrafts((current) => ({
+          ...current,
+          [editingUser.id]: { ...draftFor(editingUser), institute: null },
+        }));
       }
       setSaveMessage(`Removed ${name}.`);
       refreshInstitutes();
     } catch (requestError) {
-      setSaveMessage(friendlyError(requestError, "Institute could not be removed"));
+      setSaveMessage(
+        friendlyError(requestError, "Institute could not be removed"),
+      );
     } finally {
       setRemovingInstitute(null);
     }
@@ -1200,7 +1233,9 @@ function AllUsers({
               >
                 <option value="">Not assigned</option>
                 {institutes.map((institute) => (
-                  <option key={institute} value={institute}>{institute}</option>
+                  <option key={institute} value={institute}>
+                    {institute}
+                  </option>
                 ))}
               </select>
             </label>
@@ -1226,8 +1261,18 @@ function AllUsers({
             </header>
             {saveMessage && (
               <p
-                role={saveMessage.startsWith("Added") || saveMessage.startsWith("Removed") ? "status" : "alert"}
-                className={saveMessage.startsWith("Added") || saveMessage.startsWith("Removed") ? "admin-success" : "admin-error"}
+                role={
+                  saveMessage.startsWith("Added") ||
+                  saveMessage.startsWith("Removed")
+                    ? "status"
+                    : "alert"
+                }
+                className={
+                  saveMessage.startsWith("Added") ||
+                  saveMessage.startsWith("Removed")
+                    ? "admin-success"
+                    : "admin-error"
+                }
               >
                 {saveMessage}
               </p>
@@ -1253,7 +1298,10 @@ function AllUsers({
                 {addingInstitute ? "…" : <Plus />}
               </Button>
             </div>
-            <div className="admin-institute-list" aria-label="Institute management">
+            <div
+              className="admin-institute-list"
+              aria-label="Institute management"
+            >
               {institutes.map((institute) => (
                 <div key={institute} className="admin-institute-row">
                   <span>{institute}</span>
