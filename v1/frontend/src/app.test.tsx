@@ -499,6 +499,99 @@ describe("role workspaces", () => {
     );
   });
 
+  it("routes Research Office sidebar pages away from the similarity checker", async () => {
+    const session = {
+      email: "office@example.test",
+      role: "research-office" as const,
+      accessStatus: "active" as const,
+      isAdmin: false,
+      firstName: "Research",
+      middleName: null,
+      lastName: "Office",
+      studentEmployeeId: null,
+      displayName: "Research Office",
+      profilePhotoUrl: null,
+    };
+    const navigate = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              data: {
+                schema_version: 1,
+                role: "research-office",
+                sections: [],
+              },
+            }),
+          ),
+      ),
+    );
+
+    render(
+      <Dashboard
+        session={session}
+        navigate={navigate}
+        initialNav="Similarity Check"
+        initialSimilarityMode="content"
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Manage Repository" }));
+
+    expect(navigate).toHaveBeenCalledWith(
+      "/app/research-office/manage-repository",
+    );
+  });
+
+  it("restores a routed Research Office sidebar page", async () => {
+    const session = {
+      email: "office@example.test",
+      role: "research-office" as const,
+      accessStatus: "active" as const,
+      isAdmin: false,
+      firstName: "Research",
+      middleName: null,
+      lastName: "Office",
+      studentEmployeeId: null,
+      displayName: "Research Office",
+      profilePhotoUrl: null,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        if (String(input).startsWith("/api/office/repository?")) {
+          return new Response(
+            JSON.stringify({ data: [], links: { next: null }, meta: {} }),
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            data: { schema_version: 1, role: "research-office", sections: [] },
+          }),
+        );
+      }),
+    );
+
+    render(
+      <App
+        initialState={{
+          version: 1,
+          url: {
+            pathname: "/app/research-office/manage-repository",
+            search: "",
+          },
+          session: { status: "authenticated", user: session },
+          repository: { status: "ready", records: [] },
+        }}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Manage Repository" }),
+    ).toBeInTheDocument();
+  });
+
   it("leaves instructor section routes when another sidebar page is selected", async () => {
     const session = {
       email: "instructor@example.test",
@@ -543,7 +636,7 @@ describe("role workspaces", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "User Logs" }));
-    expect(navigate).toHaveBeenCalledWith("/app");
+    expect(navigate).toHaveBeenCalledWith("/app/instructor/user-logs");
 
     fireEvent.click(
       screen.getByRole("button", { name: "Open workspace navigation" }),
@@ -829,7 +922,7 @@ describe("role workspaces", () => {
     );
 
     const analytics = screen.getByText("Research analytics");
-    expect(screen.getByText("4 total")).toBeInTheDocument();
+    expect(screen.getByLabelText("4 total")).toBeInTheDocument();
     const overview = await screen.findByRole("heading", {
       name: "Institutional Overview",
     });
@@ -1603,7 +1696,9 @@ describe("authenticated notifications", () => {
     render(<Dashboard session={activeSession} navigate={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Open notifications" }));
     expect(await screen.findByText(second.title)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Mark all as read" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Mark all notifications as read" }),
+    );
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "1 notification could not be marked as read.",
     );

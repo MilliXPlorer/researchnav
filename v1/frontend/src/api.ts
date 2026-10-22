@@ -1240,6 +1240,12 @@ export async function markNotificationRead(
   ).data;
 }
 
+export async function deleteNotification(id: string): Promise<void> {
+  await apiRequest<void>(`/api/notifications/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
 export async function provisionAccount(
   endpoint:
     | "/api/admin/accounts"

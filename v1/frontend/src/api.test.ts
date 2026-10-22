@@ -12,6 +12,7 @@ import {
   createFeedback,
   createPdfAnnotation,
   deleteAdminUser,
+  deleteNotification,
   deleteOwnProfilePhoto,
   getOwnProfile,
   listNotifications,
@@ -472,6 +473,17 @@ describe("notification API", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       `/api/notifications/${notification.id}/read`,
       expect.objectContaining({ method: "PATCH" }),
+    );
+  });
+
+  it("deletes the UUID notification through its scoped Laravel endpoint", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(deleteNotification(notification.id)).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/notifications/${notification.id}`,
+      expect.objectContaining({ method: "DELETE" }),
     );
   });
 });

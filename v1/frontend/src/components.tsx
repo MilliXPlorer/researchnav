@@ -1,4 +1,10 @@
-import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { ArrowRight, CircleAlert, CircleCheck, Search, X } from "lucide-react";
 import {
   classificationLabel,
@@ -21,6 +27,80 @@ export function Logo({ compact = false }: { compact?: boolean }) {
       )}
     </span>
   );
+}
+
+export function AnimatedStat({
+  value,
+  placeholder,
+  variant = "count",
+}: {
+  value: number | null;
+  placeholder?: ReactNode;
+  variant?: "count" | "year";
+}) {
+  const target = value ?? 0;
+  const [display, setDisplay] = useState<number | ReactNode>(
+    value ?? placeholder ?? 0,
+  );
+  const elementRef = useRef<HTMLElement>(null);
+  const previousTarget = useRef<number | null>(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const element = elementRef.current;
+    if (!element) return;
+    if (!("IntersectionObserver" in window)) {
+      const frame = requestAnimationFrame(() => setVisible(true));
+      return () => cancelAnimationFrame(frame);
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting) return;
+        setVisible(true);
+        observer.disconnect();
+      },
+      { threshold: 0.35 },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!visible || value === null || target === previousTarget.current) return;
+    previousTarget.current = target;
+    if (
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true
+    ) {
+      const frame = requestAnimationFrame(() => setDisplay(target));
+      return () => cancelAnimationFrame(frame);
+    }
+
+    const duration = 900;
+    const startedAt = performance.now();
+    let frame = 0;
+    const animate = (now: number) => {
+      const progress = Math.min((now - startedAt) / duration, 1);
+      if (variant === "year" && progress < 0.82) {
+        const cycle = Math.floor(progress * 24);
+        setDisplay(target + ((cycle * 7) % 15));
+      } else {
+        setDisplay(
+          variant === "year"
+            ? target
+            : Math.round(target * (1 - Math.pow(1 - progress, 3))),
+        );
+      }
+      if (progress < 1) frame = requestAnimationFrame(animate);
+    };
+    frame = requestAnimationFrame(() => {
+      setDisplay(variant === "year" ? target + 9 : 0);
+      frame = requestAnimationFrame(animate);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [target, value, variant, visible]);
+
+  return <strong ref={elementRef}>{display}</strong>;
 }
 
 export function Button({

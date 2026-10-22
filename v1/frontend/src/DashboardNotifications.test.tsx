@@ -51,6 +51,8 @@ describe("Dashboard notification request ownership", () => {
               data: { ...notification, read_at: "2026-10-16T10:00:00Z" },
             }),
           );
+        if (path === "/api/notifications/notification-one")
+          return new Response(null, { status: 204 });
         if (path === "/api/dashboard")
           return new Response(
             JSON.stringify({
@@ -142,6 +144,88 @@ describe("Dashboard notification request ownership", () => {
       ),
     ).toHaveLength(1);
     unmount();
+  });
+
+  it("selects and deletes a notification without opening it", async () => {
+    const fetchMock = mockApi();
+    const navigate = vi.fn();
+    render(<Dashboard session={session} navigate={navigate} />);
+    await flush();
+    const bell = screen.getByRole("button", { name: "Open notifications" });
+    fireEvent.click(bell);
+    await flush();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Select notifications" }),
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: `Select notification: ${notification.title}`,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete selected notifications" }),
+    );
+    await flush();
+
+    expect(
+      screen.getByRole("dialog", { name: "Delete notifications" }),
+    ).toHaveTextContent("1 selected");
+    expect(
+      screen.getByRole("dialog", { name: "Delete notifications" }),
+    ).toHaveTextContent(notification.title);
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/notifications/notification-one",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+    fireEvent.click(
+      screen
+        .getByRole("dialog", { name: "Delete notifications" })
+        .querySelector<HTMLButtonElement>(".button-rust")!,
+    );
+    await flush();
+
+    expect(screen.getByText("No notifications.")).toBeInTheDocument();
+    expect(bell).not.toHaveTextContent("1");
+    expect(navigate).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/notifications/notification-one",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it("allows a selected notification to be removed from the confirmation", async () => {
+    mockApi();
+    render(<Dashboard session={session} navigate={vi.fn()} />);
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Open notifications" }));
+    await flush();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Select notifications" }),
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: `Select notification: ${notification.title}`,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete selected notifications" }),
+    );
+
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: `Keep selected: ${notification.title}`,
+      }),
+    );
+
+    expect(
+      screen.queryByRole("dialog", { name: "Delete notifications" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("checkbox", {
+        name: `Select notification: ${notification.title}`,
+      }),
+    ).not.toBeChecked();
   });
 
   it("stops its timer immediately when signing out, before the logout request finishes", async () => {

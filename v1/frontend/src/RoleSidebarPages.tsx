@@ -5557,7 +5557,7 @@ function CoordinatorAccountRoles({ role }: { role: Role }) {
         title="Account roles"
         description="Add and review Research Instructor accounts."
       />
-      <section className="panel-card admin-provision-card">
+      <section className="panel-card admin-provision-card similarity-query-panel">
         <h2>Add instructor account</h2>
         <form onSubmit={submit} className="admin-inline-form">
           <label>
@@ -9233,7 +9233,7 @@ function ResearcherSimilarityCheck({
         }
       />
 
-      <section className="panel-card admin-provision-card">
+      <section className="panel-card admin-provision-card similarity-query-panel">
         <form
           className="similarity-query-form"
           role="search"
@@ -9244,13 +9244,13 @@ function ResearcherSimilarityCheck({
         >
           {mode === "title" ? (
             <label className="full-field" htmlFor="similarity-query">
-              Proposed title or keywords
+              Research title or keywords
               <input
                 id="similarity-query"
                 type="search"
                 value={draft}
                 maxLength={MAX_SIMILARITY_QUERY_LENGTH}
-                placeholder="e.g. web-based inventory management system for small business"
+                placeholder="Enter your proposed research title..."
                 onChange={(event) => {
                   setDraft(event.target.value);
                   const input = event.currentTarget;
@@ -9466,6 +9466,13 @@ function ResearcherSimilarityCheck({
                   : "Check content"}
             </Button>
           </div>
+          {mode === "title" && (
+            <p className="similarity-query-note">
+              <span aria-hidden="true">i</span>
+              Compares research titles only. Full manuscript checking is
+              available in Content Checker.
+            </p>
+          )}
         </form>
         {mode === "title" && tooShort && (
           <p className="admin-empty">Enter at least two characters to check.</p>

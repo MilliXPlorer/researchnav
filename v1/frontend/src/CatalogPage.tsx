@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
+  ArrowUp,
   ArrowUpDown,
   ChevronDown,
   Download,
@@ -83,6 +84,7 @@ export default function CatalogPage({
   );
   const [profileOpen, setProfileOpen] = useState(false);
   const [sdgPickerOpen, setSdgPickerOpen] = useState(false);
+  const [showBackToTop, setShowBackToTop] = useState(false);
   const exactYear = searchParams.get("year") ?? "";
   const yearFrom = searchParams.get("year_from") ?? exactYear;
   const yearTo = searchParams.get("year_to") ?? exactYear;
@@ -123,6 +125,13 @@ export default function CatalogPage({
     !hasActiveSimilarityQuery && hasServerFilters && serverFilterState === null;
   const serverFiltersFailed =
     !hasActiveSimilarityQuery && serverFilterState?.status === "error";
+
+  useEffect(() => {
+    const update = () => setShowBackToTop(window.scrollY > 360);
+    update();
+    window.addEventListener("scroll", update, { passive: true });
+    return () => window.removeEventListener("scroll", update);
+  }, []);
 
   useEffect(() => {
     if (!hasServerFilters || hasActiveSimilarityQuery) return;
@@ -604,7 +613,10 @@ export default function CatalogPage({
                     ))}
                   </div>
                   <div className="result-actions">
-                    <button onClick={() => setSelectedRecord(record)}>
+                    <button
+                      className="result-metadata-action"
+                      onClick={() => setSelectedRecord(record)}
+                    >
                       View full metadata <ArrowRight />
                     </button>
                     {session ? (
@@ -690,6 +702,17 @@ export default function CatalogPage({
           onOpenWorkspace={() => navigate("/app")}
           onLogout={onLogout}
         />
+      )}
+      {showBackToTop && (
+        <button
+          type="button"
+          className="catalog-scroll-top"
+          aria-label="Back to top"
+          title="Back to top"
+          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+        >
+          <ArrowUp aria-hidden="true" />
+        </button>
       )}
     </div>
   );

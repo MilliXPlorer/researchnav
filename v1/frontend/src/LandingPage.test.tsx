@@ -25,6 +25,46 @@ const record: ResearchRecord = {
 };
 
 describe("LandingPage", () => {
+  it("activates the About, Contact, and Data privacy footer controls", () => {
+    const aboutScroll = vi.fn();
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (options) {
+      if ((this as HTMLElement).id === "about") aboutScroll(options);
+    };
+    render(
+      <LandingPage
+        onSignIn={vi.fn()}
+        session={null}
+        onSessionChange={vi.fn()}
+        onLogout={vi.fn()}
+        navigate={vi.fn()}
+        records={[]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "About" }));
+    expect(aboutScroll).toHaveBeenCalledWith({
+      behavior: "smooth",
+      block: "start",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Data privacy" }));
+    expect(window.location.hash).toBe("#privacy");
+    expect(
+      screen.getByRole("dialog", { name: "Terms and Data Privacy" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("1. Purpose of the system")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(window.location.hash).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "Contact" }));
+    expect(
+      screen.getByRole("dialog", { name: "Contact Research Office" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "researchnav123123@gmail.com" }),
+    ).toHaveAttribute("href", "mailto:researchnav123123@gmail.com");
+    Element.prototype.scrollIntoView = originalScrollIntoView;
+  });
+
   it("opens the selected study metadata without navigating to search", async () => {
     const navigate = vi.fn();
     vi.stubGlobal(

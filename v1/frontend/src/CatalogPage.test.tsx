@@ -113,6 +113,22 @@ beforeEach(() => window.history.replaceState({}, "", "/catalog"));
 afterEach(() => vi.unstubAllGlobals());
 
 describe("CatalogPage public similarity search", () => {
+  it("shows a back-to-top control after scrolling", () => {
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
+    Object.defineProperty(window, "scrollY", {
+      value: 500,
+      configurable: true,
+    });
+
+    renderCatalog();
+    fireEvent.scroll(window);
+    fireEvent.click(screen.getByRole("button", { name: "Back to top" }));
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
+    Object.defineProperty(window, "scrollY", { value: 0, configurable: true });
+  });
+
   it("keeps loaded studies visible when a later catalog page fails", () => {
     render(
       <CatalogPage

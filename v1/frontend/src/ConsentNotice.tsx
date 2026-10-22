@@ -13,9 +13,11 @@ import { CONSENT_SECTIONS, CONSENT_VERSION } from "./consent";
 export default function ConsentNotice({
   onAccept,
   onDecline,
+  readOnly = false,
 }: {
-  onAccept: () => void;
+  onAccept?: () => void;
   onDecline: () => void;
+  readOnly?: boolean;
 }) {
   const [scrolledToEnd, setScrolledToEnd] = useState(false);
   const [agreed, setAgreed] = useState(false);
@@ -33,11 +35,14 @@ export default function ConsentNotice({
       <span className="dialog-icon">
         <ScrollText />
       </span>
-      <p className="eyebrow">Before you sign in</p>
+      <p className="eyebrow">
+        {readOnly ? "Policy notice" : "Before you sign in"}
+      </p>
       <h2 id="google-signin-title">Terms and Data Privacy</h2>
       <p className="consent-intro">
-        Read the notice below, then confirm your agreement to continue. Signing
-        in is only possible after you agree.
+        {readOnly
+          ? "Read the current Terms of Use and Data Privacy notice."
+          : "Read the notice below, then confirm your agreement to continue. Signing in is only possible after you agree."}
       </p>
 
       <div
@@ -57,33 +62,38 @@ export default function ConsentNotice({
         <p className="consent-version">Notice version {CONSENT_VERSION}</p>
       </div>
 
-      {!scrolledToEnd && (
+      {!readOnly && !scrolledToEnd && (
         <p className="consent-hint">
           Scroll to the end of the notice to enable the agreement.
         </p>
       )}
 
-      <label className="consent-agree" htmlFor={checkboxId}>
-        <input
-          id={checkboxId}
-          type="checkbox"
-          checked={agreed}
-          disabled={!scrolledToEnd}
-          onChange={(event) => setAgreed(event.target.checked)}
-        />
-        <span>
-          I have read and agree to the Terms of Use and the Data Privacy notice,
-          and I consent to the processing of my personal data as described.
-        </span>
-      </label>
+      {!readOnly && (
+        <label className="consent-agree" htmlFor={checkboxId}>
+          <input
+            id={checkboxId}
+            type="checkbox"
+            checked={agreed}
+            disabled={!scrolledToEnd}
+            onChange={(event) => setAgreed(event.target.checked)}
+          />
+          <span>
+            I have read and agree to the Terms of Use and the Data Privacy
+            notice, and I consent to the processing of my personal data as
+            described.
+          </span>
+        </label>
+      )}
 
       <div className="consent-actions">
         <Button variant="secondary" onClick={onDecline}>
-          Cancel
+          {readOnly ? "Close" : "Cancel"}
         </Button>
-        <Button disabled={!agreed} onClick={onAccept}>
-          Agree and continue
-        </Button>
+        {!readOnly && (
+          <Button disabled={!agreed} onClick={onAccept}>
+            Agree and continue
+          </Button>
+        )}
       </div>
     </div>
   );

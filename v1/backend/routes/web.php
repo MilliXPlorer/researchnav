@@ -316,6 +316,7 @@ Route::prefix('api')
             Route::get('notifications', [NotificationController::class, 'index']);
             Route::get('notifications/unread-count', [NotificationController::class, 'unreadCount']);
             Route::patch('notifications/{notification}/read', [NotificationController::class, 'read'])->middleware('origin.allowed');
+            Route::delete('notifications/{notification}', [NotificationController::class, 'destroy'])->middleware('origin.allowed');
 
             Route::post('categories', [CategoryController::class, 'store'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::patch('categories/{category}', [CategoryController::class, 'update'])->middleware(['origin.allowed', 'throttle:domain-mutations']);

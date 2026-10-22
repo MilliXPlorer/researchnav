@@ -20,6 +20,7 @@ import {
   LibraryBig,
   LayoutDashboard,
   MailCheck,
+  ListChecks,
   Menu,
   Presentation,
   RefreshCw,
@@ -29,6 +30,7 @@ import {
   Settings,
   ShieldAlert,
   SlidersHorizontal,
+  Trash2,
   UserCog,
   Users,
   X,
@@ -38,6 +40,7 @@ import { canEnterDashboard } from "./access";
 import AccessRequestPanel from "./AccessRequestPanel";
 import {
   ApiError,
+  deleteNotification,
   decideAccessRequest,
   getRoleDashboard,
   listNotifications,
@@ -49,6 +52,7 @@ import AdminSidebarPage from "./AdminSidebarPages";
 import { Button, Logo } from "./components";
 import { roleConfigs } from "./data";
 import { Modal } from "./Modal";
+import { navItemPath } from "./paths";
 import ProfileDialog, { ProfileAvatar } from "./ProfileDialog";
 import RoleSidebarPage from "./RoleSidebarPages";
 import RoleWorkspace, { type RoleDashboardLoadState } from "./RoleWorkspaces";
@@ -199,20 +203,20 @@ export default function Dashboard({
 
   function selectNavigation(item: string) {
     setActiveNav({ scope: dashboardScope, role, item });
+    const defaultPath = navItemPath(role, item);
     if (role === "researcher") {
       if (item === "My Research") {
         navigate("/app/researcher/submissions");
-      } else if (showingRecordWorkspace) {
-        navigate("/app");
+      } else {
+        navigate(defaultPath);
       }
       return;
     }
-    if (role !== "instructor") return;
-    if (item === "My Sections") {
+    if (role === "instructor" && item === "My Sections") {
       navigate("/app/instructor/sections");
-    } else if (showingInstructorSection) {
-      navigate("/app");
+      return;
     }
+    navigate(defaultPath);
   }
   function selectSimilarityMode(mode: "title" | "content") {
     setSimilarityMenuOpen(true);
@@ -737,6 +741,46 @@ export default function Dashboard({
             );
             resumeCountRequests();
           }}
+          onDelete={async (item) => {
+            const requestScope = dashboardScope;
+            const resumeCountRequests = pauseCountRequests();
+            try {
+              await deleteNotification(item.id);
+              if (dashboardScopeRef.current !== requestScope) return;
+              if (item.read_at === null) markRead([item.id]);
+              setNotificationState((current) =>
+                current.scope === requestScope
+                  ? {
+                      ...current,
+                      items: current.items.filter(
+                        (currentItem) => currentItem.id !== item.id,
+                      ),
+                      error: "",
+                    }
+                  : current,
+              );
+            } catch (error) {
+              if (
+                dashboardScopeRef.current === requestScope &&
+                error instanceof ApiError &&
+                [401, 403, 419].includes(error.status)
+              )
+                stopPolling();
+              setNotificationState((current) =>
+                current.scope === requestScope
+                  ? {
+                      ...current,
+                      error:
+                        error instanceof ApiError
+                          ? `Notification could not be deleted (${error.code}).`
+                          : "Notification could not be deleted.",
+                    }
+                  : current,
+              );
+            } finally {
+              resumeCountRequests();
+            }
+          }}
           onOpen={async (item) => {
             const requestScope = dashboardScope;
             if (item.read_at === null) {
@@ -878,6 +922,7 @@ function NotificationsDrawer({
   source,
   onRetry,
   onMarkAll,
+  onDelete,
   onOpen,
   onClose,
 }: {
@@ -887,10 +932,28 @@ function NotificationsDrawer({
   source: "live" | "mock";
   onRetry: () => void;
   onMarkAll: () => Promise<void>;
+  onDelete: (item: NotificationResource) => Promise<void>;
   onOpen: (item: NotificationResource) => Promise<void>;
   onClose: () => void;
 }) {
+  const [selecting, setSelecting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [dialogRef, handleDialogKeyDown] = useDialogFocus<HTMLElement>(onClose);
+  const selected = new Set(selectedIds);
+
+  async function deleteSelected() {
+    const items = notifications.filter((item) => selected.has(item.id));
+    if (items.length === 0) return;
+    setDeleting(true);
+    await Promise.all(items.map((item) => onDelete(item)));
+    setSelectedIds([]);
+    setSelecting(false);
+    setDeleting(false);
+    setConfirmingDelete(false);
+  }
+
   return (
     <div className="drawer-backdrop" onMouseDown={onClose}>
       <aside
@@ -915,17 +978,6 @@ function NotificationsDrawer({
             <X />
           </button>
         </div>
-        <button
-          className="mark-read"
-          disabled={
-            source === "mock" ||
-            state !== "ready" ||
-            !notifications.some((item) => item.read_at === null)
-          }
-          onClick={() => void onMarkAll()}
-        >
-          Mark all as read
-        </button>
         {source === "mock" && (
           <div className="researcher-demo-notice" role="status">
             <div>
@@ -956,35 +1008,170 @@ function NotificationsDrawer({
             ) : (
               <section className="notification-group">
                 {notifications.map((item) => (
-                  <button
-                    className="notification-item"
+                  <div
+                    className={`notification-row${selecting ? " is-selecting" : ""}`}
                     key={item.id}
-                    onClick={() => source === "live" && void onOpen(item)}
-                    disabled={source === "mock"}
                   >
-                    <span
-                      className={item.read_at === null ? "unread-dot" : ""}
-                    />
-                    <span>
-                      {item.title && <strong>{item.title}</strong>}
-                      {(item.details ?? item.message) && (
-                        <small>{item.details ?? item.message}</small>
-                      )}
-                      {item.research_title && (
-                        <small>{item.research_title}</small>
-                      )}
-                      {item.submission_reference && (
-                        <small>{item.submission_reference}</small>
-                      )}
-                      {item.created_at && <time>{item.created_at}</time>}
-                    </span>
-                  </button>
+                    {selecting && (
+                      <input
+                        type="checkbox"
+                        className="notification-checkbox"
+                        aria-label={`Select notification${item.title ? `: ${item.title}` : ""}`}
+                        checked={selected.has(item.id)}
+                        onChange={(event) =>
+                          setSelectedIds((current) =>
+                            event.target.checked
+                              ? [...current, item.id]
+                              : current.filter((id) => id !== item.id),
+                          )
+                        }
+                      />
+                    )}
+                    <button
+                      className="notification-item"
+                      onClick={() => {
+                        if (selecting) {
+                          setSelectedIds((current) =>
+                            current.includes(item.id)
+                              ? current.filter((id) => id !== item.id)
+                              : [...current, item.id],
+                          );
+                        } else if (source === "live") {
+                          void onOpen(item);
+                        }
+                      }}
+                      disabled={source === "mock"}
+                    >
+                      <span
+                        className={item.read_at === null ? "unread-dot" : ""}
+                      />
+                      <span>
+                        {item.title && <strong>{item.title}</strong>}
+                        {(item.details ?? item.message) && (
+                          <small>{item.details ?? item.message}</small>
+                        )}
+                        {item.research_title && (
+                          <small>{item.research_title}</small>
+                        )}
+                        {item.submission_reference && (
+                          <small>{item.submission_reference}</small>
+                        )}
+                        {item.created_at && <time>{item.created_at}</time>}
+                      </span>
+                    </button>
+                  </div>
                 ))}
               </section>
             )}
           </>
         )}
+        {notifications.length > 0 && source === "live" && (
+          <div className="notification-selection-bar">
+            {selecting && (
+              <span aria-label={`${selectedIds.length} selected`}>
+                {selectedIds.length}
+              </span>
+            )}
+            <button
+              className="notification-selection-read"
+              aria-label="Mark all notifications as read"
+              title="Mark all as read"
+              disabled={
+                deleting ||
+                state !== "ready" ||
+                !notifications.some((item) => item.read_at === null)
+              }
+              onClick={() => void onMarkAll()}
+            >
+              <MailCheck aria-hidden="true" />
+            </button>
+            <button
+              className="notification-selection-cancel"
+              aria-label={
+                selecting ? "Cancel selection" : "Select notifications"
+              }
+              title={selecting ? "Cancel selection" : "Select notifications"}
+              disabled={deleting}
+              onClick={() => {
+                setSelecting((current) => !current);
+                setSelectedIds([]);
+              }}
+            >
+              {selecting ? (
+                <X aria-hidden="true" />
+              ) : (
+                <ListChecks aria-hidden="true" />
+              )}
+            </button>
+            {selecting && (
+              <button
+                className="notification-selection-delete"
+                aria-label="Delete selected notifications"
+                title="Delete selected"
+                disabled={selectedIds.length === 0 || deleting}
+                onClick={() => setConfirmingDelete(true)}
+              >
+                <Trash2 aria-hidden="true" />
+              </button>
+            )}
+          </div>
+        )}
       </aside>
+      {confirmingDelete && (
+        <Modal
+          label="Delete notifications"
+          busy={deleting}
+          className="notification-delete-dialog"
+          onClose={() => setConfirmingDelete(false)}
+        >
+          <div className="notification-delete-confirm">
+            <h2>Delete notifications</h2>
+            <p>{selectedIds.length} selected</p>
+            <div className="notification-delete-selection">
+              <ul className="notification-delete-list">
+                {notifications
+                  .filter((item) => selected.has(item.id))
+                  .map((item) => (
+                    <li key={item.id}>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked
+                          aria-label={`Keep selected: ${item.title || "Notification"}`}
+                          onChange={() => {
+                            const remaining = selectedIds.filter(
+                              (id) => id !== item.id,
+                            );
+                            setSelectedIds(remaining);
+                            if (remaining.length === 0)
+                              setConfirmingDelete(false);
+                          }}
+                        />
+                        <span>{item.title || "Notification"}</span>
+                      </label>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+            <div className="modal-actions">
+              <Button
+                variant="secondary"
+                disabled={deleting}
+                onClick={() => setConfirmingDelete(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="rust"
+                disabled={deleting}
+                onClick={() => void deleteSelected()}
+              >
+                {deleting ? "Deleting…" : "Delete"}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

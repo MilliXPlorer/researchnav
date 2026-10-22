@@ -1768,7 +1768,7 @@ describe("role workspace pages", () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
+    fireEvent.change(screen.getByLabelText("Research title or keywords"), {
       target: { value: "rounded" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Check Title" }));

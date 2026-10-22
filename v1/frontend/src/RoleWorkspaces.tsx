@@ -1,6 +1,6 @@
 import { ExternalLink, LibraryBig, Search, ShieldCheck } from "lucide-react";
-import { useEffect, useState } from "react";
-import { Button } from "./components";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { AnimatedStat, Button } from "./components";
 import { formatPhilippineDate } from "./dateTime";
 import { Modal } from "./Modal";
 import AdminResearchWorkspace from "./AdminResearchWorkspace";
@@ -844,7 +844,7 @@ function OfficeInstitutionalOverview({
                   <span>{institute.name}</span>
                 </div>
                 <div className="office-institute-total">
-                  <strong>{total ?? "-"}</strong>
+                  <AnimatedStat value={total} placeholder="-" />
                   <span>
                     {studies === undefined
                       ? "Loading studies"
@@ -954,6 +954,9 @@ function InstituteCountAnalytics({
 }: {
   instituteTotals?: Array<{ institute: string; total: number }> | null;
 }) {
+  const figureRef = useRef<HTMLElement>(null);
+  const [visible, setVisible] = useState(false);
+  const [chartProgress, setChartProgress] = useState(0);
   const totals = new Map(
     (instituteTotals ?? []).map((item) => [item.institute, item.total]),
   );
@@ -970,25 +973,81 @@ function InstituteCountAnalytics({
     INSTITUTE_CHART_HEIGHT - INSTITUTE_CHART_TOP - INSTITUTE_CHART_BOTTOM;
   const x = (index: number) =>
     INSTITUTE_CHART_LEFT + (index * plotWidth) / (points.length - 1);
-  const y = (total: number) =>
-    INSTITUTE_CHART_TOP + plotHeight - (total / maximum) * plotHeight;
+  const animatedY = (total: number) =>
+    INSTITUTE_CHART_TOP +
+    plotHeight -
+    (total / maximum) * plotHeight * chartProgress;
   const line = points
-    .map((point, index) => `${x(index)},${y(point.total)}`)
+    .map((point, index) => `${x(index)},${animatedY(point.total)}`)
     .join(" ");
   const area = `${INSTITUTE_CHART_LEFT},${INSTITUTE_CHART_TOP + plotHeight} ${line} ${INSTITUTE_CHART_LEFT + plotWidth},${INSTITUTE_CHART_TOP + plotHeight}`;
 
+  useEffect(() => {
+    const figure = figureRef.current;
+    if (!figure) return;
+    if (!("IntersectionObserver" in window)) {
+      const frame = requestAnimationFrame(() => setVisible(true));
+      return () => cancelAnimationFrame(frame);
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting) return;
+        setVisible(true);
+        observer.disconnect();
+      },
+      { threshold: 0.25 },
+    );
+    observer.observe(figure);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!visible) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      const frame = requestAnimationFrame(() => setChartProgress(1));
+      return () => cancelAnimationFrame(frame);
+    }
+    const duration = 1150;
+    const start = performance.now();
+    let frame = 0;
+    const animate = (now: number) => {
+      const elapsed = Math.min((now - start) / duration, 1);
+      const eased = 1 - Math.pow(1 - elapsed, 3);
+      const bounce =
+        elapsed < 1 ? Math.sin(elapsed * Math.PI * 3) * 0.04 * elapsed : 0;
+      setChartProgress(Math.min(1, Math.max(0, eased + bounce)));
+      if (elapsed < 1) frame = requestAnimationFrame(animate);
+    };
+    frame = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(frame);
+  }, [visible]);
+
   return (
-    <figure className="office-institute-analytics">
+    <figure
+      ref={figureRef}
+      className={`office-institute-analytics${visible ? " is-visible" : ""}`}
+    >
       <figcaption>
         <div>
           <p className="eyebrow">Research analytics</p>
           <h2>Manuscripts by institute</h2>
           <p>Live distribution based on archived ResearchNAV studies.</p>
         </div>
-        <strong>
-          {points.reduce((sum, point) => sum + point.total, unassignedTotal)}{" "}
-          total
-        </strong>
+        <span
+          className="office-institute-grand-total"
+          aria-label={`${points.reduce(
+            (sum, point) => sum + point.total,
+            unassignedTotal,
+          )} total`}
+        >
+          <AnimatedStat
+            value={points.reduce(
+              (sum, point) => sum + point.total,
+              unassignedTotal,
+            )}
+          />{" "}
+          <span aria-hidden="true">total</span>
+        </span>
       </figcaption>
       {allUnavailable ? (
         <p className="office-institute-message">
@@ -1038,17 +1097,25 @@ function InstituteCountAnalytics({
             <polygon className="office-institute-area" points={area} />
             <polyline className="office-institute-line" points={line} />
             {points.map((point, index) => (
-              <g key={point.code}>
+              <g
+                className="office-institute-point-group"
+                style={
+                  {
+                    "--point-index": index,
+                  } as CSSProperties
+                }
+                key={point.code}
+              >
                 <circle
                   className="office-institute-point"
                   cx={x(index)}
-                  cy={y(point.total)}
+                  cy={animatedY(point.total)}
                   r="6"
                 />
                 <text
                   className="office-institute-point-value"
                   x={x(index)}
-                  y={Math.max(17, y(point.total) - 13)}
+                  y={Math.max(17, animatedY(point.total) - 13)}
                 >
                   {point.total}
                 </text>

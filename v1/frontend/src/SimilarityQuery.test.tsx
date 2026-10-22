@@ -123,7 +123,7 @@ describe("researcher similarity check", () => {
       screen.queryByText(/no submissions to run a similarity check/i),
     ).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
+    fireEvent.change(screen.getByLabelText("Research title or keywords"), {
       target: { value: "inventory management system" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Check Title" }));
@@ -157,7 +157,7 @@ describe("researcher similarity check", () => {
     ]);
     renderCheck();
 
-    fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
+    fireEvent.change(screen.getByLabelText("Research title or keywords"), {
       target: { value: "web based research repository system" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Check Title" }));
@@ -174,7 +174,7 @@ describe("researcher similarity check", () => {
     stubQuery([archived(1, "A MOBILE POND WATER QUALITY MONITOR", "0.100000")]);
     renderCheck();
 
-    fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
+    fireEvent.change(screen.getByLabelText("Research title or keywords"), {
       target: { value: "tilapia pond monitoring" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Check Title" }));
@@ -194,7 +194,7 @@ describe("researcher similarity check", () => {
     });
     expect(submit).toBeDisabled();
 
-    fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
+    fireEvent.change(screen.getByLabelText("Research title or keywords"), {
       target: { value: "a" },
     });
     expect(submit).toBeDisabled();
@@ -202,7 +202,7 @@ describe("researcher similarity check", () => {
       screen.getByText("Enter at least two characters to check."),
     ).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
+    fireEvent.change(screen.getByLabelText("Research title or keywords"), {
       target: { value: "ab" },
     });
     expect(submit).toBeEnabled();
@@ -212,7 +212,7 @@ describe("researcher similarity check", () => {
     stubQuery([archived(1, "AN ARCHIVED STUDY WITHOUT A SCORE", null)]);
     renderCheck();
 
-    fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
+    fireEvent.change(screen.getByLabelText("Research title or keywords"), {
       target: { value: "archived study" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Check Title" }));
@@ -230,7 +230,7 @@ describe("researcher similarity check", () => {
     ]);
     renderCheck();
 
-    fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
+    fireEvent.change(screen.getByLabelText("Research title or keywords"), {
       target: { value: "research repository" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Check Title" }));
@@ -262,7 +262,7 @@ describe("researcher similarity check", () => {
     ]);
     renderCheck();
 
-    fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
+    fireEvent.change(screen.getByLabelText("Research title or keywords"), {
       target: { value: "quantum cryptography" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Check Title" }));
@@ -279,7 +279,7 @@ describe("researcher similarity check", () => {
     stubQuery([], undefined, 502);
     renderCheck();
 
-    fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
+    fireEvent.change(screen.getByLabelText("Research title or keywords"), {
       target: { value: "inventory management system" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Check Title" }));

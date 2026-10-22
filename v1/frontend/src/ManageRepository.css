@@ -54,7 +54,11 @@
   cursor: pointer;
 }
 
-.manage-repository-tabs button:hover,
+.manage-repository-tabs button:hover {
+  color: var(--canopy);
+  border-bottom-color: color-mix(in srgb, var(--fern) 45%, transparent);
+}
+
 .manage-repository-tabs button:focus-visible {
   color: var(--canopy);
   outline: 2px solid color-mix(in srgb, var(--fern) 45%, transparent);

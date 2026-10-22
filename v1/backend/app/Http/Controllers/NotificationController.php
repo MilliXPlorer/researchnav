@@ -33,4 +33,12 @@ class NotificationController extends DomainController
 
         return new NotificationResource($item->fresh());
     }
+
+    public function destroy(Request $request, string $notification)
+    {
+        $item = $this->actor($request)->notifications()->whereKey($notification)->firstOrFail();
+        $item->delete();
+
+        return response()->noContent();
+    }
 }

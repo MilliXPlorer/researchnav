@@ -4,7 +4,8 @@ import Dashboard from "./Dashboard";
 import GoogleSignInDialog from "./GoogleSignInDialog";
 import LandingPage from "./LandingPage";
 import { getCurrentSession, listPublicResearch, logout } from "./api";
-import { isProtectedRoute } from "./paths";
+import { roleConfigs } from "./data";
+import { isProtectedRoute, navItemPath } from "./paths";
 import { parseResearchWorkspaceDestination } from "./researchWorkspaceRoute";
 import { createBrowserInitialState, type InitialState } from "./ssr";
 import type { ResearchRecord, UserSession } from "./types";
@@ -41,6 +42,9 @@ export default function App({ initialState }: { initialState?: InitialState }) {
     /^\/app\/(?:researcher|research-office)\/similarity(?:\/(?:title|content))?$/.test(
       path,
     );
+  const dashboardNavSlug = path.match(
+    /^\/app\/(?:admin|researcher|adviser|instructor|panel|statistician|coordinator|librarian|research-office|research_editor)\/([a-z0-9-]+)$/,
+  )?.[1];
   const instructorSectionRoute = path.match(
     /^\/app\/instructor\/sections\/(\d+)(?:\/projects\/(\d+))?$/,
   );
@@ -165,7 +169,7 @@ export default function App({ initialState }: { initialState?: InitialState }) {
                 ? "Similarity Check"
                 : instructorSectionRoute || path === "/app/instructor/sections"
                   ? "My Sections"
-                  : undefined
+                  : roleNavFromSlug(session, dashboardNavSlug)
           }
           initialSimilarityMode={researcherSimilarityMode}
           onLogout={signOut}
@@ -194,4 +198,18 @@ export default function App({ initialState }: { initialState?: InitialState }) {
       )}
     </>
   );
+}
+
+function roleNavFromSlug(
+  session: UserSession,
+  slug: string | undefined,
+): string | undefined {
+  if (!slug) return undefined;
+  return roleConfigsForSession(session).find(
+    (item) => navItemPath(session.role, item).split("/").pop() === slug,
+  );
+}
+
+function roleConfigsForSession(session: UserSession): string[] {
+  return roleConfigs.find((config) => config.id === session.role)?.nav ?? [];
 }

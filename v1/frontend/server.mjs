@@ -219,6 +219,12 @@ export async function createApp(options = {}) {
 
   if (production) {
     app.use(
+      express.static(path.resolve(root, "dist/client"), {
+        index: false,
+        maxAge: "1h",
+      }),
+    );
+    app.use(
       "/assets",
       express.static(path.resolve(root, "dist/client/assets"), {
         immutable: true,

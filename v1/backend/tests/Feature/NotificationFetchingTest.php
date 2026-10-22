@@ -78,6 +78,26 @@ class NotificationFetchingTest extends TestCase
         $this->getJson('/api/notifications/unread-count')->assertExactJson(['unread_count' => 20]);
     }
 
+    public function test_user_can_delete_only_their_own_notification(): void
+    {
+        $actor = $this->user();
+        $this->notify($actor);
+        $actorNotification = $actor->notifications()->firstOrFail();
+        $other = $this->user();
+        $this->notify($other);
+        $otherNotification = $other->notifications()->firstOrFail();
+
+        $this->withSession(['user_id' => $actor->id])
+            ->deleteJson("/api/notifications/{$otherNotification->id}", [], ['Origin' => 'http://localhost:5173'])
+            ->assertNotFound();
+        $this->assertDatabaseHas('notifications', ['id' => $otherNotification->id]);
+
+        $this->deleteJson("/api/notifications/{$actorNotification->id}", [], ['Origin' => 'http://localhost:5173'])
+            ->assertNoContent();
+        $this->assertDatabaseMissing('notifications', ['id' => $actorNotification->id]);
+        $this->getJson('/api/notifications/unread-count')->assertExactJson(['unread_count' => 0]);
+    }
+
     private function user(): User
     {
         return User::factory()->create(['role' => 'researcher', 'access_status' => 'active']);

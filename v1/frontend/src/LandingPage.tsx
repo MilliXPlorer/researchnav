@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowRight,
   BookOpen,
@@ -9,10 +9,12 @@ import {
   LockKeyhole,
   Search,
 } from "lucide-react";
-import { Button, Logo, SearchBox } from "./components";
+import { AnimatedStat, Button, Logo, SearchBox } from "./components";
 import SdgPickerModal from "./SdgPickerModal";
 import ProfileDialog, { ProfileAvatar } from "./ProfileDialog";
 import PublicResearchMetadataDialog from "./PublicResearchMetadataDialog";
+import { Modal } from "./Modal";
+import ConsentNotice from "./ConsentNotice";
 import { instituteNames, roleConfigs } from "./data";
 import type { ResearchRecord, UserSession } from "./types";
 
@@ -38,6 +40,39 @@ export default function LandingPage({
   const [query, setQuery] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
   const [sdgPickerOpen, setSdgPickerOpen] = useState(false);
+  const [contactOpen, setContactOpen] = useState(false);
+  const [privacyOpen, setPrivacyOpen] = useState(false);
+
+  useEffect(() => {
+    const handleHashChange = () =>
+      setPrivacyOpen(window.location.hash === "#privacy");
+    handleHashChange();
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
+
+  function openPrivacy() {
+    window.history.pushState({}, "", "#privacy");
+    setPrivacyOpen(true);
+  }
+
+  function closePrivacy() {
+    window.history.replaceState(
+      {},
+      "",
+      `${window.location.pathname}${window.location.search}`,
+    );
+    setPrivacyOpen(false);
+  }
+
+  function scrollToSection(id: string) {
+    const section = document.getElementById(id);
+    if (!section) return;
+    window.history.replaceState({}, "", `#${id}`);
+    section.scrollIntoView({ behavior: "smooth", block: "start" });
+    section.setAttribute("tabindex", "-1");
+    section.focus({ preventScroll: true });
+  }
   const [metadataResearchId, setMetadataResearchId] = useState<
     string | number | null
   >(null);
@@ -195,15 +230,19 @@ export default function LandingPage({
           )}
           <div className="hero-index" aria-label="Repository statistics">
             <div>
-              <strong>{records.length}</strong>
+              <AnimatedStat value={records.length} />
               <span>public studies</span>
             </div>
             <div>
-              <strong>{instituteCount}</strong>
+              <AnimatedStat value={instituteCount} />
               <span>institutes represented</span>
             </div>
             <div>
-              <strong>{earliestYear ?? "—"}</strong>
+              <AnimatedStat
+                value={earliestYear}
+                placeholder="—"
+                variant="year"
+              />
               <span>earliest catalog year</span>
             </div>
           </div>
@@ -311,7 +350,7 @@ export default function LandingPage({
 
       <footer className="public-footer">
         <Logo />
-        <p id="privacy">
+        <p id="privacy" tabIndex={-1}>
           Tangub City Global College · Institute of Computer Studies
           <br />
           Public records provide cataloged public metadata and abstract
@@ -319,12 +358,51 @@ export default function LandingPage({
           by institutional privacy controls and the Data Privacy Act of 2012.
         </p>
         <nav aria-label="Footer navigation">
-          <a href="#about">About</a>
-          <a href="mailto:research@tcgc.edu.ph">Contact</a>
-          <a href="#privacy">Data privacy</a>
+          <button type="button" onClick={() => scrollToSection("about")}>
+            About
+          </button>
+          <button type="button" onClick={() => setContactOpen(true)}>
+            Contact
+          </button>
+          <button type="button" onClick={openPrivacy}>
+            Data privacy
+          </button>
         </nav>
         <span>© 2026 ResearchNAV</span>
       </footer>
+      {contactOpen && (
+        <Modal
+          label="Contact Research Office"
+          onClose={() => setContactOpen(false)}
+          className="public-contact-modal"
+        >
+          <div className="public-contact-dialog">
+            <p className="eyebrow">Tangub City Global College</p>
+            <h2>Contact Research Office</h2>
+            <p>
+              For repository access, corrections, or privacy requests, contact
+              the Research Office.
+            </p>
+            <div className="public-contact-action">
+              <a
+                className="button button-primary"
+                href="mailto:researchnav123123@gmail.com"
+              >
+                researchnav123123@gmail.com
+              </a>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {privacyOpen && (
+        <Modal
+          label="Terms and Data Privacy"
+          onClose={closePrivacy}
+          className="public-privacy-dialog"
+        >
+          <ConsentNotice readOnly onDecline={closePrivacy} />
+        </Modal>
+      )}
     </div>
   );
 }

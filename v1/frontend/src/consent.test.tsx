@@ -64,6 +64,19 @@ describe("consent storage", () => {
 });
 
 describe("ConsentNotice", () => {
+  it("shows the current notice without agreement controls in read-only mode", () => {
+    render(<ConsentNotice readOnly onDecline={vi.fn()} />);
+
+    expect(
+      screen.getByRole("heading", { name: "Terms and Data Privacy" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Agree and continue" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
+  });
+
   it("requires scrolling before the agreement can be checked", () => {
     render(<ConsentNotice onAccept={vi.fn()} onDecline={vi.fn()} />);
 
