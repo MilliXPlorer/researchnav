@@ -104,7 +104,7 @@ Build the browser and server bundles, then start the SSR gateway:
 ```powershell
 npm run build
 $env:NODE_ENV="production"
-$env:PUBLIC_ORIGIN="https://researchnav.example.edu"
+$env:PUBLIC_ORIGIN="https://researchnavph.tech"
 $env:SSR_API_ORIGIN="http://laravel.internal:3001"
 npm run start:web
 ```
@@ -115,6 +115,81 @@ The Content Checker accepts text-based PDF files up to 30 MiB each. Folder check
 
 The gateway exposes `/_health`, sends `Cache-Control: no-store` and a restrictive CSP on SSR HTML, serves hashed assets from `frontend/dist/client`, and imports the SSR bundle from `frontend/dist/server`. Laravel should use a production PHP server rather than `artisan serve`.
 
+### Canonical production domain
+
+The canonical production URL is **https://researchnavph.tech**.
+`https://www.researchnavph.tech` only redirects to that URL, preserving the path
+and query string. HTTP requests to either hostname also redirect directly to the
+canonical HTTPS URL.
+
+Replace the corresponding values in the **deployed backend environment** with:
+
+```dotenv
+APP_ENV=production
+APP_DEBUG=false
+APP_URL=https://researchnavph.tech
+FRONTEND_URL=https://researchnavph.tech
+APP_ORIGINS=https://researchnavph.tech,https://www.researchnavph.tech
+SESSION_DOMAIN=null
+SESSION_SECURE_COOKIE=true
+SESSION_HTTP_ONLY=true
+SESSION_SAME_SITE=lax
+```
+
+Keep the existing `APP_KEY`, Google client IDs, database/mail/Supabase credentials,
+and other secrets. The existing production guard also requires the configured
+production mail transport rather than the local `log` mailer. Host-only sessions
+(`SESSION_DOMAIN=null`) work with the same-origin `/api` gateway; an explicit
+cookie domain is unnecessary. If the deployment specifically requires a shared
+subdomain cookie, use `.researchnavph.tech` instead.
+
+The deployed frontend needs `NODE_ENV=production`,
+`PUBLIC_ORIGIN=https://researchnavph.tech`, and the existing private
+`SSR_API_ORIGIN`. Keep Laravel private. Configure `TRUSTED_PROXIES` with the actual
+gateway/proxy IPs or CIDRs; the backend example's `127.0.0.1` is suitable only
+when the immediate proxy connects over loopback. Preserve forwarded HTTPS/host
+headers through the proxy chain. Laravel intentionally disables cross-origin
+CORS middleware: browser API calls remain same-origin, and `APP_ORIGINS` controls
+the existing mutation-origin check rather than exposing a separate public API.
+
+Apply these overrides only in production. Keep `APP_ENV=local`, HTTP URLs and
+`SESSION_SECURE_COOKIE=false` for HTTP local development. Retain localhost,
+127.0.0.1, configured LAN origins and explicitly configured ngrok origins in the
+local `APP_ORIGINS`/`DEV_ALLOWED_ORIGINS` values. Vite derives `allowedHosts` from
+`DEV_ALLOWED_ORIGINS`; it is not the production host router.
+
+Deployment steps:
+
+1. In Hostinger DNS, point the apex `@` A record at the production ingress IP and
+   set `www` as a CNAME to `researchnavph.tech`. Publish an AAAA record only if
+   that ingress serves IPv6. Remove conflicting web records for these names and
+   preserve mail/TXT records. DNS alone does not implement the www redirect.
+2. Issue and install an SSL certificate covering **both** `researchnavph.tech`
+   and `www.researchnavph.tech`, with automatic renewal. The www TLS handshake
+   must succeed before its HTTPS redirect can be returned.
+3. Adapt [the Nginx example](docs/nginx.conf.example) to the actual SSR listener
+   and certificate paths, then enable it on the public ingress. It routes only
+   canonical HTTPS traffic to Node and redirects the other three scheme/host
+   combinations. Bind Node privately (for example `127.0.0.1:5173` on the same
+   host); use a private service address for separate containers.
+4. In Google Cloud Console, keep the existing OAuth Web Client ID and add
+   `https://researchnavph.tech` to **Authorized JavaScript origins**. Retain
+   required development origins. Update the OAuth consent screen's authorized
+   domain to `researchnavph.tech` and any configured homepage/privacy/terms links
+   to their corresponding new-domain URLs. This Google Identity Services popup
+   ID-token flow uses a JavaScript callback, not an OAuth redirect endpoint; no
+   `GOOGLE_CLIENT_SECRET` or `GOOGLE_REDIRECT_URI` is required. Since www redirects
+   before the app loads, it does not need a Google JavaScript origin.
+5. Apply the production environment values, rebuild Laravel's configuration with
+   `php backend/artisan config:cache`, and restart the PHP and Node services so
+   they load the new environment. Validate Nginx with `nginx -t` before reloading
+   it. No database migration is needed for this domain change.
+6. Check `https://researchnavph.tech/_health`, HTTP-to-HTTPS and www redirects
+   (including a path and query), Google sign-in/logout and session persistence,
+   and a newly generated PDF footer. Confirm the session cookie is `Secure` and
+   `HttpOnly`. Browsers cannot transfer cookies between different registrable
+   domains, so users must sign in again on the new domain.
+
 ## Authentication
 
 1. React receives a Google ID token.
@@ -123,7 +198,9 @@ The gateway exposes `/_health`, sends `Cache-Control: no-store` and a restrictiv
 4. Laravel stores the user ID in an HTTP-only database session named `researchnav_sid`.
 5. New users remain blocked until an authorized account provisions a role.
 
-Register `http://localhost:5173` as an authorized JavaScript origin for the Google OAuth Web Client ID.
+Register `https://researchnavph.tech` for production and `http://localhost:5173`
+for local development as authorized JavaScript origins for the existing Google
+OAuth Web Client ID. See the production-domain steps above for the console setup.
 
 ## Verification
 

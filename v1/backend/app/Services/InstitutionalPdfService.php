@@ -37,7 +37,7 @@ class InstitutionalPdfService
         $canvas = $pdf->getCanvas();
         $font = $pdf->getFontMetrics()->getFont('Arial', 'normal');
         $canvas->page_text(72, 28, $this->generatedLabel(), $font, 7, [0.28, 0.28, 0.28]);
-        $canvas->page_text(370, 805, 'ResearchNav | https://www.researchnav.tech', $font, 7, [0.28, 0.28, 0.28]);
+        $canvas->page_text(370, 805, 'ResearchNAV | https://researchnavph.tech', $font, 7, [0.28, 0.28, 0.28]);
 
         return $pdf->output();
     }
