@@ -9,7 +9,7 @@ import {
 } from "./dateControls";
 
 describe("date controls", () => {
-  it("uses the native picker while blocking typed and pasted dates", () => {
+  it("uses the native datetime picker", () => {
     const onChange = vi.fn();
     render(
       <DatePickerInput
@@ -20,16 +20,24 @@ describe("date controls", () => {
       />,
     );
     const input = screen.getByLabelText("Scheduled at");
-    const typed = new KeyboardEvent("keydown", {
-      key: "2",
-      bubbles: true,
-      cancelable: true,
-    });
-
     expect(input).toHaveAttribute("type", "datetime-local");
-    expect(input.dispatchEvent(typed)).toBe(false);
-    expect(fireEvent.paste(input)).toBe(false);
-    expect(fireEvent.drop(input)).toBe(false);
+  });
+
+  it("renders date fields as native date inputs", () => {
+    render(<DatePickerInput aria-label="From" type="date" value="" readOnly />);
+
+    expect(screen.getByLabelText("From")).toHaveAttribute("type", "date");
+  });
+
+  it("opens the native picker when the date field is clicked", () => {
+    const showPicker = vi.fn();
+    const original = HTMLInputElement.prototype.showPicker;
+    HTMLInputElement.prototype.showPicker = showPicker;
+    render(<DatePickerInput aria-label="From" type="date" value="" readOnly />);
+
+    fireEvent.click(screen.getByLabelText("From"));
+    expect(showPicker).toHaveBeenCalled();
+    HTMLInputElement.prototype.showPicker = original;
   });
 
   it("offers publication and academic years as selections", () => {

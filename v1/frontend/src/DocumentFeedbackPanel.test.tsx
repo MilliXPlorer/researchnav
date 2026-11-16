@@ -199,6 +199,81 @@ describe("DocumentFeedbackPanel", () => {
     await screen.findByRole("button", { name: "Addressed" });
   });
 
+  it("labels revision notes as feedback only and never calls the revision workflow", async () => {
+    let posted = false;
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === "POST") posted = true;
+        return new Response(
+          JSON.stringify({
+            data:
+              posted && init?.method !== "POST"
+                ? [
+                    {
+                      id: 3,
+                      research_document_id: 42,
+                      document_file_id: 10,
+                      comment: "Please clarify this paragraph.",
+                      feedback_type: "revision_request",
+                      feedback_status: "open",
+                      reviewer_name: "Fixture reviewer",
+                    },
+                  ]
+                : init?.method === "POST"
+                  ? { id: 3 }
+                  : [],
+          }),
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <DocumentFeedbackPanel
+        researchDocumentId={42}
+        file={file}
+        canPostFeedback
+        onClose={vi.fn()}
+      />,
+    );
+    await screen.findByText("No feedback yet.");
+    expect(
+      screen.queryByRole("option", { name: "Revision request" }),
+    ).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "Type" }), {
+      target: { value: "revision_request" },
+    });
+    expect(screen.getByText(/This adds feedback only/)).toHaveTextContent(
+      "It does not request a formal revision or change the research status.",
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "Feedback" }), {
+      target: { value: "Please clarify this paragraph." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Post feedback" }));
+    expect(
+      await screen.findByText("Please clarify this paragraph."),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("Revision note (feedback only)")).toHaveLength(
+      2,
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/research/42/feedback",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          comment: "Please clarify this paragraph.",
+          feedback_type: "revision_request",
+          document_file_id: 10,
+        }),
+      }),
+    );
+    expect(
+      fetchMock.mock.calls.some(
+        ([url]) =>
+          String(url).includes("/revisions") || String(url).includes("/status"),
+      ),
+    ).toBe(false);
+  });
+
   it("lets a feedback author resolve and reopen an item", async () => {
     let status: "open" | "resolved" = "open";
     vi.stubGlobal(

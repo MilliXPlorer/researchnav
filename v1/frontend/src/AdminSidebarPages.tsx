@@ -1,13 +1,27 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { formatPhilippineDateTime } from "./dateTime";
 import { instituteNames } from "./data";
-import { Building2, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import {
+  Activity,
+  Building2,
+  CheckCircle2,
+  CircleAlert,
+  Database,
+  Eye,
+  HardDrive,
+  Plus,
+  RefreshCw,
+  Search,
+  Server,
+  ShieldCheck,
+  Trash2,
+  UserRound,
+} from "lucide-react";
 import {
   ApiError,
   createInstitute,
   deleteInstitute,
   decideAccessRequest,
-  deleteAdminUser,
   getSystemStatus,
   listAccessRequests,
   listAdminAuditLogs,
@@ -27,12 +41,13 @@ import {
 } from "./api";
 import { Button, Pagination, SortableHeader } from "./components";
 import { DatePickerInput } from "./dateControls";
-import { ConfirmDialog, Modal } from "./Modal";
+import { Modal } from "./Modal";
 import ManageRepository from "./ManageRepository";
 import { useLiveFilters } from "./useLiveFilters";
-import { useDebouncedValue } from "./useDebouncedValue";
-import { filterUserRows } from "./userManagement";
 import { useClientSorting } from "./useClientSorting";
+import UserRoleManagementWorkspace, {
+  type UserDirectoryQuery,
+} from "./UserRoleManagement";
 
 const roles: AdminRole[] = [
   "admin",
@@ -47,6 +62,49 @@ const roles: AdminRole[] = [
   "research-office",
 ];
 const accessStatuses: AccessStatus[] = ["active", "invited", "blocked"];
+const accessRequestStatuses: AccessRequestResource["status"][] = [
+  "pending",
+  "approved",
+  "rejected",
+];
+
+const loadAdminManagedUsers = (query: UserDirectoryQuery) =>
+  listAdminUsers({
+    search: query.search || undefined,
+    role: query.role || undefined,
+    access_status: query.access_status || undefined,
+    sort: query.sort,
+    direction: query.direction,
+    page: query.page,
+    per_page: query.per_page,
+  }).then((response) => ({
+    users: response.data.map((user) => ({
+      id: user.id,
+      email: user.email,
+      name: fullName(user),
+      role: user.role,
+      accessStatus: user.access_status,
+      createdAt: user.created_at,
+      institute: user.institute,
+    })),
+    summary: response.summary,
+    meta: response.meta,
+  }));
+
+const saveAdminManagedUser = async (
+  user: { id: string },
+  draft: {
+    role: AdminRole;
+    accessStatus: AccessStatus;
+    institute: string | null;
+  },
+) => {
+  await updateAdminUser(user.id, {
+    role: draft.role,
+    access_status: draft.accessStatus,
+    institute: draft.institute,
+  });
+};
 
 export default function AdminSidebarPage({
   selectedNav,
@@ -78,16 +136,8 @@ function UserRoleManagement() {
   const [usersVersion, setUsersVersion] = useState(0);
 
   return (
-    <div className="workspace-content admin-sidebar-page">
-      <PageHeader
-        title="User & role management"
-        description="Add users, assign roles, and manage account access."
-      />
-      <AllUsers
-        key={usersVersion}
-        embedded
-        onAdd={() => setAddUserOpen(true)}
-      />
+    <div className="workspace-content admin-sidebar-page access-requests-page">
+      <AllUsers key={usersVersion} onAdd={() => setAddUserOpen(true)} />
       {addUserOpen && (
         <Modal label="Add user" onClose={() => setAddUserOpen(false)}>
           <div className="admin-add-user-modal">
@@ -196,6 +246,12 @@ function AccessRequests() {
   >({});
   const [attempt, setAttempt] = useState(0);
   const [page, setPage] = useState(1);
+  const [viewingRequest, setViewingRequest] =
+    useState<AccessRequestResource | null>(null);
+  const [search, setSearch] = useState("");
+  const [statusCounts, setStatusCounts] = useState<
+    Record<AccessRequestResource["status"], number>
+  >({ pending: 0, approved: 0, rejected: 0 });
 
   function reload() {
     setError("");
@@ -209,6 +265,10 @@ function AccessRequests() {
       .then((response) => {
         if (cancelled) return;
         setResult(response);
+        setStatusCounts((current) => ({
+          ...current,
+          [status]: response.meta.total,
+        }));
         setError("");
         setLoading(false);
       })
@@ -223,6 +283,30 @@ function AccessRequests() {
       cancelled = true;
     };
   }, [attempt, status, page]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all(
+      accessRequestStatuses
+        .filter((candidate) => candidate !== status)
+        .map(async (candidate) => {
+          const response = await listAccessRequests({ status: candidate });
+          return [candidate, response.meta.total] as const;
+        }),
+    )
+      .then((counts) => {
+        if (!cancelled) {
+          setStatusCounts((current) => ({
+            ...current,
+            ...Object.fromEntries(counts),
+          }));
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [attempt, status]);
 
   async function decide(
     request: AccessRequestResource,
@@ -251,6 +335,26 @@ function AccessRequests() {
     }
   }
 
+  const normalizedSearch = search.trim().toLocaleLowerCase();
+  const visibleRequests =
+    result?.data.filter((request) => {
+      if (!normalizedSearch) return true;
+      return [request.full_name, request.email].some((value) =>
+        value?.toLocaleLowerCase().includes(normalizedSearch),
+      );
+    }) ?? [];
+  const emptyTitle = `No ${status} access requests`;
+  const emptyDescription =
+    status === "pending"
+      ? "New Google-verified requests will appear here for review."
+      : `No ${status} Google-verified requests match this view.`;
+  function selectStatus(nextStatus: AccessRequestResource["status"]) {
+    setLoading(true);
+    setStatus(nextStatus);
+    setPage(1);
+    setSearch("");
+  }
+
   return (
     <div className="workspace-content admin-sidebar-page">
       <PageHeader
@@ -272,68 +376,157 @@ function AccessRequests() {
           {notice}
         </p>
       )}
-      <section className="panel-card admin-data-card">
-        <div className="admin-filters">
-          <label>
-            Status
-            <select
-              value={status}
-              onChange={(event) => {
-                setStatus(
-                  event.target.value as AccessRequestResource["status"],
-                );
-                setPage(1);
-              }}
-            >
-              <option value="pending">Pending</option>
-              <option value="approved">Approved</option>
-              <option value="rejected">Rejected</option>
-            </select>
+      <section className="panel-card admin-data-card access-requests-card">
+        <div className="access-requests-toolbar">
+          <div
+            className="access-request-tabs"
+            role="tablist"
+            aria-label="Access request status"
+          >
+            {accessRequestStatuses.map((candidate) => (
+              <button
+                key={candidate}
+                type="button"
+                role="tab"
+                aria-selected={status === candidate}
+                className={status === candidate ? "active" : undefined}
+                onClick={() => selectStatus(candidate)}
+                onKeyDown={(event) => {
+                  const currentIndex = accessRequestStatuses.indexOf(candidate);
+                  const nextIndex =
+                    event.key === "ArrowRight"
+                      ? (currentIndex + 1) % accessRequestStatuses.length
+                      : event.key === "ArrowLeft"
+                        ? (currentIndex - 1 + accessRequestStatuses.length) %
+                          accessRequestStatuses.length
+                        : event.key === "Home"
+                          ? 0
+                          : event.key === "End"
+                            ? accessRequestStatuses.length - 1
+                            : null;
+                  if (nextIndex === null) return;
+                  event.preventDefault();
+                  selectStatus(accessRequestStatuses[nextIndex]);
+                  const tabs =
+                    event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
+                      '[role="tab"]',
+                    );
+                  tabs?.[nextIndex]?.focus();
+                }}
+              >
+                <span>{candidate}</span>
+                <strong
+                  className={
+                    candidate === "pending" && statusCounts.pending > 0
+                      ? "has-pending"
+                      : undefined
+                  }
+                >
+                  {statusCounts[candidate]}
+                </strong>
+              </button>
+            ))}
+          </div>
+          <label className="access-request-search">
+            <span className="sr-only">Search by name or email</span>
+            <Search aria-hidden="true" />
+            <input
+              type="search"
+              value={search}
+              placeholder="Search by name or email"
+              onChange={(event) => setSearch(event.target.value)}
+            />
           </label>
         </div>
-        {error ? (
-          <p className="admin-error" role="alert">
-            {error}
-          </p>
-        ) : loading || result === null ? (
-          <p className="admin-empty" aria-busy="true">
-            Loading access requests…
-          </p>
-        ) : result.data.length === 0 ? (
-          <p className="admin-empty">No {status} access requests.</p>
-        ) : (
-          <>
-            <div className="admin-table-wrap">
-              <table>
-                <caption className="sr-only">Access requests</caption>
-                <thead>
-                  <tr>
-                    <th>Applicant</th>
-                    <th>Requested role</th>
-                    <th>Details</th>
-                    <th>Requested</th>
-                    <th>{status === "pending" ? "Decision" : "Outcome"}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.data.map((request) => (
-                    <tr key={request.id}>
-                      <td>
-                        <strong>{request.email ?? "Unknown account"}</strong>
-                        {request.full_name && <div>{request.full_name}</div>}
-                      </td>
-                      <td>{request.requested_role}</td>
-                      <td>
-                        {request.program && <div>{request.program}</div>}
-                        {request.justification && (
-                          <div>{request.justification}</div>
-                        )}
-                        {!request.program && !request.justification && "—"}
-                      </td>
-                      <td>{request.requested_at ?? "—"}</td>
-                      <td>
+        <div className="admin-table-wrap access-request-table-wrap">
+          <table>
+            <caption className="sr-only">Access requests</caption>
+            <thead>
+              <tr>
+                <th>Requester</th>
+                <th>Requested role</th>
+                <th>Submitted</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {error ? (
+                <tr>
+                  <td colSpan={5}>
+                    <p className="admin-error" role="alert">
+                      {error}
+                    </p>
+                  </td>
+                </tr>
+              ) : loading || result === null ? (
+                <tr>
+                  <td
+                    colSpan={5}
+                    className="access-request-table-state"
+                    aria-busy="true"
+                  >
+                    Loading access requests…
+                  </td>
+                </tr>
+              ) : visibleRequests.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="access-request-empty">
+                    <div>
+                      <span
+                        className="access-request-empty-icon"
+                        aria-hidden="true"
+                      >
+                        <UserRound />
+                        <ShieldCheck />
+                      </span>
+                      <h2>{emptyTitle}</h2>
+                      <p>
+                        {normalizedSearch
+                          ? `No ${status} requests match “${search.trim()}”.`
+                          : emptyDescription}
+                      </p>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                visibleRequests.map((request) => (
+                  <tr key={request.id}>
+                    <td className="access-request-requester">
+                      <strong>
+                        {request.full_name ||
+                          request.email ||
+                          "Unknown account"}
+                      </strong>
+                      {request.full_name && request.email && (
+                        <span>{request.email}</span>
+                      )}
+                    </td>
+                    <td>{request.requested_role}</td>
+                    <td>
+                      {request.requested_at
+                        ? formatPhilippineDateTime(request.requested_at)
+                        : "—"}
+                    </td>
+                    <td>
+                      <span
+                        className={`access-request-status is-${request.status}`}
+                      >
+                        {request.status}
+                      </span>
+                    </td>
+                    <td className="access-request-actions">
+                      <span className="row-actions">
+                        <Button
+                          variant="secondary"
+                          onClick={() => setViewingRequest(request)}
+                          aria-label={`View access request from ${request.full_name || request.email || "unknown account"}`}
+                          title="View access request"
+                        >
+                          <Eye aria-hidden="true" />
+                        </Button>
                         {request.status === "pending" ? (
-                          <span className="row-actions">
+                          <>
                             <label
                               className="sr-only"
                               htmlFor={`role-${request.id}`}
@@ -377,33 +570,95 @@ function AccessRequests() {
                             >
                               Reject
                             </Button>
-                          </span>
-                        ) : (
-                          <span>
-                            {request.status}
-                            {request.decided_by_email
-                              ? ` · ${request.decided_by_email}`
-                              : ""}
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <Pagination
-              meta={result.meta}
-              noun="requests"
-              onPage={(nextPage) => {
-                setPage(nextPage);
-                reload();
-              }}
-            />
-          </>
+                          </>
+                        ) : null}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+        {result && result.data.length > 0 && (
+          <Pagination
+            meta={result.meta}
+            noun="requests"
+            onPage={(nextPage) => {
+              setPage(nextPage);
+              reload();
+            }}
+          />
         )}
       </section>
+      {viewingRequest && (
+        <Modal
+          label="Access request details"
+          onClose={() => setViewingRequest(null)}
+        >
+          <div className="access-request-details">
+            <header>
+              <p className="eyebrow">Access request</p>
+              <h2>
+                {viewingRequest.full_name ||
+                  viewingRequest.email ||
+                  "Unknown account"}
+              </h2>
+              <p>
+                Review the account information and reason for requesting access.
+              </p>
+            </header>
+            <dl>
+              <div>
+                <dt>Email</dt>
+                <dd>{viewingRequest.email ?? "Not provided"}</dd>
+              </div>
+              <div>
+                <dt>Requested role</dt>
+                <dd>{viewingRequest.requested_role}</dd>
+              </div>
+              <div>
+                <dt>Program</dt>
+                <dd>{viewingRequest.program ?? "Not provided"}</dd>
+              </div>
+              <div>
+                <dt>Submitted</dt>
+                <dd>
+                  {viewingRequest.requested_at
+                    ? formatPhilippineDateTime(viewingRequest.requested_at)
+                    : "Not provided"}
+                </dd>
+              </div>
+              <div>
+                <dt>Status</dt>
+                <dd>{viewingRequest.status}</dd>
+              </div>
+              {viewingRequest.decided_by_email && (
+                <div>
+                  <dt>Reviewed by</dt>
+                  <dd>{viewingRequest.decided_by_email}</dd>
+                </div>
+              )}
+              {viewingRequest.decided_at && (
+                <div>
+                  <dt>Reviewed</dt>
+                  <dd>{formatPhilippineDateTime(viewingRequest.decided_at)}</dd>
+                </div>
+              )}
+            </dl>
+            <section className="access-request-reason">
+              <h3>Reason for access</h3>
+              <p>{viewingRequest.justification || "No reason was provided."}</p>
+            </section>
+            {viewingRequest.decision_remarks && (
+              <section className="access-request-reason">
+                <h3>Decision remarks</h3>
+                <p>{viewingRequest.decision_remarks}</p>
+              </section>
+            )}
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -634,40 +889,7 @@ function AccountProvisioning({
   );
 }
 
-function AllUsers({
-  embedded = false,
-  onAdd,
-}: {
-  embedded?: boolean;
-  onAdd?: () => void;
-}) {
-  const [query, setQuery] = useState({
-    search: "",
-    role: "",
-    access_status: "",
-  });
-  const [page, setPage] = useState(1);
-  const [sort, setSort] = useState<
-    | "last_name"
-    | "email"
-    | "role"
-    | "access_status"
-    | "last_login_at"
-    | "created_at"
-    | null
-  >(null);
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
-  const [result, setResult] =
-    useState<LaravelPaginatedResponse<AdminUserResource> | null>(null);
-  const [error, setError] = useState("");
-  const [attempt, setAttempt] = useState(0);
-  const [drafts, setDrafts] = useState<
-    Record<
-      string,
-      { role: AdminRole; access_status: AccessStatus; institute: string | null }
-    >
-  >({});
-  const [saving, setSaving] = useState<string | null>(null);
+function AllUsers({ onAdd }: { onAdd?: () => void }) {
   const [institutes, refreshInstitutes] = useInstituteOptions();
   const [managingInstitutes, setManagingInstitutes] = useState(false);
   const [newInstitute, setNewInstitute] = useState("");
@@ -675,85 +897,13 @@ function AllUsers({
   const [removingInstitute, setRemovingInstitute] = useState<string | null>(
     null,
   );
-  const [editingUser, setEditingUser] = useState<AdminUserResource | null>(
-    null,
-  );
-  const [deletingUser, setDeletingUser] = useState<AdminUserResource | null>(
-    null,
-  );
   const [saveMessage, setSaveMessage] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState({
-    search: "",
-    role: "",
-    access_status: "",
-  });
-  const debouncedSearch = useDebouncedValue(filters.search, 350);
-  const searchMounted = useRef(false);
 
-  useEffect(() => {
-    if (!searchMounted.current) {
-      searchMounted.current = true;
-      return;
-    }
-    setPage(1);
-    setQuery((current) => ({ ...current, search: debouncedSearch }));
-    reload();
-  }, [debouncedSearch]);
-
-  function reload() {
-    setError("");
-    setLoading(true);
-    setAttempt((current) => current + 1);
-  }
-
-  useEffect(() => {
-    let cancelled = false;
-    void listAdminUsers({
-      ...query,
-      role: (query.role as AdminRole) || undefined,
-      access_status: (query.access_status as AccessStatus) || undefined,
-      sort: sort || undefined,
-      direction: sort ? sortDirection : undefined,
-      page,
-      per_page: 25,
-    })
-      .then((response) => {
-        if (cancelled) return;
-        setResult(response);
-        setError("");
-        setLoading(false);
-      })
-      .catch((requestError) => {
-        if (cancelled) return;
-        setError(friendlyError(requestError, "User records are unavailable"));
-        setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [attempt, page, query, sort, sortDirection]);
-
-  function applyFilters(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setPage(1);
-    setQuery(filters);
-    reload();
-  }
-  function draftFor(user: AdminUserResource) {
-    return (
-      drafts[user.id] ?? {
-        role: user.role,
-        access_status: user.access_status,
-        institute: user.institute,
-      }
-    );
-  }
-  async function addInstitute() {
+  async function addManagedInstitute() {
     const name = newInstitute.trim();
     if (!name) return;
-    setSaveMessage("");
     setAddingInstitute(true);
+    setSaveMessage("");
     try {
       await createInstitute(name);
       setNewInstitute("");
@@ -767,17 +917,12 @@ function AllUsers({
       setAddingInstitute(false);
     }
   }
-  async function removeInstitute(name: string) {
-    setSaveMessage("");
+
+  async function removeManagedInstitute(name: string) {
     setRemovingInstitute(name);
+    setSaveMessage("");
     try {
       await deleteInstitute(name);
-      if (editingUser && draftFor(editingUser).institute === name) {
-        setDrafts((current) => ({
-          ...current,
-          [editingUser.id]: { ...draftFor(editingUser), institute: null },
-        }));
-      }
       setSaveMessage(`Removed ${name}.`);
       refreshInstitutes();
     } catch (requestError) {
@@ -788,97 +933,23 @@ function AllUsers({
       setRemovingInstitute(null);
     }
   }
-  async function save(user: AdminUserResource) {
-    const draft = draftFor(user);
-    setSaveMessage("");
-    setSaving(user.id);
-    try {
-      await updateAdminUser(user.id, draft);
-      setDrafts((current) => {
-        const remaining = { ...current };
-        delete remaining[user.id];
-        return remaining;
-      });
-      setSaveMessage(`Updated ${user.email}.`);
-      setEditingUser(null);
-      reload();
-    } catch (requestError) {
-      setDrafts((current) => {
-        const remaining = { ...current };
-        delete remaining[user.id];
-        return remaining;
-      });
-      setSaveMessage(
-        friendlyError(requestError, "User change could not be saved"),
-      );
-      setEditingUser(null);
-      reload();
-    } finally {
-      setSaving(null);
-    }
-  }
-
-  async function remove(user: AdminUserResource) {
-    setSaveMessage("");
-    setSaving(user.id);
-    try {
-      await deleteAdminUser(user.id);
-      setSaveMessage(`Deleted ${user.email}.`);
-      setDeletingUser(null);
-      reload();
-    } catch (requestError) {
-      setSaveMessage(
-        friendlyError(requestError, "User account could not be deleted"),
-      );
-    } finally {
-      setSaving(null);
-    }
-  }
-
-  const visibleUsers = filterUserRows(result?.data ?? [], filters, fullName);
-
-  function changeSort(
-    column:
-      | "last_name"
-      | "email"
-      | "role"
-      | "access_status"
-      | "last_login_at"
-      | "created_at",
-  ) {
-    setPage(1);
-
-    if (sort === column) {
-      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
-      return;
-    }
-
-    setSort(column);
-    setSortDirection("asc");
-  }
 
   return (
-    <div
-      className={
-        embedded ? "admin-data-grid" : "workspace-content admin-sidebar-page"
-      }
-    >
-      {!embedded && (
-        <PageHeader
-          title="User & role management"
-          description="Add users, assign roles, and manage account access."
-        />
-      )}
-      <section className="panel-card admin-data-card">
-        <div className="admin-card-heading">
-          <div>
-            <h2>Users</h2>
-            <p>Search users and update their role or access.</p>
-          </div>
+    <>
+      <UserRoleManagementWorkspace
+        contextLabel="System Administrator"
+        loadUsers={loadAdminManagedUsers}
+        saveUser={saveAdminManagedUser}
+        roles={roles}
+        accessStatuses={accessStatuses}
+        canEditRole
+        canEditInstitute
+        institutes={institutes}
+        actions={
           <div className="row-actions">
             {onAdd && (
-              <Button onClick={onAdd} aria-label="Add user" title="Add user">
-                <Plus aria-hidden="true" />
+              <Button onClick={onAdd}>
+                <Plus aria-hidden="true" /> Add user
               </Button>
             )}
             <Button
@@ -888,365 +959,15 @@ function AllUsers({
                 setManagingInstitutes(true);
               }}
               aria-label="Manage institutes"
-              title="Manage institutes"
             >
-              <Building2 aria-hidden="true" />
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={reload}
-              aria-label="Refresh users"
-              title="Refresh users"
-            >
-              <RefreshCw aria-hidden="true" />
+              <Building2 aria-hidden="true" /> Manage institutes
             </Button>
           </div>
-        </div>
-        <form className="admin-filters" onSubmit={applyFilters}>
-          <label>
-            Search
-            <input
-              value={filters.search}
-              onChange={(event) =>
-                setFilters((current) => ({
-                  ...current,
-                  search: event.target.value,
-                }))
-              }
-              placeholder="Name, email, or ID"
-            />
-          </label>
-          <label>
-            Role
-            <select
-              value={filters.role}
-              onChange={(event) => {
-                const next = event.target.value;
-                setFilters((current) => ({ ...current, role: next }));
-                setPage(1);
-                setQuery((current) => ({ ...current, role: next }));
-                reload();
-              }}
-            >
-              <option value="">All roles</option>
-              {roles.map((role) => (
-                <option key={role} value={role}>
-                  {label(role)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Access status
-            <select
-              value={filters.access_status}
-              onChange={(event) => {
-                const next = event.target.value;
-                setFilters((current) => ({ ...current, access_status: next }));
-                setPage(1);
-                setQuery((current) => ({ ...current, access_status: next }));
-                reload();
-              }}
-            >
-              <option value="">All statuses</option>
-              {accessStatuses.map((status) => (
-                <option key={status} value={status}>
-                  {label(status)}
-                </option>
-              ))}
-            </select>
-          </label>
-        </form>
-        {saveMessage && (
-          <p
-            role="status"
-            className={
-              saveMessage.startsWith("Updated") ||
-              saveMessage.startsWith("Deleted")
-                ? "admin-success"
-                : "admin-error"
-            }
-          >
-            {saveMessage}
-          </p>
-        )}
-        {error ? (
-          <InlineError message={error} retry={reload} />
-        ) : loading || result === null ? (
-          <Loading label="Loading users" />
-        ) : visibleUsers.length === 0 ? (
-          <p className="admin-empty">
-            {hasFilters(query)
-              ? "No users match these filters."
-              : "No user accounts are available."}
-          </p>
-        ) : (
-          <>
-            <div className="admin-table-wrap">
-              <table>
-                <caption className="sr-only">User accounts</caption>
-                <thead>
-                  <tr>
-                    <th
-                      onClick={() => changeSort("last_name")}
-                      aria-sort={
-                        sort === "last_name"
-                          ? sortDirection === "asc"
-                            ? "ascending"
-                            : "descending"
-                          : "none"
-                      }
-                    >
-                      Name{" "}
-                      {sort === "last_name"
-                        ? sortDirection === "asc"
-                          ? "↑"
-                          : "↓"
-                        : "↕"}
-                    </th>
-                    <th
-                      onClick={() => changeSort("email")}
-                      aria-sort={
-                        sort === "email"
-                          ? sortDirection === "asc"
-                            ? "ascending"
-                            : "descending"
-                          : "none"
-                      }
-                    >
-                      Email{" "}
-                      {sort === "email"
-                        ? sortDirection === "asc"
-                          ? "↑"
-                          : "↓"
-                        : "↕"}
-                    </th>
-
-                    <th
-                      onClick={() => changeSort("role")}
-                      aria-sort={
-                        sort === "role"
-                          ? sortDirection === "asc"
-                            ? "ascending"
-                            : "descending"
-                          : "none"
-                      }
-                    >
-                      Role{" "}
-                      {sort === "role"
-                        ? sortDirection === "asc"
-                          ? "↑"
-                          : "↓"
-                        : "↕"}
-                    </th>
-
-                    <th
-                      onClick={() => changeSort("access_status")}
-                      aria-sort={
-                        sort === "access_status"
-                          ? sortDirection === "asc"
-                            ? "ascending"
-                            : "descending"
-                          : "none"
-                      }
-                    >
-                      Access{" "}
-                      {sort === "access_status"
-                        ? sortDirection === "asc"
-                          ? "↑"
-                          : "↓"
-                        : "↕"}
-                    </th>
-
-                    <th
-                      onClick={() => changeSort("last_login_at")}
-                      aria-sort={
-                        sort === "last_login_at"
-                          ? sortDirection === "asc"
-                            ? "ascending"
-                            : "descending"
-                          : "none"
-                      }
-                    >
-                      Last login{" "}
-                      {sort === "last_login_at"
-                        ? sortDirection === "asc"
-                          ? "↑"
-                          : "↓"
-                        : "↕"}
-                    </th>
-
-                    <th
-                      onClick={() => changeSort("created_at")}
-                      aria-sort={
-                        sort === "created_at"
-                          ? sortDirection === "asc"
-                            ? "ascending"
-                            : "descending"
-                          : "none"
-                      }
-                    >
-                      Created{" "}
-                      {sort === "created_at"
-                        ? sortDirection === "asc"
-                          ? "↑"
-                          : "↓"
-                        : "↕"}
-                    </th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleUsers.map((user) => {
-                    return (
-                      <tr key={user.id}>
-                        <td>{fullName(user) || "—"}</td>
-                        <td>{user.email}</td>
-                        <td>{label(user.role)}</td>
-                        <td>{label(user.access_status)}</td>
-                        <td>{displayDate(user.last_login_at)}</td>
-                        <td>{displayDate(user.created_at)}</td>
-                        <td>
-                          <span className="row-actions">
-                            <Button
-                              variant="secondary"
-                              className="icon-button"
-                              aria-label={`Edit ${user.email}`}
-                              title="Edit user"
-                              onClick={() => {
-                                setDrafts((current) => ({
-                                  ...current,
-                                  [user.id]: {
-                                    role: user.role,
-                                    access_status: user.access_status,
-                                    institute: user.institute,
-                                  },
-                                }));
-                                setEditingUser(user);
-                              }}
-                              disabled={saving === user.id}
-                            >
-                              <Pencil />
-                            </Button>
-                            <Button
-                              variant="secondary"
-                              className="icon-button"
-                              aria-label={`Delete ${user.email}`}
-                              title="Delete user"
-                              onClick={() => setDeletingUser(user)}
-                              disabled={saving === user.id}
-                            >
-                              <Trash2 />
-                            </Button>
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <Pagination
-              meta={result.meta}
-              noun="users"
-              onPage={(nextPage) => {
-                setPage(nextPage);
-                reload();
-              }}
-            />
-          </>
-        )}
-      </section>
-      {editingUser && (
-        <Modal
-          label={`Edit ${editingUser.email}`}
-          onClose={() => setEditingUser(null)}
-          busy={saving === editingUser.id}
-        >
-          <form
-            className="admin-user-edit-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void save(editingUser);
-            }}
-          >
-            <header className="admin-user-edit-header">
-              <p className="eyebrow">User management</p>
-              <h2>Edit user</h2>
-              <p>{editingUser.email}</p>
-            </header>
-            <label>
-              Role
-              <select
-                value={draftFor(editingUser).role}
-                onChange={(event) =>
-                  setDrafts((current) => ({
-                    ...current,
-                    [editingUser.id]: {
-                      ...draftFor(editingUser),
-                      role: event.target.value as AdminRole,
-                    },
-                  }))
-                }
-              >
-                {roles.map((role) => (
-                  <option key={role} value={role}>
-                    {label(role)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Access status
-              <select
-                value={draftFor(editingUser).access_status}
-                onChange={(event) =>
-                  setDrafts((current) => ({
-                    ...current,
-                    [editingUser.id]: {
-                      ...draftFor(editingUser),
-                      access_status: event.target.value as AccessStatus,
-                    },
-                  }))
-                }
-              >
-                {accessStatuses.map((status) => (
-                  <option key={status} value={status}>
-                    {label(status)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Institute
-              <select
-                value={draftFor(editingUser).institute ?? ""}
-                onChange={(event) =>
-                  setDrafts((current) => ({
-                    ...current,
-                    [editingUser.id]: {
-                      ...draftFor(editingUser),
-                      institute: event.target.value || null,
-                    },
-                  }))
-                }
-              >
-                <option value="">Not assigned</option>
-                {institutes.map((institute) => (
-                  <option key={institute} value={institute}>
-                    {institute}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="modal-actions admin-user-edit-actions">
-              <Button type="submit" disabled={saving === editingUser.id}>
-                {saving === editingUser.id ? "Saving…" : "Save changes"}
-              </Button>
-            </div>
-          </form>
-        </Modal>
-      )}
+        }
+        errorMessage={(requestError) =>
+          friendlyError(requestError, "User records are unavailable")
+        }
+      />
       {managingInstitutes && (
         <Modal
           label="Manage institutes"
@@ -1260,20 +981,7 @@ function AllUsers({
               <p>Add institute options or remove unused custom institutes.</p>
             </header>
             {saveMessage && (
-              <p
-                role={
-                  saveMessage.startsWith("Added") ||
-                  saveMessage.startsWith("Removed")
-                    ? "status"
-                    : "alert"
-                }
-                className={
-                  saveMessage.startsWith("Added") ||
-                  saveMessage.startsWith("Removed")
-                    ? "admin-success"
-                    : "admin-error"
-                }
-              >
+              <p role="status" className="admin-success">
                 {saveMessage}
               </p>
             )}
@@ -1291,9 +999,8 @@ function AllUsers({
                 variant="secondary"
                 className="icon-button"
                 aria-label="Add institute"
-                title="Add institute"
                 disabled={!newInstitute.trim() || addingInstitute}
-                onClick={() => void addInstitute()}
+                onClick={() => void addManagedInstitute()}
               >
                 {addingInstitute ? "…" : <Plus />}
               </Button>
@@ -1310,9 +1017,8 @@ function AllUsers({
                     variant="quiet"
                     className="icon-button"
                     aria-label={`Remove ${institute}`}
-                    title="Remove institute"
                     disabled={removingInstitute === institute}
-                    onClick={() => void removeInstitute(institute)}
+                    onClick={() => void removeManagedInstitute(institute)}
                   >
                     <Trash2 />
                   </Button>
@@ -1322,17 +1028,7 @@ function AllUsers({
           </div>
         </Modal>
       )}
-      {deletingUser && (
-        <ConfirmDialog
-          title="Delete user account"
-          message={`Delete ${deletingUser.email}? The account will immediately lose access to ResearchNAV.`}
-          confirmLabel="Delete user"
-          busy={saving === deletingUser.id}
-          onConfirm={() => void remove(deletingUser)}
-          onCancel={() => setDeletingUser(null)}
-        />
-      )}
-    </div>
+    </>
   );
 }
 
@@ -1423,7 +1119,7 @@ function AuditLogs() {
             <input
               value={filters.action}
               onChange={(event) => change("action", event.target.value)}
-              placeholder="ADMIN_USER_UPDATED"
+              placeholder="Search by action"
             />
           </label>
           <label>
@@ -1552,6 +1248,7 @@ function SystemStatus() {
   const [loading, setLoading] = useState(true);
 
   function reload() {
+    if (loading) return;
     setError("");
     setLoading(true);
     setAttempt((current) => current + 1);
@@ -1581,122 +1278,264 @@ function SystemStatus() {
         title="System status and capabilities"
         description="Live, read-only service checks and aggregate operational counts."
         action={
-          <Button variant="secondary" onClick={reload}>
+          <Button variant="secondary" onClick={reload} disabled={loading}>
             <RefreshCw /> Refresh
           </Button>
         }
       />
-      {error ? (
+      {error && status === null ? (
         <InlineError message={error} retry={reload} />
-      ) : loading || status === null ? (
+      ) : status === null ? (
         <Loading label="Loading system status" />
       ) : (
-        <>
+        <div className={`system-settings ${loading ? "is-refreshing" : ""}`}>
+          {error && <InlineError message={error} retry={reload} />}
           <section
             className={`panel-card system-overall system-${status.overall}`}
           >
-            <h2>{label(status.overall)}</h2>
-            <p>Checked {displayDate(status.checked_at)}.</p>
+            <div className="system-health-summary">
+              {status.overall === "operational" ? (
+                <CheckCircle2 aria-hidden="true" />
+              ) : (
+                <CircleAlert aria-hidden="true" />
+              )}
+              <div>
+                <span>System health</span>
+                <h2>{label(status.overall)}</h2>
+              </div>
+            </div>
+            <p className="system-checked">
+              Last checked
+              <br />
+              <strong>{displayDate(status.checked_at)}</strong>
+            </p>
             {status.issues.length > 0 && (
-              <>
-                <h3>Degraded components</h3>
+              <div className="system-issues">
+                <strong>Degraded components</strong>
                 <ul>
                   {status.issues.map((issue) => (
-                    <li key={issue}>{issue}</li>
+                    <li key={issue}>{label(issue.replaceAll(".", " "))}</li>
                   ))}
                 </ul>
-              </>
+              </div>
             )}
           </section>
-          <section className="admin-stat-grid" aria-label="Database counts">
-            <Stat label="Users" value={status.database.counts.users.total} />
-            <Stat
-              label="Active users"
-              value={status.database.counts.users.access_statuses.active}
-            />
-            <Stat
-              label="Invited users"
-              value={status.database.counts.users.access_statuses.invited}
-            />
-            <Stat
-              label="Blocked users"
-              value={status.database.counts.users.access_statuses.blocked}
-            />
-            <Stat
-              label="Administrators"
-              value={status.database.counts.users.administrators}
-            />
-            <Stat
-              label="Coordinators"
-              value={status.database.counts.users.coordinators}
-            />
-            <Stat
-              label="Research documents"
-              value={status.database.counts.research_documents}
-            />
-            <Stat
-              label="Audit logs"
-              value={status.database.counts.audit_logs}
-            />
-            <Stat
-              label="Notifications"
-              value={status.database.counts.notifications}
-            />
-            <Stat
-              label="Document files"
-              value={status.database.counts.document_files}
-            />
-            <Stat
-              label="File bytes"
-              value={status.database.counts.document_file_bytes}
-            />
+
+          <div className="system-card-grid">
+            <StatusCard icon={<Server />} title="Application runtime">
+              <StatusRow
+                term="Environment"
+                value={status.runtime.environment}
+              />
+              <StatusRow term="PHP" value={status.runtime.php_version} />
+              <StatusRow
+                term="Laravel"
+                value={status.runtime.framework_version}
+              />
+              <StatusRow
+                term="Debug mode"
+                value={status.runtime.debug_enabled ? "Enabled" : "Disabled"}
+                tone={status.runtime.debug_enabled ? "warning" : "success"}
+              />
+            </StatusCard>
+            <StatusCard icon={<Database />} title="Database">
+              <StatusRow
+                term="Connection"
+                value={label(status.database.status)}
+                tone={
+                  status.database.status === "operational"
+                    ? "success"
+                    : "warning"
+                }
+              />
+              <StatusRow
+                term="Driver"
+                value={status.database.driver ?? "Unavailable"}
+              />
+              <StatusRow
+                term="Applied migrations"
+                value={status.database.migrations.applied}
+              />
+              <StatusRow
+                term="Deployed files"
+                value={status.database.migrations.available}
+              />
+              <StatusRow
+                term="Pending"
+                value={status.database.migrations.pending}
+                tone={
+                  status.database.migrations.pending === 0
+                    ? "success"
+                    : "warning"
+                }
+              />
+              <StatusRow
+                term="Historical"
+                value={status.database.migrations.historical}
+              />
+            </StatusCard>
+            <StatusCard icon={<HardDrive />} title="Private storage">
+              <StatusRow term="Disk" value={status.storage.private.disk} />
+              <StatusRow
+                term="Driver"
+                value={status.storage.private.driver ?? "Unavailable"}
+              />
+              <StatusRow
+                term="Health"
+                value={label(status.storage.private.status)}
+                tone={
+                  status.storage.private.status === "operational"
+                    ? "success"
+                    : "warning"
+                }
+              />
+              <Capability
+                label="Read"
+                enabled={status.storage.private.capabilities.read}
+              />
+              <Capability
+                label="Write"
+                enabled={status.storage.private.capabilities.write}
+              />
+              <Capability
+                label="Cleanup"
+                enabled={status.storage.private.capabilities.delete}
+              />
+            </StatusCard>
+          </div>
+
+          <section
+            className="panel-card system-metrics"
+            aria-labelledby="system-metrics-title"
+          >
+            <header>
+              <Activity />
+              <div>
+                <p className="eyebrow">Database snapshot</p>
+                <h2 id="system-metrics-title">Operational metrics</h2>
+              </div>
+            </header>
+            <div className="system-metric-grid">
+              <Stat label="Users" value={status.database.counts.users.total} />
+              <Stat
+                label="Active"
+                value={status.database.counts.users.access_statuses.active}
+              />
+              <Stat
+                label="Invited"
+                value={status.database.counts.users.access_statuses.invited}
+              />
+              <Stat
+                label="Blocked"
+                value={status.database.counts.users.access_statuses.blocked}
+              />
+              <Stat
+                label="Administrators"
+                value={status.database.counts.users.administrators}
+              />
+              <Stat
+                label="Coordinators"
+                value={status.database.counts.users.coordinators}
+              />
+              <Stat
+                label="Research documents"
+                value={status.database.counts.research_documents}
+              />
+              <Stat
+                label="Audit logs"
+                value={status.database.counts.audit_logs}
+              />
+              <Stat
+                label="Notifications"
+                value={status.database.counts.notifications}
+              />
+              <Stat
+                label="Document files"
+                value={status.database.counts.document_files}
+              />
+              <Stat
+                label="File storage"
+                value={formatBytes(status.database.counts.document_file_bytes)}
+                title={
+                  status.database.counts.document_file_bytes === null
+                    ? undefined
+                    : `${status.database.counts.document_file_bytes.toLocaleString()} bytes`
+                }
+              />
+            </div>
           </section>
-          <section className="panel-card admin-status-details">
-            <h2>Runtime and database</h2>
-            <dl>
-              <dt>Environment</dt>
-              <dd>{status.runtime.environment}</dd>
-              <dt>PHP</dt>
-              <dd>{status.runtime.php_version}</dd>
-              <dt>Framework</dt>
-              <dd>{status.runtime.framework_version}</dd>
-              <dt>Debug enabled</dt>
-              <dd>{String(status.runtime.debug_enabled)}</dd>
-              <dt>Database</dt>
-              <dd>
-                {status.database.driver ?? "Unavailable"} ·{" "}
-                {status.database.status}
-              </dd>
-              <dt>Migrations</dt>
-              <dd>
-                {status.database.migrations.applied ?? "—"} applied /{" "}
-                {status.database.migrations.available ?? "—"} available /{" "}
-                {status.database.migrations.pending ?? "—"} pending
-              </dd>
-            </dl>
-          </section>
-          <section className="panel-card admin-status-details">
-            <h2>Storage capabilities</h2>
-            <dl>
-              <dt>Private disk</dt>
-              <dd>
-                {status.storage.private.disk} (
-                {status.storage.private.driver ?? "unavailable"})
-              </dd>
-              <dt>Status</dt>
-              <dd>{status.storage.private.status}</dd>
-              <dt>Capabilities</dt>
-              <dd>
-                {status.storage.private.capabilities
-                  ? `Read: ${status.storage.private.capabilities.read}; Write: ${status.storage.private.capabilities.write}`
-                  : "Unavailable"}
-              </dd>
-            </dl>
-          </section>
-        </>
+        </div>
       )}
     </div>
   );
+}
+
+function StatusCard({
+  icon,
+  title,
+  children,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="panel-card system-status-card">
+      <header>
+        <span className="system-card-icon" aria-hidden="true">
+          {icon}
+        </span>
+        <h2>{title}</h2>
+      </header>
+      <dl>{children}</dl>
+    </section>
+  );
+}
+
+function StatusRow({
+  term,
+  value,
+  tone,
+}: {
+  term: string;
+  value: React.ReactNode;
+  tone?: "success" | "warning";
+}) {
+  return (
+    <>
+      <dt>{term}</dt>
+      <dd className={tone ? `system-value-${tone}` : undefined}>
+        {value ?? "—"}
+      </dd>
+    </>
+  );
+}
+
+function Capability({
+  label: capabilityLabel,
+  enabled,
+}: {
+  label: string;
+  enabled: boolean;
+}) {
+  return (
+    <StatusRow
+      term={capabilityLabel}
+      value={enabled ? "Available" : "Unavailable"}
+      tone={enabled ? "success" : "warning"}
+    />
+  );
+}
+
+function formatBytes(bytes: number | null) {
+  if (bytes === null) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KiB", "MiB", "GiB", "TiB"];
+  const unit = Math.min(
+    Math.floor(Math.log(bytes) / Math.log(1024)),
+    units.length,
+  );
+  return `${(bytes / 1024 ** unit).toFixed(2)} ${units[unit - 1]}`;
 }
 
 function Loading({ label }: { label: string }) {
@@ -1730,13 +1569,21 @@ function InlineError({
 function Stat({
   label: statLabel,
   value,
+  title,
 }: {
   label: string;
-  value: number | null;
+  value: number | string | null;
+  title?: string;
 }) {
   return (
-    <section className="panel-card admin-stat">
-      <strong>{value === null ? "—" : value.toLocaleString()}</strong>
+    <section className="admin-stat" title={title}>
+      <strong>
+        {value === null
+          ? "—"
+          : typeof value === "number"
+            ? value.toLocaleString()
+            : value}
+      </strong>
       <span>{statLabel}</span>
     </section>
   );

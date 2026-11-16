@@ -76,30 +76,6 @@ class RoleWorkspaceApiTest extends TestCase
             ->assertJsonPath('error', 'INVALID_REQUEST');
     }
 
-    public function test_panel_schedule_is_scoped_to_assigned_manuscripts(): void
-    {
-        $panelist = $this->user(['role' => 'panel']);
-        $office = $this->user(['role' => 'research-office']);
-        $assigned = $this->document('submitted');
-        $other = $this->document('submitted');
-        $this->assign($office, $assigned, $panelist, 'panel');
-        DefenseSchedule::query()->create([
-            'research_document_id' => $assigned->id,
-            'created_by' => $office->id,
-            'scheduled_at' => now()->addDays(2),
-            'status' => 'scheduled',
-        ]);
-        DefenseSchedule::query()->create([
-            'research_document_id' => $other->id,
-            'created_by' => $office->id,
-            'scheduled_at' => now()->addDays(2),
-            'status' => 'scheduled',
-        ]);
-
-        $response = $this->as($panelist)->getJson('/api/panel/schedule');
-        $response->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.research_document_id', $assigned->id);
-    }
-
     public function test_panel_assignments_include_the_latest_canonical_defense_schedule(): void
     {
         $panelist = $this->user(['role' => 'panel']);

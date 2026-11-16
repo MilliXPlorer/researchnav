@@ -1,5 +1,5 @@
 import { StrictMode } from "react";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Dashboard from "./Dashboard";
 import { defaultUserSession } from "./data";
@@ -240,6 +240,12 @@ describe("Dashboard notification request ownership", () => {
     );
     await flush();
     fireEvent.click(screen.getByRole("button", { name: /Sign out/i }));
+    const alertDialog = screen.getByRole("alertdialog", {
+      name: "Sign out of ResearchNAV?",
+    });
+    fireEvent.click(
+      within(alertDialog).getByRole("button", { name: "Sign out" }),
+    );
     await flush();
     expect(onLogout).toHaveBeenCalledTimes(1);
     await advance(0);

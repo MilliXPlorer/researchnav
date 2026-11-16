@@ -950,7 +950,6 @@ describe("role workspace pages", () => {
     {
       role: "panel",
       destinations: [
-        ["Defense Schedule", "Defense schedule"],
         ["Evaluation Form", "Evaluation form"],
         ["Panel History", "Panel history"],
       ],
@@ -2749,7 +2748,7 @@ describe("role workspace pages", () => {
     );
 
     expect(
-      await screen.findByRole("heading", { name: "Users" }),
+      await screen.findByRole("heading", { name: "User & role management" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Refresh users" }),
@@ -2758,11 +2757,11 @@ describe("role workspace pages", () => {
       screen.getByRole("button", { name: "Edit member@example.test" }),
     );
 
-    const dialog = screen.getByRole("dialog", {
-      name: "Edit member@example.test",
-    });
-    expect(within(dialog).queryByLabelText("Role")).not.toBeInTheDocument();
-    fireEvent.change(within(dialog).getByLabelText("Access status"), {
+    const dialog = screen.getByRole("dialog", { name: "Edit user" });
+    expect(
+      within(dialog).queryByLabelText("Assigned role"),
+    ).not.toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText("Account access status"), {
       target: { value: "blocked" },
     });
     fireEvent.click(
@@ -2783,7 +2782,7 @@ describe("role workspace pages", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("filters office users locally when the API returns an unfiltered page", async () => {
+  it("sends office user filters to the server", async () => {
     const users = [
       {
         id: "researcher-id",
@@ -2808,10 +2807,10 @@ describe("role workspace pages", () => {
         updated_at: null,
       },
     ];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => new Response(JSON.stringify(pageResponse(users)))),
-    );
+    const fetchMock = vi.fn<
+      (input: string | URL | Request) => Promise<Response>
+    >(() => Promise.resolve(new Response(JSON.stringify(pageResponse(users)))));
+    vi.stubGlobal("fetch", fetchMock);
 
     render(
       <RoleSidebarPage
@@ -2820,18 +2819,18 @@ describe("role workspace pages", () => {
         navigate={vi.fn()}
       />,
     );
-    expect(
-      await screen.findByText("researcher@example.test"),
-    ).toBeInTheDocument();
-    expect(screen.getByText("panel@example.test")).toBeInTheDocument();
+    await screen.findByText("researcher@example.test");
 
     fireEvent.change(screen.getByLabelText("Search"), {
       target: { value: "Alice" },
     });
-    expect(
-      await screen.findByText("researcher@example.test"),
-    ).toBeInTheDocument();
-    expect(screen.queryByText("panel@example.test")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([input]) =>
+          String(input).includes("search=Alice"),
+        ),
+      ).toBe(true),
+    );
 
     fireEvent.change(screen.getByLabelText("Search"), {
       target: { value: "" },
@@ -2839,10 +2838,13 @@ describe("role workspace pages", () => {
     fireEvent.change(screen.getByLabelText("Role"), {
       target: { value: "panel" },
     });
-    expect(await screen.findByText("panel@example.test")).toBeInTheDocument();
-    expect(
-      screen.queryByText("researcher@example.test"),
-    ).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([input]) =>
+          String(input).includes("role=panel"),
+        ),
+      ).toBe(true),
+    );
 
     fireEvent.change(screen.getByLabelText("Role"), {
       target: { value: "" },
@@ -2850,9 +2852,12 @@ describe("role workspace pages", () => {
     fireEvent.change(screen.getByLabelText("Access status"), {
       target: { value: "active" },
     });
-    expect(
-      await screen.findByText("researcher@example.test"),
-    ).toBeInTheDocument();
-    expect(screen.queryByText("panel@example.test")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([input]) =>
+          String(input).includes("access_status=active"),
+        ),
+      ).toBe(true),
+    );
   });
 });

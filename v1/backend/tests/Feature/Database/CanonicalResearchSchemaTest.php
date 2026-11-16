@@ -82,9 +82,10 @@ class CanonicalResearchSchemaTest extends TestCase
 
     public function test_workflow_review_roles_and_unique_keys_are_migrated(): void
     {
-        $this->assertTrue(Schema::hasColumns('research_review_assignments', ['review_role', 'is_active']));
+        $this->assertTrue(Schema::hasColumns('research_review_assignments', ['review_role', 'is_active', 'support_pending_slot', 'support_history_slot']));
         foreach ([
-            ['research_review_assignments', 'research_review_assignment_defense_unique'],
+            ['research_review_assignments', 'support_assignment_history_identity_unique'],
+            ['research_review_assignments', 'support_assignment_one_pending_per_role_unique'],
             ['class_section_members', 'section_document_user_unique'],
             ['evaluations', 'evaluation_document_panelist_unique'],
             ['methodology_reviews', 'methodology_review_document_statistician_unique'],

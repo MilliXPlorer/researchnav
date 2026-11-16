@@ -9,15 +9,12 @@ import {
   Pencil,
   Trash2,
   UploadCloud,
-  UserRoundCheck,
-  UserRoundPlus,
   UsersRound,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getInternalResearch,
   getResearchPeople,
-  listEligibleSupportUsers,
   listResearchFolders,
   listResearchFiles,
   listResearchRevisions,
@@ -26,7 +23,6 @@ import {
   renameResearchFile,
   researchFileDownloadUrl,
   researchFilePreviewUrl,
-  requestResearchSupport,
   resubmitResearchRevision,
   uploadResearchFile,
   type DocumentFileResource,
@@ -52,6 +48,7 @@ import type {
   ResearchWorkspaceTab,
 } from "./researchWorkspaceRoute";
 import { SdgBadges } from "./SdgMetadata";
+import SupportAssignmentCards from "./SupportAssignmentCards";
 
 type WorkspaceContext = {
   research: ResearchDocumentSummaryResource;
@@ -65,14 +62,7 @@ type WorkspaceContext = {
 type ResearcherSection =
   "files" | "revisions" | "people" | "folders" | "support";
 
-type SupportRole = SupportAssignmentResource["assignment_role"];
 type ResearcherWorkspaceTab = ResearchWorkspaceTab;
-
-const supportRoles: Array<{ role: SupportRole; label: string }> = [
-  { role: "research_editor", label: "Editor" },
-  { role: "statistician", label: "Statistician" },
-  { role: "librarian", label: "Librarian" },
-];
 
 const maxFileBytes = 25 * 1024 * 1024;
 const allowedExtensions = new Set(["pdf"]);
@@ -159,13 +149,6 @@ export default function ResearcherResearchWorkspace({
       "initial_submission",
     );
   const [activeDocumentFolder, setActiveDocumentFolder] = useState("");
-  const [supportRole, setSupportRole] = useState<SupportRole | null>(null);
-  const [supportCandidates, setSupportCandidates] = useState<
-    Array<{ id: string; name: string; email: string }>
-  >([]);
-  const [supportCandidateId, setSupportCandidateId] = useState("");
-  const [supportCandidatesLoading, setSupportCandidatesLoading] =
-    useState(false);
   const [renaming, setRenaming] = useState<DocumentFileResource | null>(null);
   const [filename, setFilename] = useState("");
   const [deleting, setDeleting] = useState<DocumentFileResource | null>(null);
@@ -340,44 +323,6 @@ export default function ResearcherResearchWorkspace({
       : []),
   ].filter((folder, index, values) => values.indexOf(folder) === index);
 
-  function currentSupportAssignment(role: SupportRole) {
-    return (context?.supportAssignments ?? []).find(
-      (assignment) =>
-        assignment.assignment_role === role &&
-        ["requested", "pending", "accepted", "confirmed", "active"].includes(
-          assignment.status,
-        ),
-    );
-  }
-
-  function supportRoleLabel(role: SupportRole) {
-    return (
-      supportRoles.find((item) => item.role === role)?.label ?? humanize(role)
-    );
-  }
-
-  async function openSupportPicker(role: SupportRole) {
-    if (mutation) return;
-    setSupportRole(role);
-    setSupportCandidateId("");
-    setSupportCandidates([]);
-    setSupportCandidatesLoading(true);
-    setMessage("");
-    try {
-      const candidates = await listEligibleSupportUsers(role);
-      if (!mounted.current) return;
-      const current = currentSupportAssignment(role);
-      setSupportCandidates(
-        candidates.filter((candidate) => candidate.id !== current?.user_id),
-      );
-    } catch {
-      if (mounted.current)
-        setMessage("Available research support accounts could not be loaded.");
-    } finally {
-      if (mounted.current) setSupportCandidatesLoading(false);
-    }
-  }
-
   async function runMutation(label: string, action: () => Promise<unknown>) {
     if (mutation || source === "mock") return;
     setMutation(label);
@@ -413,25 +358,6 @@ export default function ResearcherResearchWorkspace({
         uploadPurpose,
       ),
     ).then(() => setUpload(null));
-  }
-
-  function submitSupportRequest(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!research || !supportRole || !supportCandidateId) return;
-    const current = currentSupportAssignment(supportRole);
-    const role = supportRole;
-    void runMutation(`support-${role}`, () =>
-      requestResearchSupport(
-        research.id,
-        supportCandidateId,
-        role,
-        Boolean(current),
-      ),
-    ).then(() => {
-      setSupportRole(null);
-      setSupportCandidateId("");
-      setSupportCandidates([]);
-    });
   }
 
   if (loading) {
@@ -498,17 +424,25 @@ export default function ResearcherResearchWorkspace({
         </div>
 
         <div className="project-workspace-context">
-          {[
-            context.people.section?.name ?? "Research record",
-            research.submission_reference ?? "Pending reference",
-            context.people.section?.academic_year ??
-              research.publication_year?.toString() ??
-              "Year not set",
-            humanize(research.research_stage),
-            humanize(research.submission_status),
-          ].map((item, index) => (
-            <span key={`${item}-${index}`}>{item}</span>
-          ))}
+          <div className="project-workspace-metadata">
+            {[
+              context.people.section?.name ?? "Research record",
+              research.submission_reference ?? "Pending reference",
+              context.people.section?.academic_year ??
+                research.publication_year?.toString() ??
+                "Year not set",
+            ].map((item, index) => (
+              <span key={`${item}-${index}`}>{item}</span>
+            ))}
+          </div>
+          <div className="project-workspace-statuses">
+            <span className="project-status-badge">
+              {humanize(research.research_stage)}
+            </span>
+            <span className="project-status-badge">
+              {humanize(research.submission_status)}
+            </span>
+          </div>
         </div>
 
         <nav
@@ -628,26 +562,22 @@ export default function ResearcherResearchWorkspace({
             {(research.sdgs?.length ?? 0) > 0 && (
               <SdgBadges sdgs={research.sdgs ?? []} />
             )}
-            <p>
-              Research Instructor:{" "}
-              <span>
-                {context.people.section?.instructor_name ?? "Unassigned"}
-              </span>
-            </p>
-            {context.people.reviewers.find(
-              (person) => person.review_role === "adviser",
-            )?.name && (
+            <div className="project-overview-actors">
               <p>
-                Research Adviser:{" "}
+                <strong>Research Instructor:</strong>
                 <span>
-                  {
-                    context.people.reviewers.find(
-                      (person) => person.review_role === "adviser",
-                    )?.name
-                  }
+                  {context.people.section?.instructor_name ?? "Unassigned"}
                 </span>
               </p>
-            )}
+              <p>
+                <strong>Research Adviser:</strong>
+                <span>
+                  {context.people.reviewers.find(
+                    (person) => person.review_role === "adviser",
+                  )?.name ?? "Unassigned"}
+                </span>
+              </p>
+            </div>
           </section>
           <section className="project-overview-card">
             <div className="project-card-heading">
@@ -655,13 +585,18 @@ export default function ResearcherResearchWorkspace({
                 <p className="eyebrow">Researchers</p>
                 <h4>Study members</h4>
               </div>
-              <button
-                type="button"
-                className="text-action"
-                onClick={() => setTab("team")}
-              >
-                View team
-              </button>
+              <div className="project-card-heading-actions">
+                <span className="project-panel-count">
+                  {research.authors.length} members
+                </span>
+                <button
+                  type="button"
+                  className="text-action"
+                  onClick={() => setTab("team")}
+                >
+                  View team
+                </button>
+              </div>
             </div>
             <ul className="project-compact-list">
               {research.authors.map((author) => (
@@ -708,7 +643,9 @@ export default function ResearcherResearchWorkspace({
                     <li key={file.id}>
                       <FileText aria-hidden="true" />
                       <span>
-                        <strong>{file.original_filename}</strong>
+                        <strong title={file.original_filename}>
+                          {file.original_filename}
+                        </strong>
                         <small>
                           {file.relative_path ?? "Unfiled"} · v
                           {file.version_number}
@@ -727,64 +664,37 @@ export default function ResearcherResearchWorkspace({
           aria-labelledby="research-support-title"
           hidden={tab !== "team"}
         >
-          <div className="project-section-heading researcher-support-heading">
-            <div>
-              <p className="eyebrow">Research Team</p>
-              <h2 id="research-support-title">People assigned to this study</h2>
-              <p>
-                View your instructor and reviewers, then request the support
-                specialists your group needs. New assignments become active
-                after the selected person accepts the request.
-              </p>
-            </div>
-          </div>
           <DefenseTeamRoster
             researchDocumentId={research.id}
             people={context.people}
+            defenseType={defenseType}
+            onDefenseTypeChange={setDefenseType}
             refreshKey={attempt}
           />
-          <div className="researcher-support-grid">
-            {supportRoles.map(
-              ({ role: supportActorRole, label: actorLabel }) => {
-                const assignment = currentSupportAssignment(supportActorRole);
-                const canManage =
-                  source === "live" && !sectionErrors.includes("support");
-                return (
-                  <article
-                    className="researcher-support-card"
-                    key={supportActorRole}
-                  >
-                    <span
-                      className="researcher-support-icon"
-                      aria-hidden="true"
-                    >
-                      {assignment ? <UserRoundCheck /> : <UserRoundPlus />}
-                    </span>
-                    <div>
-                      <span>{actorLabel}</span>
-                      <strong>{assignment?.name ?? "Not assigned"}</strong>
-                      <small>
-                        {assignment
-                          ? humanize(assignment.status)
-                          : "Choose an active account when needed."}
-                      </small>
-                    </div>
-                    {canManage && (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        aria-label={`${assignment ? "Change" : "Add"} ${actorLabel}`}
-                        disabled={Boolean(mutation)}
-                        onClick={() => void openSupportPicker(supportActorRole)}
-                      >
-                        {assignment ? "Change" : "Add"}
-                      </Button>
-                    )}
-                  </article>
+          <section className="research-team-card support-specialists-card">
+            <h3>Support specialists</h3>
+            <SupportAssignmentCards
+              researchDocumentId={research.id}
+              researchTitle={research.title}
+              assignments={context.supportAssignments}
+              canManage={
+                source === "live" && !sectionErrors.includes("support")
+              }
+              onNotify={setMessage}
+              onRefreshAssignments={async () => {
+                const supportAssignments = await listResearchSupportAssignments(
+                  research.id,
                 );
-              },
-            )}
-          </div>
+                if (!mounted.current) return;
+                setContext((current) =>
+                  current ? { ...current, supportAssignments } : current,
+                );
+                setSectionErrors((current) =>
+                  current.filter((section) => section !== "support"),
+                );
+              }}
+            />
+          </section>
         </section>
 
         {research.submission_status === "revision_required" && (
@@ -1151,76 +1061,6 @@ export default function ResearcherResearchWorkspace({
           </div>
         )}
       </div>
-      {supportRole && (
-        <Modal
-          label={`${currentSupportAssignment(supportRole) ? "Change" : "Add"} ${supportRoleLabel(supportRole)}`}
-          onClose={() => {
-            setSupportRole(null);
-            setSupportCandidateId("");
-            setSupportCandidates([]);
-          }}
-          busy={supportCandidatesLoading || Boolean(mutation)}
-        >
-          <form className="admin-inline-form" onSubmit={submitSupportRequest}>
-            <h2>
-              {currentSupportAssignment(supportRole) ? "Change" : "Add"}{" "}
-              {supportRoleLabel(supportRole)}
-            </h2>
-            <div className="support-assignment-summary">
-              <Folder aria-hidden="true" />
-              <span>
-                <strong>{research.title}</strong>
-                <small>
-                  {currentSupportAssignment(supportRole)
-                    ? `Current ${supportRoleLabel(supportRole)}: ${currentSupportAssignment(supportRole)?.name ?? "Assigned account"}`
-                    : `Choose the ${supportRoleLabel(supportRole)} for this study.`}
-                </small>
-              </span>
-            </div>
-            <label>
-              Select {supportRoleLabel(supportRole)}
-              <select
-                aria-label={`Select ${supportRoleLabel(supportRole)}`}
-                value={supportCandidateId}
-                onChange={(event) => setSupportCandidateId(event.target.value)}
-                disabled={supportCandidatesLoading || Boolean(mutation)}
-              >
-                <option value="">
-                  {supportCandidatesLoading
-                    ? "Loading available accounts…"
-                    : "Choose an account"}
-                </option>
-                {supportCandidates.map((candidate) => (
-                  <option key={candidate.id} value={candidate.id}>
-                    {candidate.name} — {candidate.email}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {!supportCandidatesLoading && supportCandidates.length === 0 && (
-              <p className="admin-empty">
-                No other active accounts are available for this role.
-              </p>
-            )}
-            <div className="modal-actions">
-              <Button
-                type="submit"
-                disabled={
-                  !supportCandidateId ||
-                  supportCandidatesLoading ||
-                  Boolean(mutation)
-                }
-              >
-                {mutation === `support-${supportRole}`
-                  ? "Sending…"
-                  : currentSupportAssignment(supportRole)
-                    ? "Send change request"
-                    : "Send assignment request"}
-              </Button>
-            </div>
-          </form>
-        </Modal>
-      )}
 
       {editing && (
         <Modal

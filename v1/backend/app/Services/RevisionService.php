@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\DocumentFile;
 use App\Models\ResearchDocument;
+use App\Models\ReviewAssignment;
 use App\Models\Revision;
 use App\Models\User;
 use App\Notifications\ResearchActivityNotification;
@@ -115,7 +116,26 @@ class RevisionService
 
     private function notifyActiveReviewers(ResearchDocument $research, string $event, string $title, string $message): void
     {
-        $research->reviewAssignments()->where('is_active', true)->with('reviewer')->get()
+        $activeColumn = ReviewAssignment::column('is_active');
+        $activeStatuses = ['accepted', 'confirmed', 'active'];
+        $assignments = $research->reviewAssignments();
+        if ($activeColumn === 'status') {
+            $assignments->whereIn($activeColumn, $activeStatuses);
+        } else {
+            $assignments->where($activeColumn, true);
+        }
+
+        $assignments->with('reviewer.roleDefinition')->get()
+            ->filter(fn (ReviewAssignment $assignment): bool => $assignment->reviewer !== null
+                && ($activeColumn === 'status'
+                    ? in_array($assignment->status, $activeStatuses, true)
+                    : $assignment->is_active === true)
+                && (! ReviewAssignment::supportsStatus()
+                    || in_array($assignment->status, $activeStatuses, true))
+                && $assignment->reviewer->deleted_at === null
+                && in_array($assignment->review_role, ReviewAssignment::ROLES, true)
+                && $assignment->review_role === $assignment->reviewer->role
+                && DomainAuthorization::isAssignedRecordReader($assignment->reviewer, $research))
             ->pluck('reviewer')->filter()->unique('id')
             ->each(fn (User $reviewer) => $reviewer->notify(new ResearchActivityNotification($research, $event, $title, $message, '/research/'.$research->id)));
     }

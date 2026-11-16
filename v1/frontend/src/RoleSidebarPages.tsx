@@ -1,5 +1,38 @@
 ﻿import { useEffect, useRef, useState } from "react";
 import { formatPhilippineDateTime, philippineDateToday } from "./dateTime";
+import { processingProgress } from "./processingProgress";
+import UserRoleManagementWorkspace, {
+  type UserDirectoryQuery,
+} from "./UserRoleManagement";
+
+const loadOfficeManagedUsers = (query: UserDirectoryQuery) =>
+  listOfficeUsers({
+    search: query.search || undefined,
+    role: query.role || undefined,
+    access_status: query.access_status || undefined,
+    sort: query.sort,
+    direction: query.direction,
+    page: query.page,
+    per_page: query.per_page,
+  }).then((response) => ({
+    users: response.data.map((user) => ({
+      id: user.id,
+      email: user.email,
+      name: officeUserName(user),
+      role: user.role,
+      accessStatus: user.access_status,
+      createdAt: user.created_at,
+    })),
+    summary: response.summary,
+    meta: response.meta,
+  }));
+
+const saveOfficeManagedUser = async (
+  user: { id: string },
+  draft: { accessStatus: AccessStatus },
+) => {
+  await updateOfficeUserAccess(user.id, draft.accessStatus);
+};
 import {
   ArrowLeft,
   Building2,
@@ -52,7 +85,6 @@ import {
   listOfficeUsers,
   listPanelAssignments,
   listPanelHistory,
-  listPanelSchedule,
   listProvisionedAccounts,
   listRepositoryCatalog,
   listResearchDocuments,
@@ -103,10 +135,8 @@ import {
   addSectionMembers,
   type AccessStatus,
   type AdminRole,
-  type OfficeUserRow,
   type CoordinatorProgramReport,
   type AdviserLoadItem,
-  type DefenseScheduleResource,
   type DocumentFileResource,
   type InstructorSectionDocumentItem,
   type InstructorSectionResource,
@@ -145,7 +175,6 @@ import PublicResearchMetadataDialog from "./PublicResearchMetadataDialog";
 import { classificationLabel, formatSimilarityPercentage } from "./similarity";
 import type { ResearchRecord, Role } from "./types";
 import { useLiveFilters } from "./useLiveFilters";
-import { filterUserRows } from "./userManagement";
 import { useClientSorting } from "./useClientSorting";
 import { matchesStudySearch } from "./studySearch";
 import { SdgSelector } from "./SdgMetadata";
@@ -341,9 +370,6 @@ export default function RoleSidebarPage({
         case "Assigned Research":
         case "Research Folders":
           return <AssignedResearchFolders role={role} actorKey={actorKey} />;
-        case "Assigned Defenses":
-        case "Defense Schedule":
-          return <PanelDefenseSchedule role={role} />;
         case "Defense Evaluation":
         case "Evaluation Form":
           return <PanelEvaluationForm role={role} />;
@@ -4653,34 +4679,6 @@ function InstructorClassReports({ role }: { role: Role }) {
 
 /* ---------------------------------- Panel ---------------------------------- */
 
-function PanelDefenseSchedule({ role }: { role: Role }) {
-  const [attempt, reload] = useAttempt();
-  const state = useLoad(() => listPanelSchedule(), attempt);
-  return (
-    <div className="workspace-content admin-sidebar-page">
-      <RolePageHeader
-        role={role}
-        title="Defense schedule"
-        description="Scheduled defenses for manuscripts assigned to you."
-        action={
-          <Button variant="secondary" onClick={reload}>
-            <RefreshCw /> Refresh
-          </Button>
-        }
-      />
-      {state.status === "loading" ? (
-        <Loading label="Loading defense schedule" />
-      ) : state.status === "error" ? (
-        <InlineError message={state.message} retry={reload} />
-      ) : state.data.length === 0 ? (
-        <p className="admin-empty">No defenses are currently scheduled.</p>
-      ) : (
-        <ScheduleTable schedules={state.data} />
-      )}
-    </div>
-  );
-}
-
 function PanelEvaluationForm({ role }: { role: Role }) {
   const [attempt, reload] = useAttempt();
   const state = useLoad(() => listPanelAssignments(), attempt);
@@ -4956,42 +4954,6 @@ function PanelHistory({ role }: { role: Role }) {
         </section>
       )}
     </div>
-  );
-}
-
-function ScheduleTable({
-  schedules,
-}: {
-  schedules: DefenseScheduleResource[];
-}) {
-  return (
-    <section className="panel-card admin-data-card">
-      <div className="admin-table-wrap">
-        <table>
-          <caption className="sr-only">Defense schedules</caption>
-          <thead>
-            <tr>
-              <th>Research title</th>
-              <th>Scheduled</th>
-              <th>Room</th>
-              <th>Status</th>
-              <th>Created by</th>
-            </tr>
-          </thead>
-          <tbody>
-            {schedules.map((schedule) => (
-              <tr key={schedule.id}>
-                <td>{schedule.title ?? "—"}</td>
-                <td>{displayDate(schedule.scheduled_at)}</td>
-                <td>{schedule.room ?? "—"}</td>
-                <td>{label(schedule.status)}</td>
-                <td>{schedule.created_by?.name ?? "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
   );
 }
 
@@ -7671,338 +7633,18 @@ function LibrarianRetentionLogs({ role }: { role: Role }) {
 /* ---------------------------------- Research office ---------------------------------- */
 
 function OfficeUsers({ role }: { role: Role }) {
-  const [query, setQuery] = useState({
-    search: "",
-    role: "",
-    access_status: "",
-  });
-  const [page, setPage] = useState(1);
-  const [sort, setSort] = useState<
-    "last_name" | "email" | "role" | "access_status" | "created_at" | null
-  >(null);
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
-  const [result, setResult] = useState<LaravelPaginatedResponse<
-    Awaited<ReturnType<typeof listOfficeUsers>>["data"][number]
-  > | null>(null);
-  const [drafts, setDrafts] = useState<Record<string, AccessStatus>>({});
-  const [saving, setSaving] = useState<string | null>(null);
-  const [editingUser, setEditingUser] = useState<OfficeUserRow | null>(null);
-  const [saveMessage, setSaveMessage] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [attempt, reload] = useAttempt();
-
-  function changeFilter(name: keyof typeof query, value: string) {
-    setPage(1);
-    setLoading(true);
-    setError("");
-    setQuery((current) => ({ ...current, [name]: value }));
-  }
-
-  function changeSort(column: NonNullable<typeof sort>) {
-    setPage(1);
-    if (sort === column) {
-      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
-      return;
-    }
-    setSort(column);
-    setSortDirection("asc");
-  }
-
-  useEffect(() => {
-    let cancelled = false;
-    void listOfficeUsers({
-      ...query,
-      role: (query.role as AdminRole) || undefined,
-      access_status: (query.access_status as AccessStatus) || undefined,
-      sort: sort || undefined,
-      direction: sort ? sortDirection : undefined,
-      page,
-      per_page: 25,
-    })
-      .then((response) => {
-        if (cancelled) return;
-        setResult(response);
-        setError("");
-        setLoading(false);
-      })
-      .catch((requestError) => {
-        if (cancelled) return;
-        setError(friendlyError(requestError, "User records are unavailable"));
-        setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [attempt, page, query, sort, sortDirection]);
-
-  async function save(
-    user: Awaited<ReturnType<typeof listOfficeUsers>>["data"][number],
-  ) {
-    const status = drafts[user.id] ?? user.access_status;
-    setSaveMessage("");
-    setSaving(user.id);
-    try {
-      await updateOfficeUserAccess(user.id, status);
-      setDrafts((current) => {
-        const remaining = { ...current };
-        delete remaining[user.id];
-        return remaining;
-      });
-      setSaveMessage(`Updated ${user.email}.`);
-      setEditingUser(null);
-      reload();
-    } catch (requestError) {
-      setSaveMessage(
-        friendlyError(
-          requestError,
-          "The user access change could not be saved",
-        ),
-      );
-    } finally {
-      setSaving(null);
-    }
-  }
-
-  const visibleUsers = filterUserRows(
-    result?.data ?? [],
-    query,
-    officeUserName,
-  );
-
   return (
     <div className="workspace-content admin-sidebar-page">
-      <RolePageHeader
-        role={role}
-        title="User & role management"
-        description="Review account access across the program. Roles are assigned by coordinators."
+      <UserRoleManagementWorkspace
+        contextLabel={label(role)}
+        loadUsers={loadOfficeManagedUsers}
+        saveUser={saveOfficeManagedUser}
+        roles={roles}
+        accessStatuses={accessStatuses}
+        errorMessage={(requestError) =>
+          friendlyError(requestError, "User records are unavailable")
+        }
       />
-      <section className="panel-card admin-data-card">
-        <div className="admin-card-heading">
-          <div>
-            <h2>Users</h2>
-            <p>Search users and update their account access.</p>
-          </div>
-          <div className="row-actions">
-            <Button
-              variant="secondary"
-              onClick={reload}
-              aria-label="Refresh users"
-              title="Refresh users"
-            >
-              <RefreshCw aria-hidden="true" />
-            </Button>
-          </div>
-        </div>
-        <div className="admin-filters">
-          <label>
-            Search
-            <input
-              type="search"
-              value={query.search}
-              onChange={(event) => changeFilter("search", event.target.value)}
-              placeholder="Name or email"
-            />
-          </label>
-          <label>
-            Role
-            <select
-              value={query.role}
-              onChange={(event) => changeFilter("role", event.target.value)}
-            >
-              <option value="">All roles</option>
-              {roles.map((roleOption) => (
-                <option key={roleOption} value={roleOption}>
-                  {label(roleOption)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Access status
-            <select
-              value={query.access_status}
-              onChange={(event) =>
-                changeFilter("access_status", event.target.value)
-              }
-            >
-              <option value="">All statuses</option>
-              {accessStatuses.map((status) => (
-                <option key={status} value={status}>
-                  {label(status)}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        {saveMessage && (
-          <p
-            role="status"
-            className={
-              saveMessage.startsWith("Updated")
-                ? "admin-success"
-                : "admin-error"
-            }
-          >
-            {saveMessage}
-          </p>
-        )}
-        {error ? (
-          <InlineError message={error} retry={reload} />
-        ) : loading || result === null ? (
-          <Loading label="Loading users" />
-        ) : visibleUsers.length === 0 ? (
-          <p className="admin-empty">
-            {hasFilters(query)
-              ? "No users match these filters."
-              : "No user accounts are available."}
-          </p>
-        ) : (
-          <>
-            <div className="admin-table-wrap">
-              <table>
-                <caption className="sr-only">User accounts</caption>
-                <thead>
-                  <tr>
-                    <SortableHeader
-                      sortKey="last_name"
-                      activeSort={sort}
-                      direction={sortDirection}
-                      onSort={(key) =>
-                        changeSort(key as NonNullable<typeof sort>)
-                      }
-                    >
-                      Name
-                    </SortableHeader>
-                    <SortableHeader
-                      sortKey="email"
-                      activeSort={sort}
-                      direction={sortDirection}
-                      onSort={(key) =>
-                        changeSort(key as NonNullable<typeof sort>)
-                      }
-                    >
-                      Email
-                    </SortableHeader>
-                    <SortableHeader
-                      sortKey="role"
-                      activeSort={sort}
-                      direction={sortDirection}
-                      onSort={(key) =>
-                        changeSort(key as NonNullable<typeof sort>)
-                      }
-                    >
-                      Role
-                    </SortableHeader>
-                    <SortableHeader
-                      sortKey="access_status"
-                      activeSort={sort}
-                      direction={sortDirection}
-                      onSort={(key) =>
-                        changeSort(key as NonNullable<typeof sort>)
-                      }
-                    >
-                      Access
-                    </SortableHeader>
-                    <SortableHeader
-                      sortKey="created_at"
-                      activeSort={sort}
-                      direction={sortDirection}
-                      onSort={(key) =>
-                        changeSort(key as NonNullable<typeof sort>)
-                      }
-                    >
-                      Created
-                    </SortableHeader>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleUsers.map((user) => (
-                    <tr key={user.id}>
-                      <td>{officeUserName(user) || "—"}</td>
-                      <td>{user.email}</td>
-                      <td>{label(user.role)}</td>
-                      <td>{label(user.access_status)}</td>
-                      <td>{displayDate(user.created_at)}</td>
-                      <td>
-                        <Button
-                          variant="secondary"
-                          className="icon-button"
-                          aria-label={`Edit ${user.email}`}
-                          title="Edit user"
-                          onClick={() => {
-                            setDrafts((current) => ({
-                              ...current,
-                              [user.id]: user.access_status,
-                            }));
-                            setEditingUser(user);
-                          }}
-                          disabled={saving === user.id}
-                        >
-                          <Pencil />
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <Pagination
-              meta={result.meta}
-              noun="users"
-              onPage={(nextPage) => {
-                setPage(nextPage);
-                reload();
-              }}
-            />
-          </>
-        )}
-      </section>
-      {editingUser && (
-        <Modal
-          label={`Edit ${editingUser.email}`}
-          onClose={() => setEditingUser(null)}
-          busy={saving === editingUser.id}
-        >
-          <form
-            className="admin-user-edit-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void save(editingUser);
-            }}
-          >
-            <header className="admin-user-edit-header">
-              <p className="eyebrow">User management</p>
-              <h2>Edit user</h2>
-              <p>{editingUser.email}</p>
-            </header>
-            <label>
-              Access status
-              <select
-                value={drafts[editingUser.id] ?? editingUser.access_status}
-                onChange={(event) =>
-                  setDrafts((current) => ({
-                    ...current,
-                    [editingUser.id]: event.target.value as AccessStatus,
-                  }))
-                }
-              >
-                {accessStatuses.map((status) => (
-                  <option key={status} value={status}>
-                    {label(status)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="modal-actions admin-user-edit-actions">
-              <Button type="submit" disabled={saving === editingUser.id}>
-                {saving === editingUser.id ? "Saving…" : "Save changes"}
-              </Button>
-            </div>
-          </form>
-        </Modal>
-      )}
     </div>
   );
 }
@@ -9132,8 +8774,11 @@ function ResearcherSimilarityCheck({
     | {
         status: "ready";
         matches: ResearchRecord[];
-        extractedText: string;
         fileName: string;
+        diagnostics: Awaited<
+          ReturnType<typeof checkContentUploadSimilarity>
+        >["diagnostics"];
+        extractedText: string;
       }
     | { status: "error"; message: string }
   >({ status: "idle" });
@@ -9145,11 +8790,10 @@ function ResearcherSimilarityCheck({
 
   useEffect(() => {
     if (state.status !== "checking") return;
+    const startedAt = Date.now();
     const timer = window.setInterval(() => {
-      setCheckProgress((current) =>
-        Math.min(92, current + Math.max(1, Math.round((92 - current) / 7))),
-      );
-    }, 700);
+      setCheckProgress(processingProgress(Date.now() - startedAt));
+    }, 1_000);
     return () => window.clearInterval(timer);
   }, [state.status]);
   const tooShort = trimmed.length > 0 && trimmed.length < 2;
@@ -9162,7 +8806,7 @@ function ResearcherSimilarityCheck({
   function runCheck() {
     if (!canCheck) return;
     setSubmitted(mode === "title" ? trimmed : (file?.name ?? "manuscript"));
-    setCheckProgress(8);
+    setCheckProgress(processingProgress(0));
     setState({ status: "checking" });
     const request =
       mode === "title"
@@ -9175,8 +8819,9 @@ function ResearcherSimilarityCheck({
             ? {
                 status: "ready",
                 matches: result as ResearchRecord[],
-                extractedText: "",
                 fileName: "",
+                diagnostics: [],
+                extractedText: "",
               }
             : {
                 status: "ready",
@@ -9185,16 +8830,21 @@ function ResearcherSimilarityCheck({
                     ReturnType<typeof checkContentUploadSimilarity>
                   >
                 ).matches,
-                extractedText: (
-                  result as Awaited<
-                    ReturnType<typeof checkContentUploadSimilarity>
-                  >
-                ).extractedText,
                 fileName: (
                   result as Awaited<
                     ReturnType<typeof checkContentUploadSimilarity>
                   >
                 ).fileName,
+                diagnostics: (
+                  result as Awaited<
+                    ReturnType<typeof checkContentUploadSimilarity>
+                  >
+                ).diagnostics,
+                extractedText: (
+                  result as Awaited<
+                    ReturnType<typeof checkContentUploadSimilarity>
+                  >
+                ).extractedText,
               },
         ),
       )
@@ -9673,20 +9323,97 @@ function ResearcherSimilarityCheck({
               aria-labelledby="content-extraction-title"
             >
               <div className="content-check-extraction-heading">
-                <span aria-hidden="true">TXT</span>
+                <span aria-hidden="true">PDF</span>
                 <div>
-                  <h2 id="content-extraction-title">Extracted PDF Text</h2>
+                  <h2 id="content-extraction-title">Files processed</h2>
+                  <p>{state.fileName}</p>
+                </div>
+              </div>
+              <ul className="content-check-file-results">
+                {state.diagnostics.map((diagnostic) => {
+                  const selectedFile = files[diagnostic.index];
+                  return (
+                    <li
+                      key={`${diagnostic.index}-${selectedFile?.name ?? "file"}`}
+                    >
+                      <details>
+                        <summary>
+                          <span>
+                            {selectedFile?.name ??
+                              `File ${diagnostic.index + 1}`}
+                          </span>
+                          <strong>
+                            {diagnosticLabel(
+                              diagnostic.status,
+                              diagnostic.kind,
+                            )}
+                          </strong>
+                        </summary>
+                        <dl>
+                          <div>
+                            <dt>Extraction</dt>
+                            <dd>
+                              {diagnostic.extractionSuccess
+                                ? "Successful"
+                                : "Failed"}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Text length</dt>
+                            <dd>
+                              {diagnostic.textLength.toLocaleString()}{" "}
+                              characters
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Chapters</dt>
+                            <dd>
+                              {diagnostic.detectedChapters.length
+                                ? diagnostic.detectedChapters.join(", ")
+                                : "None detected"}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Similarity eligibility</dt>
+                            <dd>
+                              {diagnostic.eligible ? "Included" : "Excluded"}
+                            </dd>
+                          </div>
+                          {diagnostic.reason && (
+                            <div>
+                              <dt>Reason</dt>
+                              <dd>{label(diagnostic.reason)}</dd>
+                            </div>
+                          )}
+                        </dl>
+                      </details>
+                    </li>
+                  );
+                })}
+              </ul>
+              <p className="content-check-extraction-note">
+                Eligible manuscript files are assembled once in chapter order
+                before the overall repository comparison.
+              </p>
+            </section>
+          )}
+          {mode === "content" && state.extractedText && (
+            <section
+              className="panel-card content-check-full-text"
+              aria-labelledby="content-full-text-title"
+            >
+              <div className="admin-card-heading">
+                <div>
+                  <h2 id="content-full-text-title">
+                    Extracted manuscript text
+                  </h2>
                   <p>
-                    {state.fileName} ·{" "}
-                    {state.extractedText.length.toLocaleString()} characters
+                    Full text assembled from the eligible files used in this
+                    comparison.
                   </p>
                 </div>
               </div>
-              <pre tabIndex={0}>{state.extractedText}</pre>
-              <p className="content-check-extraction-note">
-                Some archived studies contain multiple files. Their extracted
-                text is combined into one study before similarity is calculated.
-              </p>
+              <pre>{state.extractedText}</pre>
             </section>
           )}
         </div>
@@ -9701,12 +9428,20 @@ function ResearcherSimilarityCheck({
   );
 }
 
+function diagnosticLabel(status: string, kind: string) {
+  if (status === "error") return "Extraction failed";
+  if (status === "duplicate") return "Duplicate file";
+  if (kind === "supporting_document") return "Supporting document";
+  if (status === "excluded") return "Excluded";
+  return "Manuscript content";
+}
+
 function similarityQueryError(error: unknown, mode: "title" | "content") {
   if (error instanceof ApiError) {
     if (error.code === "CONTENT_UPLOAD_UNREADABLE")
       return "We could not read text from this file. Use a text-based PDF; scanned or image-only PDFs are not supported.";
     if (error.code === "CONTENT_UPLOAD_INVALID_SCOPE")
-      return "We could not find a valid Chapter 1–5 section in this file. Use a manuscript with a clearly labeled Chapter 1 heading.";
+      return "We could not find a valid Chapter, Kabanata, or Tsapter section in this file. Use a manuscript with a clearly labeled Chapter 1, Kabanata 1, or Tsapter 1 heading.";
     if (error.status === 429)
       return "Too many checks in a short time. Wait a moment and try again.";
     if (error.status === 422)

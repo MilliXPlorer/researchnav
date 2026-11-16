@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Exceptions\ApiValidationException;
+use App\Http\Requests\OfficeAuthorAccountIndexRequest;
 use App\Http\Requests\OfficeUserIndexRequest;
 use App\Models\ComplianceReview;
 use App\Models\DocumentFile;
@@ -52,6 +53,11 @@ class ResearchOfficeController extends DomainController
     public function users(OfficeUserIndexRequest $request): JsonResponse
     {
         $input = $request->validated();
+        $summary = [
+            'total' => User::query()->count(),
+            'active' => User::query()->where('access_status', 'active')->count(),
+            'inactive' => User::query()->where('access_status', '!=', 'active')->count(),
+        ];
         $query = User::query()
             ->select(['id', 'email', 'first_name', 'middle_name', 'last_name', 'role', 'access_status', 'created_at', 'updated_at']);
 
@@ -82,6 +88,7 @@ class ResearchOfficeController extends DomainController
         return response()
             ->json([
                 'data' => $query->paginate($input['per_page'] ?? 25)->appends($request->query()),
+                'summary' => $summary,
                 'schema_version' => 1,
             ])
             ->header('Cache-Control', 'private, no-store');
@@ -112,6 +119,47 @@ class ResearchOfficeController extends DomainController
                 'role' => $target->role,
                 'access_status' => $target->access_status,
             ]])
+            ->header('Cache-Control', 'private, no-store');
+    }
+
+    public function authorAccounts(OfficeAuthorAccountIndexRequest $request): JsonResponse
+    {
+        $search = $request->validated('search');
+        $tokens = preg_split('/\s+/u', $search, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $accounts = User::query()
+            ->select(['id', 'email', 'first_name', 'middle_name', 'last_name'])
+            ->where('access_status', 'active')
+            ->where('account_status', 'active')
+            ->where(function (Builder $query) use ($tokens): void {
+                // Match every typed name part independently, so "Ada Byron
+                // Lovelace" finds a natural full name without relying on a
+                // database-specific concatenation function.
+                foreach ($tokens as $token) {
+                    $like = '%'.$this->escapedLike($token).'%';
+                    $query->where(function (Builder $fields) use ($like): void {
+                        foreach (['email', 'first_name', 'middle_name', 'last_name'] as $column) {
+                            $fields->orWhereRaw("{$column} LIKE ? ESCAPE '!'", [$like]);
+                        }
+                    });
+                }
+            })
+            ->orderBy('last_name')
+            ->orderBy('first_name')
+            ->orderBy('middle_name')
+            ->orderBy('email')
+            ->orderBy('id')
+            ->limit(10)
+            ->get()
+            ->map(fn (User $user): array => [
+                'id' => $user->id,
+                'name' => $user->displayName(),
+                'email' => $user->email,
+                'is_available' => true,
+            ])
+            ->values();
+
+        return response()
+            ->json(['data' => $accounts, 'schema_version' => 1])
             ->header('Cache-Control', 'private, no-store');
     }
 

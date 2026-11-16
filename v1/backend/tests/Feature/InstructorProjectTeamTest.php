@@ -6,13 +6,13 @@ use App\Models\ClassSection;
 use App\Models\ResearchDocument;
 use App\Models\ResearchProjectTeamMember;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\Concerns\UsesIsolatedProjectTeamDatabase;
 use Tests\TestCase;
 
 class InstructorProjectTeamTest extends TestCase
 {
-    use RefreshDatabase;
+    use UsesIsolatedProjectTeamDatabase;
 
     public function test_section_owner_can_replace_a_complete_project_team(): void
     {

@@ -77,6 +77,18 @@ class AppServiceProvider extends ServiceProvider
             ];
         });
         RateLimiter::for('public-search', fn (Request $request) => Limit::perMinute(60)->by((string) $request->ip()));
+        RateLimiter::for('office-author-account-search', function (Request $request): array {
+            $actor = $request->attributes->get('current_user');
+            $key = $actor instanceof User ? 'user:'.$actor->id : 'ip:'.$request->ip();
+
+            return [Limit::perMinute(60)->by($key), Limit::perMinute(180)->by('ip:'.$request->ip())];
+        });
+        RateLimiter::for('support-assignment-search', function (Request $request): array {
+            $actor = $request->attributes->get('current_user');
+            $key = $actor instanceof User ? 'user:'.$actor->id : 'ip:'.$request->ip();
+
+            return [Limit::perMinute(30)->by($key), Limit::perMinute(90)->by('ip:'.$request->ip())];
+        });
         RateLimiter::for('public-repository-similarity', function (Request $request): array {
             if ($this->hasUnlimitedSimilarityAccess($request)) {
                 return [Limit::none()];

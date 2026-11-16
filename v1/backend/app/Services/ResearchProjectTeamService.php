@@ -57,6 +57,7 @@ class ResearchProjectTeamService
         'chair' => ['panel'],
         'panel_member' => ['panel'],
     ];
+
     private const SUPPORT_ROLES = ['statistician', 'librarian', 'research_editor'];
 
     public function candidates(ClassSection $section, ResearchDocument $document, string $teamRole, ?string $search): array
@@ -91,8 +92,7 @@ class ResearchProjectTeamService
         ClassSection $section,
         ResearchDocument $document,
         string $defenseType = 'proposal'
-    ): array
-    {
+    ): array {
         $this->assertNested($section, $document);
         if (! in_array($defenseType, ['proposal', 'final'], true)) {
             throw new ApiValidationException(['defense_type' => ['Unknown defense type.']]);
@@ -106,18 +106,20 @@ class ResearchProjectTeamService
             ->get();
         $section->loadMissing('instructor');
 
-        $support = $this->currentSupportAssignments($document, $defenseType);
+        $support = $this->currentSupportAssignments($document);
+        $activeSupport = $support['active'];
+        $pendingSupport = $support['pending'];
         $panelCount = $members->where('team_role', 'panel_member')->count();
         $hasPreDefenseActors = $members->firstWhere('team_role', 'adviser') !== null
-            && $this->supportAccepted($support->get('research_editor'))
-            && $this->supportAccepted($support->get('statistician'))
-            && $this->supportAccepted($support->get('librarian'));
+            && $this->supportAccepted($activeSupport->get('research_editor'))
+            && $this->supportAccepted($activeSupport->get('statistician'))
+            && $this->supportAccepted($activeSupport->get('librarian'));
         $hasPostDefenseActors = $members->firstWhere('team_role', 'adviser') !== null
             && $members->firstWhere('team_role', 'research_office_representative') !== null
             && $members->firstWhere('team_role', 'chair') !== null
             && $panelCount === 3
-            && $this->supportAccepted($support->get('research_editor'))
-            && $this->supportAccepted($support->get('librarian'));
+            && $this->supportAccepted($activeSupport->get('research_editor'))
+            && $this->supportAccepted($activeSupport->get('librarian'));
 
         return [
             'section_id' => $section->id,
@@ -134,9 +136,14 @@ class ResearchProjectTeamService
             'chair' => $this->member($members->firstWhere('team_role', 'chair')),
             'panel_members' => $members->where('team_role', 'panel_member')->map(fn ($member) => $this->member($member))->values()->all(),
             'support_assignments' => [
-                'editor' => $this->supportPayload($support->get('research_editor')),
-                'statistician' => $this->supportPayload($support->get('statistician')),
-                'librarian' => $this->supportPayload($support->get('librarian')),
+                'editor' => $this->supportPayload($activeSupport->get('research_editor')),
+                'statistician' => $this->supportPayload($activeSupport->get('statistician')),
+                'librarian' => $this->supportPayload($activeSupport->get('librarian')),
+            ],
+            'pending_support_assignments' => [
+                'editor' => $this->supportPayload($pendingSupport->get('research_editor')),
+                'statistician' => $this->supportPayload($pendingSupport->get('statistician')),
+                'librarian' => $this->supportPayload($pendingSupport->get('librarian')),
             ],
             'pre_defense_ready' => $hasPreDefenseActors,
             'post_defense_ready' => $hasPostDefenseActors,
@@ -152,8 +159,7 @@ class ResearchProjectTeamService
         string $defenseType,
         array $input,
         ?Request $request = null
-    ): array
-    {
+    ): array {
         $this->assertNested($section, $document);
         $slots = [
             'researcher' => array_values(array_filter($input['researcher_ids'] ?? [])),
@@ -173,12 +179,14 @@ class ResearchProjectTeamService
 
         DB::transaction(function () use ($actor, $section, $document, $defenseType, $slots, $allIds, $request): void {
             ResearchDocument::query()->lockForUpdate()->findOrFail($document->id);
-                $before = ResearchProjectTeamMember::query()
-                    ->where('research_document_id', $document->id)
-                    ->when($this->teamHasDefenseType(), fn ($query) => $query->where('defense_type', $defenseType))
-                    ->get()
-                    ->groupBy('team_role')
-                    ->map(fn (Collection $items) => $items->pluck('user_id')->values()->all());
+            $previousMembers = ResearchProjectTeamMember::query()
+                ->where('research_document_id', $document->id)->lockForUpdate()->get();
+            $before = ResearchProjectTeamMember::query()
+                ->where('research_document_id', $document->id)
+                ->when($this->teamHasDefenseType(), fn ($query) => $query->where('defense_type', $defenseType))
+                ->get()
+                ->groupBy('team_role')
+                ->map(fn (Collection $items) => $items->pluck('user_id')->values()->all());
             $users = User::query()->whereIn('id', $allIds)->lockForUpdate()->get()->keyBy('id');
             foreach ($slots as $teamRole => $ids) {
                 foreach ($ids as $id) {
@@ -189,10 +197,10 @@ class ResearchProjectTeamService
                 }
             }
 
-        ResearchProjectTeamMember::query()
-            ->where('research_document_id', $document->id)
-            ->when($this->teamHasDefenseType(), fn ($query) => $query->where('defense_type', $defenseType))
-            ->delete();
+            ResearchProjectTeamMember::query()
+                ->where('research_document_id', $document->id)
+                ->when($this->teamHasDefenseType(), fn ($query) => $query->where('defense_type', $defenseType))
+                ->delete();
             foreach ($slots as $teamRole => $ids) {
                 foreach (array_values($ids) as $index => $id) {
                     ResearchProjectTeamMember::query()->create([
@@ -210,7 +218,8 @@ class ResearchProjectTeamService
                 $section,
                 $document,
                 $defenseType,
-                $slots
+                $slots,
+                $previousMembers
             );
             $this->notifyNewAssignments($document, $users, $slots, $before);
             $this->audit->log($actor, 'PROJECT_TEAM_UPDATED', $document, 'Updated the research project actor assignments.', $request);
@@ -248,6 +257,9 @@ class ResearchProjectTeamService
             ResearchDocument::query()
                 ->lockForUpdate()
                 ->findOrFail($document->id);
+
+            $previousMembers = ResearchProjectTeamMember::query()
+                ->where('research_document_id', $document->id)->lockForUpdate()->get();
 
             $existing = ResearchProjectTeamMember::query()
                 ->where('research_document_id', $document->id)
@@ -338,7 +350,8 @@ class ResearchProjectTeamService
                 $section,
                 $document,
                 $defenseType,
-                $slots
+                $slots,
+                $previousMembers
             );
 
             if (
@@ -374,9 +387,9 @@ class ResearchProjectTeamService
         ClassSection $section,
         ResearchDocument $document,
         string $defenseType,
-        array $slots
-    ): void
-    {
+        array $slots,
+        Collection $previousMembers
+    ): void {
         if (! ReviewAssignment::identityCompatible()) {
             return;
         }
@@ -395,6 +408,12 @@ class ResearchProjectTeamService
         }
         foreach (array_values($slots['panel_member']) as $index => $id) {
             $desired[] = ['user_id' => $id, 'review_role' => 'panel', 'designation' => 'panel_'.($index + 1)];
+        }
+
+        if ((new ReviewAssignment)->getTable() === 'research_assignments' && ! $this->reviewHasDefenseType()) {
+            $this->syncCanonicalCoreReviewAssignments($actor, $section, $document, $desired, $previousMembers);
+
+            return;
         }
 
         $wantedKeys = collect($desired)->map(fn ($item) => $item['user_id'].'|'.$item['review_role'])->all();
@@ -434,6 +453,113 @@ class ResearchProjectTeamService
         }
     }
 
+    private function syncCanonicalCoreReviewAssignments(
+        User $actor,
+        ClassSection $section,
+        ResearchDocument $document,
+        array $selected,
+        Collection $previousMembers
+    ): void {
+        $currentMembers = ResearchProjectTeamMember::query()
+            ->where('research_document_id', $document->id)->lockForUpdate()->get();
+        $required = $this->coreAssignmentsForMembers($section, $currentMembers);
+        $previous = $this->coreAssignmentsForMembers($section, $previousMembers);
+        $activeStatuses = ['accepted', 'confirmed', 'active'];
+        // Team-generated canonical grants are research-scoped. Never repurpose
+        // a defense-scoped grant or revoke unrelated research-wide reviewers.
+        $existing = ReviewAssignment::query()->where('research_document_id', $document->id)
+            ->where('assignment_scope', 'research')->whereNull('defense_id')
+            ->whereIn('assignment_role', ['adviser', 'instructor', 'panel', 'research-office'])
+            ->orderBy('id')->lockForUpdate()->get()
+            ->groupBy(fn ($assignment) => $assignment->reviewer_id.'|'.$assignment->review_role);
+
+        foreach (array_diff_key($previous, $required) as $key => $unused) {
+            foreach ($existing->get($key, collect()) as $assignment) {
+                if (in_array($assignment->status, $activeStatuses, true) && $this->isTeamCoreAssignment($assignment)) {
+                    $assignment->status = 'inactive';
+                    $assignment->save();
+                }
+            }
+        }
+
+        foreach (collect($selected)->keyBy(fn ($item) => $item['user_id'].'|'.$item['review_role']) as $key => $item) {
+            $records = $existing->get($key, collect());
+            $activeRecords = $records->filter(fn ($record) => in_array($record->status, $activeStatuses, true));
+            $assignment = $activeRecords->first(fn ($record) => ! $this->isTeamCoreAssignment($record))
+                ?? $activeRecords->first() ?? $records->first();
+            $newTeamMembership = ! array_key_exists($key, $previous);
+            $mayReactivate = $newTeamMembership && $records->every(fn ($record) => $record->status === 'inactive' && $this->isTeamCoreAssignment($record));
+            if ($assignment !== null && $activeRecords->isEmpty()
+                && ! $mayReactivate) {
+                // An incidental save must not undo a separately revoked or
+                // inactive assignment for an unchanged team membership.
+                continue;
+            }
+            if ($assignment === null) {
+                $assignment = new ReviewAssignment;
+                $assignment->research_document_id = $document->id;
+                $assignment->reviewer_id = $item['user_id'];
+                $assignment->review_role = $item['review_role'];
+                $assignment->assignment_scope = 'research';
+                $assignment->defense_id = null;
+            }
+            if (! $assignment->exists || $activeRecords->isEmpty()) {
+                $assignment->assigned_by = $actor->id;
+                $assignment->status = 'active';
+            }
+            // One generic grant can represent different panel/chair positions;
+            // AR-04 resolves the actual designation from the selected team.
+            if (! $assignment->exists || $this->isTeamCoreAssignment($assignment)) {
+                $assignment->designation = $required[$key]['designation'];
+            }
+            if ($assignment->isDirty()) {
+                $assignment->save();
+            }
+            foreach ($activeRecords as $duplicate) {
+                if ($duplicate->id !== $assignment->id) {
+                    $duplicate->status = 'inactive';
+                    $duplicate->save();
+                }
+            }
+        }
+    }
+
+    private function isTeamCoreAssignment(ReviewAssignment $assignment): bool
+    {
+        // These are the established labels written by this synchronizer. Keep
+        // independent/custom research-wide grants intact when a team is cleared.
+        return match ($assignment->review_role) {
+            'instructor' => $assignment->designation === 'Instructor',
+            'adviser' => $assignment->designation === 'Adviser',
+            'research-office' => $assignment->designation === 'Research Rep',
+            'panel' => in_array($assignment->designation, ['panel_chair', 'panel_member', 'panel_1', 'panel_2', 'panel_3'], true),
+            default => false,
+        };
+    }
+
+    /** @return array<string, array{user_id:string, review_role:string, designation:string}> */
+    private function coreAssignmentsForMembers(ClassSection $section, Collection $members): array
+    {
+        $required = [$section->instructor_id.'|instructor' => [
+            'user_id' => $section->instructor_id, 'review_role' => 'instructor', 'designation' => 'Instructor',
+        ]];
+        foreach ($members->sortBy(fn ($member) => [$member->defense_type === 'final' ? 1 : 0, $member->position ?? 0, $member->id]) as $member) {
+            [$role, $designation] = match ($member->team_role) {
+                'adviser' => ['adviser', 'Adviser'],
+                'research_office_representative' => ['research-office', 'Research Rep'],
+                'chair' => ['panel', 'panel_chair'],
+                'panel_member' => ['panel', $member->position === null ? 'panel_member' : 'panel_'.$member->position],
+                default => [null, null],
+            };
+            if ($role !== null) {
+                $key = $member->user_id.'|'.$role;
+                $required[$key] ??= ['user_id' => $member->user_id, 'review_role' => $role, 'designation' => $designation];
+            }
+        }
+
+        return $required;
+    }
+
     private function notifyNewAssignments(ResearchDocument $document, Collection $users, array $slots, Collection $before): void
     {
         foreach ($slots as $teamRole => $ids) {
@@ -453,32 +579,31 @@ class ResearchProjectTeamService
         }
     }
 
-    private function currentSupportAssignments(
-        ResearchDocument $document,
-        string $defenseType
-    ): Collection {
+    /** @return array{active: Collection, pending: Collection} */
+    private function currentSupportAssignments(ResearchDocument $document): array
+    {
         if (! ReviewAssignment::identityCompatible()) {
-            return collect();
+            return ['active' => collect(), 'pending' => collect()];
         }
 
-        $active = ReviewAssignment::column('is_active');
-
-        return ReviewAssignment::query()
+        $assignments = ReviewAssignment::query()
             ->where('research_document_id', $document->id)
-            ->when($this->reviewHasDefenseType(), fn ($query) => $query->where('defense_type', $defenseType))
             ->whereIn(ReviewAssignment::column('review_role'), self::SUPPORT_ROLES)
-            ->when(
-                $active === 'status',
-                fn ($query) => $query->whereIn(
-                    $active,
-                    ['requested', 'pending', 'accepted', 'confirmed', 'active']
-                )
-            )
             ->with('reviewer')
             ->latest('id')
-            ->get()
-            ->unique('review_role')
-            ->keyBy('review_role');
+            ->get();
+
+        return [
+            'active' => $assignments->filter(fn (ReviewAssignment $assignment) => $this->isActiveSupport($assignment))
+                ->unique('review_role')->keyBy('review_role'),
+            'pending' => $assignments->filter(fn (ReviewAssignment $assignment) => in_array((string) $assignment->status, ['requested', 'pending'], true))
+                ->unique('review_role')->keyBy('review_role'),
+        ];
+    }
+
+    private function isActiveSupport(ReviewAssignment $assignment): bool
+    {
+        return $assignment->is_active || in_array((string) $assignment->status, ['accepted', 'confirmed', 'active'], true);
     }
 
     private function supportAccepted(?ReviewAssignment $assignment): bool

@@ -312,7 +312,9 @@ export default function DocumentFeedbackPanel({
                     <div className="document-feedback-meta">
                       <span className="document-feedback-pill">
                         <Tag aria-hidden="true" />
-                        {label(item.feedback_type)}
+                        {item.feedback_type === "revision_request"
+                          ? "Revision note (feedback only)"
+                          : label(item.feedback_type)}
                       </span>
                       <span
                         className={
@@ -533,6 +535,12 @@ export default function DocumentFeedbackPanel({
 
       {(canPostFeedback || canReply) && (
         <form className="document-feedback-composer" onSubmit={submitFeedback}>
+          {feedbackType === "revision_request" && (
+            <p className="project-empty-copy">
+              This adds feedback only. It does not request a formal revision or
+              change the research status.
+            </p>
+          )}
           <textarea
             required
             aria-label="Feedback"
@@ -579,7 +587,9 @@ export default function DocumentFeedbackPanel({
                 <option value="suggestion">Suggestion</option>
                 {canPostFeedback && (
                   <>
-                    <option value="revision_request">Revision request</option>
+                    <option value="revision_request">
+                      Revision note (feedback only)
+                    </option>
                     <option value="approval_remark">Approval remark</option>
                   </>
                 )}

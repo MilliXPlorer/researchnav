@@ -142,6 +142,16 @@ export interface LaravelPaginatedResponse<T> {
   meta: LaravelPaginationMeta;
 }
 
+export interface UserDirectorySummary {
+  total: number;
+  active: number;
+  inactive: number;
+}
+
+export interface UserDirectoryResponse<T> extends LaravelPaginatedResponse<T> {
+  summary: UserDirectorySummary;
+}
+
 export interface OfficeRepositorySummary {
   /** All non-deleted records, regardless of the current list filters. */
   all: number;
@@ -187,6 +197,34 @@ export interface OfficeRepositoryFileResource {
   uploaded_at: string | null;
 }
 
+/** A searchable active account that may be linked to a repository author. */
+export interface OfficeAuthorAccount {
+  id: string;
+  name: string;
+  email: string;
+  is_available: boolean;
+}
+
+/** The persisted author representation returned in repository detail responses. */
+export interface OfficeRepositoryAuthorResource {
+  id: number;
+  user_id: string | null;
+  author_name: string;
+  author_order: number;
+  is_corresponding_author: boolean;
+  /** Present when the API can report the linked account's current availability. */
+  account?: OfficeAuthorAccount | null;
+}
+
+/** An author save payload. Array position determines the server-side author order. */
+export interface OfficeRepositoryAuthorInput {
+  /** Include this only when updating an existing author row. */
+  id?: number;
+  user_id: string | null;
+  author_name: string;
+  is_corresponding_author: boolean;
+}
+
 export interface OfficeRepositoryDetailResource extends Omit<
   OfficeRepositoryItemResource,
   "author_names"
@@ -198,7 +236,7 @@ export interface OfficeRepositoryDetailResource extends Omit<
   degree_program: string | null;
   manuscript_date_label: string | null;
   sdgs: SdgResource[];
-  authors: Array<{ id: number; author_name: string; author_order: number }>;
+  authors: OfficeRepositoryAuthorResource[];
   submitted_at: string | null;
   approved_at: string | null;
   archived_at: string | null;
@@ -220,6 +258,8 @@ export interface OfficeRepositoryListInput {
 
 /** The only metadata fields accepted by the office repository update route. */
 export interface OfficeRepositoryUpdateInput {
+  /** Detail version required by the server to prevent overwriting another edit. */
+  expected_updated_at?: string;
   category_id?: number | null;
   title?: string;
   abstract?: string | null;
@@ -230,7 +270,7 @@ export interface OfficeRepositoryUpdateInput {
   degree_program?: string | null;
   manuscript_date_label?: string | null;
   research_stage?: "title_proposal" | "ongoing" | "completed";
-  authors?: string[];
+  authors?: OfficeRepositoryAuthorInput[];
 }
 
 /** The exact public representation from AdminAuditLogResource. */
@@ -274,6 +314,7 @@ export interface SystemStatusResource {
       applied: number | null;
       available: number | null;
       pending: number | null;
+      historical: number | null;
     };
   };
   storage: {
@@ -281,7 +322,7 @@ export interface SystemStatusResource {
       disk: string;
       driver: string | null;
       status: "operational" | "unavailable";
-      capabilities: { read: boolean; write: boolean; delete: boolean } | null;
+      capabilities: { read: boolean; write: boolean; delete: boolean };
     };
   };
 }
@@ -1375,6 +1416,20 @@ export async function getOfficeRepositoryDetail(
   ).data;
 }
 
+export async function listOfficeAuthorAccounts(
+  search: string,
+  fetcher: ApiFetch = globalThis.fetch,
+  signal?: AbortSignal,
+): Promise<OfficeAuthorAccount[]> {
+  return (
+    await apiRequest<{ data: OfficeAuthorAccount[] }>(
+      adminQuery("/api/office/author-accounts", { search: search.trim() }),
+      { signal },
+      fetcher,
+    )
+  ).data;
+}
+
 export async function updateOfficeRepository(
   researchDocumentId: string | number,
   input: OfficeRepositoryUpdateInput,
@@ -1430,7 +1485,7 @@ export function listAdminUsers(
     direction?: "asc" | "desc";
   } = {},
   fetcher: ApiFetch = globalThis.fetch,
-): Promise<LaravelPaginatedResponse<AdminUserResource>> {
+): Promise<UserDirectoryResponse<AdminUserResource>> {
   return apiRequest(adminQuery("/api/admin/users", input), undefined, fetcher);
 }
 
@@ -1603,8 +1658,20 @@ export interface PublicRepositorySimilarityResponse {
 
 export interface ContentUploadSimilarityResult {
   matches: ResearchRecord[];
-  extractedText: string;
   fileName: string;
+  diagnostics: ContentUploadFileDiagnostic[];
+  extractedText: string;
+}
+
+export interface ContentUploadFileDiagnostic {
+  index: number;
+  status: "included" | "excluded" | "duplicate" | "error";
+  reason: string | null;
+  extractionSuccess: boolean;
+  textLength: number;
+  detectedChapters: number[];
+  kind: "manuscript" | "supporting_document" | "unknown";
+  eligible: boolean;
 }
 
 export interface PublicRepositorySimilaritySearch {
@@ -1914,8 +1981,18 @@ export async function checkContentUploadSimilarity(
   }
   const response = await apiRequest<
     PublicRepositorySimilarityResponse & {
-      extracted_text?: string;
       file_name?: string;
+      extracted_text?: string;
+      file_diagnostics?: Array<{
+        index: number;
+        status: ContentUploadFileDiagnostic["status"];
+        reason: string | null;
+        extraction_success: boolean;
+        text_length: number;
+        detected_chapters: number[];
+        kind: ContentUploadFileDiagnostic["kind"];
+        eligible: boolean;
+      }>;
     }
   >(
     "/api/similarity/content-upload",
@@ -1924,10 +2001,20 @@ export async function checkContentUploadSimilarity(
   );
   return {
     matches: (response.data ?? []).map(toResearchRecord),
-    extractedText: response.extracted_text ?? "",
     fileName:
       response.file_name ??
       (files.length === 1 ? files[0].name : `${files.length} PDF files`),
+    diagnostics: (response.file_diagnostics ?? []).map((item) => ({
+      index: item.index,
+      status: item.status,
+      reason: item.reason,
+      extractionSuccess: item.extraction_success,
+      textLength: item.text_length,
+      detectedChapters: item.detected_chapters,
+      kind: item.kind,
+      eligible: item.eligible,
+    })),
+    extractedText: response.extracted_text ?? "",
   };
 }
 
@@ -2338,12 +2425,31 @@ export interface ProjectTeamPerson {
   team_role: ProjectTeamRole;
 }
 
+export type SupportRole = "statistician" | "librarian" | "research_editor";
+
+export type SupportAssignmentStatus =
+  | "requested"
+  | "pending"
+  | "accepted"
+  | "confirmed"
+  | "active"
+  | "declined"
+  | "replaced";
+
+/** An active account returned by the research-scoped support account search. */
+export interface EligibleSupportAccountResource {
+  id: string;
+  name: string;
+  email: string;
+  role: SupportRole;
+}
+
 export interface ProjectSupportActor {
   user_id: string;
   name: string;
   email: string | null;
-  assignment_role: "statistician" | "librarian" | "research_editor";
-  status: string;
+  assignment_role: SupportRole;
+  status: SupportAssignmentStatus;
 }
 
 export interface InstructorProjectTeam {
@@ -2357,6 +2463,11 @@ export interface InstructorProjectTeam {
   chair: ProjectTeamPerson | null;
   panel_members: ProjectTeamPerson[];
   support_assignments: {
+    editor: ProjectSupportActor | null;
+    statistician: ProjectSupportActor | null;
+    librarian: ProjectSupportActor | null;
+  };
+  pending_support_assignments?: {
     editor: ProjectSupportActor | null;
     statistician: ProjectSupportActor | null;
     librarian: ProjectSupportActor | null;
@@ -2801,18 +2912,6 @@ export interface PanelEvaluationInput {
   comments?: string | null;
 }
 
-export async function listPanelSchedule(
-  fetcher: ApiFetch = globalThis.fetch,
-): Promise<DefenseScheduleResource[]> {
-  return (
-    await apiRequest<{ data: DefenseScheduleResource[] }>(
-      "/api/panel/schedule",
-      undefined,
-      fetcher,
-    )
-  ).data;
-}
-
 export async function listPanelAssignments(
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<PanelAssignmentResource[]> {
@@ -2952,9 +3051,17 @@ export interface SupportAssignmentResource {
   researchers: string[];
   user_id: string;
   name: string | null;
-  assignment_role: "statistician" | "librarian" | "research_editor";
-  status: string;
+  assignment_role: SupportRole;
+  status: SupportAssignmentStatus;
   created_at: string | null;
+}
+
+/** The exact body accepted by the research support-assignment request endpoint. */
+export interface RequestResearchSupportInput {
+  user_id: string;
+  assignment_role: SupportRole;
+  replace_current: boolean;
+  expected_current_assignment_id?: number;
 }
 
 export async function listSupportAssignmentInbox(
@@ -2996,16 +3103,26 @@ export async function listResearchSupportAssignments(
   ).data;
 }
 
-export async function listEligibleSupportUsers(
-  role: SupportAssignmentResource["assignment_role"],
+/**
+ * Searches eligible support accounts for a specific research document. The
+ * document scope lets the API exclude accounts that cannot receive this request.
+ */
+export async function searchEligibleSupportAccounts(
+  researchDocumentId: string | number,
+  role: SupportRole,
+  search: string,
   fetcher: ApiFetch = globalThis.fetch,
-): Promise<Array<{ id: string; name: string; email: string }>> {
+  signal?: AbortSignal,
+): Promise<EligibleSupportAccountResource[]> {
+  const query = new URLSearchParams({
+    research_document_id: String(researchDocumentId),
+    role,
+    search: search.trim(),
+  });
   return (
-    await apiRequest<{
-      data: Array<{ id: string; name: string; email: string }>;
-    }>(
-      `/api/support-assignments/eligible?role=${encodeURIComponent(role)}`,
-      undefined,
+    await apiRequest<{ data: EligibleSupportAccountResource[] }>(
+      `/api/support-assignments/eligible?${query.toString()}`,
+      { signal },
       fetcher,
     )
   ).data;
@@ -3014,8 +3131,9 @@ export async function listEligibleSupportUsers(
 export async function requestResearchSupport(
   researchId: string | number,
   userId: string,
-  assignmentRole: SupportAssignmentResource["assignment_role"],
+  assignmentRole: SupportRole,
   replaceCurrent = false,
+  expectedCurrentAssignmentId?: number,
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<SupportAssignmentResource> {
   return (
@@ -3027,7 +3145,10 @@ export async function requestResearchSupport(
           user_id: userId,
           assignment_role: assignmentRole,
           replace_current: replaceCurrent,
-        }),
+          ...(expectedCurrentAssignmentId === undefined
+            ? {}
+            : { expected_current_assignment_id: expectedCurrentAssignmentId }),
+        } satisfies RequestResearchSupportInput),
       },
       fetcher,
     )
@@ -3928,9 +4049,9 @@ export async function listOfficeUsers(
     direction?: "asc" | "desc";
   } = {},
   fetcher: ApiFetch = globalThis.fetch,
-): Promise<LaravelPaginatedResponse<OfficeUserRow>> {
+): Promise<UserDirectoryResponse<OfficeUserRow>> {
   const response = await apiRequest<
-    | LaravelPaginatedResponse<OfficeUserRow>
+    | UserDirectoryResponse<OfficeUserRow>
     | {
         data: {
           data: OfficeUserRow[];
@@ -3947,6 +4068,7 @@ export async function listOfficeUsers(
           prev_page_url: string | null;
           next_page_url: string | null;
         };
+        summary: UserDirectorySummary;
       }
   >(adminQuery("/api/office/users", input), undefined, fetcher);
   if ("meta" in response) return response;
@@ -3971,6 +4093,7 @@ export async function listOfficeUsers(
       to: page.to,
       total: page.total,
     },
+    summary: response.summary,
   };
 }
 

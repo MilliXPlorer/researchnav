@@ -20,6 +20,7 @@ class OfficeRepositoryUpdateRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'expected_updated_at' => ['required', 'date'],
             'category_id' => ['sometimes', 'nullable', 'integer', 'exists:categories,id'],
             'title' => ['sometimes', 'filled', 'string', 'max:500'],
             'abstract' => ['sometimes', 'nullable', 'string', 'max:50000'],
@@ -32,17 +33,79 @@ class OfficeRepositoryUpdateRequest extends FormRequest
             'manuscript_date_label' => ['sometimes', 'nullable', 'string', 'max:50'],
             'research_stage' => ['sometimes', Rule::in(ResearchDocument::RESEARCH_STAGES)],
             'authors' => ['sometimes', 'array', 'min:1', 'max:50'],
-            'authors.*' => ['required', 'string', 'max:255', 'distinct:ignore_case'],
+            'authors.*' => ['required', 'array'],
+            'authors.*.id' => ['sometimes', 'nullable', 'integer'],
+            'authors.*.user_id' => ['present', 'nullable', 'uuid'],
+            'authors.*.author_name' => ['required', 'string', 'max:255'],
+            'authors.*.is_corresponding_author' => ['required', 'boolean'],
         ];
+    }
+
+    protected function prepareForValidation(): void
+    {
+        $authors = $this->input('authors');
+        if (! is_array($authors)) {
+            return;
+        }
+
+        foreach ($authors as $index => $author) {
+            if (! is_array($author)) {
+                continue;
+            }
+            if (is_string($author['author_name'] ?? null)) {
+                $authors[$index]['author_name'] = preg_replace('/\s+/u', ' ', trim($author['author_name'])) ?? '';
+            }
+            if (is_string($author['user_id'] ?? null)) {
+                $authors[$index]['user_id'] = strtolower(trim($author['user_id']));
+            }
+        }
+
+        $this->merge(['authors' => $authors]);
     }
 
     public function withValidator(Validator $validator): void
     {
         $validator->after(function () use ($validator): void {
             $this->rejectUnknownFields($validator, [
-                'category_id', 'title', 'abstract', 'keywords', 'publication_year', 'sdg_ids',
+                'expected_updated_at', 'category_id', 'title', 'abstract', 'keywords', 'publication_year', 'sdg_ids',
                 'institute', 'degree_program', 'manuscript_date_label', 'research_stage', 'authors',
             ]);
+
+            $authors = $this->input('authors');
+            if (is_array($authors)) {
+                $names = [];
+                $userIds = [];
+                $rowIds = [];
+                foreach ($authors as $index => $author) {
+                    if (! is_array($author)) {
+                        continue;
+                    }
+                    foreach (array_diff(array_keys($author), ['id', 'user_id', 'author_name', 'is_corresponding_author']) as $field) {
+                        $validator->errors()->add("authors.{$index}.{$field}", 'This field is not allowed.');
+                    }
+                    if (is_string($author['author_name'] ?? null)) {
+                        $name = mb_strtolower($author['author_name']);
+                        if (isset($names[$name])) {
+                            $validator->errors()->add("authors.{$index}.author_name", 'The author name must be distinct.');
+                        }
+                        $names[$name] = true;
+                    }
+                    if (is_string($author['user_id'] ?? null) && $author['user_id'] !== '') {
+                        $userId = mb_strtolower($author['user_id']);
+                        if (isset($userIds[$userId])) {
+                            $validator->errors()->add("authors.{$index}.user_id", 'The user ID must be distinct.');
+                        }
+                        $userIds[$userId] = true;
+                    }
+                    if (($author['id'] ?? null) !== null && $author['id'] !== '') {
+                        $rowId = (string) $author['id'];
+                        if (isset($rowIds[$rowId])) {
+                            $validator->errors()->add("authors.{$index}.id", 'The author row ID must be distinct.');
+                        }
+                        $rowIds[$rowId] = true;
+                    }
+                }
+            }
 
             if (! $this->has('institute') && ! $this->has('degree_program')) {
                 return;

@@ -34,6 +34,7 @@ class PublicRepositorySimilarityService
         }
 
         $results = $this->process->runQuery($query, $candidates);
+        $metadataCandidateIds = $this->matchingMetadataCandidateIds($query, $candidates);
         $candidateIds = $candidates->pluck('id')->map(fn ($id): int => (int) $id)->all();
         $currentCandidates = $this->eligibleCandidatesById($candidateIds);
 
@@ -46,11 +47,16 @@ class PublicRepositorySimilarityService
 
         $byId = $currentCandidates->keyBy('id');
 
-        $nonzeroResults = array_values(array_filter(
-            $results,
-            fn (array $result): bool => $result['title_similarity_score'] !== '0.000000000000'
-                || ($result['overall_similarity_score'] !== null && $result['overall_similarity_score'] !== '0.000000000000'),
-        ));
+        $nonzeroResults = array_values(array_filter($results, function (array $result) use ($metadataCandidateIds): bool {
+            if ($metadataCandidateIds !== []) {
+                return isset($metadataCandidateIds[$result['matched_research_id']])
+                    && ($result['title_similarity_score'] !== '0.000000000000'
+                        || ($result['overall_similarity_score'] !== null && $result['overall_similarity_score'] !== '0.000000000000'));
+            }
+
+            return $result['title_similarity_score'] !== '0.000000000000'
+                || ($result['overall_similarity_score'] !== null && $result['overall_similarity_score'] !== '0.000000000000');
+        }));
 
         $mapped = array_map(function (array $result) use ($byId): array {
             /** @var ResearchDocument $research */
@@ -87,6 +93,33 @@ class PublicRepositorySimilarityService
             ['path' => request()->url(), 'pageName' => 'page'],
         );
     }
+
+    /**
+     * Prefer explicit catalog metadata matches over incidental manuscript-body matches.
+     *
+     * @param  Collection<int, ResearchDocument>  $candidates
+     * @return array<int, true>
+     */
+    private function matchingMetadataCandidateIds(string $term, Collection $candidates): array
+    {
+        $terms = collect(preg_split('/[^\pL\pN]+/u', $term) ?: [])
+            ->map(fn (string $value): string => trim($value))
+            ->filter(fn (string $value): bool => mb_strlen($value) >= 3)
+            ->unique()
+            ->values();
+
+        return $candidates->filter(function (ResearchDocument $candidate) use ($terms): bool {
+            $metadata = mb_strtolower(implode(' ', array_filter([
+                $candidate->title,
+                $candidate->abstract,
+                $candidate->keywords,
+                $candidate->authors->pluck('author_name')->implode(' '),
+            ])));
+
+            return $terms->contains(fn (string $term): bool => str_contains($metadata, mb_strtolower($term)));
+        })->mapWithKeys(fn (ResearchDocument $candidate): array => [(int) $candidate->id => true])->all();
+    }
+
 
     /** @param array<string, mixed> $filters */
     private function matchingCandidates(string $term, array $filters): Collection
@@ -188,13 +221,15 @@ class PublicRepositorySimilarityService
     }
 
     /** @return array<int, array<string, mixed>> */
-    public function compareUploadedContent(string $uploadedContent): array
+    /** @param list<string> $uploadedFileHashes */
+    public function compareUploadedContent(string $uploadedContent, array $uploadedFileHashes = []): array
     {
-        return $this->compareStandaloneContent($uploadedContent, true);
+        return $this->compareStandaloneContent($uploadedContent, true, $uploadedFileHashes);
     }
 
     /** @return array<int, array<string, mixed>> */
-    private function compareStandaloneContent(string $content, bool $uploaded): array
+    /** @param list<string> $uploadedFileHashes */
+    private function compareStandaloneContent(string $content, bool $uploaded, array $uploadedFileHashes = []): array
     {
         $this->configureMemoryLimit();
         $candidates = $uploaded
@@ -203,7 +238,7 @@ class PublicRepositorySimilarityService
         $candidateSnapshots = $uploaded ? $this->candidateSnapshots($candidates) : [];
         $results = array_values(array_filter(
             $uploaded
-                ? $this->process->runUploadedContentQuery($content, $candidates)
+                ? $this->process->runUploadedContentQuery($content, $candidates, $uploadedFileHashes)
                 : $this->process->runContentTextQuery($content, $candidates),
             fn (array $result): bool => $result['content_similarity_score'] !== null
                 && $result['content_similarity_score'] !== '0.000000000000',
@@ -359,7 +394,7 @@ class PublicRepositorySimilarityService
             ->get();
     }
 
-    /** @return array<int, array{title: string, projection_id: ?int, projection_status: ?string, projection_source_sha256: ?string, projection_body_sha256: ?string, projection_extractor_version: ?string}> */
+    /** @return array<int, array<string, mixed>> */
     private function candidateSnapshots(Collection $candidates): array
     {
         return $candidates->sortBy('id')->mapWithKeys(function (ResearchDocument $candidate): array {
@@ -374,6 +409,13 @@ class PublicRepositorySimilarityService
                 'projection_source_sha256' => $projection?->source_sha256,
                 'projection_body_sha256' => $projection?->body_text === null ? null : hash('sha256', $projection->body_text),
                 'projection_extractor_version' => $projection?->extractor_version,
+                'current_final_files' => $candidate->files
+                    ->where('document_type', 'final_manuscript')
+                    ->where('is_current', true)
+                    ->sortBy(fn ($file): string => sprintf('%010d:%s:%010d', $file->file_order, $file->original_filename, $file->id))
+                    ->map(fn ($file): array => ['id' => (int) $file->id, 'sha256' => $file->content_sha256])
+                    ->values()
+                    ->all(),
             ]];
         })->all();
     }

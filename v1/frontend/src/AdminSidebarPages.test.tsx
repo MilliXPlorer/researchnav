@@ -1,5 +1,4 @@
 import {
-  act,
   fireEvent,
   render,
   screen,
@@ -68,14 +67,14 @@ const systemStatusResponse = {
         document_files: 0,
         document_file_bytes: 0,
       },
-      migrations: { applied: 1, available: 1, pending: 0 },
+      migrations: { applied: 1, available: 1, pending: 0, historical: 0 },
     },
     storage: {
       private: {
         disk: "researchnav_private",
         driver: "local",
         status: "operational",
-        capabilities: { read: true, write: true },
+        capabilities: { read: true, write: true, delete: true },
       },
     },
   },
@@ -445,12 +444,6 @@ describe("administrator sidebar pages", () => {
       successText: "No accounts have been provisioned.",
     },
     {
-      selectedNav: "All Users",
-      loadingLabel: "Loading users",
-      successfulResponse: page([]),
-      successText: "No user accounts are available.",
-    },
-    {
       selectedNav: "Audit Logs",
       loadingLabel: "Loading audit logs",
       successfulResponse: page([]),
@@ -503,7 +496,7 @@ describe("administrator sidebar pages", () => {
       ).toBeInTheDocument();
 
       resolveRetry(new Response(JSON.stringify(successfulResponse)));
-      expect(await screen.findByText(successText)).toBeInTheDocument();
+      expect((await screen.findAllByText(successText)).length).toBeGreaterThan(0);
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
       unmount();
     },
@@ -539,13 +532,11 @@ describe("administrator sidebar pages", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Edit member@example.test" }),
     );
-    const dialog = screen.getByRole("dialog", {
-      name: "Edit member@example.test",
-    });
-    fireEvent.change(within(dialog).getByLabelText("Role"), {
+    const dialog = screen.getByRole("dialog", { name: "Edit user" });
+    fireEvent.change(within(dialog).getByLabelText("Assigned role"), {
       target: { value: "admin" },
     });
-    fireEvent.change(within(dialog).getByLabelText("Access status"), {
+    fireEvent.change(within(dialog).getByLabelText("Account access status"), {
       target: { value: "invited" },
     });
     fireEvent.click(
@@ -555,8 +546,10 @@ describe("administrator sidebar pages", () => {
       await screen.findByText("At least one active administrator must remain."),
     ).toBeInTheDocument();
     await waitFor(() => expect(userRequests).toBeGreaterThan(1));
-    expect(screen.getByRole("cell", { name: "Adviser" })).toBeInTheDocument();
-    expect(screen.getByRole("cell", { name: "Blocked" })).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Assigned role")).toHaveValue("admin");
+    expect(within(dialog).getByLabelText("Account access status")).toHaveValue(
+      "invited",
+    );
     expect(screen.queryByText(/password/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/google_sub/i)).not.toBeInTheDocument();
   });
@@ -593,13 +586,11 @@ describe("administrator sidebar pages", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Edit member@example.test" }),
     );
-    const dialog = screen.getByRole("dialog", {
-      name: "Edit member@example.test",
-    });
-    fireEvent.change(within(dialog).getByLabelText("Role"), {
+    const dialog = screen.getByRole("dialog", { name: "Edit user" });
+    fireEvent.change(within(dialog).getByLabelText("Assigned role"), {
       target: { value: "admin" },
     });
-    fireEvent.change(within(dialog).getByLabelText("Access status"), {
+    fireEvent.change(within(dialog).getByLabelText("Account access status"), {
       target: { value: "invited" },
     });
     fireEvent.click(
@@ -614,39 +605,6 @@ describe("administrator sidebar pages", () => {
       screen.getByRole("cell", { name: "Coordinator" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("cell", { name: "Blocked" })).toBeInTheDocument();
-  });
-
-  it("confirms and deletes a user account", async () => {
-    let deleted = false;
-    const fetchMock = vi.fn(
-      async (input: string | URL | Request, init?: RequestInit) => {
-        if (init?.method === "DELETE") {
-          deleted = true;
-          return new Response(null, { status: 204 });
-        }
-        return new Response(JSON.stringify(page(deleted ? [] : [user])));
-      },
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    render(<AdminSidebarPage selectedNav="All Users" />);
-    fireEvent.click(
-      await screen.findByRole("button", {
-        name: "Delete member@example.test",
-      }),
-    );
-    expect(
-      screen.getByRole("heading", { name: "Delete user account" }),
-    ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Delete user" }));
-
-    expect(
-      await screen.findByText("Deleted member@example.test."),
-    ).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith(
-      `/api/admin/users/${user.id}`,
-      expect.objectContaining({ method: "DELETE" }),
-    );
   });
 
   it("filters admin users live as search text changes without submitting", async () => {
@@ -733,14 +691,19 @@ describe("administrator sidebar pages", () => {
                 document_files: 4,
                 document_file_bytes: 1234,
               },
-              migrations: { applied: 10, available: 11, pending: 1 },
+              migrations: {
+                applied: 10,
+                available: 11,
+                pending: 1,
+                historical: 0,
+              },
             },
             storage: {
               private: {
                 disk: "researchnav_private",
                 driver: "local",
                 status: "operational",
-                capabilities: { read: true, write: true },
+                capabilities: { read: true, write: true, delete: true },
               },
             },
           },
@@ -771,12 +734,14 @@ describe("administrator sidebar pages", () => {
     ).toBeInTheDocument();
     expect(screen.getAllByText("12")).not.toHaveLength(0);
     expect(
-      screen.getByText("database.audit_logs_unavailable"),
+      screen.getByText("Database Audit Logs Unavailable"),
     ).toBeInTheDocument();
-    expect(screen.getByText(/10 applied/)).toBeInTheDocument();
+    expect(screen.getByText("Applied migrations").nextSibling).toHaveTextContent(
+      "10",
+    );
   });
 
-  it("debounces the AllUsers search at 350 ms and resets page to 1", async () => {
+  it("debounces the AllUsers search and resets page to 1", async () => {
     let userRequests = 0;
     const refined = { ...user, email: "anna@example.test" };
     const page1Users = [
@@ -872,30 +837,20 @@ describe("administrator sidebar pages", () => {
     expect(screen.getByText("Showing 3–3 of 3 users")).toBeInTheDocument();
     const requestsAfterPage2 = userRequests;
 
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-
     fireEvent.change(screen.getByLabelText("Search"), {
       target: { value: "ann" },
     });
     expect(screen.getByLabelText("Search")).toHaveValue("ann");
 
-    await act(async () => {
-      vi.advanceTimersByTime(300);
-    });
-    expect(userRequests).toBe(requestsAfterPage2);
-
-    await act(async () => {
-      vi.advanceTimersByTime(50);
+    let searchCall: (typeof fetchMock.mock.calls)[number] | undefined;
+    await waitFor(() => {
+      searchCall = fetchMock.mock.calls.find(
+        ([input]) => userParams(input).get("search") === "ann",
+      );
+      expect(searchCall).toBeDefined();
     });
     expect(userRequests).toBeGreaterThan(requestsAfterPage2);
-
-    const searchCall = fetchMock.mock.calls.find(
-      ([input]) => userParams(input).get("search") === "ann",
-    );
-    expect(searchCall).toBeDefined();
     expect(userParams(searchCall![0]).get("page")).not.toBe("2");
-
-    vi.useRealTimers();
   });
 
   it("resets sorting to page 1 and preserves filters and sorting across pages", async () => {
@@ -950,7 +905,7 @@ describe("administrator sidebar pages", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Page 2" }));
     await screen.findByText("page-2@example.test");
 
-    fireEvent.click(screen.getByRole("columnheader", { name: "Name ↕" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sort by User" }));
 
     await waitFor(() => {
       const resetSortCall = fetchMock.mock.calls.find(([input]) => {
@@ -1021,13 +976,13 @@ describe("administrator sidebar pages", () => {
     expect(await screen.findByText("member@example.test")).toBeInTheDocument();
 
     expect(
-      screen.getByRole("columnheader", { name: "Name ↕" }),
+      screen.getByRole("button", { name: "Sort by User" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("columnheader", { name: "Actions" }),
-    ).not.toHaveTextContent(/[↕↑↓]/);
+    ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("columnheader", { name: /Name/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Sort by User" }));
     await waitFor(() => {
       const sortCall = fetchMock.mock.calls.find(([input]) => {
         const params = userParams(input);
@@ -1039,9 +994,10 @@ describe("administrator sidebar pages", () => {
 
       expect(sortCall).toBeDefined();
     });
-    expect(
-      screen.getByRole("columnheader", { name: "Name ↑" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "User" })).toHaveAttribute(
+      "aria-sort",
+      "ascending",
+    );
   });
 
   it("toggles AllUsers Name sorting to descending on second click", async () => {
@@ -1084,14 +1040,15 @@ describe("administrator sidebar pages", () => {
 
     await screen.findByText("member@example.test");
 
-    const nameHeader = screen.getByRole("columnheader", { name: /Name/i });
+    const nameHeader = screen.getByRole("button", { name: "Sort by User" });
 
     fireEvent.click(nameHeader);
     fireEvent.click(nameHeader);
 
-    expect(
-      screen.getByRole("columnheader", { name: "Name ↓" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "User" })).toHaveAttribute(
+      "aria-sort",
+      "descending",
+    );
 
     await waitFor(() => {
       const descendingCall = fetchMock.mock.calls.find(([input]) => {
@@ -1147,15 +1104,13 @@ describe("administrator sidebar pages", () => {
     await screen.findByText("member@example.test");
 
     const columns = [
-      ["Email", "email"],
       ["Role", "role"],
-      ["Access", "access_status"],
-      ["Last login", "last_login_at"],
-      ["Created", "created_at"],
+      ["Access Status", "access_status"],
+      ["Date Created", "created_at"],
     ] as const;
 
     for (const [label, sort] of columns) {
-      fireEvent.click(screen.getByRole("columnheader", { name: `${label} ↕` }));
+      fireEvent.click(screen.getByRole("button", { name: `Sort by ${label}` }));
 
       await waitFor(() => {
         const matchingCall = fetchMock.mock.calls.find(([input]) => {

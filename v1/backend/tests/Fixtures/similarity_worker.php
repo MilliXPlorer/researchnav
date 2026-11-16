@@ -15,6 +15,7 @@ if (array_key_exists('query', $payload) || array_key_exists('uploaded_content', 
         'content_similarity_score' => $score,
         'matched_terms' => [],
         'fasttext_support_score' => null,
+        ...(array_key_exists('uploaded_content', $payload) ? ['exact_content_match' => false] : []),
     ], $payload['candidates'])], JSON_THROW_ON_ERROR);
 
     exit(0);

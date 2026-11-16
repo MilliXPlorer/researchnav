@@ -110,7 +110,10 @@ function renderCatalog(
 }
 
 beforeEach(() => window.history.replaceState({}, "", "/catalog"));
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("CatalogPage public similarity search", () => {
   it("shows a back-to-top control after scrolling", () => {
@@ -164,7 +167,15 @@ describe("CatalogPage public similarity search", () => {
     );
   });
 
-  it("opens manuscript files separately so catalog results stay mounted", () => {
+  it("opens manuscript files separately after an authorized access check", async () => {
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    const createObjectURL = vi
+      .spyOn(URL, "createObjectURL")
+      .mockReturnValue("blob:research-files");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("files", { status: 200 })),
+    );
     render(
       <CatalogPage
         onSignIn={vi.fn()}
@@ -174,14 +185,67 @@ describe("CatalogPage public similarity search", () => {
       />,
     );
 
-    expect(screen.getByRole("link", { name: /view files/i })).toHaveAttribute(
-      "target",
-      "_blank",
+    fireEvent.click(screen.getByRole("button", { name: /view files/i }));
+
+    await waitFor(() =>
+      expect(open).toHaveBeenCalledWith(
+        "blob:research-files",
+        "_blank",
+        "noopener,noreferrer",
+      ),
     );
-    expect(screen.getByRole("link", { name: /view files/i })).toHaveAttribute(
-      "rel",
-      "noopener noreferrer",
+    expect(createObjectURL).toHaveBeenCalled();
+  });
+
+  it("keeps anonymous visitors on the catalog and shows sign-in guidance", () => {
+    const onSignIn = vi.fn();
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <CatalogPage
+        onSignIn={onSignIn}
+        session={null}
+        navigate={vi.fn()}
+        records={[{ ...fallbackRecord, hasDownloadableManuscript: true }]}
+      />,
     );
+
+    fireEvent.click(screen.getByRole("button", { name: /view files/i }));
+
+    const dialog = screen.getByRole("dialog", { name: "Sign In Required" });
+    expect(dialog).toHaveTextContent(
+      "To view or download research files, please sign in to your ResearchNAV account.",
+    );
+    expect(open).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Sign In" }));
+    expect(onSignIn).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    [403, "Access Restricted"],
+    [404, "Files Unavailable"],
+    [500, "Unable to Open Files"],
+  ])("shows a friendly %s file access error", async (status, heading) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status })),
+    );
+    render(
+      <CatalogPage
+        onSignIn={vi.fn()}
+        session={authenticatedSession}
+        navigate={vi.fn()}
+        records={[{ ...fallbackRecord, hasDownloadableManuscript: true }]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /view files/i }));
+
+    expect(
+      await screen.findByRole("dialog", { name: heading }),
+    ).toBeInTheDocument();
   });
 
   it("shows final manuscript unavailable in metadata for authenticated users without a final manuscript", () => {
@@ -476,7 +540,7 @@ describe("CatalogPage public similarity search", () => {
       screen.getByRole("progressbar", {
         name: "Ranking Assessment of Physical Education",
       }),
-    ).toHaveAttribute("aria-valuenow", "1");
+    ).toHaveAttribute("aria-valuenow", "3");
     expect(
       screen.getByRole("heading", {
         name: "Assessment of Physical Education",

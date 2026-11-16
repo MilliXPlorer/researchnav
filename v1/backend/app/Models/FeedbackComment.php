@@ -21,6 +21,22 @@ class FeedbackComment extends ConsolidatedReviewModel
         'feedback_status' => 'status',
     ];
 
+    protected static function booted(): void
+    {
+        parent::booted();
+
+        static::addGlobalScope('feedback_lifecycle', function (Builder $query): void {
+            if ($query->getModel()->usesFinalStorage()) {
+                // Historical revision notes share a type with formal requests.
+                // Only their feedback lifecycle belongs in a conversation.
+                $query->where(function (Builder $records): void {
+                    $records->where($records->getModel()->qualifyColumn('review_type'), '!=', 'revision_request')
+                        ->orWhereIn($records->getModel()->qualifyColumn('status'), self::FEEDBACK_STATUSES);
+                });
+            }
+        });
+    }
+
     public static function column(string $legacyColumn): string
     {
         if ((new static)->usesFinalStorage()) {

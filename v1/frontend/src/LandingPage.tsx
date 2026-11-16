@@ -6,8 +6,15 @@ import {
   ChevronDown,
   FileText,
   GraduationCap,
+  History,
+  Info,
+  ChartNoAxesColumnIncreasing,
+  Layers3,
   LockKeyhole,
   Search,
+  Share2,
+  Upload,
+  Users,
 } from "lucide-react";
 import { AnimatedStat, Button, Logo, SearchBox } from "./components";
 import SdgPickerModal from "./SdgPickerModal";
@@ -41,6 +48,7 @@ export default function LandingPage({
   const [profileOpen, setProfileOpen] = useState(false);
   const [sdgPickerOpen, setSdgPickerOpen] = useState(false);
   const [contactOpen, setContactOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const [privacyOpen, setPrivacyOpen] = useState(false);
 
   useEffect(() => {
@@ -65,14 +73,6 @@ export default function LandingPage({
     setPrivacyOpen(false);
   }
 
-  function scrollToSection(id: string) {
-    const section = document.getElementById(id);
-    if (!section) return;
-    window.history.replaceState({}, "", `#${id}`);
-    section.scrollIntoView({ behavior: "smooth", block: "start" });
-    section.setAttribute("tabindex", "-1");
-    section.focus({ preventScroll: true });
-  }
   const [metadataResearchId, setMetadataResearchId] = useState<
     string | number | null
   >(null);
@@ -300,6 +300,8 @@ export default function LandingPage({
           <PublicResearchMetadataDialog
             researchDocumentId={metadataResearchId}
             onClose={() => setMetadataResearchId(null)}
+            authenticated={Boolean(session)}
+            onSignIn={onSignIn}
           />
         )}
 
@@ -340,10 +342,6 @@ export default function LandingPage({
           session={session}
           onSessionChange={onSessionChange}
           onClose={() => setProfileOpen(false)}
-          onOpenWorkspace={() => {
-            setProfileOpen(false);
-            navigate("/app");
-          }}
           onLogout={onLogout}
         />
       )}
@@ -358,7 +356,7 @@ export default function LandingPage({
           by institutional privacy controls and the Data Privacy Act of 2012.
         </p>
         <nav aria-label="Footer navigation">
-          <button type="button" onClick={() => scrollToSection("about")}>
+          <button type="button" onClick={() => setAboutOpen(true)}>
             About
           </button>
           <button type="button" onClick={() => setContactOpen(true)}>
@@ -370,6 +368,152 @@ export default function LandingPage({
         </nav>
         <span>© 2026 ResearchNAV</span>
       </footer>
+      {aboutOpen && (
+        <Modal
+          label="About ResearchNAV"
+          onClose={() => setAboutOpen(false)}
+          className="public-about-dialog"
+        >
+          <article
+            className="public-about-content"
+            aria-describedby="public-about-subtitle"
+          >
+            <header className="public-about-header">
+              <div className="public-about-title-group">
+                <Logo compact />
+                <div>
+                  <h2>About ResearchNAV</h2>
+                  <p
+                    id="public-about-subtitle"
+                    className="public-about-tagline"
+                  >
+                    Organizing research. Connecting knowledge.
+                  </p>
+                </div>
+              </div>
+            </header>
+            <div className="public-about-body">
+              <section className="public-about-band public-about-intro">
+                <span className="public-about-icon">
+                  <BookOpen aria-hidden="true" />
+                </span>
+                <p>
+                  <strong>ResearchNAV</strong> is a web-based research
+                  repository and management system developed for Tangub City
+                  Global College. It brings institutional research into one
+                  centralized platform.
+                </p>
+              </section>
+              <div className="public-about-columns">
+                <div className="public-about-left">
+                  <section className="public-about-capabilities">
+                    <h3>Built for better research management</h3>
+                    <p>
+                      A centralized platform to discover research, manage
+                      submissions, track revisions, and check content
+                      similarity—all in one place.
+                    </p>
+                    <ul>
+                      <li>
+                        <span>
+                          <Search aria-hidden="true" />
+                        </span>
+                        <div>
+                          <strong>Explore research</strong>
+                          <p>
+                            Find studies through keyword searches, filters, and
+                            similarity-based retrieval.
+                          </p>
+                        </div>
+                      </li>
+                      <li>
+                        <span>
+                          <Upload aria-hidden="true" />
+                        </span>
+                        <div>
+                          <strong>Manage submissions</strong>
+                          <p>
+                            Submit research documents and keep track of their
+                            status.
+                          </p>
+                        </div>
+                      </li>
+                      <li>
+                        <span>
+                          <History aria-hidden="true" />
+                        </span>
+                        <div>
+                          <strong>Follow revisions</strong>
+                          <p>
+                            Access adviser feedback and maintain a record of
+                            document revisions.
+                          </p>
+                        </div>
+                      </li>
+                      <li>
+                        <span>
+                          <Layers3 aria-hidden="true" />
+                        </span>
+                        <div>
+                          <strong>Check research similarity</strong>
+                          <p>
+                            Compare research titles and manuscript content with
+                            records available in the repository.
+                          </p>
+                        </div>
+                      </li>
+                    </ul>
+                  </section>
+                </div>
+                <section className="public-about-similarity">
+                  <h3>Similarity technology</h3>
+                  <p>
+                    ResearchNAV uses TF-IDF to represent textual importance,
+                    Cosine Similarity to measure how closely records match, and
+                    FastText to support contextual analysis. Together, these
+                    methods help identify related research for further review.
+                  </p>
+                  <div
+                    className="public-about-process"
+                    aria-label="Similarity technologies"
+                  >
+                    <span>
+                      <ChartNoAxesColumnIncreasing aria-hidden="true" /> TF-IDF
+                    </span>
+                    <span>
+                      <Share2 aria-hidden="true" /> Cosine Similarity
+                    </span>
+                    <span>
+                      <Layers3 aria-hidden="true" /> FastText
+                    </span>
+                  </div>
+                  <div className="public-about-notice">
+                    <Info aria-hidden="true" />
+                    <p>
+                      Similarity scores support review; they do not
+                      independently determine plagiarism, originality, or
+                      research quality.
+                    </p>
+                  </div>
+                </section>
+              </div>
+              <section className="public-about-band public-about-community">
+                <span className="public-about-icon">
+                  <Users aria-hidden="true" />
+                </span>
+                <div>
+                  <h3>Supporting Our Research Community</h3>
+                  <p>
+                    A centralized, accessible, and reliable platform for
+                    managing, discovering, and preserving the college’s research
+                    work.
+                  </p>
+                </div>
+              </section>
+            </div>
+          </article>
+        </Modal>
+      )}
       {contactOpen && (
         <Modal
           label="Contact Research Office"
@@ -386,9 +530,9 @@ export default function LandingPage({
             <div className="public-contact-action">
               <a
                 className="button button-primary"
-                href="mailto:researchnav123123@gmail.com"
+                href="mailto:researchnavph@gmail.com"
               >
-                researchnav123123@gmail.com
+                researchnavph@gmail.com
               </a>
             </div>
           </div>

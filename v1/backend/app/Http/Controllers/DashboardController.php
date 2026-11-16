@@ -191,10 +191,6 @@ class DashboardController extends DomainController
     {
         return [
             $this->researchSection('assigned_manuscripts', $this->assignedDocuments($actor, 'panel')),
-            $this->countSection('defense_schedule', DefenseSchedule::query()->where('status', 'scheduled')->whereHas('researchDocument', fn (Builder $documents) => $documents->whereHas('reviewAssignments', fn (Builder $assignments) => $assignments
-                ->where(ReviewAssignment::column('reviewer_id'), $actor->id)
-                ->where(ReviewAssignment::column('review_role'), 'panel')
-                ->where(ReviewAssignment::column('is_active'), ReviewAssignment::column('is_active') === 'status' ? 'active' : true)))),
             $this->researchSection('repository_references', $this->repositoryDocuments()),
         ];
     }

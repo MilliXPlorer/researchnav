@@ -63,7 +63,7 @@ class DashboardTest extends TestCase
             'researcher' => ['my_drafts', 'my_under_review', 'my_revision_required', 'my_flagged_similarity', 'my_approved', 'my_archived', 'repository_references'],
             'adviser' => ['assigned_reviews', 'revision_requests', 'repository_references'],
             'instructor' => ['title_proposals', 'pending_reviews', 'repository_references'],
-            'panel' => ['assigned_manuscripts', 'defense_schedule', 'repository_references'],
+            'panel' => ['assigned_manuscripts', 'repository_references'],
             'statistician' => ['methodology_reviews', 'signoffs', 'completed_references'],
             'coordinator' => ['active_instructors', 'invited_instructors', 'blocked_instructors', 'schedules', 'duplicate_flags'],
             'librarian' => ['archiving_queue', 'metadata_validation', 'repository_records'],

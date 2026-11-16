@@ -19,6 +19,58 @@ vi.mock("./SharedMonitoring", () => ({
 afterEach(() => vi.unstubAllGlobals());
 
 describe("StudyWorkspace", () => {
+  it("disables the header review action and hides it without an authorized handler", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ data: [] }))),
+    );
+    const onAction = vi.fn();
+    const props = {
+      role: "research-office" as const,
+      researchDocumentId: 17,
+      title: "Coastal Resilience Study",
+      context: [
+        "Institute of Science",
+        "Environmental Science",
+        "Title Proposal",
+        "Submitted",
+      ],
+      researchers: [],
+      status: {
+        submissionStatus: "submitted",
+        researchStage: "title_proposal",
+        archiveStatus: "not_archived",
+        visibility: "private",
+        actionLabel: "Move to under review",
+        actionDisabled: true,
+        onAction,
+      },
+    };
+    const view = render(<StudyWorkspace {...props} />);
+    const trigger = screen.getByRole("button", {
+      name: "Move to Under Review",
+    });
+    expect(trigger).toBeDisabled();
+    fireEvent.click(trigger);
+    expect(onAction).not.toHaveBeenCalled();
+    view.rerender(
+      <StudyWorkspace
+        {...props}
+        status={{ ...props.status, onAction: undefined }}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "Move to Under Review" }),
+    ).not.toBeInTheDocument();
+    view.rerender(<StudyWorkspace {...props} role="adviser" />);
+    expect(
+      screen.queryByRole("button", { name: "Move to Under Review" }),
+    ).not.toBeInTheDocument();
+    expect(
+      await screen.findByText("No manuscript files uploaded yet."),
+    ).toBeInTheDocument();
+  });
+
   it("opens a notification destination at the exact file feedback panel", async () => {
     vi.stubGlobal(
       "fetch",
@@ -79,9 +131,7 @@ describe("StudyWorkspace", () => {
     expect(
       container.querySelector(".project-document-row.is-targeted"),
     ).toHaveTextContent("chapter-one.pdf");
-    expect(
-      await screen.findByText("No feedback yet."),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("No feedback yet.")).toBeInTheDocument();
   });
 
   it("renders the canonical navigation and keeps assigned actors read-only", async () => {
@@ -151,6 +201,11 @@ describe("StudyWorkspace", () => {
       screen.queryByRole("button", { name: "Feedback" }),
     ).not.toBeInTheDocument();
     expect(screen.getByText("Read-only record")).toBeInTheDocument();
+    expect(screen.getByText("Dr. Lina Cruz")).toBeInTheDocument();
+    expect(screen.getByText("Prof. Mara Lim")).toBeInTheDocument();
+    expect(screen.getByText("1 members")).toBeInTheDocument();
+    expect(screen.getByText("Approved")).toHaveClass("project-status-badge");
+    expect(screen.getByTitle("chapter-one.pdf")).toBeInTheDocument();
     expect(
       screen.queryByRole("button", {
         name: /edit research title|delete research project|manage assignments|remove/i,

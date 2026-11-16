@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\ResearchDocument;
 use App\Models\ReviewAssignment;
 use App\Notifications\ResearchActivityNotification;
+use App\Services\DefenseMonitoringAuthorization;
 use App\Services\MonitoringService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -58,6 +59,7 @@ class EditorController extends DomainController
         $actor = $this->actor($request);
         $this->ensureAssigned($actor->id, $researchDocument);
         $input = $request->validate(['monitoring_stage' => ['required', 'in:before_proposal_defense,after_proposal_defense'], 'activity_date' => ['required', 'date'], 'activity' => ['required', 'string', 'max:10000'], 'remarks' => ['nullable', 'string', 'max:10000'], 'status' => ['required', 'in:pending,completed'], 'signature_status' => ['required', 'in:unsigned,signed']]);
+        app(DefenseMonitoringAuthorization::class)->authorizeSection($actor, $researchDocument, $input['monitoring_stage']);
         DB::table('monitoring_entries')->updateOrInsert(['research_document_id' => $researchDocument->id, 'reviewer_id' => $actor->id, 'monitoring_stage' => $input['monitoring_stage'], 'designation' => 'Editor'], ['reviewer_role' => 'research_editor', 'activity_date' => $input['activity_date'], 'activity' => $input['activity'], 'remarks' => $input['remarks'] ?? null, 'status' => $input['status'], 'signature_status' => $input['signature_status'], 'created_at' => now(), 'updated_at' => now()]);
         $activity->log($researchDocument, 'EDITOR_MONITORING_UPDATED', $actor, 'Editor monitoring entry updated.', null, $input['status'], $input['status']);
 

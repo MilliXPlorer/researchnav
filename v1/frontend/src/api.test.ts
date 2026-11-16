@@ -43,7 +43,9 @@ import {
   listInstructorStudents,
   markNotificationRead,
   normalizeNextPath,
+  requestResearchSupport,
   runTitleSimilarityCheck,
+  searchEligibleSupportAccounts,
   searchPublicResearch,
   searchPublicResearchBySimilarity,
   resubmitResearchRevision,
@@ -60,6 +62,7 @@ import {
   decideCompliance,
   getInstitutionalReport,
   listOfficeUsers,
+  listOfficeAuthorAccounts,
   listOfficeRepository,
   listRepositoryCatalog,
   updateOfficeUserAccess,
@@ -653,7 +656,21 @@ describe("office repository API", () => {
       degree_program: null,
       manuscript_date_label: null,
       sdgs: [],
-      authors: [{ id: 4, author_name: "Ada Researcher", author_order: 1 }],
+      authors: [
+        {
+          id: 4,
+          user_id: "author-4",
+          author_name: "Ada Researcher",
+          author_order: 1,
+          is_corresponding_author: true,
+          account: {
+            id: "author-4",
+            name: "Ada Researcher",
+            email: "ada@example.test",
+            is_available: true,
+          },
+        },
+      ],
       submitted_at: null,
       approved_at: null,
       archived_at: null,
@@ -704,7 +721,28 @@ describe("office repository API", () => {
       detail,
     );
     await expect(
-      updateOfficeRepository(12, { title: "Updated", sdg_ids: [4] }, fetchMock),
+      updateOfficeRepository(
+        12,
+        {
+          expected_updated_at: "2026-10-01T08:00:00.000Z",
+          title: "Updated",
+          sdg_ids: [4],
+          authors: [
+            {
+              id: 4,
+              user_id: "author-4",
+              author_name: "Ada Researcher",
+              is_corresponding_author: true,
+            },
+            {
+              user_id: null,
+              author_name: "Grace Hopper",
+              is_corresponding_author: false,
+            },
+          ],
+        },
+        fetchMock,
+      ),
     ).resolves.toEqual(detail);
     await expect(
       deleteOfficeRepository(12, fetchMock),
@@ -729,7 +767,24 @@ describe("office repository API", () => {
       {
         path: "/api/office/repository/12",
         method: "PATCH",
-        body: JSON.stringify({ title: "Updated", sdg_ids: [4] }),
+        body: JSON.stringify({
+          expected_updated_at: "2026-10-01T08:00:00.000Z",
+          title: "Updated",
+          sdg_ids: [4],
+          authors: [
+            {
+              id: 4,
+              user_id: "author-4",
+              author_name: "Ada Researcher",
+              is_corresponding_author: true,
+            },
+            {
+              user_id: null,
+              author_name: "Grace Hopper",
+              is_corresponding_author: false,
+            },
+          ],
+        }),
       },
       { path: "/api/office/repository/12", method: "DELETE", body: undefined },
       {
@@ -738,6 +793,105 @@ describe("office repository API", () => {
         body: JSON.stringify({}),
       },
     ]);
+  });
+
+  it("searches available author accounts with encoded input, cancellation, and envelope unwrapping", async () => {
+    const accounts = [
+      {
+        id: "author-4",
+        name: "Ada & Bob",
+        email: "ada@example.test",
+        is_available: true,
+      },
+    ];
+    const controller = new AbortController();
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ data: accounts })),
+    );
+
+    await expect(
+      listOfficeAuthorAccounts(" Ada & Bob ", fetchMock, controller.signal),
+    ).resolves.toEqual(accounts);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/office/author-accounts?search=Ada+%26+Bob",
+      expect.objectContaining({
+        credentials: "include",
+        signal: controller.signal,
+      }),
+    );
+  });
+});
+
+describe("support assignment API", () => {
+  it("searches research-scoped eligible accounts and sends the exact replacement request", async () => {
+    const accounts = [
+      {
+        id: "editor-2",
+        name: "Ada & Bob",
+        email: "ada@example.test",
+        role: "research_editor" as const,
+      },
+    ];
+    const assignment = {
+      id: 88,
+      research_document_id: 12,
+      research_title: "Support assignment study",
+      researchers: ["Researcher"],
+      user_id: "editor-2",
+      name: "Ada & Bob",
+      assignment_role: "research_editor" as const,
+      status: "requested" as const,
+      created_at: "2026-11-15T10:00:00.000Z",
+    };
+    const controller = new AbortController();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: accounts })))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: assignment })),
+      );
+
+    await expect(
+      searchEligibleSupportAccounts(
+        "12/3",
+        "research_editor",
+        " Ada & Bob ",
+        fetchMock,
+        controller.signal,
+      ),
+    ).resolves.toEqual(accounts);
+    await expect(
+      requestResearchSupport(
+        12,
+        "editor-2",
+        "research_editor",
+        true,
+        undefined,
+        fetchMock,
+      ),
+    ).resolves.toEqual(assignment);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/support-assignments/eligible?research_document_id=12%2F3&role=research_editor&search=Ada+%26+Bob",
+      expect.objectContaining({
+        credentials: "include",
+        signal: controller.signal,
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/research/12/support-assignments",
+      expect.objectContaining({
+        credentials: "include",
+        method: "POST",
+        body: JSON.stringify({
+          user_id: "editor-2",
+          assignment_role: "research_editor",
+          replace_current: true,
+        }),
+      }),
+    );
   });
 });
 
@@ -1468,8 +1622,9 @@ describe("similarity API", () => {
       checkContentUploadSimilarity([file], fetchMock),
     ).resolves.toEqual({
       matches: [],
-      extractedText: "CHAPTER 1\nManuscript text",
+      diagnostics: [],
       fileName: "draft.pdf",
+      extractedText: "CHAPTER 1\nManuscript text",
     });
 
     const [, init] = fetchMock.mock.calls[0];

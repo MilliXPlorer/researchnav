@@ -3,13 +3,15 @@
 namespace Tests\Feature;
 
 use App\Models\ManuscriptSearchDocument;
+use App\Models\DocumentFile;
 use App\Models\ResearchDocument;
 use App\Models\User;
 use App\Services\ManuscriptTextExtractionException;
 use App\Services\ManuscriptTextExtractor;
+use App\Services\ManuscriptSearchProjectionService;
+use App\Services\SimilarityProcessRunner;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 use Mockery;
 use Tests\TestCase;
@@ -25,8 +27,6 @@ class ContentUploadSimilarityTest extends TestCase
         parent::setUp();
         config()->set('researchnav.similarity.python_binary', PHP_BINARY);
         config()->set('researchnav.similarity.cli_path', base_path('tests/Fixtures/similarity_worker.php'));
-        config()->set('researchnav.similarity.upload_text_cache_ttl_seconds', 900);
-        Cache::flush();
         File::deleteDirectory($this->uploadRoot());
     }
 
@@ -52,6 +52,13 @@ class ContentUploadSimilarityTest extends TestCase
         ]);
     }
 
+    public function test_it_restricts_content_upload_to_authorized_roles(): void
+    {
+        $this->as(User::factory()->create(['role' => 'panel', 'access_status' => 'active']))
+            ->post('/api/similarity/content-upload', ['file' => $this->pdf()], $this->origin())
+            ->assertForbidden();
+    }
+
     public function test_it_extracts_and_compares_a_temporary_upload_without_persisting_it(): void
     {
         $extractor = Mockery::mock(ManuscriptTextExtractor::class);
@@ -59,16 +66,17 @@ class ContentUploadSimilarityTest extends TestCase
             return File::exists($path)
                 && str_ends_with(str_replace('\\', '/', $path), '/upload-0.pdf')
                 && str_contains(str_replace('\\', '/', $path), '/storage/app/private/similarity-content-upload/');
-        })->andReturn('machine learning student performance prediction');
+        })->andReturn("CHAPTER 1\nmachine learning student performance prediction");
         $this->app->instance(ManuscriptTextExtractor::class, $extractor);
 
         $this->as($this->researcher())->post('/api/similarity/content-upload', [
             'file' => $this->pdf(),
-        ], $this->origin())->assertOk()->assertExactJson([
-            'data' => [],
-            'extracted_text' => 'machine learning student performance prediction',
-            'file_name' => 'manuscript.pdf',
-        ]);
+        ], $this->origin())->assertOk()
+            ->assertJsonPath('contract_version', 'content-upload.v2')
+            ->assertJsonPath('data', [])
+            ->assertJsonPath('file_name', 'manuscript.pdf')
+            ->assertJsonPath('file_diagnostics.0.status', 'included')
+            ->assertJsonPath('extracted_text', "CHAPTER 1\nmachine learning student performance prediction");
 
         $this->assertSame([], File::directories($this->uploadRoot()));
         $this->assertDatabaseCount('similarity_results', 0);
@@ -87,15 +95,106 @@ class ContentUploadSimilarityTest extends TestCase
             'file' => $this->pdf(),
         ], $this->origin());
 
-        $response->assertOk()->assertJsonPath('extracted_text', $raw);
+        $response->assertOk()
+            ->assertJsonPath('file_diagnostics.0.text_length', strlen($raw))
+            ->assertJsonPath('file_diagnostics.0.detected_chapters.0', 1)
+            ->assertJsonPath('extracted_text', $raw);
+    }
+
+    public function test_it_reserves_one_hundred_percent_for_exact_extracted_upload_text(): void
+    {
+        config()->set('researchnav.similarity.python_binary', 'python');
+        config()->set('researchnav.similarity.cli_path', app_path('Services/similarity/cli.py'));
+        $exactText = "CHAPTER 1\nExact extracted manuscript body";
+        $extractor = Mockery::mock(ManuscriptTextExtractor::class);
+        $extractor->shouldReceive('extractRaw')->once()->andReturn($exactText);
+        $this->app->instance(ManuscriptTextExtractor::class, $extractor);
+
+        $exact = $this->publicCandidate();
+        $this->trustedProjection($exact, $exactText);
+
+        $response = $this->as($this->researcher())->post('/api/similarity/content-upload', [
+            'file' => $this->pdf(),
+        ], $this->origin());
+
+        $response->assertOk()
+            ->assertJsonPath('data.0.id', $exact->id)
+            ->assertJsonPath('data.0.content_similarity_score', '1.000000000000')
+            ->assertJsonPath('data.0.content_similarity_percentage', '100.000000000000');
+    }
+
+    public function test_it_uses_current_exact_repository_file_when_the_ready_projection_points_to_a_cover(): void
+    {
+        config()->set('researchnav.similarity.python_binary', 'python');
+        config()->set('researchnav.similarity.cli_path', base_path('app/Services/similarity/cli.py'));
+        $research = $this->publicCandidate();
+        $contentHash = hash('sha256', 'content pdf bytes');
+        $coverHash = hash('sha256', 'cover pdf bytes');
+        $content = DocumentFile::query()->create([
+            'research_document_id' => $research->id,
+            'uploaded_by' => $research->submitted_by,
+            'uploaded_at' => now(),
+            'original_filename' => 'content.pdf',
+            'stored_filename' => 'content.pdf',
+            'file_path' => 'research/'.$research->id.'/content.pdf',
+            'file_extension' => 'pdf',
+            'mime_type' => 'application/pdf',
+            'file_size' => 100,
+            'document_type' => 'final_manuscript',
+            'version_number' => 2,
+            'is_current' => true,
+            'file_order' => 1,
+            'content_sha256' => $contentHash,
+        ]);
+        $cover = DocumentFile::query()->create([
+            'research_document_id' => $research->id,
+            'uploaded_by' => $research->submitted_by,
+            'uploaded_at' => now(),
+            'original_filename' => 'cover.pdf',
+            'stored_filename' => 'cover.pdf',
+            'file_path' => 'research/'.$research->id.'/cover.pdf',
+            'file_extension' => 'pdf',
+            'mime_type' => 'application/pdf',
+            'file_size' => 100,
+            'document_type' => 'final_manuscript',
+            'version_number' => 1,
+            'is_current' => true,
+            'file_order' => 2,
+            'content_sha256' => $coverHash,
+        ]);
+        $research->manuscriptSearchDocument()->create([
+            'source_document_file_id' => $cover->id,
+            'source_kind' => 'final_manuscript',
+            'source_extension' => 'pdf',
+            'source_sha256' => $coverHash,
+            'source_size_bytes' => 100,
+            'body_text' => 'Cover text only',
+            'body_text_bytes' => 15,
+            'body_text_chars' => 15,
+            'extraction_status' => 'ready',
+            'extractor_version' => config('researchnav.manuscript_search.extractor_version'),
+        ]);
+        $this->mock(ManuscriptSearchProjectionService::class)
+            ->shouldReceive('hasCurrentSourceHash')->once()->with(Mockery::type(ResearchDocument::class), [$contentHash])->andReturnTrue()
+            ->shouldReceive('isCurrentReadyProjection')->once()->andReturnFalse()
+            ->shouldReceive('currentCanonicalText')->once()->andReturn("CHAPTER 1\nExact manuscript body");
+
+        $results = app(SimilarityProcessRunner::class)->runUploadedContentQuery(
+            "CHAPTER 1\nExact manuscript body",
+            collect([$research->load(['files', 'manuscriptSearchDocument'])]),
+            [$contentHash],
+        );
+
+        $this->assertSame('1.000000000000', $results[0]['content_similarity_score']);
+        $this->assertSame($content->id, $research->files->firstWhere('content_sha256', $contentHash)->id);
     }
 
     public function test_it_orders_and_combines_a_folder_of_pdf_parts(): void
     {
         $extractor = Mockery::mock(ManuscriptTextExtractor::class);
         $extractor->shouldReceive('extractRaw')->twice()->andReturn(
-            'Cover page',
             "CHAPTER 1\nBody text",
+            'Cover page',
         );
         $this->app->instance(ManuscriptTextExtractor::class, $extractor);
 
@@ -109,7 +208,10 @@ class ContentUploadSimilarityTest extends TestCase
 
         $response->assertOk()
             ->assertJsonPath('file_name', '2 PDF files')
-            ->assertJsonPath('extracted_text', "Cover page\n\nCHAPTER 1\nBody text");
+            ->assertJsonPath('file_diagnostics.0.status', 'included')
+            ->assertJsonPath('file_diagnostics.1.status', 'excluded')
+            ->assertJsonPath('file_diagnostics.1.reason', 'supporting_document')
+            ->assertJsonPath('extracted_text', "CHAPTER 1\nBody text");
     }
 
     public function test_it_returns_a_sanitized_error_and_cleans_up_an_unreadable_upload(): void
@@ -129,11 +231,11 @@ class ContentUploadSimilarityTest extends TestCase
         $this->assertSame([], File::directories($this->uploadRoot()));
     }
 
-    public function test_it_reuses_extracted_text_for_identical_upload_bytes(): void
+    public function test_it_does_not_retain_extracted_text_between_requests(): void
     {
         $extractor = Mockery::mock(ManuscriptTextExtractor::class);
-        $extractor->shouldReceive('extractRaw')->once()
-            ->andReturn('machine learning student performance prediction');
+        $extractor->shouldReceive('extractRaw')->twice()
+            ->andReturn("CHAPTER 1\nmachine learning student performance prediction");
         $this->app->instance(ManuscriptTextExtractor::class, $extractor);
         $user = $this->researcher();
 
@@ -151,7 +253,7 @@ class ContentUploadSimilarityTest extends TestCase
     {
         $extractor = Mockery::mock(ManuscriptTextExtractor::class);
         $extractor->shouldReceive('extractRaw')->twice()
-            ->andReturn('first extracted manuscript', 'second extracted manuscript');
+            ->andReturn("CHAPTER 1\nfirst extracted manuscript", "CHAPTER 1\nsecond extracted manuscript");
         $this->app->instance(ManuscriptTextExtractor::class, $extractor);
         $user = $this->researcher();
 
@@ -169,7 +271,7 @@ class ContentUploadSimilarityTest extends TestCase
         $extractor->shouldReceive('extractRaw')->once()->andThrow(
             new ManuscriptTextExtractionException('temporary parser failure'),
         );
-        $extractor->shouldReceive('extractRaw')->once()->andReturn('successful retry text');
+        $extractor->shouldReceive('extractRaw')->once()->andReturn("CHAPTER 1\nsuccessful retry text");
         $this->app->instance(ManuscriptTextExtractor::class, $extractor);
         $user = $this->researcher();
 
@@ -179,6 +281,119 @@ class ContentUploadSimilarityTest extends TestCase
         $this->as($user)->post('/api/similarity/content-upload', [
             'file' => $this->pdf(),
         ], $this->origin())->assertOk();
+    }
+
+    public function test_it_processes_later_chapter_one_and_skips_an_unreadable_sibling(): void
+    {
+        $extractor = Mockery::mock(ManuscriptTextExtractor::class);
+        $extractor->shouldReceive('extractRaw')->once()->andReturn("CHAPTER 2\nSecond chapter body");
+        $extractor->shouldReceive('extractRaw')->once()->andThrow(new ManuscriptTextExtractionException('corrupt pdf'));
+        $extractor->shouldReceive('extractRaw')->once()->andReturn("CHAPTER I\nFirst chapter body");
+        $this->app->instance(ManuscriptTextExtractor::class, $extractor);
+
+        $response = $this->as($this->researcher())->post('/api/similarity/content-upload', [
+            'mode' => 'folder',
+            'files' => [
+                UploadedFile::fake()->createWithContent('chapter-2.pdf', '%PDF-two'),
+                UploadedFile::fake()->createWithContent('minutes.pdf', '%PDF-bad'),
+                UploadedFile::fake()->createWithContent('chapter-1.pdf', '%PDF-one'),
+            ],
+        ], $this->origin());
+
+        $response->assertOk()
+            ->assertJsonPath('file_diagnostics.0.detected_chapters.0', 2)
+            ->assertJsonPath('file_diagnostics.1.status', 'error')
+            ->assertJsonPath('file_diagnostics.1.reason', 'extraction_failed')
+            ->assertJsonPath('file_diagnostics.2.detected_chapters.0', 1);
+    }
+
+    public function test_it_excludes_duplicate_chapter_files_when_a_full_manuscript_exists(): void
+    {
+        $extractor = Mockery::mock(ManuscriptTextExtractor::class);
+        $extractor->shouldReceive('extractRaw')->twice()->andReturn(
+            "CHAPTER 1\nFull first\nCHAPTER 2\nFull second",
+            "CHAPTER 1\nSeparate first",
+        );
+        $this->app->instance(ManuscriptTextExtractor::class, $extractor);
+
+        $response = $this->as($this->researcher())->post('/api/similarity/content-upload', [
+            'mode' => 'folder',
+            'files' => [
+                UploadedFile::fake()->createWithContent('full.pdf', '%PDF-full'),
+                UploadedFile::fake()->createWithContent('chapter-1.pdf', '%PDF-chapter'),
+            ],
+        ], $this->origin());
+
+        $response->assertOk()
+            ->assertJsonPath('file_diagnostics.0.status', 'included')
+            ->assertJsonPath('file_diagnostics.1.status', 'excluded')
+            ->assertJsonPath('file_diagnostics.1.reason', 'covered_by_canonical_manuscript');
+    }
+
+    public function test_it_appends_a_separate_later_chapter_not_covered_by_the_primary_manuscript(): void
+    {
+        $extractor = Mockery::mock(ManuscriptTextExtractor::class);
+        $extractor->shouldReceive('extractRaw')->twice()->andReturn(
+            "CHAPTER 1\nIntroduction\nCHAPTER 2\nMethods",
+            "CHAPTER 3\nResults",
+        );
+        $this->app->instance(ManuscriptTextExtractor::class, $extractor);
+
+        $response = $this->as($this->researcher())->post('/api/similarity/content-upload', [
+            'mode' => 'folder',
+            'files' => [
+                UploadedFile::fake()->createWithContent('chapters-1-2.pdf', '%PDF-primary'),
+                UploadedFile::fake()->createWithContent('chapter-3.pdf', '%PDF-later'),
+            ],
+        ], $this->origin());
+
+        $response->assertOk()
+            ->assertJsonPath('file_diagnostics.0.status', 'included')
+            ->assertJsonPath('file_diagnostics.1.status', 'included')
+            ->assertJsonPath('extracted_text', "CHAPTER 1\nIntroduction\nCHAPTER 2\nMethods\n\nCHAPTER 3\nResults");
+    }
+
+    public function test_it_detects_chapters_after_five_without_truncating_the_manuscript(): void
+    {
+        $text = "CHAPTER I\nIntroduction\nCHAPTER V\nFindings\nCHAPTER VI\nAppendix analysis";
+        $extractor = Mockery::mock(ManuscriptTextExtractor::class);
+        $extractor->shouldReceive('extractRaw')->once()->andReturn($text);
+        $this->app->instance(ManuscriptTextExtractor::class, $extractor);
+
+        $this->as($this->researcher())->post('/api/similarity/content-upload', [
+            'file' => $this->pdf(),
+        ], $this->origin())->assertOk()
+            ->assertJsonPath('file_diagnostics.0.detected_chapters', [1, 5, 6])
+            ->assertJsonPath('extracted_text', $text);
+    }
+
+    public function test_it_accepts_centered_title_case_chapter_headings_like_vsr(): void
+    {
+        $this->mock(ManuscriptTextExtractor::class)->shouldReceive('extractRaw')->once()->andReturn(
+            "Front matter\nChapter 1\nIntroduction\n                                Chapter 2\nReview\n"
+            ."                               Chapter 3\nMethods\n                               Chapter 4\nCost\n"
+            ."                               Chapter 5\nResults",
+        );
+
+        $response = $this->as($this->researcher())->post('/api/similarity/content-upload', [
+            'file' => $this->pdf(),
+        ], $this->origin());
+
+        $response->assertOk()->assertJsonPath('file_diagnostics.0.detected_chapters', [1, 2, 3, 4, 5]);
+    }
+
+    public function test_it_accepts_tsapter_headings_for_filipino_manuscripts(): void
+    {
+        $this->mock(ManuscriptTextExtractor::class)->shouldReceive('extractRaw')->once()->andReturn(
+            "TALAAN NG NILALAMAN\nTSAPTER I\nPanimula\nTSAPTER II\nKaugnay na Literatura\n"
+            ."TSAPTER III\nPamamaraan\nTSAPTER IV\nResulta at Talakayan\nTSAPTER V\nKonklusyon",
+        );
+
+        $response = $this->as($this->researcher())->post('/api/similarity/content-upload', [
+            'file' => $this->pdf(),
+        ], $this->origin());
+
+        $response->assertOk()->assertJsonPath('file_diagnostics.0.detected_chapters', [1, 2, 3, 4, 5]);
     }
 
     public function test_it_rejects_unsupported_and_unexpected_fields(): void
@@ -233,12 +448,14 @@ class ContentUploadSimilarityTest extends TestCase
 
         $response->assertOk()->assertJsonCount(10, 'data');
         $ids = collect($response->json('data'))->pluck('id')->map(fn ($id): int => (int) $id)->all();
-        $this->assertSame($eligible->pluck('id')->sort()->values()->all(), $ids);
-        $this->assertNotContains($outsideTopTen->id, $ids);
+        $this->assertSame($outsideTopTen->id, $ids[0]);
+        $this->assertCount(9, array_intersect($eligible->pluck('id')->all(), $ids));
         $this->assertNotContains($noScope->id, $ids);
         $this->assertNotContains($private->id, $ids);
         $this->assertNotContains($stale->id, $ids);
-        $this->assertSame('1.000000000000', $response->json('data.0.content_similarity_score'));
+        $scores = collect($response->json('data'))->pluck('content_similarity_score')->map(fn (string $score): float => (float) $score)->all();
+        $this->assertSame($scores, collect($scores)->sortDesc()->values()->all());
+        $this->assertLessThan(1, $scores[0]);
         $this->assertNull($response->json('data.0.fasttext_support_score'));
     }
 
@@ -280,7 +497,7 @@ class ContentUploadSimilarityTest extends TestCase
         config()->set('researchnav.similarity.cli_path', app_path('Services/similarity/cli.py'));
         config()->set('researchnav.similarity.fasttext_model_path', '');
         $extractor = Mockery::mock(ManuscriptTextExtractor::class);
-        $extractor->shouldReceive('extractRaw')->once()->andReturn("CHAPTER 1\nShared body");
+        $extractor->shouldReceive('extractRaw')->twice()->andReturn("CHAPTER 1\nShared body");
         $this->app->instance(ManuscriptTextExtractor::class, $extractor);
 
         $invalid = $this->publicCandidate();

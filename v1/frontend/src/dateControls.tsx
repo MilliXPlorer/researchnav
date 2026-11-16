@@ -1,6 +1,6 @@
 import { philippineYear } from "./dateTime";
 import { useId } from "react";
-import type { ComponentProps, KeyboardEvent } from "react";
+import type { ComponentProps, FocusEvent, MouseEvent } from "react";
 
 type DatePickerInputProps = Omit<
   ComponentProps<"input">,
@@ -15,24 +15,31 @@ const years = Array.from({ length: currentYear - 1901 + 1 }, (_, index) =>
 );
 const rangeYears = years.slice(0, 9);
 
-function preventDateTyping(event: KeyboardEvent<HTMLInputElement>) {
-  if (
-    event.key.length === 1 &&
-    !event.altKey &&
-    !event.ctrlKey &&
-    !event.metaKey
+export function DatePickerInput({ type, ...props }: DatePickerInputProps) {
+  function openPicker(
+    event: MouseEvent<HTMLInputElement> | FocusEvent<HTMLInputElement>,
   ) {
-    event.preventDefault();
+    const input = event.currentTarget;
+    if (typeof input.showPicker !== "function") return;
+    try {
+      input.showPicker();
+    } catch {
+      // Browsers may reject programmatic opening outside a user gesture.
+    }
   }
-}
 
-export function DatePickerInput(props: DatePickerInputProps) {
   return (
     <input
       {...props}
-      onKeyDown={preventDateTyping}
-      onPaste={(event) => event.preventDefault()}
-      onDrop={(event) => event.preventDefault()}
+      type={type}
+      onClick={(event) => {
+        props.onClick?.(event);
+        if (!event.defaultPrevented) openPicker(event);
+      }}
+      onFocus={(event) => {
+        props.onFocus?.(event);
+        if (!event.defaultPrevented) openPicker(event);
+      }}
     />
   );
 }

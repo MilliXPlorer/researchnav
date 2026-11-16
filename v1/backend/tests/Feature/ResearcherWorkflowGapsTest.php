@@ -106,12 +106,17 @@ class ResearcherWorkflowGapsTest extends TestCase
             'assignment_role' => 'research_editor',
         ], $this->origin())->assertCreated()->json('data');
 
-        ReviewAssignment::query()->findOrFail($first['id'])->update(['status' => 'accepted', 'is_active' => true]);
+        ReviewAssignment::query()->findOrFail($first['id'])->update([
+            'status' => 'accepted',
+            'is_active' => true,
+            'support_pending_slot' => null,
+        ]);
 
         $this->as($owner)->postJson('/api/research/'.$research->id.'/support-assignments', [
             'user_id' => $editorB->id,
             'assignment_role' => 'research_editor',
             'replace_current' => true,
+            'expected_current_assignment_id' => $first['id'],
         ], $this->origin())->assertCreated()
             ->assertJsonPath('data.user_id', $editorB->id)
             ->assertJsonPath('data.status', 'requested');
@@ -119,14 +124,23 @@ class ResearcherWorkflowGapsTest extends TestCase
         $this->assertDatabaseHas('research_review_assignments', [
             'id' => $first['id'],
             'reviewer_id' => $editorA->id,
-            'status' => 'replaced',
-            'is_active' => false,
+            'status' => 'accepted',
+            'is_active' => true,
         ]);
         $this->assertDatabaseHas('research_review_assignments', [
             'research_document_id' => $research->id,
             'reviewer_id' => $editorB->id,
             'review_role' => 'research_editor',
             'status' => 'requested',
+        ]);
+
+        $pending = ReviewAssignment::query()->where('research_document_id', $research->id)->where('reviewer_id', $editorB->id)->firstOrFail();
+        $this->as($editorB)->patchJson('/api/support-assignments/'.$pending->id.'/respond', ['decision' => 'accept'], $this->origin())->assertOk();
+
+        $this->assertDatabaseHas('research_review_assignments', [
+            'id' => $first['id'],
+            'status' => 'replaced',
+            'is_active' => false,
         ]);
     }
 

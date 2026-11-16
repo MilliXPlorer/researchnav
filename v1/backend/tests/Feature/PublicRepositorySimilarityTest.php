@@ -5,11 +5,13 @@ namespace Tests\Feature;
 use App\Models\Category;
 use App\Models\DocumentFile;
 use App\Models\ManuscriptSearchDocument;
+use App\Models\ResearchAuthor;
 use App\Models\ResearchDocument;
 use App\Models\User;
 use App\Services\SimilarityProcessRunner;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class PublicRepositorySimilarityTest extends TestCase
@@ -20,8 +22,9 @@ class PublicRepositorySimilarityTest extends TestCase
     {
         config()->set('researchnav.similarity.fasttext_model_path', '');
         config()->set('researchnav.similarity.python_binary', 'python');
+        Storage::fake('researchnav_private');
         $exact = $this->archivedPublic('Climate Water');
-        DocumentFile::query()->create([
+        $file = DocumentFile::query()->create([
             'research_document_id' => $exact->id,
             'uploaded_by' => $exact->submitted_by,
             'document_type' => 'final_manuscript',
@@ -35,6 +38,7 @@ class PublicRepositorySimilarityTest extends TestCase
             'is_current' => true,
             'uploaded_at' => now(),
         ]);
+        Storage::disk('researchnav_private')->put($file->file_path, '%PDF-1.4 climate manuscript');
         $bodyText = str_repeat('unrelated manuscript vocabulary ', 500);
         ManuscriptSearchDocument::query()->create([
             'research_document_id' => $exact->id,
@@ -128,6 +132,57 @@ class PublicRepositorySimilarityTest extends TestCase
         $this->assertSame('0.000000000000', $response->json('data.0.title_similarity_score'));
         $this->assertGreaterThan(0, (float) $response->json('data.0.query_content_similarity_score'));
         $this->assertSame('0.700000000000', $response->json('data.0.content_weight'));
+    }
+
+    public function test_query_returns_matches_found_only_in_author_names(): void
+    {
+        config()->set('researchnav.similarity.fasttext_model_path', '');
+        config()->set('researchnav.similarity.python_binary', 'python');
+        $authorMatch = $this->archivedPublic('Coastal Mapping');
+        ResearchAuthor::factory()->create([
+            'research_document_id' => $authorMatch->id,
+            'author_name' => 'Ada Rivera',
+        ]);
+        $this->archivedPublic('Unrelated Archive');
+
+        $response = $this->postJson('/api/repository/similarity', ['q' => 'Rivera']);
+
+        $response->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $authorMatch->id)
+            ->assertJsonPath('data.0.matched_terms', ['rivera']);
+        $this->assertGreaterThan(0, (float) $response->json('data.0.title_similarity_score'));
+    }
+
+    public function test_metadata_matches_exclude_incidental_manuscript_only_matches(): void
+    {
+        config()->set('researchnav.similarity.fasttext_model_path', '');
+        config()->set('researchnav.similarity.python_binary', 'python');
+        $authorMatch = $this->archivedPublic('Career Platform');
+        ResearchAuthor::factory()->create([
+            'research_document_id' => $authorMatch->id,
+            'author_name' => 'Christopher Casipong',
+        ]);
+        $contentMatch = $this->archivedPublic('Unrelated Monitoring System');
+        $bodyText = 'Casipong appears only in the manuscript body.';
+        ManuscriptSearchDocument::query()->create([
+            'research_document_id' => $contentMatch->id,
+            'body_text' => $bodyText,
+            'body_text_bytes' => strlen($bodyText),
+            'body_text_chars' => mb_strlen($bodyText),
+            'extraction_status' => 'ready',
+            'source_sha256' => str_repeat('c', 64),
+            'extractor_version' => config('researchnav.manuscript_search.extractor_version'),
+        ]);
+
+        $response = $this->postJson('/api/repository/similarity', ['q' => 'casipong']);
+
+        $response->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $authorMatch->id)
+            ->assertJsonPath('data.0.matched_terms', ['casipong'])
+            ->assertJsonMissing(['id' => $contentMatch->id]);
+        $this->assertGreaterThan(0, (float) $response->json('data.0.title_similarity_score'));
     }
 
     public function test_query_treats_malformed_or_stale_ready_projection_provenance_as_unavailable(): void

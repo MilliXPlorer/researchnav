@@ -8,6 +8,7 @@ use App\Models\ResearchAuthor;
 use App\Models\ResearchDocument;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class PublicRepositoryTest extends TestCase
@@ -226,9 +227,10 @@ class PublicRepositoryTest extends TestCase
 
     public function test_index_reports_a_current_final_manuscript_as_downloadable(): void
     {
+        Storage::fake('researchnav_private');
         $category = $this->category('Files');
         $document = $this->document($category, ['title' => 'Available manuscript']);
-        DocumentFile::query()->create([
+        $file = DocumentFile::query()->create([
             'research_document_id' => $document->id,
             'uploaded_by' => $document->submitted_by,
             'document_type' => 'final_manuscript',
@@ -242,10 +244,36 @@ class PublicRepositoryTest extends TestCase
             'is_current' => true,
             'uploaded_at' => now(),
         ]);
+        Storage::disk('researchnav_private')->put($file->file_path, '%PDF-1.4 available manuscript');
 
         $this->getJson('/api/repository')
             ->assertOk()
             ->assertJsonPath('data.0.has_downloadable_manuscript', true);
+    }
+
+    public function test_index_does_not_advertise_a_missing_private_manuscript(): void
+    {
+        Storage::fake('researchnav_private');
+        $category = $this->category('Missing files');
+        $document = $this->document($category, ['title' => 'Missing manuscript']);
+        DocumentFile::query()->create([
+            'research_document_id' => $document->id,
+            'uploaded_by' => $document->submitted_by,
+            'document_type' => 'final_manuscript',
+            'version_number' => 1,
+            'original_filename' => 'missing.pdf',
+            'stored_filename' => 'missing.pdf',
+            'file_path' => 'research/'.$document->id.'/missing.pdf',
+            'file_extension' => 'pdf',
+            'mime_type' => 'application/pdf',
+            'file_size' => 100,
+            'is_current' => true,
+            'uploaded_at' => now(),
+        ]);
+
+        $this->getJson('/api/repository')
+            ->assertOk()
+            ->assertJsonPath('data.0.has_downloadable_manuscript', false);
     }
 
     public function test_show_returns_not_found_for_non_public_or_deleted_documents(): void

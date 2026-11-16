@@ -26,11 +26,6 @@ const record: ResearchRecord = {
 
 describe("LandingPage", () => {
   it("activates the About, Contact, and Data privacy footer controls", () => {
-    const aboutScroll = vi.fn();
-    const originalScrollIntoView = Element.prototype.scrollIntoView;
-    Element.prototype.scrollIntoView = function (options) {
-      if ((this as HTMLElement).id === "about") aboutScroll(options);
-    };
     render(
       <LandingPage
         onSignIn={vi.fn()}
@@ -42,11 +37,50 @@ describe("LandingPage", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "About" }));
-    expect(aboutScroll).toHaveBeenCalledWith({
-      behavior: "smooth",
-      block: "start",
+    const aboutTrigger = screen.getByRole("button", { name: "About" });
+    aboutTrigger.focus();
+    fireEvent.click(aboutTrigger);
+    const aboutDialog = screen.getByRole("dialog", {
+      name: "About ResearchNAV",
     });
+    expect(
+      within(aboutDialog).getByRole("heading", {
+        name: "Built for better research management",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(aboutDialog).getByText(
+        "Organizing research. Connecting knowledge.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(aboutDialog).getByText(
+        /do not independently determine plagiarism/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(aboutDialog).getByText(
+        /brings institutional research into one centralized platform/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(aboutDialog).getByRole("heading", {
+        name: "Similarity technology",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(aboutDialog).getByLabelText("Similarity technologies"),
+    ).toHaveTextContent("TF-IDF Cosine Similarity FastText");
+    expect(document.body).toHaveStyle({ overflow: "hidden" });
+    fireEvent.click(
+      within(aboutDialog).getByRole("button", {
+        name: "Close About ResearchNAV",
+      }),
+    );
+    expect(
+      screen.queryByRole("dialog", { name: "About ResearchNAV" }),
+    ).not.toBeInTheDocument();
+    expect(aboutTrigger).toHaveFocus();
     fireEvent.click(screen.getByRole("button", { name: "Data privacy" }));
     expect(window.location.hash).toBe("#privacy");
     expect(
@@ -60,9 +94,34 @@ describe("LandingPage", () => {
       screen.getByRole("dialog", { name: "Contact Research Office" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("link", { name: "researchnav123123@gmail.com" }),
-    ).toHaveAttribute("href", "mailto:researchnav123123@gmail.com");
-    Element.prototype.scrollIntoView = originalScrollIntoView;
+      screen.getByRole("link", { name: "researchnavph@gmail.com" }),
+    ).toHaveAttribute("href", "mailto:researchnavph@gmail.com");
+  });
+
+  it("closes the About modal with Escape and restores its trigger", async () => {
+    render(
+      <LandingPage
+        onSignIn={vi.fn()}
+        session={null}
+        onSessionChange={vi.fn()}
+        onLogout={vi.fn()}
+        navigate={vi.fn()}
+        records={[]}
+      />,
+    );
+
+    const trigger = screen.getByRole("button", { name: "About" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole("dialog", { name: "About ResearchNAV" });
+    fireEvent.keyDown(dialog, { key: "Escape" });
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "About ResearchNAV" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(trigger).toHaveFocus();
   });
 
   it("opens the selected study metadata without navigating to search", async () => {
@@ -85,6 +144,7 @@ describe("LandingPage", () => {
                 abstract: record.abstract,
                 keywords: record.keywords,
                 research_stage: "completed",
+                has_downloadable_manuscript: true,
                 sdgs: [],
               },
             }),
@@ -115,6 +175,10 @@ describe("LandingPage", () => {
       ),
     );
     expect(navigate).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "View files" }));
+    expect(
+      screen.getByRole("dialog", { name: "Sign In Required" }),
+    ).toBeInTheDocument();
   });
 
   it("shows public records by Study ID ascending", () => {

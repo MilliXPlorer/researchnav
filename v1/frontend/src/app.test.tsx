@@ -490,6 +490,16 @@ describe("role workspaces", () => {
     expect(
       within(navigation).getByRole("button", { name: "Content Checker" }),
     ).toBeInTheDocument();
+    expect(
+      within(navigation)
+        .getByRole("button", { name: "Title Checker" })
+        .querySelector("svg"),
+    ).toBeInTheDocument();
+    expect(
+      within(navigation)
+        .getByRole("button", { name: "Content Checker" })
+        .querySelector("svg"),
+    ).toBeInTheDocument();
 
     fireEvent.click(
       within(navigation).getByRole("button", { name: "Content Checker" }),
@@ -763,7 +773,10 @@ describe("role workspaces", () => {
         screen.queryByRole("heading", { level: 2, name: sectionHeading }),
       ).not.toBeInTheDocument();
       expect(
-        screen.getByRole("heading", { level: 2, name: "Statistics" }),
+        screen.getByRole("heading", {
+          level: 2,
+          name: role === "admin" ? "Repository overview" : "Statistics",
+        }),
       ).toBeInTheDocument();
       const workloadMeter = screen.queryByRole("meter", {
         name: sectionHeading,
@@ -781,9 +794,197 @@ describe("role workspaces", () => {
     },
   );
 
-  it("excludes non-research totals from the workload graph", () => {
-    const dashboard = dashboardFor("panel", "assigned_manuscripts");
+  it("groups administrator statistics and analytics by operational meaning", () => {
+    const sectionTotals = {
+      pending_accounts: 3,
+      draft_research: 4,
+      submission_queue: 5,
+      revision_required: 6,
+      pending_title_validations: 7,
+      flagged_similarity: 8,
+      approved_for_archiving: 9,
+      archived_repository: 10,
+      recent_research: 11,
+    };
+    const dashboard = dashboardFor("admin", "submission_queue");
+    const { container } = render(
+      <RoleWorkspace
+        {...readyProps("admin", "submission_queue")}
+        dashboardState={{
+          scope: dashboardScopeFor("admin"),
+          status: "ready",
+          dashboard: {
+            ...dashboard,
+            sections: Object.entries(sectionTotals).map(([key, total]) => ({
+              key,
+              state: "ready" as const,
+              total,
+              reason: null,
+              items: [],
+            })),
+            analytics: {
+              title: "Research activity",
+              period: "Last 6 months",
+              series: [
+                {
+                  key: "created",
+                  label: "Created",
+                  points: [
+                    { key: "2026-09", label: "Sep", value: 2 },
+                    { key: "2026-10", label: "Oct", value: 7 },
+                  ],
+                },
+                {
+                  key: "archived",
+                  label: "Archived",
+                  points: [
+                    { key: "2026-09", label: "Sep", value: 1 },
+                    { key: "2026-10", label: "Oct", value: 3 },
+                  ],
+                },
+              ],
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(
+      container.querySelector(".admin-dashboard-workspace"),
+    ).not.toBeNull();
+    expect(screen.getByText("Full system access")).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "Needs attention" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "Repository overview" }),
+    ).toBeInTheDocument();
+    expect(
+      container.querySelectorAll(
+        ".admin-dashboard-statistics-attention .dashboard-stat-card",
+      ),
+    ).toHaveLength(6);
+    expect(
+      container.querySelectorAll(
+        ".admin-dashboard-statistics-repository .dashboard-stat-card",
+      ),
+    ).toHaveLength(3);
+    expect(
+      screen.getByRole("heading", { name: "Current workload" }),
+    ).toBeInTheDocument();
+    expect(container.querySelectorAll(".dashboard-chart-row")).toHaveLength(6);
+    expect(
+      screen.queryByRole("meter", { name: "Archived repository" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("meter", { name: "Recent research" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("img", { name: "Research activity, Last 6 months" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("18 total activity"),
+    ).not.toBeInTheDocument();
+    expect(
+      container.querySelector(
+        ".admin-dashboard-visualizations .dashboard-analytics",
+      ),
+    ).not.toBeNull();
+  });
+
+  it("renders close monthly activity values as separate zero-based bars", () => {
+    const dashboard = dashboardFor("admin", "submission_queue");
+    const { container } = render(
+      <RoleWorkspace
+        {...readyProps("admin", "submission_queue")}
+        dashboardState={{
+          scope: dashboardScopeFor("admin"),
+          status: "ready",
+          dashboard: {
+            ...dashboard,
+            analytics: {
+              title: "Research activity",
+              period: "Last 6 months",
+              series: [
+                {
+                  key: "created",
+                  label: "Created",
+                  points: [
+                    { key: "2026-08", label: "Aug", value: 0 },
+                    { key: "2026-09", label: "Sep", value: 509 },
+                  ],
+                },
+                {
+                  key: "archived",
+                  label: "Archived",
+                  points: [
+                    { key: "2026-08", label: "Aug", value: 0 },
+                    { key: "2026-09", label: "Sep", value: 512 },
+                  ],
+                },
+              ],
+            },
+          },
+        }}
+      />,
+    );
+
+    const septemberBars = container.querySelectorAll(
+      '.analytics-bar[data-month="2026-09"]',
+    );
+    const augustBars = container.querySelectorAll(
+      '.analytics-bar[data-month="2026-08"]',
+    );
+    expect(septemberBars).toHaveLength(2);
+    expect(septemberBars[0]).toHaveAttribute("data-value", "509");
+    expect(septemberBars[1]).toHaveAttribute("data-value", "512");
+    expect(septemberBars[0].getAttribute("x")).not.toBe(
+      septemberBars[1].getAttribute("x"),
+    );
+    expect(augustBars).toHaveLength(2);
+    augustBars.forEach((bar) => {
+      expect(bar).toHaveAttribute("height", "0");
+      expect(bar).toHaveAttribute("y", "228");
+    });
+    const septemberGroup = screen.getByRole("group", {
+      name: "Sep, Created: 509, Archived: 512",
+    });
+    expect(septemberGroup).toHaveAttribute("tabindex", "0");
+    fireEvent.focus(septemberGroup);
+    expect(screen.getByRole("tooltip")).toHaveTextContent(
+      "SepCreated: 509Archived: 512",
+    );
+    expect(septemberGroup).toHaveAttribute(
+      "aria-describedby",
+      "dashboard-activity-tooltip",
+    );
+    fireEvent.blur(septemberGroup);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    expect(container.querySelector(".analytics-area")).toBeNull();
+    expect(container.querySelector(".analytics-line")).toBeNull();
+  });
+
+  it("does not render research activity when monthly analytics are missing", () => {
+    const dashboard = dashboardFor("admin", "submission_queue");
     render(
+      <RoleWorkspace
+        {...readyProps("admin", "submission_queue")}
+        dashboardState={{
+          scope: dashboardScopeFor("admin"),
+          status: "ready",
+          dashboard: { ...dashboard, analytics: undefined },
+        }}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("img", { name: /Research activity/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps all-zero activity series anchored to the baseline", () => {
+    const dashboard = dashboardFor("panel", "assigned_manuscripts");
+    const { container } = render(
       <RoleWorkspace
         {...readyProps("panel", "assigned_manuscripts")}
         dashboardState={{
@@ -791,27 +992,90 @@ describe("role workspaces", () => {
           status: "ready",
           dashboard: {
             ...dashboard,
-            sections: [
-              dashboard.sections[0],
-              {
-                key: "defense_schedule",
-                state: "ready",
-                total: 12,
-                reason: null,
-                items: [],
-              },
-            ],
+            analytics: {
+              title: "Research activity",
+              period: "Last 6 months",
+              series: [
+                {
+                  key: "created",
+                  label: "Created",
+                  points: [{ key: "2026-10", label: "Oct", value: 1 }],
+                },
+                {
+                  key: "archived",
+                  label: "Archived",
+                  points: [{ key: "2026-10", label: "Oct", value: 0 }],
+                },
+              ],
+            },
+          },
+        }}
+      />,
+    );
+
+    const bars = container.querySelectorAll(".analytics-bar");
+    expect(bars).toHaveLength(2);
+    expect(bars[1]).toHaveAttribute("height", "0");
+    expect(bars[1]).toHaveAttribute("y", "202");
+    const legend = screen.getByLabelText("Chart legend");
+    expect(within(legend).getByText("Created")).toBeInTheDocument();
+    expect(within(legend).getByText("Archived")).toBeInTheDocument();
+    expect(
+      screen.getByRole("columnheader", { name: "Archived" }),
+    ).toBeInTheDocument();
+  });
+
+  it("renders the compact panel dashboard with authorized tools", () => {
+    const selectNav = vi.fn();
+    const props = readyProps("panel", "assigned_manuscripts");
+    const { container } = render(
+      <RoleWorkspace
+        {...props}
+        selectNav={selectNav}
+        dashboardState={{
+          ...props.dashboardState,
+          dashboard: {
+            ...props.dashboardState.dashboard,
+            analytics: {
+              title: "Research activity",
+              period: "Last 6 months",
+              series: [
+                {
+                  key: "created",
+                  label: "Created",
+                  points: [{ key: "2026-10", label: "Oct", value: 7 }],
+                },
+              ],
+            },
           },
         }}
       />,
     );
 
     expect(
-      screen.getByRole("meter", { name: "Assigned manuscripts" }),
+      container.querySelector(".panel-dashboard-workspace"),
+    ).not.toBeNull();
+    expect(
+      screen.getByRole("heading", { name: "Current workload" }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("meter", { name: "Defense schedule" }),
+      screen.getByLabelText("Assigned manuscripts: 7 total"),
+    ).toHaveTextContent("7");
+    expect(
+      screen.queryByRole("meter", { name: "Assigned manuscripts" }),
     ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Panel tools" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open Assigned Research" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "User Logs" }));
+
+    expect(selectNav).toHaveBeenNthCalledWith(1, "Assigned Research");
+    expect(selectNav).toHaveBeenNthCalledWith(2, "User Logs");
+    expect(container.querySelector(".analytics-bar")).not.toBeNull();
   });
 
   it("hides legacy schedules and duplicate flags on the coordinator overview", () => {
@@ -900,9 +1164,11 @@ describe("role workspaces", () => {
       }),
     );
 
+    const selectNav = vi.fn();
     render(
       <RoleWorkspace
         {...readyProps("research-office", "submission_queue")}
+        selectNav={selectNav}
         dashboardState={{
           scope: dashboardScopeFor("research-office"),
           status: "ready",
@@ -922,6 +1188,20 @@ describe("role workspaces", () => {
     );
 
     const analytics = screen.getByText("Research analytics");
+    expect(
+      screen.getByRole("button", { name: "View Submission queue" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("img", { name: "Research manuscripts by institute" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Current workload" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Quick actions" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Manage Repository" }));
+    expect(selectNav).toHaveBeenCalledWith("Manage Repository");
     expect(screen.getByLabelText("4 total")).toBeInTheDocument();
     const overview = await screen.findByRole("heading", {
       name: "Institutional Overview",
@@ -940,6 +1220,9 @@ describe("role workspaces", () => {
         "Institute of Business and Financial Management: 0 research records",
       ),
     ).toBeInTheDocument();
+    expect(
+      screen.getAllByRole("button", { name: /research records$/ }),
+    ).toHaveLength(6);
 
     fireEvent.click(
       screen.getByLabelText("Institute of Health Sciences: 2 research records"),
@@ -1366,9 +1649,24 @@ describe("role workspaces", () => {
         name: "Research activity, Last 6 months",
       }),
     ).toBeInTheDocument();
-    expect(container.querySelectorAll(".analytics-line polyline")).toHaveLength(
-      2,
+    expect(container.querySelectorAll(".analytics-bar")).toHaveLength(12);
+    expect(container.querySelectorAll(".analytics-area")).toHaveLength(0);
+    expect(container.querySelector(".dashboard-analytics")).toBeInTheDocument();
+    const activityChart = screen.getByRole("img", {
+      name: "Research activity, Last 6 months",
+    });
+    expect(
+      Array.from(
+        activityChart.querySelectorAll(".analytics-axis-value"),
+        (tick) => tick.textContent,
+      ),
+    ).toEqual(["4", "2", "0"]);
+    const gridY = Array.from(
+      activityChart.querySelectorAll(".analytics-grid-line"),
+      (line) => Number(line.getAttribute("y1")),
     );
+    expect(gridY[1] - gridY[0]).toBe(gridY[2] - gridY[1]);
+    expect(screen.getByLabelText("12 total activity")).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /New submission/ }),
     ).not.toBeInTheDocument();
@@ -2516,6 +2814,102 @@ describe("authenticated notifications", () => {
       expect(screen.queryByText("Similarity results")).not.toBeInTheDocument();
     },
   );
+
+  it("opens a Research Office file feedback deep link in the shared workspace", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const path = String(input);
+        if (path === "/api/notifications")
+          return new Response(
+            JSON.stringify({ data: [], links: { next: null } }),
+          );
+        if (path === "/api/dashboard")
+          return new Response(
+            JSON.stringify({
+              data: {
+                schema_version: 1,
+                role: "research-office",
+                sections: [],
+              },
+            }),
+          );
+        if (path === "/api/monitoring/research")
+          return new Response(JSON.stringify({ data: [] }));
+        if (path === "/api/research/791")
+          return new Response(
+            JSON.stringify({
+              data: {
+                id: 791,
+                title: "Office deep-linked record",
+                abstract: null,
+                publication_year: 2026,
+                research_stage: "ongoing",
+                submission_status: "under_review",
+                archive_status: "not_archived",
+                visibility: "private",
+                authors: [],
+                sdgs: [],
+              },
+            }),
+          );
+        if (path === "/api/research/791/people")
+          return new Response(
+            JSON.stringify({ data: { section: null, reviewers: [] } }),
+          );
+        if (path === "/api/research/791/files")
+          return new Response(
+            JSON.stringify({
+              data: [
+                {
+                  id: 1069,
+                  original_filename: "chapter-three.pdf",
+                  mime_type: "application/pdf",
+                  relative_path: "Chapter 3",
+                  version_number: 1,
+                  is_current: true,
+                  upload_purpose: "revision",
+                  uploaded_at: "2026-11-01T08:00:00Z",
+                },
+              ],
+            }),
+          );
+        if (path === "/api/research/791/folders")
+          return new Response(JSON.stringify({ data: ["Chapter 3"] }));
+        if (path === "/api/research/791/files/1069/feedback")
+          return new Response(JSON.stringify({ data: [] }));
+        if (path.startsWith("/api/research/791/"))
+          return new Response(JSON.stringify({ data: [] }));
+        return new Response(JSON.stringify({ error: "NOT_FOUND" }), {
+          status: 404,
+        });
+      }),
+    );
+
+    render(
+      <Dashboard
+        session={{ ...activeSession, role: "research-office" }}
+        navigate={vi.fn()}
+        researchDocumentId={791}
+        researchWorkspaceDestination={{
+          tab: "documents",
+          folder: "Chapter 3",
+          fileId: 1069,
+          panel: "feedback",
+        }}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "chapter-three.pdf" }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("study-workspace")).toBeInTheDocument();
+    expect(screen.queryByText("System administration")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Documents" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  });
 });
 
 describe("sign out middleware", () => {
@@ -2576,6 +2970,12 @@ describe("sign out middleware", () => {
       }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    const alertDialog = await screen.findByRole("alertdialog", {
+      name: "Sign out of ResearchNAV?",
+    });
+    fireEvent.click(
+      within(alertDialog).getByRole("button", { name: "Sign out" }),
+    );
 
     await waitFor(() => expect(window.location.pathname).toBe("/"));
     expect(
@@ -2599,6 +2999,12 @@ describe("sign out middleware", () => {
       }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    const alertDialog = await screen.findByRole("alertdialog", {
+      name: "Sign out of ResearchNAV?",
+    });
+    fireEvent.click(
+      within(alertDialog).getByRole("button", { name: "Sign out" }),
+    );
 
     await waitFor(() => expect(window.location.pathname).toBe("/"));
     expect(

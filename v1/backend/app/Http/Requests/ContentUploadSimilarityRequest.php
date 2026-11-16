@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Http\Requests\Concerns\RejectsUnknownFields;
+use App\Models\User;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Validator;
 
@@ -12,7 +13,10 @@ class ContentUploadSimilarityRequest extends FormRequest
 
     public function authorize(): bool
     {
-        return true;
+        $user = $this->attributes->get('current_user');
+
+        return $user instanceof User
+            && in_array($user->role, ['researcher', 'research-office'], true);
     }
 
     /** @return array<string, list<string>> */
@@ -49,6 +53,9 @@ class ContentUploadSimilarityRequest extends FormRequest
             }
             if ($this->input('mode') === 'folder' && $this->hasFile('file')) {
                 $validator->errors()->add('file', 'Folder mode accepts only files[].');
+            }
+            if ($this->input('mode') === 'file' && is_array($files) && $files !== []) {
+                $validator->errors()->add('files', 'File mode accepts only file.');
             }
         });
     }

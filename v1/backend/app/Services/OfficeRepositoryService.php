@@ -30,6 +30,9 @@ class OfficeRepositoryService
             if ($document->trashed()) {
                 return null;
             }
+            if ($document->updated_at?->equalTo($data['expected_updated_at']) !== true) {
+                throw new OfficeRepositoryConflictException;
+            }
 
             $this->ensureInstituteProgramPair($document, $data);
             $metadata = $this->metadata($data);
@@ -152,68 +155,84 @@ class OfficeRepositoryService
             && $document->visibility === 'public';
     }
 
-    /**
-     * Preserve an existing author's relationship metadata whenever possible.
-     * Unchanged names keep their row when reordered; otherwise, remaining rows
-     * are treated as renamed in their existing order. Excess rows are removed
-     * and new names are created without a linked user or correspondence flag.
-     *
-     * @param  array<int, string>  $authorNames
-     */
-    private function syncAuthors(ResearchDocument $document, array $authorNames): void
+    /** @param array<int, array{id?: int|null, user_id?: string|null, author_name: string, is_corresponding_author: bool}> $authors */
+    private function syncAuthors(ResearchDocument $document, array $authors): void
     {
-        $authorNames = array_values($authorNames);
+        $authors = array_values($authors);
         $existingAuthors = $document->authors()
             ->orderBy('author_order')
             ->orderBy('id')
+            ->lockForUpdate()
             ->get()
             ->values();
-        $availableAuthors = $existingAuthors->keyBy('id');
-        $authorsByName = $existingAuthors->keyBy(
-            fn (ResearchAuthor $author): string => mb_strtolower(trim($author->author_name)),
-        );
-        $assignments = [];
+        $existingById = $existingAuthors->keyBy('id');
+        $retainedIds = [];
 
-        foreach ($authorNames as $index => $authorName) {
-            $matchingAuthor = $authorsByName->get(mb_strtolower(trim($authorName)));
-            if ($matchingAuthor === null || ! $availableAuthors->has($matchingAuthor->id)) {
+        foreach ($authors as $index => $author) {
+            if (($author['id'] ?? null) === null) {
                 continue;
             }
 
-            $assignments[$index] = $matchingAuthor;
-            $availableAuthors->forget($matchingAuthor->id);
+            $row = $existingById->get((int) $author['id']);
+            if ($row === null) {
+                throw ValidationException::withMessages([
+                    "authors.{$index}.id" => ['The selected author does not belong to this record.'],
+                ]);
+            }
+            $retainedIds[] = (int) $row->id;
         }
 
-        foreach (array_keys($authorNames) as $index) {
-            if (array_key_exists($index, $assignments)) {
+        $activeUserIds = collect($authors)
+            ->pluck('user_id')
+            ->filter(fn ($userId): bool => is_string($userId) && $userId !== '')
+            ->unique()
+            ->values();
+        $availableUserIds = User::query()
+            ->where('access_status', 'active')
+            ->where('account_status', 'active')
+            ->whereIn('id', $activeUserIds)
+            ->lockForUpdate()
+            ->pluck('id')
+            ->flip();
+
+        foreach ($authors as $index => $author) {
+            $userId = $author['user_id'] ?? null;
+            if ($userId === null || $availableUserIds->has($userId)) {
                 continue;
             }
 
-            $matchingAuthor = $availableAuthors->shift();
-            if ($matchingAuthor !== null) {
-                $assignments[$index] = $matchingAuthor;
+            $existing = ($author['id'] ?? null) === null ? null : $existingById->get((int) $author['id']);
+            if ($existing !== null && $existing->user_id === $userId) {
+                continue;
             }
+            throw ValidationException::withMessages([
+                "authors.{$index}.user_id" => ['The selected account is unavailable.'],
+            ]);
         }
 
-        ResearchAuthor::query()
-            ->where('research_document_id', $document->id)
-            ->whereKey($availableAuthors->keys())
-            ->delete();
+        $removedAuthors = ResearchAuthor::query()->where('research_document_id', $document->id);
+        if ($retainedIds !== []) {
+            $removedAuthors->whereNotIn('id', $retainedIds);
+        }
+        $removedAuthors->delete();
 
         $temporaryOrder = ((int) $existingAuthors->max('author_order')) + $existingAuthors->count() + 1;
         $temporaryPrefix = '__office_repository_author_'.Str::uuid().'_';
-        foreach ($assignments as $index => $author) {
+        foreach ($existingAuthors->whereIn('id', $retainedIds) as $index => $author) {
             $author->update([
                 'author_name' => $temporaryPrefix.$author->id,
                 'author_order' => $temporaryOrder + $index,
             ]);
         }
 
-        foreach ($authorNames as $index => $authorName) {
-            if (isset($assignments[$index])) {
-                $assignments[$index]->update([
-                    'author_name' => trim($authorName),
+        foreach ($authors as $index => $author) {
+            $existing = ($author['id'] ?? null) === null ? null : $existingById->get((int) $author['id']);
+            if ($existing !== null) {
+                $existing->update([
+                    'user_id' => $author['user_id'] ?? null,
+                    'author_name' => $author['author_name'],
                     'author_order' => $index + 1,
+                    'is_corresponding_author' => $author['is_corresponding_author'],
                 ]);
 
                 continue;
@@ -221,10 +240,10 @@ class OfficeRepositoryService
 
             ResearchAuthor::query()->create([
                 'research_document_id' => $document->id,
-                'user_id' => null,
-                'author_name' => trim($authorName),
+                'user_id' => $author['user_id'] ?? null,
+                'author_name' => $author['author_name'],
                 'author_order' => $index + 1,
-                'is_corresponding_author' => false,
+                'is_corresponding_author' => $author['is_corresponding_author'],
             ]);
         }
     }

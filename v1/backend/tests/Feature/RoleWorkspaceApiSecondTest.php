@@ -68,7 +68,12 @@ class RoleWorkspaceApiSecondTest extends TestCase
         $this->as($office)->putJson('/api/office/compliance/'.$approved->id, ['review_status' => 'pending'], $this->origin())
             ->assertUnprocessable();
 
-        $this->as($office)->getJson('/api/office/users')->assertOk()->assertJsonCount(2, 'data.data');
+        $this->as($office)->getJson('/api/office/users?search='.$owner->email)
+            ->assertOk()
+            ->assertJsonCount(1, 'data.data')
+            ->assertJsonPath('summary.total', 2)
+            ->assertJsonPath('summary.active', 2)
+            ->assertJsonPath('summary.inactive', 0);
         $this->as($office)->patchJson('/api/office/users/'.$owner->id, ['access_status' => 'blocked'], $this->origin())
             ->assertOk()
             ->assertJsonPath('data.access_status', 'blocked');

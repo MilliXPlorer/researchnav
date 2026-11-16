@@ -7,6 +7,7 @@ use App\Http\Requests\OfficeRepositoryUpdateRequest;
 use App\Http\Resources\OfficeRepositoryDetailResource;
 use App\Http\Resources\OfficeRepositoryItemResource;
 use App\Models\ResearchDocument;
+use App\Services\OfficeRepositoryConflictException;
 use App\Services\OfficeRepositoryService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -84,7 +85,11 @@ class OfficeRepositoryController extends DomainController
     public function update(OfficeRepositoryUpdateRequest $request, string $researchDocument, OfficeRepositoryService $repository): JsonResponse
     {
         ResearchDocument::withTrashed()->findOrFail($researchDocument);
-        $document = $repository->update($this->actor($request), (int) $researchDocument, $request->validated(), $request);
+        try {
+            $document = $repository->update($this->actor($request), (int) $researchDocument, $request->validated(), $request);
+        } catch (OfficeRepositoryConflictException $exception) {
+            return response()->json(['error' => $exception->error], 409);
+        }
         if ($document === null) {
             return response()->json(['error' => 'REPOSITORY_RECORD_TRASHED'], 409);
         }
@@ -132,7 +137,8 @@ class OfficeRepositoryController extends DomainController
         return [
             'category:id,name,slug',
             'sdgs:id,code,title,short_title,color_hex',
-            'authors:id,research_document_id,author_name,author_order,is_corresponding_author',
+            'authors:id,research_document_id,user_id,author_name,author_order,is_corresponding_author',
+            'authors.user:id,email,first_name,middle_name,last_name,role,institute,access_status,account_status,deleted_at',
             'files:id,research_document_id,document_type,upload_purpose,version_number,file_order,original_filename,file_extension,mime_type,file_size,is_current,uploaded_at',
         ];
     }

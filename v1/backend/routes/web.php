@@ -158,7 +158,6 @@ Route::prefix('api')
         });
 
         Route::prefix('panel')->middleware(['current.user', 'account.active', 'role:panel'])->group(function (): void {
-            Route::get('schedule', [PanelController::class, 'schedule']);
             Route::get('assignments', [PanelController::class, 'assignments']);
             Route::post('evaluations', [PanelController::class, 'submitEvaluation'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('history', [PanelController::class, 'history']);
@@ -210,6 +209,8 @@ Route::prefix('api')
         });
 
         Route::prefix('office')->middleware(['current.user', 'account.active', 'office.authority'])->group(function (): void {
+            Route::get('author-accounts', [ResearchOfficeController::class, 'authorAccounts'])
+                ->middleware('throttle:office-author-account-search');
             Route::get('repository', [OfficeRepositoryController::class, 'index']);
             Route::get('repository/{researchDocument}', [OfficeRepositoryController::class, 'show'])
                 ->whereNumber('researchDocument');
@@ -260,7 +261,7 @@ Route::prefix('api')
             Route::post('research/{researchDocument}/shared-monitoring/signature', [SharedMonitoringController::class, 'storeSignature'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('research/{researchDocument}/shared-monitoring/signature/{stage}/{reviewer}', [SharedMonitoringController::class, 'signature']);
             Route::post('research/{researchDocument}/shared-monitoring/verify', [SharedMonitoringController::class, 'verify'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
-            Route::get('support-assignments/eligible', [SupportAssignmentController::class, 'eligible']);
+            Route::get('support-assignments/eligible', [SupportAssignmentController::class, 'eligible'])->middleware('throttle:support-assignment-search');
             Route::get('support-assignments/inbox', [SupportAssignmentController::class, 'inbox']);
             Route::get('research/{researchDocument}/support-assignments', [SupportAssignmentController::class, 'index']);
             Route::post('research/{researchDocument}/support-assignments', [SupportAssignmentController::class, 'store'])->middleware(['origin.allowed', 'throttle:domain-mutations']);

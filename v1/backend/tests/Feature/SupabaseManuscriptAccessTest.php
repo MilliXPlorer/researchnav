@@ -37,6 +37,17 @@ class SupabaseManuscriptAccessTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_catalog_chooser_returns_not_found_when_the_private_file_is_missing(): void
+    {
+        [$document, $file] = $this->localManuscript();
+        Storage::disk('researchnav_private')->delete($file->file_path);
+        $viewer = User::factory()->create(['access_status' => 'active']);
+
+        $this->withSession(['user_id' => $viewer->id])
+            ->get('/api/repository/'.$document->id.'/download')
+            ->assertNotFound();
+    }
+
     public function test_grouped_catalog_download_is_a_zip_named_for_the_folder(): void
     {
         [$document, $file] = $this->localManuscript(['import_group_name' => 'Study A']);

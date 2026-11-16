@@ -6,15 +6,15 @@ use App\Models\ClassSection;
 use App\Models\ResearchDocument;
 use App\Models\ResearchProjectTeamMember;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Tests\Concerns\UsesIsolatedMonitoringDatabase;
 use Tests\TestCase;
 
 class SharedMonitoringTest extends TestCase
 {
-    use RefreshDatabase;
+    use UsesIsolatedMonitoringDatabase;
 
     public function test_assigned_reviewer_receives_proposal_and_final_defense_stages(): void
     {
@@ -85,8 +85,10 @@ class SharedMonitoringTest extends TestCase
             'reviewer_id' => $adviser->id,
             'assigned_by' => $office->id,
             'review_role' => 'adviser',
+            'defense_type' => 'final',
             'is_active' => true,
         ]);
+        $this->teamActor($research, $adviser, 'final');
 
         $this->as($adviser)->putJson(
             '/api/research/'.$research->id.'/shared-monitoring',
@@ -133,9 +135,11 @@ class SharedMonitoringTest extends TestCase
             'reviewer_id' => $representative->id,
             'assigned_by' => $assigner->id,
             'review_role' => 'research-office',
+            'defense_type' => 'final',
             'designation' => 'Research Rep',
             'is_active' => true,
         ]);
+        $this->teamActor($research, $representative, 'final');
 
         $this->as($representative)->putJson(
             '/api/research/'.$research->id.'/shared-monitoring',
@@ -159,8 +163,10 @@ class SharedMonitoringTest extends TestCase
             'reviewer_id' => $adviser->id,
             'assigned_by' => $office->id,
             'review_role' => 'adviser',
+            'defense_type' => 'final',
             'is_active' => true,
         ]);
+        $this->teamActor($research, $adviser, 'final');
 
         $this->as($adviser)->putJson(
             '/api/research/'.$research->id.'/shared-monitoring',
@@ -275,13 +281,18 @@ class SharedMonitoringTest extends TestCase
                 'updated_at' => now(),
             ]);
         } else {
-            $research->reviewAssignments()->create([
-                'reviewer_id' => $actor->id,
-                'assigned_by' => $office->id,
-                'review_role' => $role,
-                'designation' => $role === 'panel' ? 'panel_1' : null,
-                'is_active' => true,
-            ]);
+            // Both-stage permissions now require actual both-stage evidence.
+            foreach (['proposal', 'final'] as $defenseType) {
+                $research->reviewAssignments()->create([
+                    'reviewer_id' => $actor->id,
+                    'assigned_by' => $office->id,
+                    'review_role' => $role,
+                    'defense_type' => $defenseType,
+                    'designation' => $role === 'panel' ? 'panel_1' : null,
+                    'is_active' => true,
+                ]);
+                $this->teamActor($research, $actor, $defenseType);
+            }
         }
 
         $this->as($actor)
@@ -326,6 +337,21 @@ class SharedMonitoringTest extends TestCase
             'role' => 'researcher',
             'access_status' => 'active',
         ], $attributes));
+    }
+
+    private function teamActor(ResearchDocument $research, User $actor, string $defenseType): void
+    {
+        $teamRole = match ($actor->role) {
+            'adviser' => 'adviser', 'panel' => 'panel_member',
+            'research-office' => 'research_office_representative', default => null,
+        };
+        if ($teamRole !== null) {
+            ResearchProjectTeamMember::query()->create([
+                'research_document_id' => $research->id, 'user_id' => $actor->id,
+                'defense_type' => $defenseType, 'team_role' => $teamRole,
+                'position' => $teamRole === 'panel_member' ? 1 : null, 'assigned_by' => $actor->id,
+            ]);
+        }
     }
 
     private function as(User $user): static

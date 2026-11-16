@@ -22,7 +22,6 @@ import {
   MailCheck,
   ListChecks,
   Menu,
-  Presentation,
   RefreshCw,
   ScanSearch,
   ScrollText,
@@ -87,7 +86,6 @@ const navIcons: Record<string, LucideIcon> = {
   "Manuscript Review": BookOpenCheck,
   "Research Progress Updates": Activity,
   "Review Submissions": ClipboardCheck,
-  "Assigned Defenses": Presentation,
   "Defense Evaluation": ClipboardCheck,
   "Availability Calendar": CalendarDays,
   "Evaluation History": FileClock,
@@ -469,10 +467,12 @@ export default function Dashboard({
                   {similarityMenuOpen && (
                     <div className="sidebar-nav-children">
                       <button onClick={() => selectSimilarityMode("title")}>
-                        Title Checker
+                        <FileSearch aria-hidden="true" />
+                        <span>Title Checker</span>
                       </button>
                       <button onClick={() => selectSimilarityMode("content")}>
-                        Content Checker
+                        <FileCheck2 aria-hidden="true" />
+                        <span>Content Checker</span>
                       </button>
                     </div>
                   )}
@@ -605,7 +605,8 @@ export default function Dashboard({
                             setWorkspaceMenuOpen(false);
                           }}
                         >
-                          Title Checker
+                          <FileSearch aria-hidden="true" />
+                          <span>Title Checker</span>
                         </button>
                         <button
                           onClick={() => {
@@ -613,7 +614,8 @@ export default function Dashboard({
                             setWorkspaceMenuOpen(false);
                           }}
                         >
-                          Content Checker
+                          <FileCheck2 aria-hidden="true" />
+                          <span>Content Checker</span>
                         </button>
                       </div>
                     )}
@@ -907,7 +909,6 @@ export default function Dashboard({
           session={session}
           onSessionChange={onSessionChange}
           onClose={() => setAccountOpen(false)}
-          onOpenWorkspace={() => setAccountOpen(false)}
           onLogout={onLogout ? signOut : undefined}
         />
       )}

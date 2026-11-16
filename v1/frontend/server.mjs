@@ -110,6 +110,14 @@ export async function createApp(options = {}) {
     100,
     180_000,
   );
+  const repositorySimilarityTimeoutMs = configuredInteger(
+    options.repositorySimilarityTimeoutMs ??
+      process.env.SSR_REPOSITORY_SIMILARITY_TIMEOUT_MS ??
+      180_000,
+    "SSR_REPOSITORY_SIMILARITY_TIMEOUT_MS",
+    100,
+    300_000,
+  );
   const maxBodyBytes = configuredInteger(
     options.maxBodyBytes ??
       Math.min(
@@ -193,9 +201,14 @@ export async function createApp(options = {}) {
       const isContentUpload =
         request.method === "POST" &&
         normalizedPathname === "/api/similarity/content-upload";
+      const isRepositorySimilarity =
+        request.method === "POST" &&
+        normalizedPathname === "/api/repository/similarity";
       const requestTimeoutMs = isContentUpload
         ? contentUploadTimeoutMs
-        : apiTimeoutMs;
+        : isRepositorySimilarity
+          ? repositorySimilarityTimeoutMs
+          : apiTimeoutMs;
       request.setTimeout(requestTimeoutMs);
 
       proxy.web(

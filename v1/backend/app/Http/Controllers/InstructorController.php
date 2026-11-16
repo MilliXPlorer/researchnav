@@ -10,6 +10,7 @@ use App\Models\SimilarityResult;
 use App\Models\User;
 use App\Notifications\ResearchActivityNotification;
 use App\Services\ClassSectionService;
+use App\Services\DefenseMonitoringAuthorization;
 use App\Services\DomainAuthorization;
 use App\Services\MonitoringService;
 use App\Services\ReportingService;
@@ -509,6 +510,7 @@ class InstructorController extends DomainController
             'signature_status' => ['required', 'in:unsigned,signed'],
         ]);
 
+        app(DefenseMonitoringAuthorization::class)->authorizeSection($actor, $researchDocument, $input['monitoring_stage']);
         $entry = DB::transaction(function () use ($actor, $researchDocument, $input, $activity) {
             DB::table('monitoring_entries')->updateOrInsert([
                 'research_document_id' => $researchDocument->id,
@@ -545,6 +547,7 @@ class InstructorController extends DomainController
         $input = $this->validated($request, [
             'monitoring_stage' => ['required', 'in:before_proposal_defense,after_proposal_defense'],
         ]);
+        app(DefenseMonitoringAuthorization::class)->authorizeSection($actor, $researchDocument, $input['monitoring_stage']);
         $entries = DB::table('monitoring_entries')
             ->where('research_document_id', $researchDocument->id)
             ->where('monitoring_stage', $input['monitoring_stage'])

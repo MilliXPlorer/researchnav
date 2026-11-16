@@ -96,9 +96,11 @@ class SimilarityController extends DomainController
             $result = $service->compare($uploads);
 
             return response()->json([
+                'contract_version' => 'content-upload.v2',
                 'data' => PublicRepositorySimilarityResource::collection($result['matches'])->resolve($request),
-                'extracted_text' => $result['extracted_text'],
                 'file_name' => count($uploads) === 1 ? $uploads[0]->getClientOriginalName() : count($uploads).' PDF files',
+                'file_diagnostics' => $result['diagnostics'],
+                'extracted_text' => $result['extracted_text'],
             ]);
         } catch (UploadedContentUnreadableException) {
             return response()->json(['error' => 'CONTENT_UPLOAD_UNREADABLE'], 422);

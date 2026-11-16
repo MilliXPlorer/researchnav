@@ -186,13 +186,26 @@ class OfficeRepositoryManagementTest extends TestCase
     {
         $document = $this->document(['archive_status' => 'archived', 'visibility' => 'public']);
         $file = $this->file($document, ['file_path' => 'research/'.$document->id.'/secret.pdf', 'stored_filename' => 'secret.pdf', 'relative_path' => 'private/subfolder', 'content_sha256' => str_repeat('a', 64)]);
-        ResearchAuthor::query()->create(['research_document_id' => $document->id, 'author_name' => 'Repository Author', 'author_order' => 1]);
+        $authorAccount = $this->actor('researcher', [
+            'first_name' => 'Repository',
+            'last_name' => 'Author',
+            'institute' => 'Institute of Computer Studies',
+        ]);
+        ResearchAuthor::query()->create([
+            'research_document_id' => $document->id,
+            'user_id' => $authorAccount->id,
+            'author_name' => 'Repository Author',
+            'author_order' => 1,
+        ]);
         $response = $this->as($this->actor('admin'))->getJson('/api/office/repository/'.$document->id)
             ->assertOk()
             ->assertHeader('Cache-Control', 'no-store, private')
             ->assertJsonPath('data.files.0.id', $file->id)
             ->assertJsonPath('data.files.0.original_filename', 'manuscript.pdf')
-            ->assertJsonPath('data.authors.0.author_name', 'Repository Author');
+            ->assertJsonPath('data.authors.0.author_name', 'Repository Author')
+            ->assertJsonPath('data.authors.0.user_id', $authorAccount->id)
+            ->assertJsonPath('data.authors.0.account.name', 'Repository Author')
+            ->assertJsonPath('data.authors.0.account.is_available', true);
 
         $data = $response->json('data');
         $this->assertArrayNotHasKey('file_path', $data['files'][0]);
@@ -201,6 +214,7 @@ class OfficeRepositoryManagementTest extends TestCase
         $this->assertArrayNotHasKey('content_sha256', $data['files'][0]);
         $this->assertArrayNotHasKey('manuscript_search_document', $data);
         $this->assertArrayNotHasKey('similarity_results', $data);
+        $this->assertSame(['id', 'name', 'email', 'is_available'], array_keys($data['authors'][0]['account']));
     }
 
     public function test_missing_ids_return_the_stable_not_found_error_for_each_detail_or_mutation_route(): void
@@ -211,7 +225,7 @@ class OfficeRepositoryManagementTest extends TestCase
         $this->as($office)->getJson('/api/office/repository/'.$missingId)
             ->assertNotFound()
             ->assertExactJson(['error' => 'NOT_FOUND']);
-        $this->as($office)->patchJson('/api/office/repository/'.$missingId, ['title' => 'Missing'], $this->origin())
+        $this->as($office)->patchJson('/api/office/repository/'.$missingId, ['title' => 'Missing', 'expected_updated_at' => now()->toISOString()], $this->origin())
             ->assertNotFound()
             ->assertExactJson(['error' => 'NOT_FOUND']);
         $this->as($office)->deleteJson('/api/office/repository/'.$missingId, [], $this->origin())
@@ -246,12 +260,16 @@ class OfficeRepositoryManagementTest extends TestCase
         $office = $this->actor('research-office');
         $secretPayload = 'Confidential manuscript text that must not enter audit descriptions.';
         $response = $this->as($office)->patchJson('/api/office/repository/'.$document->id, [
+            'expected_updated_at' => $document->updated_at->toISOString(),
             'title' => 'An Updated: Title!',
             'abstract' => $secretPayload,
             'institute' => 'Institute of Computer Studies',
             'degree_program' => 'Bachelor of Science in Computer Science',
             'sdg_ids' => [1, 2],
-            'authors' => ['Updated Researcher', 'Second Researcher'],
+            'authors' => [
+                ['author_name' => 'Updated Researcher', 'user_id' => null, 'is_corresponding_author' => false],
+                ['author_name' => 'Second Researcher', 'user_id' => null, 'is_corresponding_author' => false],
+            ],
         ], $this->origin());
         $response->assertOk()
             ->assertHeader('Cache-Control', 'no-store, private')
@@ -274,16 +292,87 @@ class OfficeRepositoryManagementTest extends TestCase
         $this->assertSame("Updated repository metadata for {$document->submission_reference}.", $auditDescription);
         $this->assertStringNotContainsString($secretPayload, $auditDescription);
 
-        $this->as($office)->patchJson('/api/office/repository/'.$document->id, ['visibility' => 'public'], $this->origin())
+        $this->as($office)->patchJson('/api/office/repository/'.$document->id, ['visibility' => 'public', 'expected_updated_at' => $document->fresh()->updated_at->toISOString()], $this->origin())
             ->assertUnprocessable()
             ->assertJsonPath('error', 'VALIDATION_FAILED');
         $this->as($office)->patchJson('/api/office/repository/'.$document->id, [
+            'expected_updated_at' => $document->fresh()->updated_at->toISOString(),
             'institute' => 'Institute of Computer Studies',
             'degree_program' => 'Bachelor of Science in Midwifery',
         ], $this->origin())->assertUnprocessable();
     }
 
-    public function test_update_authors_preserves_existing_metadata_when_rows_are_renamed_or_reordered(): void
+    public function test_author_account_search_is_authorized_minimized_and_deterministic(): void
+    {
+        $route = collect(Route::getRoutes()->getRoutes())
+            ->first(fn ($candidate) => $candidate->uri() === 'api/office/author-accounts');
+        $this->assertNotNull($route);
+        $this->assertContains('throttle:office-author-account-search', $route->gatherMiddleware());
+
+        $office = $this->actor('research-office');
+        $first = $this->actor('researcher', [
+            'first_name' => 'Matching',
+            'last_name' => 'Account',
+            'email' => 'author-01@example.test',
+            'institute' => 'Institute of Computer Studies',
+        ]);
+        for ($number = 2; $number <= 11; $number++) {
+            $this->actor('researcher', [
+                'first_name' => 'Matching',
+                'last_name' => 'Account',
+                'email' => sprintf('author-%02d@example.test', $number),
+            ]);
+        }
+        $blocked = $this->actor('researcher', ['first_name' => 'Matching', 'access_status' => 'blocked']);
+        $deleted = $this->actor('researcher', ['first_name' => 'Matching']);
+        $deleted->delete();
+        $literalWildcard = $this->actor('researcher', ['first_name' => 'Literal%Account', 'last_name' => 'Wildcard']);
+        $this->actor('researcher', ['first_name' => 'LiteralOther', 'last_name' => 'Wildcard']);
+        $fullName = $this->actor('researcher', [
+            'first_name' => 'Ada',
+            'middle_name' => 'Grace',
+            'last_name' => 'Lovelace',
+            'email' => 'ada.lovelace@example.test',
+        ]);
+        $inconsistent = $this->actor('researcher', ['first_name' => 'Matching', 'last_name' => 'Inconsistent']);
+        DB::table('users')->where('id', $inconsistent->id)->update(['account_status' => 'blocked']);
+
+        $this->getJson('/api/office/author-accounts?search=Matching')->assertUnauthorized();
+        $this->as($this->actor('researcher'))->getJson('/api/office/author-accounts?search=Matching')
+            ->assertForbidden()
+            ->assertExactJson(['error' => 'ROLE_NOT_AUTHORIZED']);
+        $response = $this->as($office)->getJson('/api/office/author-accounts?search=%20Matching%20')
+            ->assertOk()
+            ->assertHeader('Cache-Control', 'no-store, private')
+            ->assertJsonCount(10, 'data')
+            ->assertJsonPath('data.0.id', $first->id)
+            ->assertJsonPath('data.0.name', 'Matching Account')
+            ->assertJsonPath('data.0.is_available', true);
+
+        $this->assertSame(['id', 'name', 'email', 'is_available'], array_keys($response->json('data.0')));
+        $response->assertJsonMissing(['id' => $blocked->id])->assertJsonMissing(['id' => $deleted->id]);
+        $response->assertJsonMissing(['id' => $inconsistent->id]);
+        $this->as($office)->getJson('/api/office/author-accounts?search=Ada%20Grace%20Lovelace')
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $fullName->id);
+        $this->as($office)->getJson('/api/office/author-accounts?search=Grace')
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $fullName->id);
+        $this->as($office)->getJson('/api/office/author-accounts?search=ada.lovelace%40example.test')
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $fullName->id);
+        $this->as($office)->getJson('/api/office/author-accounts?'.http_build_query(['search' => 'Literal%']))
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $literalWildcard->id);
+        foreach (['', ' ', 'x', str_repeat('x', 101)] as $search) {
+            $this->as($office)->getJson('/api/office/author-accounts?'.http_build_query(['search' => $search]))
+                ->assertUnprocessable()
+                ->assertJsonPath('error', 'VALIDATION_FAILED');
+        }
+    }
+
+    public function test_update_authors_replaces_rows_by_id_and_preserves_unavailable_links_only_on_the_same_row(): void
     {
         $document = $this->document();
         $firstUser = $this->actor('researcher');
@@ -302,8 +391,28 @@ class OfficeRepositoryManagementTest extends TestCase
             'author_order' => 2,
             'is_corresponding_author' => false,
         ]);
+        $addedUser = $this->actor('researcher');
         $this->as($this->actor('research-office'))->patchJson('/api/office/repository/'.$document->id, [
-            'authors' => ['Second Researcher', 'Renamed First Researcher', 'Added Researcher'],
+            'expected_updated_at' => $document->fresh()->updated_at->toISOString(),
+            'authors' => [
+                [
+                    'id' => $second->id,
+                    'user_id' => $secondUser->id,
+                    'author_name' => 'Second Researcher',
+                    'is_corresponding_author' => true,
+                ],
+                [
+                    'id' => $first->id,
+                    'user_id' => null,
+                    'author_name' => "  Renamed\n First   Researcher  ",
+                    'is_corresponding_author' => false,
+                ],
+                [
+                    'user_id' => $addedUser->id,
+                    'author_name' => 'Added Researcher',
+                    'is_corresponding_author' => true,
+                ],
+            ],
         ], $this->origin())->assertOk();
 
         $this->assertDatabaseHas('research_authors', [
@@ -311,33 +420,126 @@ class OfficeRepositoryManagementTest extends TestCase
             'author_name' => 'Second Researcher',
             'author_order' => 1,
             'user_id' => $secondUser->id,
-            'is_corresponding_author' => false,
+            'is_corresponding_author' => true,
         ]);
         $this->assertDatabaseHas('research_authors', [
             'id' => $first->id,
             'author_name' => 'Renamed First Researcher',
             'author_order' => 2,
-            'user_id' => $firstUser->id,
-            'is_corresponding_author' => true,
+            'user_id' => null,
+            'is_corresponding_author' => false,
         ]);
         $this->assertDatabaseHas('research_authors', [
             'author_name' => 'Added Researcher',
             'author_order' => 3,
-            'user_id' => null,
-            'is_corresponding_author' => false,
+            'user_id' => $addedUser->id,
+            'is_corresponding_author' => true,
         ]);
 
         $this->as($this->actor('research-office'))->patchJson('/api/office/repository/'.$document->id, [
-            'authors' => ['Second Researcher'],
+            'expected_updated_at' => $document->fresh()->updated_at->toISOString(),
+            'authors' => [[
+                'id' => $second->id,
+                'user_id' => $secondUser->id,
+                'author_name' => 'Second Researcher',
+                'is_corresponding_author' => true,
+            ]],
         ], $this->origin())->assertOk();
 
         $this->assertDatabaseHas('research_authors', [
             'id' => $second->id,
             'user_id' => $secondUser->id,
-            'is_corresponding_author' => false,
+            'is_corresponding_author' => true,
         ]);
         $this->assertDatabaseMissing('research_authors', ['id' => $first->id]);
         $this->assertDatabaseMissing('research_authors', ['author_name' => 'Added Researcher']);
+
+        $unavailable = $this->actor('researcher', ['access_status' => 'blocked']);
+        $unavailableRow = ResearchAuthor::query()->create([
+            'research_document_id' => $document->id,
+            'user_id' => $unavailable->id,
+            'author_name' => 'Unavailable Researcher',
+            'author_order' => 2,
+            'is_corresponding_author' => false,
+        ]);
+        $this->as($this->actor('research-office'))->patchJson('/api/office/repository/'.$document->id, [
+            'expected_updated_at' => $document->fresh()->updated_at->toISOString(),
+            'authors' => [
+                [
+                    'id' => $second->id,
+                    'user_id' => $secondUser->id,
+                    'author_name' => 'Second Researcher',
+                    'is_corresponding_author' => true,
+                ],
+                [
+                    'id' => $unavailableRow->id,
+                    'user_id' => $unavailable->id,
+                    'author_name' => 'Unavailable Researcher',
+                    'is_corresponding_author' => false,
+                ],
+            ],
+        ], $this->origin())->assertOk();
+        $this->assertDatabaseHas('research_authors', ['id' => $unavailableRow->id, 'user_id' => $unavailable->id]);
+        $this->as($this->actor('research-office'))->patchJson('/api/office/repository/'.$document->id, [
+            'expected_updated_at' => $document->fresh()->updated_at->toISOString(),
+            'authors' => [[
+                'author_name' => 'Unavailable New Link',
+                'user_id' => $unavailable->id,
+                'is_corresponding_author' => false,
+            ]],
+        ], $this->origin())
+            ->assertUnprocessable()
+            ->assertJsonPath('error', 'VALIDATION_FAILED');
+
+        $inconsistent = $this->actor('researcher');
+        DB::table('users')->where('id', $inconsistent->id)->update(['account_status' => 'blocked']);
+        $this->as($this->actor('research-office'))->patchJson('/api/office/repository/'.$document->id, [
+            'expected_updated_at' => $document->fresh()->updated_at->toISOString(),
+            'authors' => [[
+                'author_name' => 'Inconsistent Account',
+                'user_id' => $inconsistent->id,
+                'is_corresponding_author' => false,
+            ]],
+        ], $this->origin())
+            ->assertUnprocessable()
+            ->assertJsonPath('error', 'VALIDATION_FAILED');
+    }
+
+    public function test_update_authors_rejects_invalid_structures_duplicates_and_foreign_rows(): void
+    {
+        $document = $this->document();
+        $author = ResearchAuthor::query()->create([
+            'research_document_id' => $document->id,
+            'author_name' => 'Existing Author',
+            'author_order' => 1,
+        ]);
+        $otherDocument = $this->document();
+        $foreignAuthor = ResearchAuthor::query()->create([
+            'research_document_id' => $otherDocument->id,
+            'author_name' => 'Foreign Author',
+            'author_order' => 1,
+        ]);
+        $user = $this->actor('researcher');
+        $office = $this->actor('research-office');
+
+        $base = [
+            'id' => $author->id,
+            'user_id' => $user->id,
+            'author_name' => 'Existing Author',
+            'is_corresponding_author' => false,
+        ];
+        foreach ([
+            ['authors' => [$base, [...$base, 'author_name' => '  existing   author ']]],
+            ['authors' => [$base, [...$base, 'author_name' => 'Another Author']]],
+            ['authors' => [[...$base, 'unexpected' => true]]],
+            ['authors' => [[...$base, 'id' => $foreignAuthor->id]]],
+            ['authors' => [['author_name' => 'Incomplete Author', 'user_id' => null]]],
+            ['authors' => [['author_name' => 'Missing Account Key', 'is_corresponding_author' => false]]],
+        ] as $payload) {
+            $this->as($office)->patchJson('/api/office/repository/'.$document->id, ['expected_updated_at' => $document->fresh()->updated_at->toISOString(), ...$payload], $this->origin())
+                ->assertUnprocessable()
+                ->assertJsonPath('error', 'VALIDATION_FAILED');
+        }
     }
 
     public function test_patch_only_revalidates_institute_program_when_the_pair_is_changed_and_rechecks_it_under_lock(): void
@@ -348,13 +550,14 @@ class OfficeRepositoryManagementTest extends TestCase
             'degree_program' => 'Legacy imported program',
         ]);
 
-        $this->as($office)->patchJson('/api/office/repository/'.$legacy->id, ['title' => 'Corrected legacy title'], $this->origin())
+        $this->as($office)->patchJson('/api/office/repository/'.$legacy->id, ['title' => 'Corrected legacy title', 'expected_updated_at' => $legacy->updated_at->toISOString()], $this->origin())
             ->assertOk()
             ->assertJsonPath('data.title', 'Corrected legacy title');
-        $this->as($office)->patchJson('/api/office/repository/'.$legacy->id, ['institute' => 'Institute of Computer Studies'], $this->origin())
+        $this->as($office)->patchJson('/api/office/repository/'.$legacy->id, ['institute' => 'Institute of Computer Studies', 'expected_updated_at' => $legacy->fresh()->updated_at->toISOString()], $this->origin())
             ->assertUnprocessable()
             ->assertJsonPath('error', 'VALIDATION_FAILED');
         $this->as($office)->patchJson('/api/office/repository/'.$legacy->id, [
+            'expected_updated_at' => $legacy->fresh()->updated_at->toISOString(),
             'institute' => 'Institute of Computer Studies',
             'degree_program' => 'Bachelor of Science in Computer Science',
         ], $this->origin())->assertOk();
@@ -362,6 +565,7 @@ class OfficeRepositoryManagementTest extends TestCase
         $document = $this->document();
         try {
             app(OfficeRepositoryService::class)->update($office, $document->id, [
+                'expected_updated_at' => $document->updated_at->toISOString(),
                 'institute' => 'Institute of Health Sciences',
             ]);
             $this->fail('The locked effective institute/program pair must be validated.');
@@ -381,12 +585,35 @@ class OfficeRepositoryManagementTest extends TestCase
             'degree_program' => [['unexpected' => 'value'], (object) ['unexpected' => 'value']],
         ] as $field => $malformedValues) {
             foreach ($malformedValues as $value) {
-                $this->as($office)->patchJson('/api/office/repository/'.$document->id, [$field => $value], $this->origin())
+                $this->as($office)->patchJson('/api/office/repository/'.$document->id, [$field => $value, 'expected_updated_at' => $document->fresh()->updated_at->toISOString()], $this->origin())
                     ->assertUnprocessable()
                     ->assertJsonPath('error', 'VALIDATION_FAILED')
                     ->assertJsonStructure(['error', 'errors' => [$field]]);
             }
         }
+    }
+
+    public function test_update_requires_the_detail_version_and_rejects_a_stale_version_after_locking(): void
+    {
+        $document = $this->document(['title' => 'Original title']);
+        $office = $this->actor('research-office');
+        $expected = $document->updated_at->toISOString();
+
+        $this->as($office)->patchJson('/api/office/repository/'.$document->id, ['title' => 'Missing version'], $this->origin())
+            ->assertUnprocessable()
+            ->assertJsonPath('error', 'VALIDATION_FAILED')
+            ->assertJsonStructure(['errors' => ['expected_updated_at']]);
+
+        DB::table('research_documents')->where('id', $document->id)->update([
+            'updated_at' => now()->addSecond(),
+        ]);
+        $this->as($office)->patchJson('/api/office/repository/'.$document->id, [
+            'expected_updated_at' => $expected,
+            'title' => 'Stale overwrite',
+        ], $this->origin())
+            ->assertConflict()
+            ->assertExactJson(['error' => 'REPOSITORY_RECORD_CONFLICT']);
+        $this->assertSame('Original title', $document->fresh()->title);
     }
 
     public function test_delete_and_restore_preserve_source_data_timestamps_and_lifecycle_fields(): void
@@ -455,7 +682,7 @@ class OfficeRepositoryManagementTest extends TestCase
             ->assertConflict()
             ->assertExactJson(['error' => 'REPOSITORY_RECORD_TRASHED']);
         $this->assertSame(1, AuditLog::query()->where('action', 'OFFICE_REPOSITORY_DELETED')->where('entity_id', (string) $document->id)->count());
-        $this->as($office)->patchJson('/api/office/repository/'.$document->id, ['title' => 'Not allowed'], $this->origin())
+        $this->as($office)->patchJson('/api/office/repository/'.$document->id, ['title' => 'Not allowed', 'expected_updated_at' => $document->fresh()->updated_at->toISOString()], $this->origin())
             ->assertConflict()
             ->assertExactJson(['error' => 'REPOSITORY_RECORD_TRASHED']);
 

@@ -275,6 +275,21 @@ class AdminNavigationApiTest extends TestCase
         ], $response->json('data.*.names.last_name'));
     }
 
+    public function test_users_listing_includes_unfiltered_access_summary(): void
+    {
+        $admin = $this->user(['role' => 'admin', 'access_status' => 'active']);
+        $this->user(['email' => 'active-summary@example.edu', 'access_status' => 'active']);
+        $this->user(['email' => 'invited-summary@example.edu', 'access_status' => 'invited']);
+        $this->user(['email' => 'blocked-summary@example.edu', 'access_status' => 'blocked']);
+
+        $this->as($admin)->getJson('/api/admin/users?search=blocked-summary')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('summary.total', 4)
+            ->assertJsonPath('summary.active', 2)
+            ->assertJsonPath('summary.inactive', 2);
+    }
+
     public function test_users_listing_can_sort_by_last_name_descending(): void
     {
         $admin = $this->user([
@@ -382,7 +397,9 @@ class AdminNavigationApiTest extends TestCase
 
         $response->assertOk()
             ->assertJsonPath('data.storage.private.status', 'unavailable')
-            ->assertJsonPath('data.storage.private.capabilities', null)
+            ->assertJsonPath('data.storage.private.capabilities.read', false)
+            ->assertJsonPath('data.storage.private.capabilities.write', false)
+            ->assertJsonPath('data.storage.private.capabilities.delete', true)
             ->assertJsonPath('data.issues', ['storage.researchnav_private_unavailable']);
         $this->assertStringNotContainsString('.researchnav-status-', $response->getContent());
     }

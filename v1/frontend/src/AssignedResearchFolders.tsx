@@ -2,12 +2,14 @@ import { useEffect, useId, useRef, useState } from "react";
 import { ArrowLeft, Check, ChevronDown, Folder, RefreshCw } from "lucide-react";
 import {
   assignOfficeRepresentative,
+  archiveInternalResearch,
   getInternalResearch,
   getOfficeProjectTeam,
   getResearchPeople,
   listOfficeRepresentativeCandidates,
   listSharedMonitoringResearch,
   respondToSupportAssignment,
+  transitionInternalResearch,
   type InstructorProjectTeam,
   type ProjectTeamPerson,
   type ResearchDocumentSummaryResource,
@@ -15,6 +17,7 @@ import {
   type SharedMonitoringResearch,
 } from "./api";
 import { Button } from "./components";
+import { ConfirmDialog } from "./Modal";
 import ResearchFolderRow from "./ResearchFolderRow";
 import StudyWorkspace from "./StudyWorkspace";
 import { matchesStudySearch } from "./studySearch";
@@ -62,6 +65,8 @@ export default function AssignedResearchFolders(props: {
   actorKey?: string;
   initialResearchDocumentId?: string | number;
   destination?: ResearchWorkspaceDestination;
+  navigate?: (path: string) => void;
+  onResearchChanged?: () => void;
 }) {
   return (
     <AssignedResearchFoldersContent
@@ -76,11 +81,15 @@ function AssignedResearchFoldersContent({
   actorKey,
   initialResearchDocumentId,
   destination,
+  navigate,
+  onResearchChanged,
 }: {
   role: Role;
   actorKey?: string;
   initialResearchDocumentId?: string | number;
   destination?: ResearchWorkspaceDestination;
+  navigate?: (path: string) => void;
+  onResearchChanged?: () => void;
 }) {
   const [folders, setFolders] = useState<SharedMonitoringResearch[]>([]);
   const [selected, setSelected] = useState(
@@ -108,12 +117,28 @@ function AssignedResearchFoldersContent({
   const [representativeBusy, setRepresentativeBusy] = useState(false);
   const [representativeLoading, setRepresentativeLoading] = useState(false);
   const [representativeError, setRepresentativeError] = useState("");
+  const [representativeFeedback, setRepresentativeFeedback] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
   const [folderSearch, setFolderSearch] = useState("");
   const [instituteFilter, setInstituteFilter] = useState("");
   const [stageFilter, setStageFilter] = useState("");
   const [respondingAssignmentId, setRespondingAssignmentId] = useState<
     number | null
   >(null);
+  const [workflowAction, setWorkflowAction] = useState<
+    "under_review" | "approved" | "archive" | null
+  >(null);
+  const [workflowBusy, setWorkflowBusy] = useState(false);
+  const workflowPendingRef = useRef(false);
+  const [workflowFeedback, setWorkflowFeedback] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
+  const [archiveVisibility, setArchiveVisibility] = useState<
+    "private" | "registered_only" | "public"
+  >("private");
 
   useEffect(() => {
     selectedRef.current = selected;
@@ -153,7 +178,11 @@ function AssignedResearchFoldersContent({
     setRepresentativeBusy(false);
     setRepresentativeLoading(false);
     setRepresentativeError("");
+    setRepresentativeFeedback(null);
     setLoadedId("");
+    if (initialResearchDocumentId !== undefined) {
+      navigate?.("/app/research-office/assigned-research");
+    }
   }
 
   async function respondToAssignment(
@@ -178,13 +207,25 @@ function AssignedResearchFoldersContent({
     void listSharedMonitoringResearch()
       .then((items) => {
         if (cancelled) return;
-        if (initialResearchDocumentId === undefined) clearSelectedStudy();
+        if (initialResearchDocumentId === undefined) {
+          setSelected("");
+          setResearch(null);
+          setPeople(null);
+          setTeam(null);
+          setLoadedId("");
+        }
         setFolders(items);
         setError("");
       })
       .catch(() => {
         if (cancelled) return;
-        if (initialResearchDocumentId === undefined) clearSelectedStudy();
+        if (initialResearchDocumentId === undefined) {
+          setSelected("");
+          setResearch(null);
+          setPeople(null);
+          setTeam(null);
+          setLoadedId("");
+        }
         setFolders([]);
         setError("Assigned research folders could not be loaded.");
       })
@@ -206,9 +247,11 @@ function AssignedResearchFoldersContent({
       .then(async ([record, researchPeople]) => {
         if (cancelled) return;
         setResearch(record);
+        setArchiveVisibility(record.visibility);
         setPeople(researchPeople);
 
         if (role === "research-office" && record.section_id != null) {
+          setRepresentativeFeedback(null);
           setRepresentativeLoading(true);
           setRepresentativeError("");
           try {
@@ -268,9 +311,17 @@ function AssignedResearchFoldersContent({
   }, [selected, attempt, role]);
 
   async function saveRepresentative() {
-    if (!research) return;
+    if (
+      !research ||
+      !team ||
+      representativeBusy ||
+      representativeLoading ||
+      representativeId === (team.research_office_representative?.user_id ?? "")
+    )
+      return;
     const researchId = String(research.id);
     setRepresentativeBusy(true);
+    setRepresentativeFeedback(null);
     try {
       const updated = await assignOfficeRepresentative(
         research.id,
@@ -278,14 +329,81 @@ function AssignedResearchFoldersContent({
       );
       if (selectedRef.current !== researchId) return;
       setTeam(updated);
+      setRepresentativeId(
+        updated.research_office_representative?.user_id ?? "",
+      );
+      setRepresentativeFeedback({
+        type: "success",
+        text: "Research Representative assignment saved.",
+      });
       setError("");
     } catch {
       if (selectedRef.current !== researchId) return;
-      setError("The Research Representative assignment could not be saved.");
+      setRepresentativeFeedback({
+        type: "error",
+        text: "The Research Representative assignment could not be saved. Please try again.",
+      });
     } finally {
       if (selectedRef.current === researchId) setRepresentativeBusy(false);
     }
   }
+
+  async function applyWorkflowAction() {
+    if (!research || !workflowAction || workflowPendingRef.current) return;
+    workflowPendingRef.current = true;
+    setWorkflowBusy(true);
+    setWorkflowFeedback(null);
+    try {
+      const updated =
+        workflowAction === "archive"
+          ? await archiveInternalResearch(research.id, archiveVisibility)
+          : await transitionInternalResearch(research.id, workflowAction);
+      setResearch((current) =>
+        current
+          ? { ...current, ...updated, authors: current.authors }
+          : current,
+      );
+      setWorkflowFeedback({
+        type: "success",
+        text:
+          workflowAction === "under_review"
+            ? "Research moved to under review."
+            : workflowAction === "approved"
+              ? "Research approved."
+              : "Research archived.",
+      });
+      setFolders((current) =>
+        workflowAction === "archive"
+          ? current.filter((folder) => folder.id !== research.id)
+          : current.map((folder) =>
+              folder.id === research.id ? { ...folder, ...updated } : folder,
+            ),
+      );
+      onResearchChanged?.();
+      setWorkflowAction(null);
+    } catch {
+      setWorkflowFeedback({
+        type: "error",
+        text: "The research status could not be updated. Refresh and try again.",
+      });
+      setWorkflowAction(null);
+    } finally {
+      workflowPendingRef.current = false;
+      setWorkflowBusy(false);
+    }
+  }
+
+  const nextWorkflowAction =
+    role !== "research-office" || !research
+      ? null
+      : research.submission_status === "submitted"
+        ? { key: "under_review" as const, label: "Move to under review" }
+        : research.submission_status === "under_review"
+          ? { key: "approved" as const, label: "Approve research" }
+          : research.submission_status === "approved" &&
+              research.archive_status !== "archived"
+            ? { key: "archive" as const, label: "Archive research" }
+            : null;
 
   function refreshFolders() {
     setLoading(true);
@@ -359,7 +477,7 @@ function AssignedResearchFoldersContent({
                 aria-haspopup="listbox"
                 aria-expanded={representativeMenuOpen}
                 aria-controls={representativeMenuId}
-                disabled={representativeLoading}
+                disabled={representativeLoading || representativeBusy || !team}
                 onClick={() => setRepresentativeMenuOpen((open) => !open)}
               >
                 <span>
@@ -382,6 +500,7 @@ function AssignedResearchFoldersContent({
                     aria-selected={representativeId === ""}
                     onClick={() => {
                       setRepresentativeId("");
+                      setRepresentativeFeedback(null);
                       setRepresentativeMenuOpen(false);
                     }}
                   >
@@ -396,10 +515,13 @@ function AssignedResearchFoldersContent({
                       key={person.user_id}
                       onClick={() => {
                         setRepresentativeId(person.user_id);
+                        setRepresentativeFeedback(null);
                         setRepresentativeMenuOpen(false);
                       }}
                     >
-                      <span>{person.name} ({person.email})</span>
+                      <span>
+                        {person.name} ({person.email})
+                      </span>
                       {representativeId === person.user_id && (
                         <Check aria-hidden="true" />
                       )}
@@ -410,18 +532,41 @@ function AssignedResearchFoldersContent({
             </div>
           </div>
           <Button
+            title={
+              representativeBusy
+                ? "Saving assignment"
+                : representativeLoading
+                  ? "Loading assignment"
+                  : !team
+                    ? "Assignment unavailable"
+                    : representativeId ===
+                        (currentRepresentative?.user_id ?? "")
+                      ? "No changes to save"
+                      : "Save assignment"
+            }
             onClick={() => void saveRepresentative()}
             disabled={
               representativeBusy ||
               representativeLoading ||
+              !team ||
               representativeId === (currentRepresentative?.user_id ?? "")
             }
           >
             {representativeBusy ? "Saving..." : "Save assignment"}
           </Button>
         </div>
+        {representativeFeedback && (
+          <p
+            className={`form-message is-${representativeFeedback.type}`}
+            role={representativeFeedback.type === "error" ? "alert" : "status"}
+          >
+            {representativeFeedback.text}
+          </p>
+        )}
         {representativeLoading && (
-          <p className="project-empty-copy">Loading Research Office personnel…</p>
+          <p className="project-empty-copy">
+            Loading Research Office personnel…
+          </p>
         )}
         {!representativeLoading && representativeError && (
           <p className="project-empty-copy" role="alert">
@@ -463,9 +608,7 @@ function AssignedResearchFoldersContent({
               <RefreshCw /> Refresh
             </Button>
           </header>
-          {error && (
-            <FoldersError message={error} onRetry={refreshFolders} />
-          )}
+          {error && <FoldersError message={error} onRetry={refreshFolders} />}
           {loading ? (
             <FoldersLoading label="Loading assigned studies" />
           ) : folders.length === 0 ? (
@@ -680,9 +823,71 @@ function AssignedResearchFoldersContent({
                 role === "admin"
               }
               destination={destination}
+              status={
+                role === "research-office"
+                  ? {
+                      submissionStatus: research.submission_status,
+                      researchStage: research.research_stage,
+                      archiveStatus: research.archive_status,
+                      visibility: research.visibility,
+                      publicationYear: research.publication_year,
+                      actionLabel: nextWorkflowAction?.label,
+                      actionBusy: workflowBusy,
+                      feedback: workflowFeedback,
+                      onAction: nextWorkflowAction
+                        ? () => setWorkflowAction(nextWorkflowAction.key)
+                        : undefined,
+                    }
+                  : undefined
+              }
             />
           )}
         </section>
+      )}
+      {workflowAction && research && (
+        <ConfirmDialog
+          title={
+            workflowAction === "under_review"
+              ? "Move to Under Review?"
+              : workflowAction === "approved"
+                ? "Approve this research?"
+                : "Archive this research?"
+          }
+          message={
+            workflowAction === "archive"
+              ? `This will archive the record with ${label(archiveVisibility)} visibility.`
+              : workflowAction === "under_review"
+                ? "Are you sure you want to change this research status from Submitted to Under Review?"
+                : "The current workflow status will be updated for all authorized users."
+          }
+          confirmLabel={
+            workflowAction === "under_review"
+              ? "Confirm"
+              : (nextWorkflowAction?.label ?? "Update status")
+          }
+          busy={workflowBusy}
+          onConfirm={() => void applyWorkflowAction()}
+          onCancel={() => !workflowBusy && setWorkflowAction(null)}
+        >
+          {workflowAction === "archive" ? (
+            <label>
+              Archive visibility
+              <select
+                value={archiveVisibility}
+                disabled={workflowBusy}
+                onChange={(event) =>
+                  setArchiveVisibility(
+                    event.target.value as typeof archiveVisibility,
+                  )
+                }
+              >
+                <option value="private">Private</option>
+                <option value="registered_only">Registered only</option>
+                <option value="public">Public</option>
+              </select>
+            </label>
+          ) : undefined}
+        </ConfirmDialog>
       )}
     </div>
   );

@@ -147,17 +147,34 @@ class SimilarityProcessRunner implements SimilarityProcess
      * @param  Collection<int, ResearchDocument>  $candidates
      * @return array<int, array<string, mixed>>
      */
-    public function runUploadedContentQuery(string $uploadedContent, Collection $candidates): array
+    /** @param list<string> $uploadedFileHashes */
+    public function runUploadedContentQuery(string $uploadedContent, Collection $candidates, array $uploadedFileHashes = []): array
     {
         $decoded = $this->execute([
             'uploaded_content' => $uploadedContent,
-            'candidates' => $candidates->map(fn (ResearchDocument $candidate): array => $this->queryRecord($candidate))->values()->all(),
+            'candidates' => $candidates->map(function (ResearchDocument $candidate) use ($uploadedFileHashes): array {
+                $projection = $candidate->manuscriptSearchDocument;
+                $projections = app(ManuscriptSearchProjectionService::class);
+                $hasExactSource = $projections->hasCurrentSourceHash($candidate, $uploadedFileHashes);
+                $hasCurrentFiles = $candidate->files->contains(
+                    fn ($file): bool => $file->is_current && $file->document_type === 'final_manuscript',
+                );
+                $current = ! $hasCurrentFiles || $projections->isCurrentReadyProjection($candidate, $projection);
+                $content = $current ? $projection->body_text : ($hasExactSource ? $projections->currentCanonicalText($candidate) : null);
+
+                return ['id' => (int) $candidate->id, 'title' => $candidate->title, 'content' => $content];
+            })->filter(fn (array $candidate): bool => is_string($candidate['content']) && trim($candidate['content']) !== '')->values()->all(),
         ]);
         $policy = $this->policy ?? app(SimilarityScorePolicy::class);
 
         return collect($this->validateUploadedContentOutput($decoded, $candidates))
             ->map(function (array $result) use ($policy): array {
                 $score = $result['content_similarity_score'];
+                if ($result['exact_content_match']) {
+                    $score = '1.000000000000';
+                } elseif ($score === '1.000000000000') {
+                    $score = '0.999999999999';
+                }
 
                 return [
                     ...$result,
@@ -167,6 +184,15 @@ class SimilarityProcessRunner implements SimilarityProcess
                     'score_status' => 'scored',
                 ];
             })
+            ->map(function (array $result): array {
+                unset($result['exact_content_match']);
+
+                return $result;
+            })
+            ->sortBy([
+                ['content_similarity_score', 'desc'],
+                ['matched_research_id', 'asc'],
+            ])
             ->values()
             ->all();
     }
@@ -179,7 +205,7 @@ class SimilarityProcessRunner implements SimilarityProcess
     {
         $decoded = $this->execute([
             $sourceKey => $source,
-            'candidates' => $candidates->map(fn (ResearchDocument $candidate): array => $this->queryRecord($candidate))->values()->all(),
+            'candidates' => $candidates->map(fn (ResearchDocument $candidate): array => $this->queryRecord($candidate, false))->values()->all(),
         ]);
         $policy = $this->policy ?? app(SimilarityScorePolicy::class);
 
@@ -300,7 +326,7 @@ class SimilarityProcessRunner implements SimilarityProcess
         return $decoded;
     }
 
-    /** @return array{id: int, title: string}|array{id: int, title: string, content: string} */
+    /** @return array{id: int, title: string, metadata: string}|array{id: int, title: string, metadata: string, content: string} */
     private function record(ResearchDocument $research, ?string $content = null): array
     {
         $record = ['id' => $research->id, 'title' => $research->title];
@@ -309,7 +335,7 @@ class SimilarityProcessRunner implements SimilarityProcess
     }
 
     /** @return array{id: int, title: string}|array{id: int, title: string, content: string} */
-    private function queryRecord(ResearchDocument $research): array
+    private function queryRecord(ResearchDocument $research, bool $includeMetadata = true): array
     {
         $projection = $research->relationLoaded('manuscriptSearchDocument')
             ? $research->getRelation('manuscriptSearchDocument')
@@ -319,7 +345,24 @@ class SimilarityProcessRunner implements SimilarityProcess
                 ? $projection->body_text
                 : null;
 
-        return $this->record($research, $content);
+        if (! $includeMetadata) {
+            return $this->record($research, $content);
+        }
+
+        $authors = $research->relationLoaded('authors')
+            ? $research->getRelation('authors')->pluck('author_name')->filter()->implode(' ')
+            : '';
+        $record = [
+            'id' => $research->id,
+            'title' => $research->title,
+            'metadata' => trim(implode(' ', array_filter([
+                $research->abstract,
+                $research->keywords,
+                $authors,
+            ]))),
+        ];
+
+        return $content === null ? $record : $record + ['content' => $content];
     }
 
     /** @param array<string, mixed> $value */
@@ -521,7 +564,7 @@ class SimilarityProcessRunner implements SimilarityProcess
         foreach ($output['results'] as $result) {
             if (! is_array($result) || array_keys($result) !== [
                 'matched_research_id', 'title_similarity_score', 'content_similarity_score',
-                'matched_terms', 'fasttext_support_score',
+                'matched_terms', 'fasttext_support_score', 'exact_content_match',
             ]) {
                 throw new SimilarityProcessException('Similarity worker result schema is invalid.');
             }
@@ -529,6 +572,7 @@ class SimilarityProcessRunner implements SimilarityProcess
                 || isset($validated[$result['matched_research_id']])
                 || $result['title_similarity_score'] !== '0.000000000000'
                 || $result['fasttext_support_score'] !== null
+                || ! is_bool($result['exact_content_match'])
                 || ! $this->validScore($result['content_similarity_score'])
                 || $result['content_similarity_score'] === '0.000000000000'
                 || ! is_array($result['matched_terms']) || count($result['matched_terms']) > 32) {

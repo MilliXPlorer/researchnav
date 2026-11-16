@@ -57,11 +57,17 @@ def _record(
     field: str,
     with_content: bool = False,
     optional_content: bool = False,
+    optional_metadata: bool = False,
 ) -> dict[str, Any]:
     expected = {"id", "title", "content"} if with_content else {"id", "title"}
     valid_keys = [expected]
     if optional_content:
         valid_keys.append({"id", "title", "content"})
+    if optional_metadata:
+        valid_keys.extend([
+            {"id", "title", "metadata"},
+            {"id", "title", "metadata", "content"},
+        ])
     if not isinstance(value, dict) or set(value) not in valid_keys:
         raise InvalidWorkerInput(f"Invalid {field} record.")
     if not isinstance(value["id"], int) or value["id"] < 1:
@@ -78,6 +84,11 @@ def _record(
         or len(value["content"]) > MAX_CONTENT_LENGTH
     ):
         raise InvalidWorkerInput(f"Invalid {field} content.")
+    if "metadata" in value and (
+        not isinstance(value["metadata"], str)
+        or len(value["metadata"]) > MAX_CONTENT_LENGTH
+    ):
+        raise InvalidWorkerInput(f"Invalid {field} metadata.")
     return value
 
 
@@ -114,7 +125,7 @@ def _query_payload(raw: str) -> tuple[str, list[dict[str, Any]]]:
     if len(value["candidates"]) > MAX_CANDIDATES:
         raise SimilarityCapacityExceeded("Candidate capacity exceeded.")
     candidates = [
-        _record(candidate, "candidate", optional_content=True)
+        _record(candidate, "candidate", optional_content=True, optional_metadata=True)
         for candidate in value["candidates"]
     ]
     ids = [candidate["id"] for candidate in candidates]

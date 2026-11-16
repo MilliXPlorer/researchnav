@@ -1,17 +1,22 @@
 import { useEffect, useState } from "react";
-import { Download, FileText } from "lucide-react";
-import { getPublicResearch, repositoryDownloadUrl } from "./api";
+import { Download, FileText, LockKeyhole } from "lucide-react";
+import { getPublicResearch } from "./api";
 import { Button } from "./components";
 import type { ResearchRecord } from "./types";
 import { useDialogFocus } from "./useDialogFocus";
 import { SdgBadges } from "./SdgMetadata";
+import ProtectedFileAccess from "./ProtectedFileAccess";
 
 export default function PublicResearchMetadataDialog({
   researchDocumentId,
   onClose,
+  authenticated = true,
+  onSignIn = () => {},
 }: {
   researchDocumentId: string | number;
   onClose: () => void;
+  authenticated?: boolean;
+  onSignIn?: () => void;
 }) {
   const [record, setRecord] = useState<ResearchRecord | null>(null);
   const [failed, setFailed] = useState(false);
@@ -93,14 +98,13 @@ export default function PublicResearchMetadataDialog({
                 Return to results
               </Button>
               {record.hasDownloadableManuscript ? (
-                <a
-                  className="button button-primary"
-                  href={repositoryDownloadUrl(record.id)}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <ProtectedFileAccess
+                  researchDocumentId={record.id}
+                  authenticated={authenticated}
+                  onSignIn={onSignIn}
                 >
-                  <Download /> View files
-                </a>
+                  {authenticated ? <Download /> : <LockKeyhole />} View files
+                </ProtectedFileAccess>
               ) : (
                 <span className="download-gate is-unavailable">
                   <FileText /> Final manuscript unavailable

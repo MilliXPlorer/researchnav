@@ -1,4 +1,14 @@
-import { ExternalLink, LibraryBig, Search, ShieldCheck } from "lucide-react";
+import {
+  ArrowUpRight,
+  BarChart3,
+  BookOpen,
+  ExternalLink,
+  FolderKanban,
+  History,
+  LibraryBig,
+  Search,
+  ShieldCheck,
+} from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { AnimatedStat, Button } from "./components";
 import { formatPhilippineDate } from "./dateTime";
@@ -93,15 +103,26 @@ export default function RoleWorkspace({
   researchDocumentId,
   researchWorkspaceDestination,
 }: WorkspaceProps) {
-  if (
-    ["admin", "research-office"].includes(role) &&
-    researchDocumentId !== undefined
-  ) {
+  if (role === "admin" && researchDocumentId !== undefined) {
     return (
       <AdminResearchWorkspace
         key={`${dashboardScope}:${researchDocumentId}`}
         researchDocumentId={researchDocumentId}
         navigate={navigate}
+      />
+    );
+  }
+
+  if (role === "research-office" && researchDocumentId !== undefined) {
+    return (
+      <AssignedResearchFolders
+        key={`${dashboardScope}:${researchDocumentId}`}
+        role={role}
+        actorKey={dashboardScope}
+        initialResearchDocumentId={researchDocumentId}
+        destination={researchWorkspaceDestination}
+        navigate={navigate}
+        onResearchChanged={onRetry}
       />
     );
   }
@@ -203,7 +224,7 @@ function ResearcherWorkspace({
 }) {
   const config = workspaceConfigs.researcher;
   return (
-    <div className="workspace-content">
+    <div className="workspace-content researcher-dashboard-workspace">
       <WorkspaceHeader
         eyebrow={config.eyebrow}
         title={config.title}
@@ -406,11 +427,6 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
         internalRecord: true,
         researchMetric: true,
       },
-      defense_schedule: {
-        title: "Defense schedule",
-        description: "Scheduled proposal defense information.",
-        destination: "Assigned Defenses",
-      },
       repository_references: {
         title: "Repository references",
         description: "Archived research available in the catalog.",
@@ -552,7 +568,11 @@ function RoleDashboardWorkspace({
       className={
         role === "research-office"
           ? "workspace-content office-dashboard-workspace"
-          : "workspace-content"
+          : role === "admin"
+            ? "workspace-content admin-dashboard-workspace"
+            : role === "panel"
+              ? "workspace-content panel-dashboard-workspace"
+              : "workspace-content"
       }
     >
       <WorkspaceHeader {...config} action={action} />
@@ -679,6 +699,36 @@ function DashboardSections({
           Object.prototype.hasOwnProperty.call(config.sections, section.key),
         )
       : dashboardState.dashboard.sections;
+  const adminAttentionKeys = new Set([
+    "pending_accounts",
+    "submission_queue",
+    "revision_required",
+    "pending_title_validations",
+    "flagged_similarity",
+    "approved_for_archiving",
+  ]);
+  const adminRepositoryKeys = new Set([
+    "draft_research",
+    "archived_repository",
+    "recent_research",
+  ]);
+  const adminWorkloadKeys = new Set([
+    "draft_research",
+    "submission_queue",
+    "revision_required",
+    "pending_title_validations",
+    "flagged_similarity",
+    "approved_for_archiving",
+  ]);
+  const adminAttentionSections = visibleSections.filter((section) =>
+    adminAttentionKeys.has(section.key),
+  );
+  const adminRepositorySections = visibleSections.filter((section) =>
+    adminRepositoryKeys.has(section.key),
+  );
+  const adminWorkloadSections = visibleSections.filter((section) =>
+    adminWorkloadKeys.has(section.key),
+  );
 
   return (
     <>
@@ -693,27 +743,92 @@ function DashboardSections({
           </Button>
         </section>
       )}
-      <DashboardStatistics
-        sections={visibleSections}
-        config={config}
-        onSelect={(section) => setSelectedSectionKey(section.key)}
-      />
+      {role === "admin" ? (
+        <>
+          <DashboardStatistics
+            sections={adminAttentionSections}
+            config={config}
+            eyebrow="Needs attention"
+            title="Needs attention"
+            titleHidden
+            variant="attention"
+            onSelect={(section) => setSelectedSectionKey(section.key)}
+          />
+          <DashboardStatistics
+            sections={adminRepositorySections}
+            config={config}
+            eyebrow="Repository overview"
+            title="Repository overview"
+            titleHidden
+            variant="repository"
+            onSelect={(section) => setSelectedSectionKey(section.key)}
+          />
+        </>
+      ) : (
+        <DashboardStatistics
+          sections={visibleSections}
+          config={config}
+          onSelect={(section) => setSelectedSectionKey(section.key)}
+        />
+      )}
       {role === "research-office" && (
         <InstituteCountAnalytics
           instituteTotals={dashboardState.dashboard.institutional_overview}
         />
       )}
-      <div className="dashboard-visualizations">
-        <DashboardWorkloadChart
+      {role === "research-office" ? (
+        <OfficeDashboardOperations
           sections={visibleSections.filter(
             (section) => config.sections[section.key]?.researchMetric,
           )}
           config={config}
+          selectNav={selectNav}
         />
-        {role !== "research-office" && dashboardState.dashboard.analytics && (
-          <DashboardAnalytics analytics={dashboardState.dashboard.analytics} />
-        )}
-      </div>
+      ) : role === "panel" ? (
+        <>
+          <PanelDashboardOperations
+            sections={visibleSections}
+            config={config}
+            selectNav={selectNav}
+          />
+          {dashboardState.dashboard.analytics && (
+            <div className="dashboard-visualizations">
+              <DashboardAnalytics
+                analytics={dashboardState.dashboard.analytics}
+              />
+            </div>
+          )}
+        </>
+      ) : role === "admin" ? (
+        <div className="dashboard-visualizations admin-dashboard-visualizations">
+          <DashboardWorkloadChart
+            sections={adminWorkloadSections}
+            config={config}
+          />
+          {dashboardState.dashboard.analytics && (
+            <DashboardAnalytics
+              analytics={dashboardState.dashboard.analytics}
+              fitToContainer
+              showTotal={false}
+            />
+          )}
+        </div>
+      ) : (
+        <div className="dashboard-visualizations">
+          <DashboardWorkloadChart
+            sections={visibleSections.filter(
+              (section) => config.sections[section.key]?.researchMetric,
+            )}
+            config={config}
+          />
+          {dashboardState.dashboard.analytics && (
+            <DashboardAnalytics
+              analytics={dashboardState.dashboard.analytics}
+              fitToContainer={role === "researcher"}
+            />
+          )}
+        </div>
+      )}
       {role === "research-office" && (
         <OfficeInstitutionalOverview
           studiesByInstitute={officeInstituteStudies}
@@ -749,6 +864,109 @@ function DashboardSections({
         </Modal>
       )}
     </>
+  );
+}
+
+function PanelDashboardOperations({
+  sections,
+  config,
+  selectNav,
+}: {
+  sections: RoleDashboardSection[];
+  config: WorkspaceConfig;
+  selectNav: (item: string) => void;
+}) {
+  const assigned = availableDashboardSections(sections).find(
+    (section) => section.key === "assigned_manuscripts",
+  );
+  const assignedTitle =
+    config.sections.assigned_manuscripts?.title ?? "Assigned manuscripts";
+  const actions = [
+    { label: "Assigned Research", icon: BookOpen },
+    { label: "User Logs", icon: History },
+  ] as const;
+
+  return (
+    <div className="panel-dashboard-operations">
+      <section className="panel-dashboard-workload">
+        <header>
+          <p className="eyebrow">Workload</p>
+          <h2>Current workload</h2>
+        </header>
+        <div>
+          <span>{assignedTitle}</span>
+          <strong
+            aria-label={`${assignedTitle}: ${assigned?.total ?? 0} total`}
+          >
+            {assigned?.total ?? 0}
+          </strong>
+        </div>
+        <button type="button" onClick={() => selectNav("Assigned Research")}>
+          Open Assigned Research <ArrowUpRight aria-hidden="true" />
+        </button>
+      </section>
+      <section className="panel-dashboard-tools">
+        <header>
+          <p className="eyebrow">Shortcuts</p>
+          <h2>Panel tools</h2>
+        </header>
+        <div>
+          {actions.map(({ label, icon: Icon }) => (
+            <button key={label} type="button" onClick={() => selectNav(label)}>
+              <Icon aria-hidden="true" />
+              <span>{label}</span>
+              <ArrowUpRight aria-hidden="true" />
+            </button>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function OfficeDashboardOperations({
+  sections,
+  config,
+  selectNav,
+}: {
+  sections: RoleDashboardSection[];
+  config: WorkspaceConfig;
+  selectNav: (item: string) => void;
+}) {
+  const actions = [
+    { label: "Assigned Research", icon: BookOpen },
+    { label: "Manage Repository", icon: FolderKanban },
+    { label: "Similarity Check", icon: Search },
+    { label: "Reports & Exports", icon: BarChart3 },
+  ] as const;
+
+  return (
+    <section
+      className="office-dashboard-operations"
+      aria-label="Dashboard tools"
+    >
+      <DashboardWorkloadChart sections={sections} config={config} />
+      <nav
+        className="office-dashboard-quick-actions"
+        aria-label="Quick actions"
+      >
+        <header>
+          <p className="eyebrow">Shortcuts</p>
+          <h3>Quick actions</h3>
+        </header>
+        <div>
+          {actions.map(({ label, icon: Icon }) => (
+            <button key={label} type="button" onClick={() => selectNav(label)}>
+              <span aria-hidden="true">
+                <Icon />
+              </span>
+              <strong>{label}</strong>
+              <ArrowUpRight aria-hidden="true" />
+            </button>
+          ))}
+        </div>
+      </nav>
+    </section>
   );
 }
 
@@ -1135,12 +1353,12 @@ function InstituteCountAnalytics({
   );
 }
 
-const CHART_WIDTH = 620;
-const CHART_HEIGHT = 130;
-const CHART_LEFT = 38;
-const CHART_RIGHT = 12;
-const CHART_TOP = 12;
-const CHART_BOTTOM = 26;
+const CHART_WIDTH = 760;
+const CHART_HEIGHT = 250;
+const CHART_LEFT = 48;
+const CHART_RIGHT = 26;
+const CHART_TOP = 40;
+const CHART_BOTTOM = 48;
 
 function niceChartMaximum(value: number) {
   if (value <= 5) return Math.max(1, value);
@@ -1152,13 +1370,29 @@ function niceChartMaximum(value: number) {
 
 function DashboardAnalytics({
   analytics,
+  fitToContainer = false,
+  showTotal = true,
 }: {
   analytics: RoleDashboardAnalytics;
+  fitToContainer?: boolean;
+  showTotal?: boolean;
 }) {
-  const allValues = analytics.series.flatMap((series) =>
+  const figureRef = useRef<HTMLElement>(null);
+  const plotRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(CHART_WIDTH);
+  const [activeTooltip, setActiveTooltip] = useState<{
+    index: number;
+    label: string;
+    values: number[];
+  } | null>(null);
+  const chartSeries = analytics.series;
+  const allValues = chartSeries.flatMap((series) =>
     series.points.map((point) => point.value),
   );
-  const maximum = niceChartMaximum(Math.max(0, ...allValues));
+  const niceMaximum = niceChartMaximum(Math.max(0, ...allValues));
+  const maximum = fitToContainer
+    ? Math.max(2, Math.ceil(niceMaximum / 2) * 2)
+    : niceMaximum;
   const labels = Array.from(
     new Map(
       analytics.series
@@ -1166,101 +1400,194 @@ function DashboardAnalytics({
         .map((point) => [point.key, point]),
     ).values(),
   ).sort((left, right) => left.key.localeCompare(right.key));
-  const plotWidth = CHART_WIDTH - CHART_LEFT - CHART_RIGHT;
-  const plotHeight = CHART_HEIGHT - CHART_TOP - CHART_BOTTOM;
-  const gridStep = maximum <= 5 ? 1 : maximum / 5;
-  const gridValues = Array.from(
-    { length: Math.round(maximum / gridStep) + 1 },
-    (_, index) => maximum - index * gridStep,
+  const chartWidth = fitToContainer ? containerWidth : CHART_WIDTH;
+  const chartHeight = fitToContainer ? 280 : CHART_HEIGHT;
+  const chartLeft = fitToContainer ? 58 : CHART_LEFT;
+  const chartRight = fitToContainer ? 42 : CHART_RIGHT;
+  const chartTop = fitToContainer ? 42 : CHART_TOP;
+  const chartBottom = fitToContainer ? 52 : CHART_BOTTOM;
+  const plotWidth = chartWidth - chartLeft - chartRight;
+  const plotHeight = chartHeight - chartTop - chartBottom;
+  const gridValues = Array.from(new Set([maximum, Math.round(maximum / 2), 0]));
+  const total = analytics.series.reduce(
+    (sum, series) =>
+      sum +
+      series.points.reduce((seriesSum, point) => seriesSum + point.value, 0),
+    0,
   );
-  const x = (index: number) =>
-    CHART_LEFT + (index * plotWidth) / Math.max(labels.length - 1, 1);
-  const y = (value: number) =>
-    CHART_TOP + plotHeight - (value / maximum) * plotHeight;
+  const groupWidth = plotWidth / Math.max(labels.length, 1);
+  const barGap = Math.min(8, groupWidth * 0.08);
+  const barWidth = Math.min(
+    44,
+    Math.max(4, (groupWidth * 0.58 - barGap) / Math.max(chartSeries.length, 1)),
+  );
+  const barsWidth =
+    chartSeries.length * barWidth +
+    Math.max(0, chartSeries.length - 1) * barGap;
+  const x = (index: number) => chartLeft + groupWidth * (index + 0.5);
+  const finalY = (value: number) =>
+    chartTop + plotHeight - (value / maximum) * plotHeight;
+
+  useEffect(() => {
+    const plot = plotRef.current;
+    if (!fitToContainer || !plot) return;
+    const measure = () => {
+      const width = Math.round(plot.getBoundingClientRect().width);
+      if (width > 0) setContainerWidth(Math.max(240, width));
+    };
+    const frame = requestAnimationFrame(measure);
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(measure);
+    observer?.observe(plot);
+    window.addEventListener("resize", measure);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [fitToContainer]);
 
   return (
     <figure
-      className="dashboard-analytics"
+      ref={figureRef}
+      className="dashboard-analytics office-institute-analytics"
       aria-labelledby="dashboard-analytics-title"
     >
       <figcaption>
         <div>
-          <p className="eyebrow">Analytics</p>
+          <p className="eyebrow">{showTotal ? "Analytics" : "Trend"}</p>
           <h2 id="dashboard-analytics-title">{analytics.title}</h2>
           <p>{analytics.period}, based on records visible to this workspace.</p>
         </div>
-        <div className="dashboard-analytics-legend" aria-label="Chart legend">
-          {analytics.series.map((series, index) => (
-            <span key={series.key} className={`analytics-series-${index + 1}`}>
-              <i aria-hidden="true" /> {series.label}
+        <div className="dashboard-analytics-summary">
+          {showTotal && (
+            <span
+              className="office-institute-grand-total"
+              aria-label={`${total} total activity`}
+            >
+              <AnimatedStat value={total} />{" "}
+              <span aria-hidden="true">total</span>
             </span>
-          ))}
+          )}
+          <div className="dashboard-analytics-legend" aria-label="Chart legend">
+            {chartSeries.map((series, index) => (
+              <span
+                key={series.key}
+                className={`analytics-series-${index + 1}`}
+              >
+                <i aria-hidden="true" /> {series.label}
+              </span>
+            ))}
+          </div>
         </div>
       </figcaption>
 
-      <div className="dashboard-line-chart">
+      <div className="dashboard-bar-chart" ref={plotRef}>
+        {activeTooltip && (
+          <div
+            id="dashboard-activity-tooltip"
+            className="dashboard-activity-tooltip"
+            role="tooltip"
+            style={{
+              left: `${((activeTooltip.index + 0.5) / Math.max(labels.length, 1)) * 100}%`,
+            }}
+          >
+            <strong>{activeTooltip.label}</strong>
+            {chartSeries.map((series, seriesIndex) => (
+              <span key={series.key}>
+                {series.label}:{" "}
+                {activeTooltip.values[seriesIndex].toLocaleString()}
+              </span>
+            ))}
+          </div>
+        )}
         <svg
-          viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
+          viewBox={`0 0 ${chartWidth} ${chartHeight}`}
           role="img"
           aria-label={`${analytics.title}, ${analytics.period}`}
         >
           {gridValues.map((value) => {
-            const gridY = y(value);
+            const gridY = finalY(value);
             return (
               <g key={value}>
                 <line
                   className="analytics-grid-line"
-                  x1={CHART_LEFT}
-                  x2={CHART_WIDTH - CHART_RIGHT}
+                  x1={chartLeft}
+                  x2={chartWidth - chartRight}
                   y1={gridY}
                   y2={gridY}
                 />
-                <text
-                  className="analytics-axis-value"
-                  x={CHART_LEFT - 10}
-                  y={gridY + 4}
-                >
-                  {value}
-                </text>
+                {(value > 0 || fitToContainer) && (
+                  <text
+                    className="analytics-axis-value"
+                    x={chartLeft - 10}
+                    y={gridY + 4}
+                  >
+                    {value.toLocaleString()}
+                  </text>
+                )}
               </g>
             );
           })}
 
-          {analytics.series.map((series, seriesIndex) => {
-            const valuesByKey = new Map(
-              series.points.map((point) => [point.key, point]),
+          {labels.map((label, index) => {
+            const values = chartSeries.map(
+              (series) =>
+                series.points.find((point) => point.key === label.key)?.value ??
+                0,
             );
-            const orderedPoints = labels.map(
-              (label) => valuesByKey.get(label.key) ?? { ...label, value: 0 },
-            );
-            const points = orderedPoints
-              .map((point, index) => `${x(index)},${y(point.value)}`)
-              .join(" ");
+            const tooltip = [
+              label.label,
+              ...chartSeries.map(
+                (series, seriesIndex) =>
+                  `${series.label}: ${values[seriesIndex].toLocaleString()}`,
+              ),
+            ].join("\n");
             return (
               <g
-                key={series.key}
-                className={`analytics-line analytics-series-${seriesIndex + 1}`}
+                key={label.key}
+                className="analytics-bar-group"
+                tabIndex={0}
+                role="group"
+                aria-label={tooltip.replaceAll("\n", ", ")}
+                aria-describedby={
+                  activeTooltip?.index === index
+                    ? "dashboard-activity-tooltip"
+                    : undefined
+                }
+                onMouseEnter={() =>
+                  setActiveTooltip({ index, label: label.label, values })
+                }
+                onMouseLeave={() => setActiveTooltip(null)}
+                onFocus={() =>
+                  setActiveTooltip({ index, label: label.label, values })
+                }
+                onBlur={() => setActiveTooltip(null)}
               >
-                <polyline points={points} />
-                {orderedPoints.map((point, index) => (
-                  <g key={point.key}>
-                    <circle cx={x(index)} cy={y(point.value)} r="4">
-                      <title>{`${point.label} ${series.label}: ${point.value}`}</title>
-                    </circle>
-                    {point.value > 0 && (
-                      <text
-                        className="analytics-point-value"
-                        x={x(index)}
-                        y={Math.max(
-                          CHART_TOP + 9,
-                          y(point.value) - 8 - seriesIndex * 10,
-                        )}
-                      >
-                        {point.value}
-                      </text>
-                    )}
-                  </g>
-                ))}
+                <title>{tooltip}</title>
+                {chartSeries.map((series, seriesIndex) => {
+                  const value = values[seriesIndex];
+                  const height = (value / maximum) * plotHeight;
+                  const barX =
+                    x(index) -
+                    barsWidth / 2 +
+                    seriesIndex * (barWidth + barGap);
+                  return (
+                    <rect
+                      key={series.key}
+                      className={`analytics-bar analytics-series-${seriesIndex + 1}`}
+                      data-month={label.key}
+                      data-value={value}
+                      x={barX}
+                      y={chartTop + plotHeight - height}
+                      width={barWidth}
+                      height={height}
+                      rx={Math.min(4, barWidth / 4)}
+                    />
+                  );
+                })}
               </g>
             );
           })}
@@ -1270,7 +1597,7 @@ function DashboardAnalytics({
               key={point.key}
               className="analytics-axis-label"
               x={x(index)}
-              y={CHART_HEIGHT - 13}
+              y={chartHeight - 13}
             >
               {point.label}
             </text>
@@ -1310,10 +1637,18 @@ function DashboardStatistics({
   sections,
   config,
   onSelect,
+  eyebrow = "Live overview",
+  title = "Statistics",
+  titleHidden = false,
+  variant,
 }: {
   sections: RoleDashboardSection[];
   config: WorkspaceConfig;
   onSelect?: (section: RoleDashboardSection) => void;
+  eyebrow?: string;
+  title?: string;
+  titleHidden?: boolean;
+  variant?: "attention" | "repository";
 }) {
   const available = availableDashboardSections(sections);
 
@@ -1321,15 +1656,20 @@ function DashboardStatistics({
 
   return (
     <section
-      className="dashboard-statistics"
-      aria-labelledby="dashboard-statistics-title"
+      className={`dashboard-statistics${variant ? ` admin-dashboard-statistics admin-dashboard-statistics-${variant}` : ""}`}
+      aria-labelledby={`dashboard-statistics-${variant ?? "default"}-title`}
     >
       <header>
         <div>
-          <p className="eyebrow">Live overview</p>
-          <h2 id="dashboard-statistics-title">Statistics</h2>
+          <p className="eyebrow">{eyebrow}</p>
+          <h2
+            id={`dashboard-statistics-${variant ?? "default"}-title`}
+            className={titleHidden ? "sr-only" : undefined}
+          >
+            {title}
+          </h2>
         </div>
-        <p>Current totals for this role workspace.</p>
+        {!variant && <p>Current totals for this role workspace.</p>}
       </header>
       <dl className="dashboard-stat-grid">
         {available.map((section) => {
@@ -1373,6 +1713,7 @@ function DashboardWorkloadChart({
     1,
     ...available.map((section) => section.total),
   );
+  const allEmpty = available.every((section) => section.total === 0);
 
   return (
     <figure className="dashboard-chart">
@@ -1382,6 +1723,11 @@ function DashboardWorkloadChart({
           <h3>Current workload</h3>
         </div>
       </figcaption>
+      {allEmpty && (
+        <p className="dashboard-chart-empty" role="status">
+          No actionable workload is currently pending.
+        </p>
+      )}
       <div className="dashboard-chart-bars">
         {available.map((section) => {
           const title =

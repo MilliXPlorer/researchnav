@@ -150,7 +150,11 @@ function installApi(
           },
         ]);
       }
-      if (path.startsWith("/api/support-assignments/eligible?role=")) {
+      if (
+        path.startsWith(
+          "/api/support-assignments/eligible?research_document_id=42&role=",
+        )
+      ) {
         return response([
           { id: "editor-b", name: "New Editor", email: "editor@example.test" },
         ]);
@@ -184,6 +188,38 @@ function installApi(
             instructor_name: "Ina Structor",
           },
           reviewers: [{ review_role: "adviser", name: "Ada Viser" }],
+        });
+      }
+      if (path.startsWith("/api/research/42/team?defense_type=")) {
+        const final = path.endsWith("final");
+        return response({
+          section_id: 3,
+          research_document_id: 42,
+          defense_type: final ? "final" : "proposal",
+          instructor: {
+            user_id: "instructor",
+            name: final ? "Final Instructor" : "Ina Structor",
+            email: "instructor@example.test",
+            team_role: "instructor",
+          },
+          researchers: [],
+          adviser: {
+            user_id: "adviser",
+            name: final ? "Final Adviser" : "Ada Viser",
+            email: "adviser@example.test",
+            team_role: "adviser",
+          },
+          research_office_representative: null,
+          chair: null,
+          panel_members: [],
+          support_assignments: {
+            editor: null,
+            statistician: null,
+            librarian: null,
+          },
+          pre_defense_ready: !final,
+          post_defense_ready: false,
+          complete: false,
         });
       }
       if (
@@ -264,6 +300,11 @@ describe("researcher research workspace", () => {
     expect(screen.getByText("Research workspace")).toBeInTheDocument();
     expect(screen.getByText("Study members")).toBeInTheDocument();
     expect(screen.getByText("Latest documents")).toBeInTheDocument();
+    expect(screen.getByText("1 members")).toBeInTheDocument();
+    expect(screen.getByText("Revision Required")).toHaveClass(
+      "project-status-badge",
+    );
+    expect(screen.getByTitle("final.pdf")).toBeInTheDocument();
     expect(screen.queryByText("Submission timeline")).not.toBeInTheDocument();
     expect(
       screen.queryByRole("heading", { name: "Research progress" }),
@@ -669,16 +710,31 @@ describe("researcher research workspace", () => {
         "final_revision",
       );
     });
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter(
+          ([path, init]) =>
+            String(path) === "/api/research/42/support-assignments" &&
+            !init?.method,
+        ).length,
+      ).toBeGreaterThan(1),
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Research Team" }));
     fireEvent.click(screen.getByRole("button", { name: "Change Editor" }));
-    await screen.findByRole("heading", { name: "Change Editor" });
-    fireEvent.change(screen.getByLabelText("Select Editor"), {
-      target: { value: "editor-b" },
+    await screen.findByRole("heading", { name: "Change editor" });
+    fireEvent.change(screen.getByPlaceholderText("Search by name or email"), {
+      target: { value: "New" },
     });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Send change request" }),
+    await waitFor(() =>
+      expect(
+        screen.getByRole("option", { name: /New Editor/ }),
+      ).toBeInTheDocument(),
     );
+    fireEvent.click(screen.getByRole("option", { name: /New Editor/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Send request" }));
+    await screen.findByRole("heading", { name: "Send support request?" });
+    fireEvent.click(screen.getByRole("button", { name: "Send request" }));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -689,9 +745,53 @@ describe("researcher research workspace", () => {
             user_id: "editor-b",
             assignment_role: "research_editor",
             replace_current: true,
+            expected_current_assignment_id: 71,
           }),
         }),
       ),
+    );
+  });
+
+  it("switches stage and defense phase while showing specialists in both roster and controls", async () => {
+    const fetchMock = installApi();
+    render(
+      <RoleWorkspace
+        role="researcher"
+        navigate={vi.fn()}
+        selectNav={vi.fn()}
+        dashboardScope="researcher:researcher@example.test"
+        dashboardState={{
+          status: "loading",
+          scope: "researcher:researcher@example.test",
+        }}
+        onRetry={vi.fn()}
+        researchDocumentId="42"
+      />,
+    );
+    await screen.findByRole("heading", { name: "Revision-ready study" });
+    fireEvent.click(screen.getByRole("button", { name: "Research Team" }));
+    expect((await screen.findAllByText("Ina Structor")).length).toBeGreaterThan(
+      0,
+    );
+    expect(screen.getByText("Complete")).toBeInTheDocument();
+    expect(screen.getAllByText("Editor")).toHaveLength(2);
+    expect(screen.getAllByText("Statistician")).toHaveLength(2);
+    expect(screen.getAllByText("Librarian")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("tab", { name: "After defense" }));
+    expect(screen.getAllByText("Editor")).toHaveLength(2);
+    expect(screen.getAllByText("Librarian")).toHaveLength(2);
+    expect(screen.getAllByText("Statistician")).toHaveLength(1);
+    expect(screen.getByText("Panel 1").nextSibling).toHaveTextContent(
+      "Unassigned",
+    );
+    expect(screen.getByText("Incomplete")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Defense stage"), {
+      target: { value: "final" },
+    });
+    expect(await screen.findByText("Final Instructor")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/research/42/team?defense_type=final",
+      expect.anything(),
     );
   });
 

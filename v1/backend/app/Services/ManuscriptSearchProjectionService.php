@@ -37,7 +37,7 @@ class ManuscriptSearchProjectionService
         $resolution = $this->resolveSource($document);
         $source = $resolution['source'];
         $projection = ManuscriptSearchDocument::query()->where('research_document_id', $documentId)->first();
-        if (! $force && $this->isCurrentReadyProjection($projection, $source)) {
+        if (! $force && $this->isCurrentReadyProjectionForSource($projection, $source)) {
             return 'skipped';
         }
         if (! $force && $this->isCurrentResolutionFailure($projection, $resolution)) {
@@ -81,6 +81,48 @@ class ManuscriptSearchProjectionService
             ['research_document_id' => $documentId],
             $this->clearedValues(null, 'pending', null),
         );
+    }
+
+    public function isCurrentReadyProjection(ResearchDocument $document, ?ManuscriptSearchDocument $projection): bool
+    {
+        return $this->isCurrentReadyProjectionForSource($projection, $this->resolveSource($document)['source']);
+    }
+
+    public function currentCanonicalText(ResearchDocument $document): ?string
+    {
+        $resolution = $this->resolveSource($document);
+        if ($resolution['state'] !== 'source' || $resolution['source']['has_doc']) {
+            return null;
+        }
+
+        try {
+            $source = $resolution['source'];
+            $files = isset($source['files']) ? $source['files'] : [$source];
+            $parts = [];
+            foreach ($files as $index => $file) {
+                $parts[] = ['index' => $index, 'text' => $this->extractor->extractRaw($file['path'])];
+            }
+
+            return app(UploadedContentSimilarityService::class)->canonicalText($parts);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /** @param list<string> $hashes */
+    public function hasCurrentSourceHash(ResearchDocument $document, array $hashes): bool
+    {
+        if ($hashes === []) {
+            return false;
+        }
+        $resolution = $this->resolveSource($document);
+        if ($resolution['state'] !== 'source') {
+            return false;
+        }
+        $source = $resolution['source'];
+        $files = isset($source['files']) ? $source['files'] : [$source];
+
+        return collect($files)->contains(fn (array $file): bool => in_array($file['sha256'], $hashes, true));
     }
 
     public function purgeIneligible(): int
@@ -416,7 +458,7 @@ class ManuscriptSearchProjectionService
             && ! $document->trashed();
     }
 
-    private function isCurrentReadyProjection(?ManuscriptSearchDocument $projection, ?array $source): bool
+    private function isCurrentReadyProjectionForSource(?ManuscriptSearchDocument $projection, ?array $source): bool
     {
         return $projection !== null && $projection->extraction_status === 'ready' && $source !== null
             && $projection->extractor_version === (string) config('researchnav.manuscript_search.extractor_version')

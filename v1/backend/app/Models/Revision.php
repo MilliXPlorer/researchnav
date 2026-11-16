@@ -23,6 +23,19 @@ class Revision extends ConsolidatedReviewModel
 
     public const STATUSES = ['requested', 'in_progress', 'resubmitted', 'under_review', 'accepted'];
 
+    protected static function booted(): void
+    {
+        parent::booted();
+
+        static::addGlobalScope('revision_lifecycle', function (Builder $query): void {
+            if ($query->getModel()->usesFinalStorage()) {
+                // Feedback-only revision notes use the same historical type,
+                // but never an actionable revision lifecycle status.
+                $query->whereIn($query->getModel()->qualifyColumn('status'), self::STATUSES);
+            }
+        });
+    }
+
     protected $fillable = ['research_document_id', 'requested_by', 'reviewer_role', 'review_type', 'document_file_id', 'revision_number', 'revision_remarks', 'required_action', 'revision_status', 'requested_at', 'submitted_at', 'reviewed_at', 'resolved_at'];
 
     public static function column(string $legacyColumn): string
@@ -44,6 +57,10 @@ class Revision extends ConsolidatedReviewModel
 
     public function getAttribute($key): mixed
     {
+        if ($this->usesFinalStorage() && $key === 'document_file_id') {
+            return $this->getAttributeValue('document_file_id');
+        }
+
         if ($this->usesFinalStorage()) {
             $key = static::column((string) $key);
         }
@@ -53,6 +70,12 @@ class Revision extends ConsolidatedReviewModel
 
     public function setAttribute($key, $value): static
     {
+        if ($this->usesFinalStorage() && $key === 'document_file_id') {
+            $this->attributes['document_file_id'] = $value;
+
+            return $this;
+        }
+
         return parent::setAttribute($this->usesFinalStorage() ? static::column((string) $key) : $key, $value);
     }
 

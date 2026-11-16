@@ -193,6 +193,17 @@ def test_shared_term_filter_does_not_change_uploaded_content_scores_or_ranking()
     assert [result["matched_research_id"] for result in results] == [3, 2]
 
 
+def test_public_query_uses_metadata_only_when_title_has_no_match() -> None:
+    result = compare_query(
+        "Rivera",
+        [{"id": 1, "title": "Coastal Mapping", "metadata": "Ada Rivera"}],
+        None,
+    )[0]
+
+    assert result["title_similarity_score"] != "0.000000000000"
+    assert result["matched_terms"] == ["rivera"]
+
+
 def test_uploaded_content_preserves_ordinals_so_different_ordinals_are_not_false_hundreds() -> (
     None
 ):
@@ -244,6 +255,45 @@ def test_uploaded_content_ranks_exact_content_match_ahead_of_title_match() -> No
     assert [result["matched_research_id"] for result in results] == [3]
     assert results[0]["content_similarity_score"] == "1.000000000000"
     assert results[0]["title_similarity_score"] == "0.000000000000"
+    assert results[0]["exact_content_match"] is True
+
+
+def test_uploaded_content_keeps_exact_match_inside_tied_top_ten() -> None:
+    upload = "CHAPTER 1\nalpha beta gamma"
+    candidates = [
+        {
+            "id": candidate_id,
+            "title": f"Candidate {candidate_id}",
+            "content": "CHAPTER 1\ngamma beta alpha",
+        }
+        for candidate_id in range(1, 11)
+    ]
+    candidates.append({"id": 99, "title": "Exact", "content": upload})
+
+    results = compare_query(upload, candidates, None, uploaded_content=True)
+
+    assert len(results) == 10
+    assert results[0]["matched_research_id"] == 99
+    assert results[0]["exact_content_match"] is True
+
+
+def test_uploaded_content_vocabulary_is_bounded_per_document_not_repository(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(engine_module, "_MAX_CONTENT_VOCABULARY", 4)
+
+    results = compare_query(
+        "CHAPTER 1\nalpha beta",
+        [
+            {"id": 2, "title": "First", "content": "CHAPTER 1\nalpha gamma"},
+            {"id": 3, "title": "Second", "content": "CHAPTER 1\nbeta delta"},
+            {"id": 4, "title": "Third", "content": "CHAPTER 1\nalpha epsilon"},
+        ],
+        None,
+        uploaded_content=True,
+    )
+
+    assert [result["matched_research_id"] for result in results] == [2, 3, 4]
 
 
 def test_shared_term_filter_keeps_title_and_content_scores_unchanged() -> None:
@@ -580,7 +630,7 @@ def test_cli_enforces_the_default_uploaded_content_character_boundary() -> None:
             assert json.loads(completed.stdout) == {"error": {"code": "INVALID_INPUT"}}
 
 
-def test_uploaded_content_golden_parity_scopes_chapters_and_normalizes_exact_text() -> (
+def test_uploaded_content_golden_parity_keeps_complete_text_after_chapters() -> (
     None
 ):
     upload = "Cover\r\nCHAPTER I: Introduction\r\nAlpha findings.\r\nCHAPTER 2\r\nBeta evidence.\r\nREFERENCES\r\nUpload source"
@@ -593,7 +643,7 @@ def test_uploaded_content_golden_parity_scopes_chapters_and_normalizes_exact_tex
         uploaded_content=True,
     )[0]
 
-    assert result["content_similarity_score"] == "1.000000000000"
+    assert 0 < float(result["content_similarity_score"]) < 1
     assert result["fasttext_support_score"] is None
     assert result["matched_terms"] == [
         "alpha",
@@ -601,7 +651,134 @@ def test_uploaded_content_golden_parity_scopes_chapters_and_normalizes_exact_tex
         "evidence",
         "findings",
         "introduction",
+        "source",
     ]
+
+
+def test_uploaded_content_matches_line_preserving_and_flattened_extractions() -> None:
+    line_preserving = (
+        "CHAPTER 1\nIntroduction body\nCHAPTER 2\nMethods body\n"
+        "CHAPTER 3\nResults body\nREFERENCES\nSource list\nAPPENDIX A\nCode listing"
+    )
+    flattened = (
+        "Chapter 1 Introduction body Chapter 2 Methods body Chapter 3 Results body "
+        "REFERENCES Source list APPENDIX A Code listing"
+    )
+
+    result = compare_query(
+        line_preserving,
+        [{"id": 375, "title": "ADMS", "content": flattened}],
+        None,
+        uploaded_content=True,
+    )[0]
+
+    assert result["content_similarity_score"] == "1.000000000000"
+
+
+def test_uploaded_content_ignores_chapter_like_back_matter_headings() -> None:
+    manuscript = (
+        "CHAPTER 1\nOpening body\nCHAPTER 2\nMethods\nREFERENCES\n"
+        "Chapter 1 Introduction to an unrelated book"
+    )
+
+    result = compare_query(
+        manuscript,
+        [{"id": 2, "title": "Candidate", "content": manuscript}],
+        None,
+        uploaded_content=True,
+    )[0]
+
+    assert result["content_similarity_score"] == "1.000000000000"
+    assert result["exact_content_match"] is True
+
+
+def test_uploaded_content_ignores_toc_appendix_heading_before_real_chapter_one() -> None:
+    manuscript = (
+        "TABLE OF CONTENTS\nAppendix Page\nChapter 1\nIntroduction\n"
+        "Chapter 2\nReview\nChapter 3\nMethods\nChapter 4\nCost\n"
+        "Chapter 5\nResults\nREFERENCES\nSources"
+    )
+
+    result = compare_query(
+        manuscript,
+        [{"id": 2, "title": "Candidate", "content": manuscript}],
+        None,
+        uploaded_content=True,
+    )[0]
+
+    assert result["content_similarity_score"] == "1.000000000000"
+    assert result["exact_content_match"] is True
+
+
+def test_uploaded_content_accepts_tsapter_headings() -> None:
+    manuscript = (
+        "TALAAN NG NILALAMAN\nTSAPTER I\nPanimula\nTSAPTER II\n"
+        "Kaugnay na Literatura\nTSAPTER III\nPamamaraan\nTSAPTER IV\n"
+        "Resulta at Talakayan\nTSAPTER V\nKonklusyon at Rekomendasyon"
+    )
+
+    result = compare_query(
+        manuscript,
+        [{"id": 2, "title": "Filipino BEED", "content": manuscript}],
+        None,
+        uploaded_content=True,
+    )[0]
+
+    assert result["content_similarity_score"] == "1.000000000000"
+    assert result["exact_content_match"] is True
+
+
+def test_uploaded_content_ignores_chapter_numbered_prose_after_heading() -> None:
+    manuscript = (
+        "Chapter 1\nTHE PROBLEM AND ITS SCOPE\nOpening body\n"
+        "Chapter 2\nRESULTS AND DISCUSSION\n"
+        "Chapter 2 presents the information collected from the survey conducted.\n"
+        "Findings body\nChapter 3\nSUMMARY OF FINDINGS\nFinal body"
+    )
+
+    result = compare_query(
+        manuscript,
+        [{"id": 2, "title": "Candidate", "content": manuscript}],
+        None,
+        uploaded_content=True,
+    )[0]
+
+    assert result["content_similarity_score"] == "1.000000000000"
+
+
+def test_uploaded_content_accepts_repeated_later_tsapter_heading() -> None:
+    manuscript = (
+        "Tsapter 1\nSAKLAW AT SULIRANIN\nOpening body\n"
+        "Tsapter 2\nPRESENTASYON NG DATOS\nFindings body\n"
+        "Tsapter 3\nBUOD AT KONKLUSYON\nFinal body\nTsapter 3\nAppendix copy"
+    )
+
+    scope = engine_module._uploaded_content_scope(manuscript)
+
+    assert scope.last_chapter == 3
+
+
+def test_uploaded_content_accepts_verified_chpter_typo() -> None:
+    manuscript = (
+        "Chpter 1\nSAKLAW AT SULIRANIN\nOpening body\n"
+        "Tsapter 2\nPRESENTASYON NG DATOS\nFindings body\n"
+        "Tsapter 3\nBUOD AT KONKLUSYON\nFinal body"
+    )
+
+    assert engine_module._uploaded_content_scope(manuscript).last_chapter == 3
+
+
+def test_uploaded_content_infers_first_section_before_tsapter_two() -> None:
+    manuscript = (
+        "SAKLAW AT SULIRANIN\nOpening body\n"
+        "Tsapter 2\nPRESENTASYON NG DATOS\nFindings body\n"
+        "Tsapter 3\nBUOD AT KONKLUSYON\nFinal body"
+    )
+
+    scope = engine_module._uploaded_content_scope(manuscript)
+
+    assert scope.last_chapter == 3
+    assert scope.text.startswith("CHAPTER 1\nSAKLAW AT SULIRANIN")
 
 
 def test_uploaded_content_changed_body_is_not_a_false_hundred_percent_match() -> None:
@@ -640,7 +817,7 @@ def test_uploaded_content_preserves_calculated_cosine_for_reordered_terms() -> (
     assert result["content_similarity_score"] == "1.000000000000"
 
 
-def test_uploaded_content_excludes_chapter_six_and_numeric_junk_terms() -> None:
+def test_uploaded_content_keeps_chapters_after_five() -> None:
     result = compare_query(
         "CHAPTER 1\nResearch climate 2024\nCHAPTER 6\nExcluded unique sixterm",
         [
@@ -654,8 +831,8 @@ def test_uploaded_content_excludes_chapter_six_and_numeric_junk_terms() -> None:
         uploaded_content=True,
     )[0]
 
-    assert result["content_similarity_score"] == "1.000000000000"
-    assert result["matched_terms"] == ["climate", "research"]
+    assert 0 < float(result["content_similarity_score"]) < 1
+    assert result["matched_terms"] == ["climate", "research", "sixterm"]
 
 
 def test_flattened_scope_does_not_treat_lowercase_prose_as_back_matter() -> None:
@@ -675,7 +852,7 @@ def test_flattened_scope_does_not_treat_lowercase_prose_as_back_matter() -> None
     assert "evidence" in result["matched_terms"]
 
 
-def test_uploaded_content_mixed_case_normal_back_matter_scores_zero() -> None:
+def test_uploaded_content_keeps_back_matter_without_silent_truncation() -> None:
     result = compare_query(
         "ChApTeR 1\nUploadonly\nChApTeR 6\nSharedsix\nReFeReNcEs\nSharedreferences\nApPeNdIx\nSharedappendix",
         [
@@ -689,7 +866,7 @@ def test_uploaded_content_mixed_case_normal_back_matter_scores_zero() -> None:
         uploaded_content=True,
     )
 
-    assert result == []
+    assert float(result[0]["content_similarity_score"]) > 0
 
 
 def test_uploaded_content_uses_flattened_candidate_scope_fallback() -> None:
@@ -768,12 +945,13 @@ def test_uploaded_content_returns_only_the_positive_top_ten_by_score_then_identi
 def test_uploaded_content_omits_positive_scores_that_render_as_zero(monkeypatch) -> None:
     monkeypatch.setattr(engine_module, "_content_cosine", lambda *_args: 1e-13)
 
-    assert compare_query(
+    results = compare_query(
         "CHAPTER 1\nshared body",
-        [{"id": 2, "title": "Candidate", "content": "CHAPTER 1\nshared body"}],
+        [{"id": 2, "title": "Candidate", "content": "CHAPTER 1\ndifferent body"}],
         None,
         uploaded_content=True,
-    ) == []
+    )
+    assert results == []
 
 
 def test_uploaded_content_applies_the_reference_scoped_corpus_capacity_limit(monkeypatch) -> None:

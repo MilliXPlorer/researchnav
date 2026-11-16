@@ -20,7 +20,6 @@ import {
   SimilarityRing,
 } from "./components";
 import {
-  repositoryDownloadUrl,
   searchPublicResearch,
   searchPublicResearchBySimilarity,
   type LaravelPaginationMeta,
@@ -31,9 +30,11 @@ import { YearRangeSelect } from "./dateControls";
 import { classificationLabel, formatSimilarityPercentage } from "./similarity";
 import type { SimilarityClassification } from "./similarity";
 import type { ResearchRecord, UserSession } from "./types";
+import { processingProgress } from "./processingProgress";
 import { useDialogFocus } from "./useDialogFocus";
 import { SdgBadges } from "./SdgMetadata";
 import SdgPickerModal from "./SdgPickerModal";
+import ProtectedFileAccess from "./ProtectedFileAccess";
 
 type SimilaritySearchResponse =
   | {
@@ -219,15 +220,13 @@ export default function CatalogPage({
 
     let active = true;
     const controller = new AbortController();
+    const startedAt = Date.now();
     const progressTimer = window.setInterval(() => {
-      setSimilarityProgress((progress) => {
-        const value = progress?.key === similarityKey ? progress.value : 5;
-        return {
-          key: similarityKey,
-          value: Math.min(95, value + Math.max(1, Math.ceil((95 - value) / 8))),
-        };
+      setSimilarityProgress({
+        key: similarityKey,
+        value: processingProgress(Date.now() - startedAt),
       });
-    }, 400);
+    }, 1_000);
 
     searchPublicResearchBySimilarity(
       {
@@ -291,7 +290,9 @@ export default function CatalogPage({
     yearTo,
   ]);
   const visibleSimilarityProgress =
-    similarityProgress?.key === similarityKey ? similarityProgress.value : 1;
+    similarityProgress?.key === similarityKey
+      ? similarityProgress.value
+      : processingProgress(0);
   const loadingTitleCandidates = useMemo(() => {
     const queryTerms = activeQuery
       .toLocaleLowerCase()
@@ -619,28 +620,22 @@ export default function CatalogPage({
                     >
                       View full metadata <ArrowRight />
                     </button>
-                    {session ? (
-                      record.hasDownloadableManuscript ? (
-                        <a
-                          className="button button-primary"
-                          href={repositoryDownloadUrl(record.id)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          <Download /> View files
-                        </a>
-                      ) : (
-                        <span className="download-gate is-unavailable">
-                          <FileText /> Final manuscript unavailable
-                        </span>
-                      )
-                    ) : (
-                      <button
-                        className="button button-primary"
-                        onClick={onSignIn}
+                    {record.hasDownloadableManuscript ? (
+                      <ProtectedFileAccess
+                        researchDocumentId={record.id}
+                        authenticated={Boolean(session)}
+                        onSignIn={onSignIn}
                       >
-                        <LockKeyhole /> Sign in to view files
-                      </button>
+                        {session ? <Download /> : <LockKeyhole />} View files
+                      </ProtectedFileAccess>
+                    ) : session ? (
+                      <span className="download-gate is-unavailable">
+                        <FileText /> Final manuscript unavailable
+                      </span>
+                    ) : (
+                      <span className="download-gate is-unavailable">
+                        <FileText /> Final manuscript unavailable
+                      </span>
                     )}
                   </div>
                 </article>
@@ -699,7 +694,6 @@ export default function CatalogPage({
           session={session}
           onSessionChange={onSessionChange}
           onClose={() => setProfileOpen(false)}
-          onOpenWorkspace={() => navigate("/app")}
           onLogout={onLogout}
         />
       )}
@@ -799,23 +793,18 @@ function MetadataDialog({
           <Button variant="secondary" onClick={onClose}>
             Return to results
           </Button>
-          {authenticated && record.hasDownloadableManuscript ? (
-            <a
-              className="button button-primary"
-              href={repositoryDownloadUrl(record.id)}
-              target="_blank"
-              rel="noopener noreferrer"
+          {record.hasDownloadableManuscript ? (
+            <ProtectedFileAccess
+              researchDocumentId={record.id}
+              authenticated={authenticated}
+              onSignIn={onSignIn}
             >
-              <Download /> View files
-            </a>
-          ) : authenticated ? (
+              {authenticated ? <Download /> : <LockKeyhole />} View files
+            </ProtectedFileAccess>
+          ) : (
             <span className="download-gate is-unavailable">
               <FileText /> Final manuscript unavailable
             </span>
-          ) : (
-            <Button onClick={onSignIn}>
-              <LockKeyhole /> Sign in to view files
-            </Button>
           )}
         </div>
       </section>

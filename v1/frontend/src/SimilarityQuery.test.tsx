@@ -302,9 +302,24 @@ describe("researcher similarity check", () => {
           return new Response(
             JSON.stringify({
               data: [archived(1, "ARCHIVED MANUSCRIPT", "0.120000")],
+              contract_version: "content-upload.v2",
               extracted_text: "CHAPTER 1\nExtracted manuscript content",
               file_name: "machine-learning.pdf",
+              file_diagnostics: [
+                {
+                  index: 0,
+                  file_name: "machine-learning.pdf",
+                  status: "included",
+                  reason: "selected_for_comparison",
+                  extraction_success: true,
+                  detected_chapters: [1],
+                  text_length: 39,
+                  kind: "manuscript",
+                  eligible: true,
+                },
+              ],
             }),
+            { headers: { "Content-Type": "application/json" } },
           );
         }
         return new Response("{}", { status: 404 });
@@ -335,7 +350,13 @@ describe("researcher similarity check", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Content similarity")).toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "Extracted PDF Text" }),
+      screen.getByRole("heading", { name: "Files processed" }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("machine-learning.pdf")).not.toHaveLength(0);
+    expect(screen.getByText("Included")).toBeInTheDocument();
+    expect(screen.getAllByText("1")).not.toHaveLength(0);
+    expect(
+      screen.getByRole("heading", { name: "Extracted manuscript text" }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/Extracted manuscript content/),
@@ -470,7 +491,7 @@ describe("researcher similarity check", () => {
     fireEvent.click(screen.getByRole("button", { name: "Check content" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "We could not find a valid Chapter 1–5 section in this file. Use a manuscript with a clearly labeled Chapter 1 heading.",
+      "We could not find a valid Chapter, Kabanata, or Tsapter section in this file. Use a manuscript with a clearly labeled Chapter 1, Kabanata 1, or Tsapter 1 heading.",
     );
   });
 });

@@ -7,7 +7,7 @@ use App\Models\DefenseSchedule;
 use App\Models\Evaluation;
 use App\Models\ResearchDocument;
 use App\Models\ReviewAssignment;
-use App\Services\DefenseScheduleService;
+use App\Services\DefenseMonitoringAuthorization;
 use App\Services\EvaluationService;
 use App\Services\MonitoringService;
 use Illuminate\Http\JsonResponse;
@@ -18,13 +18,6 @@ use Illuminate\Support\Facades\Validator;
 
 class PanelController extends DomainController
 {
-    public function schedule(Request $request, DefenseScheduleService $schedules): JsonResponse
-    {
-        return response()
-            ->json(['data' => $schedules->list($this->actor($request), mineOnly: true), 'schema_version' => 1])
-            ->header('Cache-Control', 'private, no-store');
-    }
-
     public function assignments(Request $request): JsonResponse
     {
         $actor = $this->actor($request);
@@ -107,7 +100,7 @@ class PanelController extends DomainController
             abort(403);
         }
         $input = $this->validated($request, ['activity_date' => ['required', 'date'], 'activity' => ['required', 'string', 'max:10000'], 'remarks' => ['nullable', 'string', 'max:10000'], 'status' => ['required', 'in:pending,completed'], 'signature_status' => ['required', 'in:unsigned,signed']]);
-        $designation = $researchDocument->reviewAssignments()->where(ReviewAssignment::column('reviewer_id'), $actor->id)->where(ReviewAssignment::column('review_role'), 'panel')->value('designation') === 'panel_chair' ? 'Chair' : 'Panel Member';
+        [, $designation] = app(DefenseMonitoringAuthorization::class)->authorizeSection($actor, $researchDocument, 'after_proposal_defense');
         DB::table('monitoring_entries')->updateOrInsert(['research_document_id' => $researchDocument->id, 'reviewer_id' => $actor->id, 'monitoring_stage' => 'after_proposal_defense', 'designation' => $designation], ['reviewer_role' => 'panel', 'activity_date' => $input['activity_date'], 'activity' => $input['activity'], 'remarks' => $input['remarks'] ?? null, 'status' => $input['status'], 'signature_status' => $input['signature_status'], 'created_at' => now(), 'updated_at' => now()]);
         $activity->log($researchDocument, 'PANELIST_MONITORING_UPDATED', $actor, 'Panelist post-defense monitoring updated.', null, $input['status'], $input['status']);
 

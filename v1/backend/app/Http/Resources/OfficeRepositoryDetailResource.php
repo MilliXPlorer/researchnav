@@ -46,9 +46,11 @@ class OfficeRepositoryDetailResource extends JsonResource
             ])->values()),
             'authors' => $this->whenLoaded('authors', fn () => $this->authors->map(fn ($author) => [
                 'id' => $author->id,
+                'user_id' => $author->user_id,
                 'author_name' => $author->author_name,
                 'author_order' => $author->author_order,
                 'is_corresponding_author' => $author->is_corresponding_author,
+                'account' => $this->authorAccount($author),
             ])->values()),
             'files' => $this->whenLoaded('files', fn () => $this->files->map(fn ($file) => [
                 'id' => $file->id,
@@ -66,6 +68,21 @@ class OfficeRepositoryDetailResource extends JsonResource
             'can_edit' => ! $trashed,
             'can_delete' => ! $trashed,
             'can_restore' => $trashed,
+        ];
+    }
+
+    private function authorAccount($author): ?array
+    {
+        $user = $author->user;
+        if ($user === null || $user->trashed() || $user->access_status !== 'active' || $user->account_status !== 'active') {
+            return null;
+        }
+
+        return [
+            'id' => $user->id,
+            'name' => $user->displayName(),
+            'email' => $user->email,
+            'is_available' => true,
         ];
     }
 }

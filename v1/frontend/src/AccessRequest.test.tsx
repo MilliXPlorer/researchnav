@@ -174,9 +174,7 @@ describe("AccessRequestPanel", () => {
     fireEvent.change(screen.getByLabelText("Reason for access"), {
       target: { value: "Starting my capstone." },
     });
-    fireEvent.click(
-      screen.getByRole("button", { name: /Send request/ }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /Send request/ }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "A request from this account is already awaiting review.",
@@ -222,8 +220,18 @@ describe("administrator access request queue", () => {
     expect(
       await screen.findByText("applicant@example.test"),
     ).toBeInTheDocument();
+    expect(screen.queryByText("Starting my capstone.")).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "View access request from Filjoy Adala",
+      }),
+    );
+    expect(
+      screen.getByRole("dialog", { name: "Access request details" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("BS Computer Science")).toBeInTheDocument();
     expect(screen.getByText("Starting my capstone.")).toBeInTheDocument();
+    expect(screen.getByText("Reason for access")).toBeInTheDocument();
   });
 
   it("approves a request with the role the administrator selects", async () => {
@@ -257,5 +265,148 @@ describe("administrator access request queue", () => {
 
     await waitFor(() => expect(decided).toMatchObject({ decision: "reject" }));
     expect((decided as { granted_role?: string }).granted_role).toBeUndefined();
+  });
+
+  it("switches status tabs, exposes counts, and clears search", async () => {
+    const requests = {
+      pending: [pendingRequest],
+      approved: [
+        {
+          ...pendingRequest,
+          id: 8,
+          status: "approved",
+          email: "approved@example.test",
+        },
+      ],
+      rejected: [],
+    } as const;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const status =
+        new URLSearchParams(String(input).split("?")[1]).get("status") ??
+        "pending";
+      const data = requests[status as keyof typeof requests];
+      return new Response(
+        JSON.stringify({
+          data,
+          links: {},
+          meta: {
+            current_page: 1,
+            last_page: 1,
+            total: data.length,
+            per_page: 25,
+          },
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AdminSidebarPage selectedNav="Access Requests" />);
+
+    const pending = await screen.findByRole("tab", { name: "pending 1" });
+    const approved = await screen.findByRole("tab", { name: "approved 1" });
+    const rejected = await screen.findByRole("tab", { name: "rejected 0" });
+    expect(pending).toHaveAttribute("aria-selected", "true");
+    expect(approved).toHaveAttribute("aria-selected", "false");
+    fireEvent.change(screen.getByLabelText("Search by name or email"), {
+      target: { value: "filjoy" },
+    });
+    pending.focus();
+    fireEvent.keyDown(pending, { key: "ArrowRight" });
+    expect(
+      await screen.findByText("approved@example.test"),
+    ).toBeInTheDocument();
+    expect(approved).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Search by name or email")).toHaveValue("");
+    fireEvent.click(rejected);
+    expect(
+      await screen.findByRole("heading", {
+        name: "No rejected access requests",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("filters the selected status by name or email case-insensitively", async () => {
+    stubQueue();
+    render(<AdminSidebarPage selectedNav="Access Requests" />);
+    await screen.findByText("applicant@example.test");
+
+    fireEvent.change(screen.getByLabelText("Search by name or email"), {
+      target: { value: "FILJOY" },
+    });
+    expect(screen.getByText("applicant@example.test")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Search by name or email"), {
+      target: { value: "missing@example.test" },
+    });
+    expect(
+      screen.getByText("No pending requests match “missing@example.test”."),
+    ).toBeInTheDocument();
+  });
+
+  it.each([
+    [
+      "pending",
+      "No pending access requests",
+      "New Google-verified requests will appear here for review.",
+    ],
+    [
+      "approved",
+      "No approved access requests",
+      "No approved Google-verified requests match this view.",
+    ],
+    [
+      "rejected",
+      "No rejected access requests",
+      "No rejected Google-verified requests match this view.",
+    ],
+  ] as const)(
+    "shows the %s empty state",
+    async (status, heading, description) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(
+          async () =>
+            new Response(
+              JSON.stringify({
+                data: [],
+                links: {},
+                meta: { current_page: 1, last_page: 1, total: 0, per_page: 25 },
+              }),
+            ),
+        ),
+      );
+      render(<AdminSidebarPage selectedNav="Access Requests" />);
+      if (status !== "pending") {
+        fireEvent.click(
+          await screen.findByRole("tab", { name: `${status} 0` }),
+        );
+      }
+      expect(
+        await screen.findByRole("heading", { name: heading }),
+      ).toBeInTheDocument();
+      expect(screen.getByText(description)).toBeInTheDocument();
+      expect(
+        screen.getByRole("columnheader", { name: "Requester" }),
+      ).toBeInTheDocument();
+    },
+  );
+
+  it("refreshes the selected queue", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            data: [],
+            links: {},
+            meta: { current_page: 1, last_page: 1, total: 0, per_page: 25 },
+          }),
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AdminSidebarPage selectedNav="Access Requests" />);
+    await screen.findByText("No pending access requests");
+    const before = fetchMock.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.length).toBeGreaterThan(before),
+    );
   });
 });

@@ -182,7 +182,10 @@ describe("SSR gateway", () => {
     });
   });
 
-  it("uses the longer timeout only for content uploads", async () => {
+  it.each([
+    ["content uploads", "/api/similarity/content-upload"],
+    ["repository similarity", "/api/repository/similarity"],
+  ])("uses the longer timeout for %s", async (_label, pathname) => {
     const apiOrigin = await upstream((_request, response) => {
       setTimeout(() => {
         response.setHeader("content-type", "application/json");
@@ -195,6 +198,7 @@ describe("SSR gateway", () => {
       apiOrigin,
       apiTimeoutMs: 100,
       contentUploadTimeoutMs: 1_000,
+      repositorySimilarityTimeoutMs: 1_000,
       template,
       renderer: {
         render: async () => ({
@@ -207,7 +211,7 @@ describe("SSR gateway", () => {
     });
     const origin = await listen(app);
 
-    const response = await fetch(`${origin}/api/similarity/content-upload`, {
+    const response = await fetch(`${origin}${pathname}`, {
       method: "POST",
       headers: { "content-type": "multipart/form-data; boundary=test" },
       body: "--test--\r\n",

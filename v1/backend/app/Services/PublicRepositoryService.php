@@ -8,10 +8,14 @@ use Illuminate\Support\Facades\Schema;
 
 class PublicRepositoryService
 {
+    public function __construct(
+        private readonly PublicManuscriptAvailability $manuscripts,
+    ) {}
+
     /** @param array<string, mixed> $filters */
     public function search(array $filters)
     {
-        $query = $this->publicScope()->select('research_documents.*')->with(['authors', 'category', 'sdgs'])->withExists(['files as has_downloadable_manuscript' => fn ($files) => $files->current()->where('document_type', 'final_manuscript')]);
+        $query = $this->publicScope()->select('research_documents.*')->with(['authors', 'category', 'sdgs', 'files' => fn ($files) => $files->select(['id', 'research_document_id', 'document_type', 'is_current', 'stored_filename', 'file_path'])->current()->where('document_type', 'final_manuscript')]);
         if ($term = $filters['q'] ?? null) {
             $like = $this->like($term);
             $metadataMatch = fn (Builder $q) => $q->whereRaw("research_documents.title LIKE ? ESCAPE '!'", [$like])
@@ -69,17 +73,31 @@ class PublicRepositoryService
             }
         }
 
-        return $query
+        $results = $query
             ->orderByDesc('research_documents.publication_year')
             ->orderBy('research_documents.title')
             ->orderBy('research_documents.id')
             ->paginate(min((int) ($filters['per_page'] ?? 15), 1000))
             ->appends($filters);
+        $results->getCollection()->each(fn (ResearchDocument $research) => $this->setDownloadAvailability($research));
+
+        return $results;
     }
 
     public function find(int $id): ResearchDocument
     {
-        return $this->publicScope()->select('research_documents.*')->with(['authors', 'category', 'sdgs'])->withExists(['files as has_downloadable_manuscript' => fn ($files) => $files->current()->where('document_type', 'final_manuscript')])->findOrFail($id);
+        $research = $this->publicScope()->select('research_documents.*')->with(['authors', 'category', 'sdgs', 'files'])->findOrFail($id);
+        $this->setDownloadAvailability($research);
+
+        return $research;
+    }
+
+    private function setDownloadAvailability(ResearchDocument $research): void
+    {
+        if (! $research->relationLoaded('files')) {
+            $research->load('files');
+        }
+        $research->has_downloadable_manuscript = $this->manuscripts->hasAvailableFile($research);
     }
 
     private function publicScope(): Builder

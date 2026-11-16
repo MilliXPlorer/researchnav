@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import { ArrowUp, X } from "lucide-react";
 import { Button } from "./components";
 import { useDialogFocus } from "./useDialogFocus";
@@ -25,6 +25,8 @@ export function Modal({
 }) {
   const [askDiscard, setAskDiscard] = useState(false);
   const [showScrollTop, setShowScrollTop] = useState(false);
+  const discardTriggerRef = useRef<HTMLElement | null>(null);
+  const discardDialogRef = useRef<HTMLDivElement>(null);
   const [dialogRef, handleDialogKeyDown] =
     useDialogFocus<HTMLElement>(requestClose);
 
@@ -44,13 +46,54 @@ export function Modal({
     return () => panel.removeEventListener("scroll", onScroll);
   }, [dialogRef]);
 
+  useEffect(() => {
+    if (askDiscard)
+      discardDialogRef.current
+        ?.querySelector<HTMLButtonElement>("button:not(:disabled)")
+        ?.focus();
+  }, [askDiscard]);
+
   function requestClose() {
+    // Once this prompt is visible, only its explicit actions may dismiss the
+    // editor. A second Escape, backdrop press, or close-button press must not
+    // turn a confirmation request into an accidental discard.
+    if (askDiscard) return;
     if (busy) return;
     if (dirty && !askDiscard) {
+      discardTriggerRef.current = document.activeElement as HTMLElement | null;
       setAskDiscard(true);
       return;
     }
     onClose();
+  }
+
+  function keepEditing() {
+    setAskDiscard(false);
+    requestAnimationFrame(() => discardTriggerRef.current?.focus());
+  }
+
+  function handleDiscardKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    event.stopPropagation();
+    if (event.key === "Escape") {
+      event.preventDefault();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const controls = Array.from(
+      event.currentTarget.querySelectorAll<HTMLElement>(
+        "button:not(:disabled)",
+      ),
+    );
+    if (controls.length === 0) return;
+    const first = controls[0];
+    const last = controls[controls.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   }
 
   return (
@@ -66,7 +109,7 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={label}
-        onKeyDown={handleDialogKeyDown}
+        onKeyDown={askDiscard ? undefined : handleDialogKeyDown}
         onMouseDown={(event) => event.stopPropagation()}
       >
         {showClose && (
@@ -94,10 +137,17 @@ export function Modal({
           </button>
         )}
         {askDiscard && (
-          <div className="modal-discard" role="alertdialog">
+          <div
+            className="modal-discard"
+            role="alertdialog"
+            aria-modal="true"
+            aria-label="Unsaved changes"
+            ref={discardDialogRef}
+            onKeyDown={handleDiscardKeyDown}
+          >
             <p>You have unsaved changes. Discard them and close?</p>
             <span className="row-actions">
-              <Button variant="secondary" onClick={() => setAskDiscard(false)}>
+              <Button variant="secondary" onClick={keepEditing}>
                 Keep editing
               </Button>
               <Button variant="rust" onClick={onClose}>
@@ -118,6 +168,7 @@ export function ConfirmDialog({
   busy = false,
   onConfirm,
   onCancel,
+  children,
 }: {
   title: string;
   message: string;
@@ -125,6 +176,7 @@ export function ConfirmDialog({
   busy?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
+  children?: ReactNode;
 }) {
   return (
     <Modal label={title} onClose={onCancel} busy={busy}>
@@ -132,6 +184,7 @@ export function ConfirmDialog({
         <p className="eyebrow">Please confirm</p>
         <h2>{title}</h2>
         <p>{message}</p>
+        {children}
         <div className="modal-actions">
           <Button variant="secondary" onClick={onCancel} disabled={busy}>
             Cancel
