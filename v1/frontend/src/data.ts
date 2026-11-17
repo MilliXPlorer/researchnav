@@ -123,7 +123,7 @@ export const roleConfigs: RoleConfig[] = [
     shortLabel: "Librarian",
     description:
       "Review references, citations, links, and source documentation.",
-    nav: ["Dashboard", "Assigned Research", "User Logs"],
+    nav: ["Dashboard", "Assigned Research", "Repository", "User Logs"],
   },
   {
     id: "research-office",

@@ -2,18 +2,19 @@
 
 namespace Tests\Feature;
 
-use App\Models\ManuscriptSearchDocument;
 use App\Models\DocumentFile;
+use App\Models\ManuscriptSearchDocument;
 use App\Models\ResearchDocument;
 use App\Models\User;
+use App\Services\ManuscriptSearchProjectionService;
 use App\Services\ManuscriptTextExtractionException;
 use App\Services\ManuscriptTextExtractor;
-use App\Services\ManuscriptSearchProjectionService;
 use App\Services\SimilarityProcessRunner;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\File;
 use Mockery;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class ContentUploadSimilarityTest extends TestCase
@@ -225,7 +226,7 @@ class ContentUploadSimilarityTest extends TestCase
         $this->as($this->researcher())->post('/api/similarity/content-upload', [
             'file' => $this->pdf(),
         ], $this->origin())->assertUnprocessable()->assertExactJson([
-            'error' => 'CONTENT_UPLOAD_UNREADABLE',
+            'error' => 'CONTENT_UPLOAD_PDF_TEXT_UNREADABLE',
         ])->assertDontSee('private parser detail');
 
         $this->assertSame([], File::directories($this->uploadRoot()));
@@ -353,6 +354,42 @@ class ContentUploadSimilarityTest extends TestCase
             ->assertJsonPath('extracted_text', "CHAPTER 1\nIntroduction\nCHAPTER 2\nMethods\n\nCHAPTER 3\nResults");
     }
 
+    public function test_it_rejects_an_out_of_order_secondary_part(): void
+    {
+        $this->mock(ManuscriptTextExtractor::class)->shouldReceive('extractRaw')->twice()->andReturn(
+            "CHAPTER 1\nIntroduction",
+            "CHAPTER 3\nResults\nCHAPTER 2\nMethods",
+        );
+
+        $this->as($this->researcher())->post('/api/similarity/content-upload', [
+            'mode' => 'folder',
+            'files' => [
+                UploadedFile::fake()->createWithContent('chapter-1.pdf', '%PDF-one'),
+                UploadedFile::fake()->createWithContent('chapters-3-2.pdf', '%PDF-later'),
+            ],
+        ], $this->origin())->assertUnprocessable()->assertExactJson([
+            'error' => 'CONTENT_UPLOAD_CHAPTER_ORDER_INVALID',
+        ]);
+    }
+
+    public function test_it_rejects_an_empty_secondary_part(): void
+    {
+        $this->mock(ManuscriptTextExtractor::class)->shouldReceive('extractRaw')->twice()->andReturn(
+            "CHAPTER 1\nIntroduction",
+            'CHAPTER 2',
+        );
+
+        $this->as($this->researcher())->post('/api/similarity/content-upload', [
+            'mode' => 'folder',
+            'files' => [
+                UploadedFile::fake()->createWithContent('chapter-1.pdf', '%PDF-one'),
+                UploadedFile::fake()->createWithContent('chapter-2.pdf', '%PDF-two'),
+            ],
+        ], $this->origin())->assertUnprocessable()->assertExactJson([
+            'error' => 'CONTENT_UPLOAD_CHAPTER_SCOPE_EMPTY',
+        ]);
+    }
+
     public function test_it_detects_chapters_after_five_without_truncating_the_manuscript(): void
     {
         $text = "CHAPTER I\nIntroduction\nCHAPTER V\nFindings\nCHAPTER VI\nAppendix analysis";
@@ -394,6 +431,112 @@ class ContentUploadSimilarityTest extends TestCase
         ], $this->origin());
 
         $response->assertOk()->assertJsonPath('file_diagnostics.0.detected_chapters', [1, 2, 3, 4, 5]);
+    }
+
+    #[DataProvider('normalizedChapterHeadingProvider')]
+    public function test_it_uses_the_canonical_detector_for_normalized_chapter_headings(string $text): void
+    {
+        config()->set('researchnav.similarity.python_binary', 'python');
+        config()->set('researchnav.similarity.cli_path', app_path('Services/similarity/cli.py'));
+        $this->mock(ManuscriptTextExtractor::class)->shouldReceive('extractRaw')->once()->andReturn($text);
+
+        $this->as($this->researcher())->post('/api/similarity/content-upload', [
+            'file' => $this->pdf(),
+        ], $this->origin())->assertOk()
+            ->assertJsonPath('file_diagnostics.0.detected_chapters.0', 1);
+    }
+
+    public static function normalizedChapterHeadingProvider(): array
+    {
+        return [
+            'standalone' => ["Chapter 1\nINTRODUCTION\nBody"],
+            'uppercase' => ["CHAPTER 1\nINTRODUCTION\nBody"],
+            'nbsp' => ["Chapter\u{00A0}1\nINTRODUCTION\nBody"],
+            'multiple spaces' => ["Chapter     1\nINTRODUCTION\nBody"],
+            'split lines' => ["Chapter\n1\nINTRODUCTION\nBody"],
+            'page break' => ["Chapter\f1\nINTRODUCTION\nBody"],
+            'flattened' => ['Cover Chapter 1 INTRODUCTION Body'],
+            'number word' => ["Chapter One\nINTRODUCTION\nBody"],
+            'kabanata' => ["Kabanata Uno\nPANIMULA\nBody"],
+            'tsapter' => ["Tsapter I\nPANIMULA\nBody"],
+            'verified typo' => ["Chpter 1\nINTRODUCTION\nBody"],
+        ];
+    }
+
+    public function test_it_prefers_a_real_body_chapter_one_after_a_toc_entry(): void
+    {
+        config()->set('researchnav.similarity.python_binary', 'python');
+        config()->set('researchnav.similarity.cli_path', app_path('Services/similarity/cli.py'));
+        $text = "TABLE OF CONTENTS\nChapter 1 Introduction 1\nChapter 2 Methods 10\n"
+            ."Chapter 1\nINTRODUCTION\nReal manuscript body\nChapter 2\nMETHODS\nBody";
+        $this->mock(ManuscriptTextExtractor::class)->shouldReceive('extractRaw')->once()->andReturn($text);
+
+        $this->as($this->researcher())->post('/api/similarity/content-upload', [
+            'file' => $this->pdf(),
+        ], $this->origin())->assertOk();
+    }
+
+    #[DataProvider('tocBodyChapterProvider')]
+    public function test_it_accepts_repeated_toc_and_body_chapter_sequences(string $family): void
+    {
+        config()->set('researchnav.similarity.python_binary', 'python');
+        config()->set('researchnav.similarity.cli_path', app_path('Services/similarity/cli.py'));
+        $toc = collect(range(1, 5))->map(fn (int $number): string => "{$family} {$number} Title {$number}")->implode("\n");
+        $body = collect(range(1, 5))->map(fn (int $number): string => "{$family} {$number}\n".($number === 1 ? 'INTRODUCTION' : "BODY {$number}")."\nReadable content {$number}")->implode("\n");
+        $this->mock(ManuscriptTextExtractor::class)->shouldReceive('extractRaw')->once()->andReturn("TABLE OF CONTENTS\n{$toc}\n{$body}");
+
+        $this->as($this->researcher())->post('/api/similarity/content-upload', [
+            'file' => $this->pdf(),
+        ], $this->origin())->assertOk()
+            ->assertJsonPath('file_diagnostics.0.detected_chapters', [1, 2, 3, 4, 5]);
+    }
+
+    public static function tocBodyChapterProvider(): array
+    {
+        return [
+            'chapter' => ['Chapter'],
+            'kabanata' => ['Kabanata'],
+            'tsapter' => ['Tsapter'],
+            'verified typo' => ['Chpter'],
+        ];
+    }
+
+    public function test_it_ignores_a_chapter_reference_after_back_matter(): void
+    {
+        config()->set('researchnav.similarity.python_binary', 'python');
+        config()->set('researchnav.similarity.cli_path', app_path('Services/similarity/cli.py'));
+        $text = "CHAPTER 1\nINTRODUCTION\nReadable body\nCHAPTER 2\nMETHODS\nReadable methods\n"
+            ."CURRICULUM VITAE\nChapter 1\nPrevious publication heading";
+        $this->mock(ManuscriptTextExtractor::class)->shouldReceive('extractRaw')->once()->andReturn($text);
+
+        $this->as($this->researcher())->post('/api/similarity/content-upload', [
+            'file' => $this->pdf(),
+        ], $this->origin())->assertOk()
+            ->assertJsonPath('file_diagnostics.0.detected_chapters', [1, 2]);
+    }
+
+    #[DataProvider('invalidChapterScopeProvider')]
+    public function test_it_returns_specific_safe_chapter_scope_errors(string $text, string $error): void
+    {
+        config()->set('researchnav.similarity.python_binary', 'python');
+        config()->set('researchnav.similarity.cli_path', app_path('Services/similarity/cli.py'));
+        $this->mock(ManuscriptTextExtractor::class)->shouldReceive('extractRaw')->once()->andReturn($text);
+
+        $this->as($this->researcher())->post('/api/similarity/content-upload', [
+            'file' => $this->pdf(),
+        ], $this->origin())->assertUnprocessable()->assertExactJson(['error' => $error]);
+    }
+
+    public static function invalidChapterScopeProvider(): array
+    {
+        return [
+            'missing' => ['Abstract only', 'CONTENT_UPLOAD_CHAPTER_ONE_NOT_FOUND'],
+            'prose' => ['This is discussed in chapter 1 of the reference book.', 'CONTENT_UPLOAD_CHAPTER_ONE_NOT_FOUND'],
+            'line start prose' => ["Chapter 1 explains the model.\nThe discussion continues here.", 'CONTENT_UPLOAD_CHAPTER_ONE_NOT_FOUND'],
+            'toc only' => ["TABLE OF CONTENTS\nChapter 1 Introduction 1\nChapter 2 Methods 10", 'CONTENT_UPLOAD_CHAPTER_ONE_NOT_FOUND'],
+            'invalid order' => ["CHAPTER 2\nMethods\nCHAPTER 1\nIntroduction\nBody", 'CONTENT_UPLOAD_CHAPTER_ORDER_INVALID'],
+            'empty scope' => ['CHAPTER 1', 'CONTENT_UPLOAD_CHAPTER_SCOPE_EMPTY'],
+        ];
     }
 
     public function test_it_rejects_unsupported_and_unexpected_fields(): void
@@ -470,7 +613,7 @@ class ContentUploadSimilarityTest extends TestCase
         $this->as($this->researcher())->post('/api/similarity/content-upload', [
             'file' => $this->pdf(),
         ], $this->origin())->assertUnprocessable()->assertExactJson([
-            'error' => 'CONTENT_UPLOAD_INVALID_SCOPE',
+            'error' => 'CONTENT_UPLOAD_CHAPTER_ONE_NOT_FOUND',
         ]);
     }
 

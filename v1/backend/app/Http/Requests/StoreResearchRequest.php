@@ -19,7 +19,6 @@ class StoreResearchRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'category_id' => ['nullable', 'integer', 'exists:categories,id'],
             'institute' => ['nullable', Rule::in(ResearchDocument::INSTITUTES)],
             'degree_program' => ['nullable', 'string', 'max:255'],
             'title' => ['required', 'string', 'max:500'],
@@ -40,7 +39,7 @@ class StoreResearchRequest extends FormRequest
     public function withValidator(Validator $validator): void
     {
         $validator->after(function () use ($validator): void {
-            $this->rejectUnknownFields($validator, ['category_id', 'institute', 'degree_program', 'title', 'abstract', 'keywords', 'publication_year', 'sdg_ids', 'research_stage', 'authors']);
+            $this->rejectUnknownFields($validator, ['institute', 'degree_program', 'title', 'abstract', 'keywords', 'publication_year', 'sdg_ids', 'research_stage', 'authors']);
             $this->validateProgram($validator);
             foreach ((array) $this->input('authors', []) as $index => $author) {
                 if (! is_array($author)) {

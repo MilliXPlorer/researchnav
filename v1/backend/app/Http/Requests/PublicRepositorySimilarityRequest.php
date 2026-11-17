@@ -21,7 +21,6 @@ class PublicRepositorySimilarityRequest extends FormRequest
             'page' => ['sometimes', 'integer', 'min:1'],
             'year_from' => ['sometimes', 'integer', 'between:1901,2155'],
             'year_to' => ['sometimes', 'integer', 'between:1901,2155'],
-            'category' => ['sometimes', 'string', 'max:180'],
             'institute' => ['sometimes', 'string', 'max:255'],
             'sdg_ids' => ['sometimes', 'array', 'max:17'],
             'sdg_ids.*' => ['integer', 'distinct', 'between:1,17'],
@@ -46,7 +45,7 @@ class PublicRepositorySimilarityRequest extends FormRequest
                 return;
             }
 
-            $allowed = ['q', 'page', 'year_from', 'year_to', 'category', 'institute', 'sdg_ids', 'sort'];
+            $allowed = ['q', 'page', 'year_from', 'year_to', 'institute', 'sdg_ids', 'sort'];
             if (! $body instanceof \stdClass || array_diff(array_keys(get_object_vars($body)), $allowed) !== []) {
                 $validator->errors()->add('body', 'The request body contains unsupported fields.');
             }

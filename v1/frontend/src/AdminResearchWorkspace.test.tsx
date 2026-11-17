@@ -746,6 +746,12 @@ describe("AdminResearchWorkspace", () => {
       target: { value: "public" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Archive research" }));
+    expect(
+      screen.getByRole("dialog", { name: "Archive research?" }),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "Archive research" })[1],
+    );
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(

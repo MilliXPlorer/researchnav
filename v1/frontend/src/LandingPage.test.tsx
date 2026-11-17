@@ -18,7 +18,6 @@ const record: ResearchRecord = {
   degreeProgram: "Bachelor of Science in Computer Science",
   institute: "Institute of Computer Studies",
   program: "Bachelor of Science in Computer Science",
-  category: "Information Systems",
   abstract: "An example abstract.",
   keywords: ["repository"],
   researchStage: "Completed",
@@ -87,7 +86,9 @@ describe("LandingPage", () => {
       screen.getByRole("dialog", { name: "Terms and Data Privacy" }),
     ).toBeInTheDocument();
     expect(screen.getByText("1. Purpose of the system")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close Terms and Data Privacy" }),
+    );
     expect(window.location.hash).toBe("");
     fireEvent.click(screen.getByRole("button", { name: "Contact" }));
     expect(
@@ -140,7 +141,6 @@ describe("LandingPage", () => {
                 institution_name: record.institutionName,
                 institute: record.institute,
                 degree_program: record.program,
-                category: { name: record.category },
                 abstract: record.abstract,
                 keywords: record.keywords,
                 research_stage: "completed",
@@ -181,7 +181,7 @@ describe("LandingPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows public records by Study ID ascending", () => {
+  it("shows the three latest public studies", () => {
     render(
       <LandingPage
         onSignIn={vi.fn()}
@@ -190,19 +190,19 @@ describe("LandingPage", () => {
         onLogout={vi.fn()}
         navigate={vi.fn()}
         records={[
-          { ...record, id: "12", title: "Twelfth study" },
-          { ...record, id: "3", title: "Third study" },
-          { ...record, id: "8", title: "Eighth study" },
-          { ...record, id: "1", title: "First study" },
+          { ...record, id: "12", title: "Older study", year: 2024 },
+          { ...record, id: "3", title: "Newest study", year: 2026 },
+          { ...record, id: "8", title: "Latest ID", year: 2025 },
+          { ...record, id: "1", title: "Earlier ID", year: 2025 },
         ]}
       />,
     );
 
     const cards = screen.getAllByRole("article");
-    expect(within(cards[0]).getByText("First study")).toBeInTheDocument();
-    expect(within(cards[1]).getByText("Third study")).toBeInTheDocument();
-    expect(within(cards[2]).getByText("Eighth study")).toBeInTheDocument();
-    expect(screen.queryByText("Twelfth study")).not.toBeInTheDocument();
+    expect(within(cards[0]).getByText("Newest study")).toBeInTheDocument();
+    expect(within(cards[1]).getByText("Latest ID")).toBeInTheDocument();
+    expect(within(cards[2]).getByText("Earlier ID")).toBeInTheDocument();
+    expect(screen.queryByText("Older study")).not.toBeInTheDocument();
   });
 
   it("opens an exact catalog year as a range", () => {
@@ -218,9 +218,8 @@ describe("LandingPage", () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText("Browse by year"), {
-      target: { value: "2026" },
-    });
+    fireEvent.click(screen.getByRole("button", { name: "Browse by year" }));
+    fireEvent.click(screen.getByRole("option", { name: "2026" }));
 
     expect(navigate).toHaveBeenCalledWith(
       "/catalog?year_from=2026&year_to=2026",

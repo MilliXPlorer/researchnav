@@ -87,6 +87,107 @@ export interface RoleDashboard {
   sections: RoleDashboardSection[];
   analytics?: RoleDashboardAnalytics;
   institutional_overview?: Array<{ institute: string; total: number }> | null;
+  statistician?: StatisticianDashboardProjection | null;
+  librarian?: LibrarianDashboardProjection | null;
+}
+
+export interface LibrarianDashboardProjection {
+  schema_version: 1;
+  counts: {
+    archiving_queue: number;
+    metadata_validation: number;
+    repository_records: number;
+    archived_this_month: number;
+  };
+  queue: Array<{
+    research_document_id: number;
+    title: string;
+    submitted_by: string;
+    research_stage: string;
+    status: "pending" | "validating" | "ready";
+    updated_at: string | null;
+  }>;
+  queue_status: { pending: number; validating: number; ready: number };
+  activity: {
+    six_months: LibrarianDashboardActivity;
+    twelve_months: LibrarianDashboardActivity;
+  };
+  recent_activity: Array<{
+    id: string;
+    research_document_id: number;
+    title: string;
+    type:
+      | "record_archived"
+      | "metadata_updated"
+      | "record_returned"
+      | "archiving_review_completed";
+    occurred_at: string;
+  }>;
+}
+
+export interface LibrarianDashboardActivity {
+  months: Array<{
+    key: string;
+    label: string;
+    archived: number;
+    returned: number;
+  }>;
+}
+
+export type StatisticianReviewStatus =
+  | "pending"
+  | "in_progress"
+  | "returned_for_clarification"
+  | "signed_off"
+  | "not_applicable";
+
+export interface StatisticianDashboardWorkloadItem {
+  research_document_id: number;
+  title: string;
+  research_stage: string;
+  submission_status: string;
+  review_status: StatisticianReviewStatus;
+  due_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  updated_at: string | null;
+}
+
+export interface StatisticianDashboardProjection {
+  schema_version: 1;
+  counts: {
+    assigned: number;
+    pending: number;
+    in_review: number;
+    for_sign_off: number;
+    completed: number;
+  };
+  workload: StatisticianDashboardWorkloadItem[];
+  workload_status: {
+    pending: number;
+    in_review: number;
+    completed: number;
+  };
+  activity: {
+    months: Array<{
+      key: string;
+      label: string;
+      started: number;
+      completed: number;
+    }>;
+  };
+  recent_activity: Array<{
+    id: string;
+    research_document_id: number;
+    title: string;
+    type:
+      | "study_assigned"
+      | "review_started"
+      | "review_completed"
+      | "sign_off_requested"
+      | "sign_off_completed";
+    occurred_at: string;
+  }>;
 }
 
 export interface RoleDashboardResponse {
@@ -229,8 +330,6 @@ export interface OfficeRepositoryDetailResource extends Omit<
   OfficeRepositoryItemResource,
   "author_names"
 > {
-  category_id: number | null;
-  category: { id: number; name: string } | null;
   abstract: string | null;
   keywords: string | null;
   degree_program: string | null;
@@ -260,7 +359,6 @@ export interface OfficeRepositoryListInput {
 export interface OfficeRepositoryUpdateInput {
   /** Detail version required by the server to prevent overwriting another edit. */
   expected_updated_at?: string;
-  category_id?: number | null;
   title?: string;
   abstract?: string | null;
   keywords?: string | null;
@@ -1576,7 +1674,6 @@ export interface PublicResearchResource {
   institution_location?: string;
   institute?: string;
   degree_program?: string;
-  category?: { name?: string } | string | null;
   sdgs?: SdgResource[];
   abstract?: string;
   keywords?: string[] | string | null;
@@ -1672,6 +1769,7 @@ export interface ContentUploadFileDiagnostic {
   detectedChapters: number[];
   kind: "manuscript" | "supporting_document" | "unknown";
   eligible: boolean;
+  extractedText: string | null;
 }
 
 export interface PublicRepositorySimilaritySearch {
@@ -1679,7 +1777,6 @@ export interface PublicRepositorySimilaritySearch {
   page?: number;
   yearFrom?: string | number;
   yearTo?: string | number;
-  category?: string;
   institute?: string;
   sdgIds?: number[];
   sort?: "relevance" | "newest" | "oldest";
@@ -1715,12 +1812,6 @@ function toKeywords(keywords: PublicResearchResource["keywords"]) {
     : [];
 }
 
-function toCategory(category: PublicResearchResource["category"]) {
-  return typeof category === "string"
-    ? category
-    : (category?.name ?? "Uncategorized");
-}
-
 function toResearchStage(researchStage?: string) {
   return (researchStage ?? "Not specified")
     .split("_")
@@ -1746,7 +1837,6 @@ export function toResearchRecord(
     institute,
     degreeProgram,
     program: degreeProgram,
-    category: toCategory(resource.category),
     sdgs: resource.sdgs ?? [],
     abstract: resource.abstract ?? "",
     keywords: toKeywords(resource.keywords),
@@ -1821,14 +1911,13 @@ export async function getPublicResearch(
  *
  * Unlike `listPublicResearch`, this delegates matching and filtering to Laravel,
  * which compares the query against titles, abstracts, keywords, and author names
- * and applies the author/keyword/category/year filters in SQL. Callers therefore
+ * and applies the author, keyword, and year filters in SQL. Callers therefore
  * never need to download the whole catalog to filter it in the browser.
  */
 export type PublicResearchFilters = {
   q?: string;
   author?: string;
   keywords?: string;
-  category?: string;
   institute?: string;
   sdgIds?: number[];
   year?: string | number;
@@ -1852,7 +1941,6 @@ export async function searchPublicResearch(
   append("q", filters.q);
   append("author", filters.author);
   append("keywords", filters.keywords);
-  append("category", filters.category);
   append("institute", filters.institute);
   filters.sdgIds?.forEach((id) => params.append("sdg_ids[]", String(id)));
   append("year", filters.year);
@@ -1879,6 +1967,56 @@ export async function searchPublicResearch(
   return records;
 }
 
+export async function searchArchivedRoleRepository(
+  filters: Pick<PublicResearchFilters, "q" | "year" | "perPage"> = {},
+  fetcher: ApiFetch = globalThis.fetch,
+  signal?: AbortSignal,
+): Promise<LaravelPaginatedResponse<ResearchRecord> & { years: number[] }> {
+  const params = new URLSearchParams();
+  const query = filters.q?.trim();
+  if (query) params.set("q", query);
+  if (filters.year !== undefined && String(filters.year).trim() !== "") {
+    params.set("year", String(filters.year));
+  }
+  params.set("per_page", String(filters.perPage ?? 25));
+
+  let next: string | null = `/api/archived-repository?${params.toString()}`;
+  const data: ResearchRecord[] = [];
+  let years: number[] = [];
+  let links: LaravelPaginationLinks | undefined;
+  let meta: LaravelPaginationMeta | undefined;
+  for (let page = 0; next && page < 100; page += 1) {
+    const response = await apiRequest<{
+      data?: PublicResearchResource[];
+      links?: LaravelPaginationLinks;
+      meta?: LaravelPaginationMeta;
+      filters?: { years?: number[] };
+    }>(next, { signal }, fetcher);
+    data.push(...(response.data ?? []).map(toResearchRecord));
+    years = response.filters?.years ?? years;
+    links = response.links;
+    meta = response.meta;
+    next = normalizeNextPath(response.links?.next ?? null);
+  }
+  const fallbackMeta: LaravelPaginationMeta = {
+    current_page: 1,
+    from: data.length > 0 ? 1 : null,
+    last_page: 1,
+    links: [],
+    path: "/api/archived-repository",
+    per_page: filters.perPage ?? 25,
+    to: data.length > 0 ? data.length : null,
+    total: data.length,
+  };
+
+  return {
+    data,
+    links: links ?? { first: null, last: null, prev: null, next: null },
+    meta: meta ? { ...meta, from: data.length ? 1 : null, to: data.length || null, total: data.length } : fallbackMeta,
+    years,
+  };
+}
+
 /**
  * Requests public, algorithm-ranked repository matches for one submitted query.
  * The returned order is the server's ranking and must remain unchanged by callers.
@@ -1894,7 +2032,6 @@ export async function searchPublicResearchBySimilarity(
     ...(input.page && input.page > 1 ? { page: input.page } : {}),
     ...(input.yearFrom ? { year_from: Number(input.yearFrom) } : {}),
     ...(input.yearTo ? { year_to: Number(input.yearTo) } : {}),
-    ...(input.category ? { category: input.category } : {}),
     ...(input.institute ? { institute: input.institute } : {}),
     ...(input.sdgIds?.length ? { sdg_ids: input.sdgIds } : {}),
     ...(input.sort && input.sort !== "relevance" ? { sort: input.sort } : {}),
@@ -1992,6 +2129,7 @@ export async function checkContentUploadSimilarity(
         detected_chapters: number[];
         kind: ContentUploadFileDiagnostic["kind"];
         eligible: boolean;
+        extracted_text?: string | null;
       }>;
     }
   >(
@@ -2013,6 +2151,7 @@ export async function checkContentUploadSimilarity(
       detectedChapters: item.detected_chapters,
       kind: item.kind,
       eligible: item.eligible,
+      extractedText: item.extracted_text ?? null,
     })),
     extractedText: response.extracted_text ?? "",
   };
@@ -2057,15 +2196,6 @@ export function roleLabel(role: Role) {
     .join(" ");
 }
 
-/** The exact public representation from CategoryResource. */
-export interface CategoryResource {
-  id: number;
-  name: string;
-  slug: string;
-  description: string | null;
-  is_active: boolean;
-}
-
 export interface SdgResource {
   id: number;
   code: string;
@@ -2079,7 +2209,6 @@ export interface ResearchDocumentSummaryResource {
   id: number;
   submission_reference?: string | null;
   submitted_by: string | null;
-  category_id: number | null;
   section_id?: number | null;
   title: string;
   normalized_title: string | null;
@@ -2101,12 +2230,10 @@ export interface ResearchDocumentSummaryResource {
   approved_at: string | null;
   archived_at: string | null;
   authors: ResearchAuthorResource[];
-  category: CategoryResource | null;
   sdgs?: SdgResource[];
 }
 
 export interface ResearchDraftInput {
-  category_id?: number | null;
   sdg_ids?: number[];
   institute?: string | null;
   degree_program?: string | null;
@@ -3160,7 +3287,6 @@ export interface LibrarianResearchItem {
   title: string;
   researchers: string[];
   program: string | null;
-  category: string | null;
   academic_year: number | null;
   research_stage: string;
   submission_status: string;
@@ -3722,7 +3848,6 @@ export interface MetadataCompleteness {
   abstract: boolean;
   keywords: boolean;
   authors: boolean;
-  category: boolean;
 }
 
 export interface ArchivingQueueItem {
@@ -3732,7 +3857,6 @@ export interface ArchivingQueueItem {
   archive_status: string;
   visibility: string;
   publication_year: number | null;
-  category: string | null;
   metadata_completeness: MetadataCompleteness;
   updated_at: string | null;
 }
@@ -3740,12 +3864,16 @@ export interface ArchivingQueueItem {
 export interface RepositoryCatalogRow {
   id: number;
   title: string;
-  category: { id: number; name: string } | null;
   submission_status: string;
   archive_status: string;
   visibility: string;
   publication_year: number | null;
   updated_at: string | null;
+  authors: Array<{ id: number; author_name: string }>;
+}
+
+export interface RepositoryCatalogResponse extends LaravelPaginatedResponse<RepositoryCatalogRow> {
+  filters: { years: number[] };
 }
 
 export interface MetadataStandardsItem {
@@ -3754,7 +3882,6 @@ export interface MetadataStandardsItem {
   submission_status: string;
   archive_status: string;
   publication_year: number | null;
-  category: string | null;
   metadata_completeness: MetadataCompleteness;
   metadata_review: {
     id: number;
@@ -3762,7 +3889,6 @@ export interface MetadataStandardsItem {
     abstract_complete: boolean;
     authors_complete: boolean;
     keywords_complete: boolean;
-    category_complete: boolean;
     notes: string | null;
     review_status: string;
   } | null;
@@ -3773,7 +3899,6 @@ export interface MetadataReviewInput {
   abstract_complete?: boolean | null;
   authors_complete?: boolean | null;
   keywords_complete?: boolean | null;
-  category_complete?: boolean | null;
   notes?: string | null;
   review_status?: "pending" | "complete" | "needs_correction";
 }
@@ -3785,7 +3910,6 @@ export interface MetadataReviewResource {
   abstract_complete: boolean;
   authors_complete: boolean;
   keywords_complete: boolean;
-  category_complete: boolean;
   notes: string | null;
   review_status: string;
 }
@@ -3826,12 +3950,12 @@ export async function listArchivingQueue(
 export async function listRepositoryCatalog(
   input: {
     search?: string;
-    category?: string | number;
+    visibility?: "private" | "registered_only" | "public";
+    year?: number;
     page?: number;
     per_page?: number;
     sort?:
       | "title"
-      | "category"
       | "submission_status"
       | "archive_status"
       | "visibility"
@@ -3840,10 +3964,11 @@ export async function listRepositoryCatalog(
     direction?: "asc" | "desc";
   } = {},
   fetcher: ApiFetch = globalThis.fetch,
-): Promise<LaravelPaginatedResponse<RepositoryCatalogRow>> {
+): Promise<RepositoryCatalogResponse> {
   const response = await apiRequest<
     | LaravelPaginatedResponse<RepositoryCatalogRow>
     | {
+        filters?: { years: number[] };
         data: {
           data: RepositoryCatalogRow[];
           current_page: number;
@@ -3862,7 +3987,19 @@ export async function listRepositoryCatalog(
       }
   >(adminQuery("/api/librarian/catalog", input), undefined, fetcher);
 
-  if ("meta" in response) return response;
+  if ("meta" in response) {
+    return {
+      ...response,
+      filters:
+        "filters" in response &&
+        response.filters !== null &&
+        typeof response.filters === "object" &&
+        "years" in response.filters &&
+        Array.isArray(response.filters.years)
+          ? { years: response.filters.years.map(Number) }
+          : { years: [] },
+    };
+  }
 
   const page = response.data;
 
@@ -3884,7 +4021,35 @@ export async function listRepositoryCatalog(
       to: page.to,
       total: page.total,
     },
+    filters: response.filters ?? { years: [] },
   };
+}
+
+export async function listLibrarianRepositoryFiles(
+  researchDocumentId: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<DocumentFileResource[]> {
+  return (
+    await apiRequest<{ data: DocumentFileResource[] }>(
+      `/api/librarian/catalog/${encodeURIComponent(String(researchDocumentId))}/files`,
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export function librarianRepositoryFilePreviewUrl(
+  researchDocumentId: string | number,
+  fileId: string | number,
+) {
+  return `/api/librarian/catalog/${encodeURIComponent(String(researchDocumentId))}/files/${encodeURIComponent(String(fileId))}/preview`;
+}
+
+export function librarianRepositoryFileDownloadUrl(
+  researchDocumentId: string | number,
+  fileId: string | number,
+) {
+  return `/api/librarian/catalog/${encodeURIComponent(String(researchDocumentId))}/files/${encodeURIComponent(String(fileId))}/download`;
 }
 
 export async function listMetadataStandards(
@@ -4213,18 +4378,6 @@ export async function submitResearchDocument(
     await apiRequest<{ data: ResearchDocumentSummaryResource }>(
       `${researchPath(researchDocumentId)}/submit`,
       { method: "POST", body: JSON.stringify({}) },
-      fetcher,
-    )
-  ).data;
-}
-
-export async function listCategories(
-  fetcher: ApiFetch = globalThis.fetch,
-): Promise<CategoryResource[]> {
-  return (
-    await apiRequest<{ data: CategoryResource[] }>(
-      "/api/categories",
-      undefined,
       fetcher,
     )
   ).data;

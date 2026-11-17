@@ -51,13 +51,6 @@ trait UsesIsolatedMonitoringDatabase
         foreach (User::LEGACY_ROLES as $role) {
             DB::table('user_roles')->insertOrIgnore(['slug' => User::canonicalSlugForLegacyRole($role), 'is_active' => true]);
         }
-        Schema::create('categories', function (Blueprint $table): void {
-            $table->id();
-            $table->string('name');
-            $table->string('slug');
-            $table->softDeletes();
-            $table->timestamps();
-        });
         Schema::create('class_sections', function (Blueprint $table): void {
             $table->id();
             $table->uuid('instructor_id');
@@ -68,7 +61,6 @@ trait UsesIsolatedMonitoringDatabase
             $table->id();
             $table->uuid('submitted_by')->nullable();
             $table->unsignedBigInteger('section_id')->nullable();
-            $table->unsignedBigInteger('category_id')->nullable();
             foreach (['title', 'normalized_title', 'submission_reference', 'research_stage', 'submission_status', 'archive_status', 'visibility', 'institute'] as $column) {
                 $table->string($column)->nullable();
             }

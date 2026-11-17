@@ -14,7 +14,6 @@ class OfficeRepositoryDetailResource extends JsonResource
         return [
             'id' => $this->id,
             'submission_reference' => $this->submission_reference,
-            'category_id' => $this->category_id,
             'title' => $this->title,
             'normalized_title' => $this->normalized_title,
             'abstract' => $this->abstract,
@@ -32,11 +31,6 @@ class OfficeRepositoryDetailResource extends JsonResource
             'archived_at' => $this->archived_at?->toISOString(),
             'updated_at' => $this->updated_at?->toISOString(),
             'deleted_at' => $this->deleted_at?->toISOString(),
-            'category' => $this->whenLoaded('category', fn () => $this->category === null ? null : [
-                'id' => $this->category->id,
-                'name' => $this->category->name,
-                'slug' => $this->category->slug,
-            ]),
             'sdgs' => $this->whenLoaded('sdgs', fn () => $this->sdgs->map(fn ($sdg) => [
                 'id' => $sdg->id,
                 'code' => $sdg->code,

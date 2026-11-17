@@ -23,7 +23,6 @@ const archived = (
   institution_name: "Tangub City Global College",
   institute: "Institute of Computer Studies",
   degree_program: "BS Computer Science",
-  category: { name: "Institutional Information Systems" },
   abstract: "Archived abstract.",
   keywords: ["repository"],
   research_stage: "completed",
@@ -316,6 +315,7 @@ describe("researcher similarity check", () => {
                   text_length: 39,
                   kind: "manuscript",
                   eligible: true,
+                  extracted_text: "CHAPTER 1\nSelected file content",
                 },
               ],
             }),
@@ -361,6 +361,13 @@ describe("researcher similarity check", () => {
     expect(
       screen.getByText(/Extracted manuscript content/),
     ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "machine-learning.pdf" }),
+    );
+    expect(screen.getByText(/Selected file content/)).toBeInTheDocument();
+    expect(
+      screen.getByText("Extracted text from machine-learning.pdf."),
+    ).toBeInTheDocument();
   });
 
   it("uploads an ordered PDF folder as files[]", async () => {
@@ -396,6 +403,64 @@ describe("researcher similarity check", () => {
     const submittedBody = contentBody as FormData | null;
     expect(submittedBody?.get("mode")).toBe("folder");
     expect(submittedBody?.getAll("files[]")).toEqual(files);
+  });
+
+  it("shows details for only one processed file at a time", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            data: [],
+            extracted_text: "CHAPTER 1\nBody",
+            file_name: "2 PDF files",
+            file_diagnostics: [
+              {
+                index: 0,
+                status: "excluded",
+                reason: "supporting_document",
+                extraction_success: true,
+                text_length: 5,
+                detected_chapters: [],
+                kind: "supporting_document",
+                eligible: false,
+                extracted_text: "Cover",
+              },
+              {
+                index: 1,
+                status: "included",
+                reason: null,
+                extraction_success: true,
+                text_length: 14,
+                detected_chapters: [1],
+                kind: "manuscript",
+                eligible: true,
+                extracted_text: "CHAPTER 1\nBody",
+              },
+            ],
+          }),
+        ),
+      ),
+    );
+    renderCheck("content");
+    const files = [
+      new File(["cover"], "cover.pdf", { type: "application/pdf" }),
+      new File(["chapter"], "chapter-1.pdf", { type: "application/pdf" }),
+    ];
+    fireEvent.change(screen.getByLabelText("Manuscript folder"), {
+      target: { files },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Check content" }));
+
+    const firstSummary = (await screen.findByText("cover.pdf")).closest(
+      "summary",
+    )!;
+    const secondSummary = screen.getByText("chapter-1.pdf").closest("summary")!;
+    fireEvent.click(firstSummary);
+    expect(firstSummary.parentElement).toHaveAttribute("open");
+    fireEvent.click(secondSummary);
+    expect(firstSummary.parentElement).not.toHaveAttribute("open");
+    expect(secondSummary.parentElement).toHaveAttribute("open");
   });
 
   it("rejects a dropped folder when any file is not a PDF", () => {
@@ -466,13 +531,30 @@ describe("researcher similarity check", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("explains how to fix an upload with no valid chapter scope", async () => {
+  it.each([
+    [
+      "CONTENT_UPLOAD_CHAPTER_ONE_NOT_FOUND",
+      "We could not find the beginning of Chapter 1 in the extracted text. Confirm that the PDF contains selectable text and a clearly labeled Chapter 1, Kabanata 1, or supported equivalent.",
+    ],
+    [
+      "CONTENT_UPLOAD_CHAPTER_ORDER_INVALID",
+      "The manuscript chapters were detected in an invalid order. Confirm that the main Chapter 1 appears before the succeeding chapters.",
+    ],
+    [
+      "CONTENT_UPLOAD_CHAPTER_SCOPE_EMPTY",
+      "Chapter 1 was detected, but no readable manuscript content was found within the supported checking scope.",
+    ],
+    [
+      "CONTENT_UPLOAD_PDF_TEXT_UNREADABLE",
+      "We could not extract readable text from this PDF. Scanned or image-only PDFs are not currently supported.",
+    ],
+  ])("renders the safe content error %s", async (code, message) => {
     vi.stubGlobal(
       "fetch",
       vi.fn(
         async () =>
           new Response(
-            JSON.stringify({ error: "CONTENT_UPLOAD_INVALID_SCOPE" }),
+            JSON.stringify({ error: code }),
             {
               status: 422,
             },
@@ -491,7 +573,7 @@ describe("researcher similarity check", () => {
     fireEvent.click(screen.getByRole("button", { name: "Check content" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "We could not find a valid Chapter, Kabanata, or Tsapter section in this file. Use a manuscript with a clearly labeled Chapter 1, Kabanata 1, or Tsapter 1 heading.",
+      message,
     );
   });
 });

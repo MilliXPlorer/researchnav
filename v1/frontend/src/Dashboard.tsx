@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Activity,
-  Archive,
   Bell,
   BookOpen,
   BookOpenCheck,
@@ -82,6 +81,7 @@ const navIcons: Record<string, LucideIcon> = {
   "My Sections": FolderKanban,
   "Similarity Check": ScanSearch,
   "Assigned Research": BookOpen,
+  Repository: LibraryBig,
   "Title Review": FileSearch,
   "Manuscript Review": BookOpenCheck,
   "Research Progress Updates": Activity,
@@ -102,7 +102,6 @@ const navIcons: Record<string, LucideIcon> = {
   "Reports & Exports": FileCheck2,
   Search,
   "My Library": LibraryBig,
-  "Browse by Category": Archive,
   Notifications: Bell,
   Profile: CircleUserRound,
 };

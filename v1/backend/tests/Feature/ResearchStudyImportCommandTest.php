@@ -9,6 +9,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -94,6 +95,18 @@ class ResearchStudyImportCommandTest extends TestCase
         $this->assertDatabaseCount('document_files', 10);
         $this->assertDatabaseCount('monitoring_logs', 10);
         $this->assertDatabaseCount('audit_logs', 10);
+    }
+
+    public function test_it_accepts_legacy_category_manifest_objects_without_persisting_categories(): void
+    {
+        $source = $this->createFixture();
+        $owner = User::factory()->create(['email' => 'owner@example.test', 'access_status' => 'active']);
+
+        $this->artisan('research:import-studies', ['--owner' => $owner->email, '--source' => $source])
+            ->assertSuccessful();
+
+        $this->assertDatabaseCount('research_documents', 10);
+        $this->assertFalse(Schema::hasTable('categories'));
     }
 
     public function test_imported_manuscripts_are_available_only_to_repository_office_accounts(): void

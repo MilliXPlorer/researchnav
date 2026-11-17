@@ -14,6 +14,7 @@ import {
   Globe2,
   MoreHorizontal,
   Pencil,
+  Plus,
   RefreshCw,
   RotateCcw,
   Trash2,
@@ -23,14 +24,12 @@ import {
   deleteOfficeRepository,
   getOfficeRepositoryDetail,
   listOfficeAuthorAccounts,
-  listCategories,
   listOfficeRepository,
   restoreOfficeRepository,
   updateOfficeRepository,
   type OfficeRepositoryBucket,
   type OfficeRepositoryAuthorInput,
   type OfficeAuthorAccount,
-  type CategoryResource,
   type OfficeRepositoryDetailResource,
   type OfficeRepositoryItemResource,
   type OfficeRepositoryUpdateInput,
@@ -41,6 +40,7 @@ import { formatPhilippineDateTime } from "./dateTime";
 import { ConfirmDialog, Modal } from "./Modal";
 import ResearchOfficeBulkImport from "./ResearchOfficeBulkImport";
 import { SdgIcon } from "./SdgIcon";
+import SelectMenu from "./SelectMenu";
 import { sustainableDevelopmentGoals } from "./sdgs";
 import "./ManageRepository.css";
 
@@ -93,7 +93,6 @@ function initialDraft(
   detail: OfficeRepositoryDetailResource,
 ): OfficeRepositoryUpdateInput {
   return {
-    category_id: detail.category_id,
     title: detail.title,
     abstract: detail.abstract,
     keywords: detail.keywords,
@@ -364,7 +363,6 @@ function editorFieldTarget(
     abstract: { tab: "basic", id: "repository-abstract" },
     keywords: { tab: "basic", id: "repository-keywords" },
     publication_year: { tab: "classification", id: "repository-year" },
-    category_id: { tab: "classification", id: "repository-category" },
     institute: { tab: "classification", id: "repository-institute" },
     degree_program: { tab: "classification", id: "repository-program" },
     manuscript_date_label: {
@@ -928,8 +926,6 @@ export default function ManageRepository({
   >(null);
   const requestGeneration = useRef(0);
   const detailGeneration = useRef(0);
-  const [categories, setCategories] = useState<CategoryResource[] | null>(null);
-  const [categoryOptionsError, setCategoryOptionsError] = useState("");
 
   const bucket = view;
 
@@ -958,8 +954,6 @@ export default function ManageRepository({
     setDetailLoading(true);
     setDetailError("");
     setDetailFieldErrors({});
-    setCategories(null);
-    setCategoryOptionsError("");
     setSelected(null);
     setEditing(false);
     setKeywordEntry("");
@@ -1045,29 +1039,6 @@ export default function ManageRepository({
       });
     return () => controller.abort();
   }, [detailVersion, pendingDetailAction, selectedId]);
-
-  useEffect(() => {
-    if (!editing) return;
-    let cancelled = false;
-    void listCategories()
-      .then((values) => {
-        if (!cancelled) {
-          setCategories(values.filter((category) => category.is_active));
-          setCategoryOptionsError("");
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setCategories(null);
-          setCategoryOptionsError(
-            "Category options are unavailable. The current category is preserved; refresh and try again before changing it.",
-          );
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [editing]);
 
   useEffect(() => {
     if (
@@ -1212,7 +1183,14 @@ export default function ManageRepository({
           <p>Manage studies and archived manuscripts.</p>
         </div>
         <div className="manage-repository-header-actions">
-          <Button onClick={() => setAddStudyOpen(true)}>+ Add Study</Button>
+          <Button
+            className="manage-repository-add-study"
+            aria-label="Add Study"
+            title="Add Study"
+            onClick={() => setAddStudyOpen(true)}
+          >
+            <Plus aria-hidden="true" />
+          </Button>
         </div>
       </header>
 
@@ -1306,18 +1284,18 @@ export default function ManageRepository({
           </label>
           <label>
             Institute
-            <select
+            <SelectMenu
+              label="Institute"
               value={filterDraft.institute}
-              onChange={(event) => changeInstitute(event.target.value)}
-              aria-invalid={Boolean(filterFieldErrors.institute)}
-            >
-              <option value="">All institutes</option>
-              {instituteNames.map((institute) => (
-                <option key={institute} value={institute}>
-                  {institute}
-                </option>
-              ))}
-            </select>
+              onChange={changeInstitute}
+              options={[
+                { value: "", label: "All institutes" },
+                ...instituteNames.map((institute) => ({
+                  value: institute,
+                  label: institute,
+                })),
+              ]}
+            />
             <FieldError messages={filterFieldErrors.institute} />
           </label>
           <Button
@@ -1578,12 +1556,8 @@ export default function ManageRepository({
                   setKeywordEntry={setKeywordEntry}
                   error={detailError}
                   fieldErrors={detailFieldErrors}
-                  categories={categories}
-                  categoryOptionsError={categoryOptionsError}
                   saving={saving}
                   onEdit={() => {
-                    setCategories(null);
-                    setCategoryOptionsError("");
                     setDetailFieldErrors({});
                     setEditing(true);
                   }}
@@ -1635,8 +1609,6 @@ function RepositoryEditor({
   setDraft,
   error,
   fieldErrors,
-  categories,
-  categoryOptionsError,
   saving,
   keywordEntry,
   setKeywordEntry,
@@ -1648,8 +1620,6 @@ function RepositoryEditor({
   setDraft: Dispatch<SetStateAction<OfficeRepositoryUpdateInput>>;
   error: string;
   fieldErrors: FieldErrors;
-  categories: CategoryResource[] | null;
-  categoryOptionsError: string;
   saving: boolean;
   keywordEntry: string;
   setKeywordEntry: Dispatch<SetStateAction<string>>;
@@ -1665,9 +1635,6 @@ function RepositoryEditor({
     repositoryProgramsByInstitute[
       selectedInstitute as keyof typeof repositoryProgramsByInstitute
     ] ?? [];
-  const selectedCategory = categories?.find(
-    (category) => category.id === draft.category_id,
-  );
   const files = sortedFiles(detail.files);
   const issues = draftIssues(draft);
   const dirty =
@@ -1954,45 +1921,6 @@ function RepositoryEditor({
                     />
                   </label>
                   <label>
-                    Category
-                    <select
-                      id="repository-category"
-                      value={draft.category_id ?? ""}
-                      disabled={saving || categories === null}
-                      aria-invalid={Boolean(fieldErrors.category_id)}
-                      onChange={(event) =>
-                        update(
-                          "category_id",
-                          event.target.value
-                            ? Number(event.target.value)
-                            : null,
-                        )
-                      }
-                    >
-                      <option value="">Uncategorized</option>
-                      {draft.category_id !== null &&
-                        draft.category_id !== undefined &&
-                        !selectedCategory && (
-                          <option value={draft.category_id}>
-                            {detail.category?.name ??
-                              `Current category (${draft.category_id})`}
-                          </option>
-                        )}
-                      {categories?.map((category) => (
-                        <option key={category.id} value={category.id}>
-                          {category.name}
-                        </option>
-                      ))}
-                    </select>
-                    {categories === null && !categoryOptionsError && (
-                      <small>Loading category options…</small>
-                    )}
-                    {categoryOptionsError && (
-                      <small>{categoryOptionsError}</small>
-                    )}
-                    <FieldError messages={fieldErrors.category_id} />
-                  </label>
-                  <label>
                     Institute
                     <select
                       id="repository-institute"
@@ -2269,14 +2197,6 @@ function RepositoryEditor({
                         <dd>{draft.publication_year ?? "Not specified"}</dd>
                       </div>
                       <div>
-                        <dt>Category</dt>
-                        <dd>
-                          {selectedCategory?.name ??
-                            detail.category?.name ??
-                            "Uncategorized"}
-                        </dd>
-                      </div>
-                      <div>
                         <dt>Institute and degree program</dt>
                         <dd>
                           {draft.institute ?? "No institute"} ·{" "}
@@ -2419,8 +2339,6 @@ function RepositoryDetail({
   setDraft,
   error,
   fieldErrors,
-  categories,
-  categoryOptionsError,
   saving,
   keywordEntry,
   setKeywordEntry,
@@ -2436,8 +2354,6 @@ function RepositoryDetail({
   setDraft: Dispatch<SetStateAction<OfficeRepositoryUpdateInput>>;
   error: string;
   fieldErrors: FieldErrors;
-  categories: CategoryResource[] | null;
-  categoryOptionsError: string;
   saving: boolean;
   keywordEntry: string;
   setKeywordEntry: Dispatch<SetStateAction<string>>;
@@ -2455,8 +2371,6 @@ function RepositoryDetail({
         setDraft={setDraft}
         error={error}
         fieldErrors={fieldErrors}
-        categories={categories}
-        categoryOptionsError={categoryOptionsError}
         saving={saving}
         keywordEntry={keywordEntry}
         setKeywordEntry={setKeywordEntry}
@@ -2486,10 +2400,6 @@ function RepositoryDetail({
         </p>
       )}
       <dl className="manage-repository-metadata">
-        <div>
-          <dt>Category</dt>
-          <dd>{detail.category?.name ?? "—"}</dd>
-        </div>
         <div>
           <dt>Research stage</dt>
           <dd>{label(detail.research_stage)}</dd>

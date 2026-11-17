@@ -300,6 +300,128 @@ describe("AssignedResearchFolders", () => {
     },
   );
 
+  it.each<Role>([
+    "adviser",
+    "panel",
+    "statistician",
+    "research_editor",
+    "librarian",
+  ])(
+    "renders the same canonical read-only research team for %s",
+    async (role) => {
+      const orderedResearch = {
+        ...research,
+        researchers: ["Ari Santos", "Bea Flores"],
+        authors: [
+          { id: 4, author_name: "Ari Santos" },
+          { id: 5, author_name: "Bea Flores" },
+        ],
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = String(input);
+          if (url === `/api/research/${research.id}`) {
+            return new Response(JSON.stringify({ data: orderedResearch }));
+          }
+          return assignedStudyFetch(input);
+        }),
+      );
+
+      render(<AssignedResearchFolders role={role} />);
+      fireEvent.click(
+        await screen.findByRole("button", {
+          name: "Open research folder Coastal Resilience Study",
+        }),
+      );
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Research Team" }),
+      );
+
+      const team = await screen.findByTestId("canonical-research-team");
+      expect(screen.getAllByTestId("canonical-research-team")).toHaveLength(1);
+      expect(
+        within(team).getByRole("heading", {
+          name: "People assigned to this study",
+        }),
+      ).toBeInTheDocument();
+      const researcherItems = within(team)
+        .getByRole("heading", { name: "Researchers" })
+        .closest("section")!
+        .querySelectorAll("li");
+      expect(
+        Array.from(researcherItems).map(
+          (item) => item.querySelector("strong")?.textContent,
+        ),
+      ).toEqual(["Ari Santos", "Bea Flores"]);
+      expect(
+        within(team).getAllByRole("heading", { name: "Defense team" }),
+      ).toHaveLength(1);
+      expect(
+        within(team).getByRole("heading", { name: "Support specialists" }),
+      ).toBeInTheDocument();
+      expect(within(team).getAllByText("Active")).toHaveLength(3);
+      expect(within(team).getByText("Complete")).toBeInTheDocument();
+      expect(
+        within(team).queryByRole("button", {
+          name: /manage|assign|request|change|remove/i,
+        }),
+      ).not.toBeInTheDocument();
+
+      fireEvent.click(within(team).getByRole("tab", { name: "After defense" }));
+      expect(within(team).getByText("Incomplete")).toBeInTheDocument();
+      expect(
+        within(team).getByText("Research Representative"),
+      ).toBeInTheDocument();
+    },
+  );
+
+  it.each<Role>([
+    "adviser",
+    "instructor",
+    "panel",
+    "statistician",
+    "research_editor",
+    "librarian",
+  ])("shows file feedback for an assigned %s reviewer", async (role) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input) === `/api/research/${research.id}/files`) {
+          return new Response(
+            JSON.stringify({
+              data: [
+                {
+                  id: 31,
+                  original_filename: "chapter-one.pdf",
+                  mime_type: "application/pdf",
+                  relative_path: "Chapter 1",
+                  version_number: 1,
+                  is_current: true,
+                  upload_purpose: "initial_submission",
+                  uploaded_at: "2026-09-21T08:00:00Z",
+                },
+              ],
+            }),
+          );
+        }
+        return assignedStudyFetch(input);
+      }),
+    );
+
+    render(<AssignedResearchFolders role={role} />);
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Open research folder Coastal Resilience Study",
+      }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Documents" }));
+
+    expect(
+      await screen.findByRole("button", { name: "File feedback" }),
+    ).toBeInTheDocument();
+  });
+
   it.each<Role>(["statistician", "research_editor", "librarian"])(
     "lets %s accept a pending assignment before opening its folder",
     async (role) => {
@@ -522,12 +644,14 @@ describe("AssignedResearchFolders", () => {
 
     const search = await screen.findByLabelText("Search assigned studies");
     fireEvent.change(search, { target: { value: "coastal" } });
-    fireEvent.change(screen.getByLabelText("Research stage filter"), {
-      target: { value: "final" },
-    });
-    fireEvent.change(screen.getByLabelText("Institute filter"), {
-      target: { value: "Institute of Agriculture" },
-    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Research stage filter" }),
+    );
+    fireEvent.click(screen.getByRole("option", { name: "Final" }));
+    fireEvent.click(screen.getByRole("button", { name: "Institute filter" }));
+    fireEvent.click(
+      screen.getByRole("option", { name: "Institute of Agriculture" }),
+    );
 
     expect(
       screen.getByRole("button", {
@@ -546,8 +670,12 @@ describe("AssignedResearchFolders", () => {
     ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
-    expect(screen.getByLabelText("Research stage filter")).toHaveValue("");
-    expect(screen.getByLabelText("Institute filter")).toHaveValue("");
+    expect(
+      screen.getByRole("button", { name: "Research stage filter" }),
+    ).toHaveTextContent("All stages");
+    expect(
+      screen.getByRole("button", { name: "Institute filter" }),
+    ).toHaveTextContent("All institutes");
     expect(
       screen.getByRole("button", {
         name: "Open research folder Coastal Resilience Study",

@@ -45,6 +45,7 @@ import { Button } from "./components";
 import { instituteNames } from "./data";
 import PdfAnnotationWorkspace from "./PdfAnnotationWorkspace";
 import { SdgBadges, SdgSelector } from "./SdgMetadata";
+import { ConfirmDialog } from "./Modal";
 
 type FormState = {
   title: string;
@@ -163,6 +164,7 @@ export default function AdminResearchWorkspace({
   } | null>(null);
   const [archiveVisibility, setArchiveVisibility] =
     useState<InternalResearchResource["visibility"]>("private");
+  const [confirmArchive, setConfirmArchive] = useState(false);
   const [validationChoices, setValidationChoices] = useState<
     Record<number, ValidationChoice | "">
   >({});
@@ -797,14 +799,7 @@ export default function AdminResearchWorkspace({
               </label>
               <Button
                 disabled={isMutating}
-                onClick={() =>
-                  void runMutation(
-                    "archive",
-                    "Research archived and refreshed.",
-                    () =>
-                      archiveInternalResearch(research.id, archiveVisibility),
-                  )
-                }
+                onClick={() => setConfirmArchive(true)}
               >
                 {mutation === "archive" ? "Archiving…" : "Archive research"}
               </Button>
@@ -1434,6 +1429,22 @@ export default function AdminResearchWorkspace({
             })}
           </ul>
         </section>
+      )}
+      {confirmArchive && (
+        <ConfirmDialog
+          title="Archive research?"
+          message={`Archive ${research.title} with ${archiveVisibility.replaceAll("_", " ")} visibility?`}
+          confirmLabel="Archive research"
+          busy={mutation === "archive"}
+          onConfirm={() =>
+            void runMutation(
+              "archive",
+              "Research archived and refreshed.",
+              () => archiveInternalResearch(research.id, archiveVisibility),
+            ).finally(() => setConfirmArchive(false))
+          }
+          onCancel={() => setConfirmArchive(false)}
+        />
       )}
     </div>
   );

@@ -23,6 +23,7 @@ import StudyWorkspace from "./StudyWorkspace";
 import { matchesStudySearch } from "./studySearch";
 import type { ResearchWorkspaceDestination } from "./researchWorkspaceRoute";
 import type { Role } from "./types";
+import SelectMenu from "./SelectMenu";
 
 function label(value: string) {
   return value
@@ -642,36 +643,34 @@ function AssignedResearchFoldersContent({
                 </label>
                 <label>
                   <span>Research stage</span>
-                  <select
-                    aria-label="Research stage filter"
+                  <SelectMenu
+                    label="Research stage filter"
                     value={stageFilter}
-                    onChange={(event) => setStageFilter(event.target.value)}
-                  >
-                    <option value="">All stages</option>
-                    {stages.map((stage) => (
-                      <option key={stage} value={stage}>
-                        {label(stage)}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={setStageFilter}
+                    options={[
+                      { value: "", label: "All stages" },
+                      ...stages.map((stage) => ({
+                        value: stage,
+                        label: label(stage),
+                      })),
+                    ]}
+                  />
                 </label>
                 {role === "research-office" && (
                   <label>
                     <span>Institute</span>
-                    <select
-                      aria-label="Institute filter"
+                    <SelectMenu
+                      label="Institute filter"
                       value={instituteFilter}
-                      onChange={(event) =>
-                        setInstituteFilter(event.target.value)
-                      }
-                    >
-                      <option value="">All institutes</option>
-                      {institutes.map((institute) => (
-                        <option key={institute} value={institute}>
-                          {institute}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={setInstituteFilter}
+                      options={[
+                        { value: "", label: "All institutes" },
+                        ...institutes.map((institute) => ({
+                          value: institute,
+                          label: institute,
+                        })),
+                      ]}
+                    />
                   </label>
                 )}
                 {(stageFilter || instituteFilter) && (
@@ -819,6 +818,9 @@ function AssignedResearchFoldersContent({
                 role === "adviser" ||
                 role === "instructor" ||
                 role === "panel" ||
+                role === "statistician" ||
+                role === "research_editor" ||
+                role === "librarian" ||
                 role === "research-office" ||
                 role === "admin"
               }

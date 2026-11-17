@@ -120,7 +120,6 @@ class PublicRepositorySimilarityService
         })->mapWithKeys(fn (ResearchDocument $candidate): array => [(int) $candidate->id => true])->all();
     }
 
-
     /** @param array<string, mixed> $filters */
     private function matchingCandidates(string $term, array $filters): Collection
     {
@@ -160,9 +159,6 @@ class PublicRepositorySimilarityService
         }
         if ($yearTo = $filters['year_to'] ?? null) {
             $query->where('publication_year', '<=', $yearTo);
-        }
-        if ($category = $filters['category'] ?? null) {
-            $query->whereHas('category', fn (Builder $categories) => $categories->where('slug', $category)->orWhere('name', $category));
         }
         if ($institute = $filters['institute'] ?? null) {
             $query->where('institute', $institute);
@@ -423,7 +419,7 @@ class PublicRepositorySimilarityService
     /** @return array<int, string> */
     private function candidateRelations(): array
     {
-        $relations = ['authors', 'category', 'sdgs', 'files'];
+        $relations = ['authors', 'sdgs', 'files'];
         if (Schema::hasTable('manuscript_search_documents')) {
             $relations[] = 'manuscriptSearchDocument';
         }

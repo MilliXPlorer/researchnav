@@ -4,6 +4,7 @@ import { processingProgress } from "./processingProgress";
 import UserRoleManagementWorkspace, {
   type UserDirectoryQuery,
 } from "./UserRoleManagement";
+import SelectMenu from "./SelectMenu";
 
 const loadOfficeManagedUsers = (query: UserDirectoryQuery) =>
   listOfficeUsers({
@@ -42,6 +43,7 @@ import {
   Eye,
   FileText,
   Folder,
+  FolderOpen,
   GraduationCap,
   Globe2,
   MessageSquareText,
@@ -72,7 +74,6 @@ import {
   listAdviserPendingReviews,
   listAdviserFeedbackHistory,
   listAdviserSimilarityAlerts,
-  listCategories,
   listAdviserLoad,
   listInstructorClassReports,
   listInstructorMonitoring,
@@ -87,6 +88,10 @@ import {
   listPanelHistory,
   listProvisionedAccounts,
   listRepositoryCatalog,
+  searchArchivedRoleRepository,
+  listLibrarianRepositoryFiles,
+  librarianRepositoryFileDownloadUrl,
+  librarianRepositoryFilePreviewUrl,
   listResearchDocuments,
   listMetadataStandards,
   listRetentionLogs,
@@ -264,6 +269,8 @@ export default function RoleSidebarPage({
         case "Assigned Research":
         case "Research Folders":
           return <AssignedResearchFolders role={role} actorKey={actorKey} />;
+        case "Repository":
+          return <ArchivedRoleRepository role={role} />;
         case "Editorial Review":
           return <EditorReview role={role} />;
         case "Monitoring":
@@ -370,6 +377,8 @@ export default function RoleSidebarPage({
         case "Assigned Research":
         case "Research Folders":
           return <AssignedResearchFolders role={role} actorKey={actorKey} />;
+        case "Repository":
+          return <ArchivedRoleRepository role={role} />;
         case "Defense Evaluation":
         case "Evaluation Form":
           return <PanelEvaluationForm role={role} />;
@@ -388,6 +397,8 @@ export default function RoleSidebarPage({
         case "Assigned Research":
         case "Research Folders":
           return <AssignedResearchFolders role={role} actorKey={actorKey} />;
+        case "Repository":
+          return <ArchivedRoleRepository role={role} />;
         case "Statistical Review":
         case "Methodology Checklist":
           return <StatisticianMethodologyChecklist role={role} />;
@@ -420,6 +431,7 @@ export default function RoleSidebarPage({
           return <LibrarianReferenceReview role={role} />;
         case "Monitoring":
           return <LibrarianMonitoring role={role} />;
+        case "Repository":
         case "Repository Catalog":
           return <LibrarianRepositoryCatalog role={role} navigate={navigate} />;
         case "Metadata Standards":
@@ -629,14 +641,23 @@ function UserLogs({ role }: { role: Role }) {
           <div className="row-actions">
             <Button
               variant="secondary"
+              className="icon-button"
               disabled={loading || clearing || logs.length === 0}
               onClick={() => setConfirmClear(true)}
+              aria-label="Clear Logs"
+              title="Clear Logs"
             >
-              Clear Logs
+              <Trash2 aria-hidden="true" />
             </Button>
 
-            <Button disabled={clearing} onClick={reloadLogs}>
-              Refresh
+            <Button
+              className="icon-button"
+              disabled={clearing}
+              onClick={reloadLogs}
+              aria-label="Refresh"
+              title="Refresh"
+            >
+              <RefreshCw aria-hidden="true" />
             </Button>
           </div>
         }
@@ -760,8 +781,9 @@ function UserLogs({ role }: { role: Role }) {
       {confirmClear && (
         <ConfirmDialog
           title="Clear Logs"
-          message="Are you sure to clear logs?"
-          confirmLabel="Clear logs"
+          message="Are you sure you want to clear all logs? This action cannot be undone."
+          confirmLabel="Clear Logs"
+          className="clear-logs-confirmation"
           busy={clearing}
           onConfirm={() => void clearVisibleLogs()}
           onCancel={() => setConfirmClear(false)}
@@ -6791,13 +6813,15 @@ function LibrarianRepositoryCatalog({
   role: Role;
   navigate: (path: string) => void;
 }) {
-  const [query, setQuery] = useState({ search: "", category: "" });
+  const [query, setQuery] = useState({
+    search: "",
+    visibility: "",
+    year: "",
+  });
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState<
     | "title"
-    | "category"
     | "submission_status"
-    | "archive_status"
     | "visibility"
     | "publication_year"
     | "updated_at"
@@ -6809,10 +6833,20 @@ function LibrarianRepositoryCatalog({
   > | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [viewingFiles, setViewingFiles] = useState<{
+    id: number;
+    title: string;
+    authors: Array<{ id: number; author_name: string }>;
+    search: string;
+  } | null>(null);
+  const [repositoryFiles, setRepositoryFiles] = useState<
+    DocumentFileResource[]
+  >([]);
+  const [filesLoading, setFilesLoading] = useState(false);
+  const [filesError, setFilesError] = useState("");
   const [attempt, reload] = useAttempt();
-  const categories = useLoad(() => listCategories(), 0);
   const { filters, change } = useLiveFilters(
-    { search: "", category: "" },
+    { search: "", visibility: "", year: "" },
     (next) => {
       setPage(1);
       setQuery(next);
@@ -6824,7 +6858,13 @@ function LibrarianRepositoryCatalog({
     let cancelled = false;
     void listRepositoryCatalog({
       ...query,
-      category: query.category ? Number(query.category) : undefined,
+      visibility:
+        query.visibility === "private" ||
+        query.visibility === "public" ||
+        query.visibility === "registered_only"
+          ? query.visibility
+          : undefined,
+      year: query.year ? Number(query.year) : undefined,
       sort: sort || undefined,
       direction: sort ? sortDirection : undefined,
       page,
@@ -6865,43 +6905,106 @@ function LibrarianRepositoryCatalog({
     reload();
   }
 
+  function openFiles(row: {
+    id: number;
+    title: string;
+    authors: Array<{ id: number; author_name: string }>;
+  }) {
+    setViewingFiles({ ...row, search: query.search });
+    setRepositoryFiles([]);
+    setFilesError("");
+    setFilesLoading(true);
+    void listLibrarianRepositoryFiles(row.id)
+      .then(setRepositoryFiles)
+      .catch((requestError) =>
+        setFilesError(
+          friendlyError(requestError, "Study files are unavailable"),
+        ),
+      )
+      .finally(() => setFilesLoading(false));
+  }
+
+  const visibleAuthors = viewingFiles
+    ? viewingFiles.authors.filter(
+        (author, index, authors) =>
+          author.author_name.trim() !== "" &&
+          authors.findIndex(
+            (candidate) =>
+              candidate.author_name.trim().toLocaleLowerCase() ===
+              author.author_name.trim().toLocaleLowerCase(),
+          ) === index,
+      )
+    : [];
+  const normalizedAuthorSearch = viewingFiles?.search
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLocaleLowerCase();
+  const authorSearchTokens =
+    normalizedAuthorSearch?.split(" ").filter(Boolean) ?? [];
+  const displayedAuthor =
+    visibleAuthors.find((author) => {
+      const normalizedName = author.author_name
+        .trim()
+        .replace(/\s+/g, " ")
+        .toLocaleLowerCase();
+      return (
+        authorSearchTokens.length > 0 &&
+        authorSearchTokens.every((token) => normalizedName.includes(token))
+      );
+    }) ?? visibleAuthors[0];
+
   return (
-    <div className="workspace-content admin-sidebar-page">
+    <div className="workspace-content admin-sidebar-page librarian-repository-page">
       <RolePageHeader
         role={role}
-        title="Repository catalog"
-        description="Approved and archived research records."
+        title="Repository"
+        description="Search and browse repository records."
         action={
           <Button variant="secondary" onClick={() => navigate("/catalog")}>
             Open public catalog
           </Button>
         }
       />
-      <section className="panel-card admin-data-card">
-        <form className="admin-filters" onSubmit={applyFilters}>
+      <section className="panel-card admin-data-card manage-repository-card librarian-repository-card">
+        <form
+          className="manage-repository-filter-row librarian-repository-filters"
+          onSubmit={applyFilters}
+        >
           <label>
             Search
             <input
               value={filters.search}
               onChange={(event) => change("search", event.target.value)}
-              placeholder="Title keyword"
+              placeholder="Search by title or author"
             />
           </label>
           <label>
-            Category
-            <select
-              value={filters.category}
-              onChange={(event) => change("category", event.target.value)}
-            >
-              <option value="">All categories</option>
-              {(categories.status === "ready" ? categories.data : []).map(
-                (category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.name}
-                  </option>
-                ),
-              )}
-            </select>
+            Visibility
+            <SelectMenu
+              label="Visibility"
+              value={filters.visibility}
+              onChange={(value) => change("visibility", value)}
+              options={[
+                { value: "", label: "All visibility" },
+                { value: "public", label: "Public" },
+                { value: "private", label: "Private" },
+              ]}
+            />
+          </label>
+          <label>
+            Publication year
+            <SelectMenu
+              label="Publication year"
+              value={filters.year}
+              onChange={(value) => change("year", value)}
+              options={[
+                { value: "", label: "All years" },
+                ...(result?.filters.years ?? []).map((year) => ({
+                  value: String(year),
+                  label: String(year),
+                })),
+              ]}
+            />
           </label>
         </form>
         {error ? (
@@ -6916,7 +7019,7 @@ function LibrarianRepositoryCatalog({
           </p>
         ) : (
           <>
-            <div className="admin-table-wrap">
+            <div className="admin-table-wrap librarian-repository-table-wrap">
               <table>
                 <caption className="sr-only">Repository catalog</caption>
                 <thead>
@@ -6932,16 +7035,6 @@ function LibrarianRepositoryCatalog({
                       Title
                     </SortableHeader>
                     <SortableHeader
-                      sortKey="category"
-                      activeSort={sort}
-                      direction={sortDirection}
-                      onSort={(key) =>
-                        changeSort(key as NonNullable<typeof sort>)
-                      }
-                    >
-                      Category
-                    </SortableHeader>
-                    <SortableHeader
                       sortKey="submission_status"
                       activeSort={sort}
                       direction={sortDirection}
@@ -6950,16 +7043,6 @@ function LibrarianRepositoryCatalog({
                       }
                     >
                       Status
-                    </SortableHeader>
-                    <SortableHeader
-                      sortKey="archive_status"
-                      activeSort={sort}
-                      direction={sortDirection}
-                      onSort={(key) =>
-                        changeSort(key as NonNullable<typeof sort>)
-                      }
-                    >
-                      Archive
                     </SortableHeader>
                     <SortableHeader
                       sortKey="visibility"
@@ -6991,18 +7074,28 @@ function LibrarianRepositoryCatalog({
                     >
                       Updated
                     </SortableHeader>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {result.data.map((row) => (
                     <tr key={row.id}>
                       <td>{row.title}</td>
-                      <td>{row.category?.name ?? "—"}</td>
                       <td>{label(row.submission_status)}</td>
-                      <td>{label(row.archive_status)}</td>
                       <td>{label(row.visibility)}</td>
                       <td>{row.publication_year ?? "—"}</td>
                       <td>{displayDate(row.updated_at)}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="icon-button librarian-repository-view"
+                          aria-label={`View files for ${row.title}`}
+                          title="View study files"
+                          onClick={() => openFiles(row)}
+                        >
+                          <Eye aria-hidden="true" />
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -7019,6 +7112,252 @@ function LibrarianRepositoryCatalog({
           </>
         )}
       </section>
+      {viewingFiles && (
+        <Modal
+          label={`Files for ${viewingFiles.title}`}
+          className="librarian-files-modal"
+          onClose={() => setViewingFiles(null)}
+        >
+          <div className="librarian-files-dialog">
+            <header className="librarian-files-header">
+              <span className="librarian-files-header-icon" aria-hidden="true">
+                <FolderOpen />
+              </span>
+              <p className="eyebrow">Repository files</p>
+            </header>
+            <h2 className="librarian-files-title">{viewingFiles.title}</h2>
+            <div className="librarian-files-authors">
+              <Users aria-hidden="true" />
+              <p>
+                <strong>Authors:</strong>{" "}
+                {displayedAuthor
+                  ? `${displayedAuthor.author_name.trim()}${visibleAuthors.length > 1 ? " et al." : ""}`
+                  : "Authors not available."}
+              </p>
+            </div>
+            {filesLoading ? (
+              <Loading label="Loading study files" />
+            ) : filesError ? (
+              <InlineError
+                message={filesError}
+                retry={() => openFiles(viewingFiles)}
+              />
+            ) : repositoryFiles.length === 0 ? (
+              <p className="admin-empty">
+                No files are available for this study.
+              </p>
+            ) : (
+              <ul className="librarian-files-list">
+                {repositoryFiles.map((file) => (
+                  <li key={file.id}>
+                    <div className="librarian-file-details">
+                      <span className="librarian-file-icon" aria-hidden="true">
+                        <FileText />
+                      </span>
+                      <span className="librarian-file-copy">
+                        <strong title={file.original_filename}>
+                          {file.original_filename}
+                        </strong>
+                        <small>
+                          {label(file.document_type)} · Version{" "}
+                          {file.version_number}
+                        </small>
+                      </span>
+                    </div>
+                    <span className="row-actions">
+                      {file.mime_type === "application/pdf" && (
+                        <a
+                          className="icon-button"
+                          href={librarianRepositoryFilePreviewUrl(
+                            viewingFiles.id,
+                            file.id,
+                          )}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-label={`View ${file.original_filename}`}
+                          title="Preview file"
+                        >
+                          <Eye aria-hidden="true" />
+                        </a>
+                      )}
+                      <a
+                        className="icon-button"
+                        href={librarianRepositoryFileDownloadUrl(
+                          viewingFiles.id,
+                          file.id,
+                        )}
+                        aria-label={`Download ${file.original_filename}`}
+                        title="Download file"
+                      >
+                        <Download aria-hidden="true" />
+                      </a>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function ArchivedRoleRepository({ role }: { role: Role }) {
+  const [search, setSearch] = useState("");
+  const [year, setYear] = useState("");
+  const [query, setQuery] = useState({ search: "", year: "" });
+  const [result, setResult] = useState<Awaited<
+    ReturnType<typeof searchArchivedRoleRepository>
+  > | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [attempt, reload] = useAttempt();
+  const [metadataResearchId, setMetadataResearchId] = useState<
+    string | number | null
+  >(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void searchArchivedRoleRepository(
+      {
+        q: query.search,
+        year: query.year || undefined,
+        perPage: 100,
+      },
+      globalThis.fetch,
+      controller.signal,
+    )
+      .then((response) => {
+        setResult(response);
+        setError("");
+      })
+      .catch((requestError) => {
+        if (controller.signal.aborted) return;
+        setError(
+          friendlyError(requestError, "Archived repository is unavailable"),
+        );
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [attempt, query]);
+
+  const years = result?.years ?? [];
+
+  return (
+    <div className="workspace-content admin-sidebar-page archived-role-repository-page">
+      <RolePageHeader
+        role={role}
+        title="Repository"
+        description="Browse archived studies available as institutional references."
+      />
+      <section className="panel-card archived-role-repository-card">
+        <header className="archived-role-repository-intro">
+          <div>
+            <p className="eyebrow">Archived collection</p>
+            <h2>Repository references</h2>
+          </div>
+          <span>{result?.meta.total ?? 0} archived studies</span>
+        </header>
+        <form
+          className="archived-role-repository-filters"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setLoading(true);
+            setQuery({ search: search.trim(), year });
+          }}
+        >
+          <label>
+            Search archived studies
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search by title, author, or keyword"
+            />
+          </label>
+          <label>
+            Publication year
+            <SelectMenu
+              label="Archived publication year"
+              value={year}
+              onChange={(value) => {
+                setYear(value);
+                setLoading(true);
+                setQuery((current) => ({ ...current, year: value }));
+              }}
+              options={[
+                { value: "", label: "All years" },
+                ...years.map((value) => ({
+                  value: String(value),
+                  label: String(value),
+                })),
+              ]}
+            />
+          </label>
+          <Button type="submit">Search</Button>
+        </form>
+        {error ? (
+          <InlineError message={error} retry={reload} />
+        ) : loading || result === null ? (
+          <Loading label="Loading archived repository" />
+        ) : result.data.length === 0 ? (
+          <p className="admin-empty">
+            {query.search || query.year
+              ? "No archived studies match these filters."
+              : "No archived studies are available."}
+          </p>
+        ) : (
+          <div className="admin-table-wrap archived-role-repository-table-wrap">
+            <table>
+              <caption className="sr-only">Archived repository studies</caption>
+              <thead>
+                <tr>
+                  <th>Study</th>
+                  <th>Researchers</th>
+                  <th>Institute / Program</th>
+                  <th>Year</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.data.map((record) => (
+                  <tr key={record.id}>
+                    <td>
+                      <strong>{record.title}</strong>
+                      <small>{record.keywords.slice(0, 3).join(" · ")}</small>
+                    </td>
+                    <td>{record.authors || "Not available"}</td>
+                    <td>
+                      <span>{record.institute}</span>
+                      <small>{record.program}</small>
+                    </td>
+                    <td>{record.year}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="icon-button archived-role-repository-view"
+                        aria-label={`View metadata for ${record.title}`}
+                        onClick={() => setMetadataResearchId(record.id)}
+                      >
+                        <Eye aria-hidden="true" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+      {metadataResearchId !== null && (
+        <PublicResearchMetadataDialog
+          researchDocumentId={metadataResearchId}
+          onClose={() => setMetadataResearchId(null)}
+          authenticated
+        />
+      )}
     </div>
   );
 }
@@ -7032,7 +7371,6 @@ function LibrarianMetadataStandards({ role }: { role: Role }) {
     abstract_complete: false,
     authors_complete: false,
     keywords_complete: false,
-    category_complete: false,
     notes: "",
     review_status: "complete",
   });
@@ -7042,13 +7380,11 @@ function LibrarianMetadataStandards({ role }: { role: Role }) {
     state.status === "ready" ? state.data : [],
     {
       title: (item) => item.title,
-      category: (item) => item.category,
       year: (item) => item.publication_year,
       title_complete: (item) => item.metadata_completeness.title,
       abstract: (item) => item.metadata_completeness.abstract,
       keywords: (item) => item.metadata_completeness.keywords,
       authors: (item) => item.metadata_completeness.authors,
-      category_complete: (item) => item.metadata_completeness.category,
       review: (item) => item.metadata_review?.review_status,
     },
   );
@@ -7060,7 +7396,6 @@ function LibrarianMetadataStandards({ role }: { role: Role }) {
       abstract_complete: item.metadata_review?.abstract_complete ?? false,
       authors_complete: item.metadata_review?.authors_complete ?? false,
       keywords_complete: item.metadata_review?.keywords_complete ?? false,
-      category_complete: item.metadata_review?.category_complete ?? false,
       notes: item.metadata_review?.notes ?? "",
       review_status: item.metadata_review?.review_status ?? "complete",
     });
@@ -7122,39 +7457,16 @@ function LibrarianMetadataStandards({ role }: { role: Role }) {
                         changeSort(
                           key as
                             | "title"
-                            | "category"
                             | "year"
                             | "title_complete"
                             | "abstract"
                             | "keywords"
                             | "authors"
-                            | "category_complete"
                             | "review",
                         )
                       }
                     >
                       Title
-                    </SortableHeader>
-                    <SortableHeader
-                      sortKey="category"
-                      activeSort={sort}
-                      direction={direction}
-                      onSort={(key) =>
-                        changeSort(
-                          key as
-                            | "title"
-                            | "category"
-                            | "year"
-                            | "title_complete"
-                            | "abstract"
-                            | "keywords"
-                            | "authors"
-                            | "category_complete"
-                            | "review",
-                        )
-                      }
-                    >
-                      Category
                     </SortableHeader>
                     <SortableHeader
                       sortKey="year"
@@ -7164,13 +7476,11 @@ function LibrarianMetadataStandards({ role }: { role: Role }) {
                         changeSort(
                           key as
                             | "title"
-                            | "category"
                             | "year"
                             | "title_complete"
                             | "abstract"
                             | "keywords"
                             | "authors"
-                            | "category_complete"
                             | "review",
                         )
                       }
@@ -7185,13 +7495,11 @@ function LibrarianMetadataStandards({ role }: { role: Role }) {
                         changeSort(
                           key as
                             | "title"
-                            | "category"
                             | "year"
                             | "title_complete"
                             | "abstract"
                             | "keywords"
                             | "authors"
-                            | "category_complete"
                             | "review",
                         )
                       }
@@ -7206,13 +7514,11 @@ function LibrarianMetadataStandards({ role }: { role: Role }) {
                         changeSort(
                           key as
                             | "title"
-                            | "category"
                             | "year"
                             | "title_complete"
                             | "abstract"
                             | "keywords"
                             | "authors"
-                            | "category_complete"
                             | "review",
                         )
                       }
@@ -7227,13 +7533,11 @@ function LibrarianMetadataStandards({ role }: { role: Role }) {
                         changeSort(
                           key as
                             | "title"
-                            | "category"
                             | "year"
                             | "title_complete"
                             | "abstract"
                             | "keywords"
                             | "authors"
-                            | "category_complete"
                             | "review",
                         )
                       }
@@ -7248,39 +7552,16 @@ function LibrarianMetadataStandards({ role }: { role: Role }) {
                         changeSort(
                           key as
                             | "title"
-                            | "category"
                             | "year"
                             | "title_complete"
                             | "abstract"
                             | "keywords"
                             | "authors"
-                            | "category_complete"
                             | "review",
                         )
                       }
                     >
                       Authors
-                    </SortableHeader>
-                    <SortableHeader
-                      sortKey="category_complete"
-                      activeSort={sort}
-                      direction={direction}
-                      onSort={(key) =>
-                        changeSort(
-                          key as
-                            | "title"
-                            | "category"
-                            | "year"
-                            | "title_complete"
-                            | "abstract"
-                            | "keywords"
-                            | "authors"
-                            | "category_complete"
-                            | "review",
-                        )
-                      }
-                    >
-                      Category set
                     </SortableHeader>
                     <SortableHeader
                       sortKey="review"
@@ -7290,13 +7571,11 @@ function LibrarianMetadataStandards({ role }: { role: Role }) {
                         changeSort(
                           key as
                             | "title"
-                            | "category"
                             | "year"
                             | "title_complete"
                             | "abstract"
                             | "keywords"
                             | "authors"
-                            | "category_complete"
                             | "review",
                         )
                       }
@@ -7310,13 +7589,11 @@ function LibrarianMetadataStandards({ role }: { role: Role }) {
                   {sortedRows.map((item) => (
                     <tr key={item.research_document_id}>
                       <td>{item.title}</td>
-                      <td>{item.category ?? "—"}</td>
                       <td>{item.publication_year ?? "—"}</td>
                       <td>{yesNo(item.metadata_completeness.title)}</td>
                       <td>{yesNo(item.metadata_completeness.abstract)}</td>
                       <td>{yesNo(item.metadata_completeness.keywords)}</td>
                       <td>{yesNo(item.metadata_completeness.authors)}</td>
-                      <td>{yesNo(item.metadata_completeness.category)}</td>
                       <td>
                         {item.metadata_review
                           ? label(item.metadata_review.review_status)
@@ -7358,7 +7635,6 @@ function LibrarianMetadataStandards({ role }: { role: Role }) {
                       ["abstract_complete", "Abstract complete"],
                       ["authors_complete", "Authors complete"],
                       ["keywords_complete", "Keywords complete"],
-                      ["category_complete", "Category complete"],
                     ] as const
                   ).map(([field, fieldLabel]) => (
                     <label key={field} className="checklist-toggle">
@@ -8768,6 +9044,10 @@ function ResearcherSimilarityCheck({
   const [fileError, setFileError] = useState("");
   const [checkProgress, setCheckProgress] = useState(0);
   const [submitted, setSubmitted] = useState("");
+  const [selectedExtractedFile, setSelectedExtractedFile] = useState<
+    number | null
+  >(null);
+  const [openFileDetails, setOpenFileDetails] = useState<number | null>(null);
   const [state, setState] = useState<
     | { status: "idle" }
     | { status: "checking" }
@@ -8805,6 +9085,8 @@ function ResearcherSimilarityCheck({
 
   function runCheck() {
     if (!canCheck) return;
+    setSelectedExtractedFile(null);
+    setOpenFileDetails(null);
     setSubmitted(mode === "title" ? trimmed : (file?.name ?? "manuscript"));
     setCheckProgress(processingProgress(0));
     setState({ status: "checking" });
@@ -8866,6 +9148,18 @@ function ResearcherSimilarityCheck({
           return percentage === null || Number(percentage) > 0;
         })
       : [];
+  const selectedDiagnostic =
+    state.status === "ready" && selectedExtractedFile !== null
+      ? state.diagnostics.find(
+          (diagnostic) => diagnostic.index === selectedExtractedFile,
+        )
+      : undefined;
+  const displayedExtractedText =
+    selectedDiagnostic?.extractedText ??
+    (state.status === "ready" ? state.extractedText : "");
+  const displayedExtractedFile = selectedDiagnostic
+    ? files[selectedDiagnostic.index]
+    : undefined;
   const reviewRequired = scored.filter(
     (match) => match.adviserReviewRequired === true,
   );
@@ -9132,28 +9426,35 @@ function ResearcherSimilarityCheck({
       {state.status === "checking" ? (
         <div className="content-check-loading-backdrop">
           <section
-            className="content-check-loading"
+            className={`content-check-loading${mode === "content" ? " content-check-loading-manuscript" : ""}`}
             role="status"
             aria-live="polite"
             aria-busy="true"
           >
-            <div>
-              <span>
-                {mode === "title"
-                  ? "Title similarity check"
-                  : "Content similarity check"}
-              </span>
-              <h2>
-                {mode === "title"
-                  ? "Checking your proposed title"
-                  : "Processing your manuscript"}
-              </h2>
-              <p>
-                {mode === "title"
-                  ? "Comparing the title with archived research titles. This may take a moment."
-                  : "Extracting text and comparing it with archived research. This may take a moment."}
-              </p>
+            <div className="content-check-loading-copy">
+              {mode === "content" && (
+                <span className="content-check-loading-icon" aria-hidden="true">
+                  <FileText />
+                </span>
+              )}
+              <div>
+                <span>
+                  {mode === "title"
+                    ? "Title similarity check"
+                    : "Content similarity check"}
+                </span>
+                <h2>
+                  {mode === "title"
+                    ? "Checking your proposed title"
+                    : "Processing your manuscript"}
+                </h2>
+              </div>
             </div>
+            <p>
+              {mode === "title"
+                ? "Comparing the title with archived research titles. This may take a moment."
+                : "Extracting text and comparing it with archived research. This may take a moment."}
+            </p>
             <div
               className="content-check-loading-track"
               role="progressbar"
@@ -9165,11 +9466,19 @@ function ResearcherSimilarityCheck({
               <i style={{ width: `${checkProgress}%` }} />
             </div>
             <div className="content-check-loading-meta">
-              <p>
-                {mode === "title"
-                  ? "Ranking matching research titles"
-                  : "Extracting and comparing files"}
-              </p>
+              <div>
+                {mode === "content" && (
+                  <i
+                    className="content-check-loading-spinner"
+                    aria-hidden="true"
+                  />
+                )}
+                <p>
+                  {mode === "title"
+                    ? "Ranking matching research titles"
+                    : "Extracting and comparing files"}
+                </p>
+              </div>
               <strong>{checkProgress}%</strong>
             </div>
           </section>
@@ -9336,12 +9645,33 @@ function ResearcherSimilarityCheck({
                     <li
                       key={`${diagnostic.index}-${selectedFile?.name ?? "file"}`}
                     >
-                      <details>
-                        <summary>
-                          <span>
+                      <details open={openFileDetails === diagnostic.index}>
+                        <summary
+                          onClick={(event) => {
+                            event.preventDefault();
+                            setOpenFileDetails((current) =>
+                              current === diagnostic.index
+                                ? null
+                                : diagnostic.index,
+                            );
+                          }}
+                        >
+                          <button
+                            type="button"
+                            className="content-check-file-select"
+                            disabled={!diagnostic.extractedText}
+                            aria-pressed={
+                              selectedExtractedFile === diagnostic.index
+                            }
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              setSelectedExtractedFile(diagnostic.index);
+                            }}
+                          >
                             {selectedFile?.name ??
                               `File ${diagnostic.index + 1}`}
-                          </span>
+                          </button>
                           <strong>
                             {diagnosticLabel(
                               diagnostic.status,
@@ -9397,7 +9727,7 @@ function ResearcherSimilarityCheck({
               </p>
             </section>
           )}
-          {mode === "content" && state.extractedText && (
+          {mode === "content" && displayedExtractedText && (
             <section
               className="panel-card content-check-full-text"
               aria-labelledby="content-full-text-title"
@@ -9408,12 +9738,13 @@ function ResearcherSimilarityCheck({
                     Extracted manuscript text
                   </h2>
                   <p>
-                    Full text assembled from the eligible files used in this
-                    comparison.
+                    {displayedExtractedFile
+                      ? `Extracted text from ${displayedExtractedFile.name}.`
+                      : "Full text assembled from the eligible files used in this comparison."}
                   </p>
                 </div>
               </div>
-              <pre>{state.extractedText}</pre>
+              <pre>{displayedExtractedText}</pre>
             </section>
           )}
         </div>
@@ -9438,10 +9769,20 @@ function diagnosticLabel(status: string, kind: string) {
 
 function similarityQueryError(error: unknown, mode: "title" | "content") {
   if (error instanceof ApiError) {
-    if (error.code === "CONTENT_UPLOAD_UNREADABLE")
-      return "We could not read text from this file. Use a text-based PDF; scanned or image-only PDFs are not supported.";
-    if (error.code === "CONTENT_UPLOAD_INVALID_SCOPE")
-      return "We could not find a valid Chapter, Kabanata, or Tsapter section in this file. Use a manuscript with a clearly labeled Chapter 1, Kabanata 1, or Tsapter 1 heading.";
+    if (
+      error.code === "CONTENT_UPLOAD_PDF_TEXT_UNREADABLE" ||
+      error.code === "CONTENT_UPLOAD_UNREADABLE"
+    )
+      return "We could not extract readable text from this PDF. Scanned or image-only PDFs are not currently supported.";
+    if (
+      error.code === "CONTENT_UPLOAD_CHAPTER_ONE_NOT_FOUND" ||
+      error.code === "CONTENT_UPLOAD_INVALID_SCOPE"
+    )
+      return "We could not find the beginning of Chapter 1 in the extracted text. Confirm that the PDF contains selectable text and a clearly labeled Chapter 1, Kabanata 1, or supported equivalent.";
+    if (error.code === "CONTENT_UPLOAD_CHAPTER_ORDER_INVALID")
+      return "The manuscript chapters were detected in an invalid order. Confirm that the main Chapter 1 appears before the succeeding chapters.";
+    if (error.code === "CONTENT_UPLOAD_CHAPTER_SCOPE_EMPTY")
+      return "Chapter 1 was detected, but no readable manuscript content was found within the supported checking scope.";
     if (error.status === 429)
       return "Too many checks in a short time. Wait a moment and try again.";
     if (error.status === 422)

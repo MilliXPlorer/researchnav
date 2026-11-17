@@ -2,15 +2,26 @@ import {
   ArrowUpRight,
   BarChart3,
   BookOpen,
+  CheckCircle2,
+  ClipboardCheck,
+  Clock3,
+  Database,
   ExternalLink,
   FolderKanban,
   History,
   LibraryBig,
+  LineChart,
   Search,
   ShieldCheck,
+  SquareStack,
+  Tags,
 } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { AnimatedStat, Button } from "./components";
+import {
+  DashboardEmptyState,
+  DashboardKpiCard,
+} from "./DashboardPrimitives";
 import { formatPhilippineDate } from "./dateTime";
 import { Modal } from "./Modal";
 import AdminResearchWorkspace from "./AdminResearchWorkspace";
@@ -28,9 +39,12 @@ import {
   listOfficeInstituteStudies,
   officeInstituteStudyOpenUrl,
   type OfficeInstituteStudy,
+  type LibrarianDashboardProjection,
   type RoleDashboard,
   type RoleDashboardAnalytics,
   type RoleDashboardSection,
+  type StatisticianDashboardProjection,
+  type StatisticianDashboardWorkloadItem,
 } from "./api";
 import type { Role } from "./types";
 
@@ -419,7 +433,7 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
   panel: {
     eyebrow: "Research Panel / Dashboard",
     title: "Dashboard",
-    description: "Available defense information and repository references.",
+    description: "Review assigned studies and manage your panel evaluations.",
     sections: {
       assigned_manuscripts: {
         title: "Assigned manuscripts",
@@ -438,7 +452,7 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
     eyebrow: "Statistician / Dashboard",
     title: "Dashboard",
     description:
-      "Available methodology work and completed research references.",
+      "Overview of your assigned studies, workload, and recent activity.",
     sections: {
       methodology_reviews: {
         title: "Methodology reviews",
@@ -481,7 +495,8 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
   librarian: {
     eyebrow: "Librarian / Dashboard",
     title: "Dashboard",
-    description: "Repository records and available archiving information.",
+    description:
+      "Manage archiving requests, validate repository metadata, and monitor collection activity.",
     sections: {
       archiving_queue: {
         title: "Archiving queue",
@@ -572,7 +587,11 @@ function RoleDashboardWorkspace({
             ? "workspace-content admin-dashboard-workspace"
             : role === "panel"
               ? "workspace-content panel-dashboard-workspace"
-              : "workspace-content"
+              : role === "statistician"
+                ? "workspace-content statistician-dashboard-workspace"
+                : role === "librarian"
+                  ? "workspace-content librarian-dashboard-workspace"
+                : "workspace-content"
       }
     >
       <WorkspaceHeader {...config} action={action} />
@@ -693,6 +712,24 @@ function DashboardSections({
     );
   }
 
+  if (role === "statistician" && dashboardState.dashboard.statistician) {
+    return (
+      <StatisticianDashboard
+        projection={dashboardState.dashboard.statistician}
+        navigate={navigate}
+      />
+    );
+  }
+
+  if (role === "librarian" && dashboardState.dashboard.librarian) {
+    return (
+      <LibrarianDashboard
+        projection={dashboardState.dashboard.librarian}
+        navigate={navigate}
+      />
+    );
+  }
+
   const visibleSections =
     role === "coordinator"
       ? dashboardState.dashboard.sections.filter((section) =>
@@ -793,9 +830,7 @@ function DashboardSections({
           />
           {dashboardState.dashboard.analytics && (
             <div className="dashboard-visualizations">
-              <DashboardAnalytics
-                analytics={dashboardState.dashboard.analytics}
-              />
+              <DashboardAnalytics analytics={dashboardState.dashboard.analytics} />
             </div>
           )}
         </>
@@ -867,6 +902,553 @@ function DashboardSections({
   );
 }
 
+function StatisticianDashboard({
+  projection,
+  navigate,
+}: {
+  projection: StatisticianDashboardProjection;
+  navigate: (path: string) => void;
+}) {
+  const [filter, setFilter] = useState<"all" | "pending" | "in_review">("all");
+  const [activityView, setActivityView] = useState<"review" | "recent">(
+    "review",
+  );
+  const workload = projection.workload.filter((item) => {
+    if (filter === "pending") return item.review_status === "pending";
+    if (filter === "in_review") {
+      return ["in_progress", "returned_for_clarification"].includes(
+        item.review_status,
+      );
+    }
+    return true;
+  });
+  const statusTotal =
+    projection.workload_status.pending +
+    projection.workload_status.in_review +
+    projection.workload_status.completed;
+  const pendingEnd = statusTotal
+    ? (projection.workload_status.pending / statusTotal) * 100
+    : 0;
+  const inReviewEnd = statusTotal
+    ? pendingEnd + (projection.workload_status.in_review / statusTotal) * 100
+    : 0;
+  const activityMaximum = Math.max(
+    1,
+    ...projection.activity.months.flatMap((month) => [
+      month.started,
+      month.completed,
+    ]),
+  );
+  const hasActivity = projection.activity.months.some(
+    (month) => month.started > 0 || month.completed > 0,
+  );
+
+  return (
+    <div
+      className="statistician-dashboard"
+      data-testid="statistician-dashboard"
+    >
+      <div className="statistician-kpi-grid">
+        <DashboardKpiCard
+          icon={SquareStack}
+          label="Assigned studies"
+          value={projection.counts.assigned}
+          description="Total studies under your work"
+        />
+        <DashboardKpiCard
+          icon={Clock3}
+          label="Pending reviews"
+          value={projection.counts.pending}
+          description="Awaiting methodology review"
+        />
+        <DashboardKpiCard
+          icon={ClipboardCheck}
+          label="For sign-off"
+          value={projection.counts.for_sign_off}
+          description="Reviews ready for your sign-off"
+        />
+        <DashboardKpiCard
+          icon={CheckCircle2}
+          label="Completed"
+          value={projection.counts.completed}
+          description="Reviews completed and signed off"
+        />
+      </div>
+
+      <section
+        className="statistician-workload-card"
+        data-testid="statistician-workload-card"
+      >
+        <div className="statistician-workload-main">
+          <header className="statistician-section-heading">
+            <h2>Current workload</h2>
+            <div
+              className="statistician-workload-filters"
+              aria-label="Workload filters"
+            >
+              {(["all", "pending", "in_review"] as const).map((value) => (
+                <button
+                  type="button"
+                  key={value}
+                  aria-pressed={filter === value}
+                  onClick={() => setFilter(value)}
+                >
+                  {value === "all"
+                    ? "All"
+                    : value === "pending"
+                      ? "Pending"
+                      : "In review"}
+                </button>
+              ))}
+            </div>
+          </header>
+          {workload.length === 0 ? (
+            <DashboardEmptyState>
+              No methodology reviews are currently assigned to you.
+            </DashboardEmptyState>
+          ) : (
+            <>
+              <div
+                className="statistician-workload-table"
+                role="table"
+                aria-label="Current methodology workload"
+              >
+                <div className="statistician-workload-head" role="row">
+                  <span role="columnheader">Study</span>
+                  <span role="columnheader">Stage</span>
+                  <span role="columnheader">Due date</span>
+                  <span role="columnheader">Action</span>
+                </div>
+                {workload.map((item) => (
+                  <StatisticianWorkloadRow
+                    key={item.research_document_id}
+                    item={item}
+                    onOpen={() =>
+                      navigate(`/research/${item.research_document_id}`)
+                    }
+                  />
+                ))}
+              </div>
+              <p className="statistician-workload-summary">
+                Showing {workload.length} of {projection.workload.length}{" "}
+                assigned {projection.workload.length === 1 ? "study" : "studies"}
+              </p>
+            </>
+          )}
+        </div>
+
+        <aside
+          className="statistician-workload-status"
+          aria-labelledby="statistician-workload-status-title"
+        >
+          <h2 id="statistician-workload-status-title">Workload status</h2>
+          {statusTotal === 0 ? (
+            <DashboardEmptyState className="statistician-status-empty">
+              No workload status is available.
+            </DashboardEmptyState>
+          ) : (
+            <div className="statistician-status-visual">
+              <div
+                className="statistician-donut"
+                role="img"
+                aria-label={`Workload status: ${projection.workload_status.pending} pending, ${projection.workload_status.in_review} in review, ${projection.workload_status.completed} completed`}
+                style={
+                  {
+                    "--pending-end": `${pendingEnd}%`,
+                    "--review-end": `${inReviewEnd}%`,
+                  } as CSSProperties
+                }
+              >
+                <span>
+                  <strong>{statusTotal}</strong>
+                  <small>Total reviews</small>
+                </span>
+              </div>
+              <dl className="statistician-status-legend">
+                {(
+                  [
+                    ["Pending", projection.workload_status.pending],
+                    ["In review", projection.workload_status.in_review],
+                    ["Completed", projection.workload_status.completed],
+                  ] as const
+                ).map(([label, value]) => (
+                  <div key={label}>
+                    <dt>{label}</dt>
+                    <dd>{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
+        </aside>
+      </section>
+
+      <section
+        className="statistician-activity-card"
+        data-testid="statistician-activity-card"
+      >
+        <header className="statistician-activity-heading">
+          <h2>Activity</h2>
+          <div className="statistician-activity-tabs" aria-label="Activity view">
+            <button
+              type="button"
+              aria-pressed={activityView === "review"}
+              onClick={() => setActivityView("review")}
+            >
+              Review activity
+            </button>
+            <button
+              type="button"
+              aria-pressed={activityView === "recent"}
+              onClick={() => setActivityView("recent")}
+            >
+              Recent activity
+            </button>
+          </div>
+        </header>
+        <div className="statistician-activity-layout">
+          <div
+            className={`statistician-review-activity ${activityView === "review" ? "is-selected" : ""}`}
+          >
+            {!hasActivity ? (
+              <div className="statistician-activity-empty">
+                <LineChart aria-hidden="true" />
+                <p>No review activity in the last 6 months.</p>
+              </div>
+            ) : (
+              <>
+                <div className="statistician-activity-chart" aria-hidden="true">
+                  {projection.activity.months.map((month) => (
+                    <div key={month.key}>
+                      <span className="statistician-activity-bars">
+                        <i
+                          style={{
+                            height: `${(month.completed / activityMaximum) * 100}%`,
+                          }}
+                        />
+                        <b
+                          style={{
+                            height: `${(month.started / activityMaximum) * 100}%`,
+                          }}
+                        />
+                      </span>
+                      <small>{month.label}</small>
+                    </div>
+                  ))}
+                </div>
+                <div className="statistician-activity-legend">
+                  <span>
+                    <i /> Completed
+                  </span>
+                  <span>
+                    <b /> Reviews started
+                  </span>
+                </div>
+                <table className="sr-only">
+                  <caption>Review activity for the last six months</caption>
+                  <thead>
+                    <tr>
+                      <th>Month</th>
+                      <th>Completed</th>
+                      <th>Reviews started</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {projection.activity.months.map((month) => (
+                      <tr key={month.key}>
+                        <th>{month.label}</th>
+                        <td>{month.completed}</td>
+                        <td>{month.started}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            )}
+          </div>
+
+          <aside
+            className={`statistician-recent-activity ${activityView === "recent" ? "is-selected" : ""}`}
+            aria-labelledby="statistician-recent-activity-title"
+          >
+            <h3 id="statistician-recent-activity-title">Recent activity</h3>
+            {projection.recent_activity.length === 0 ? (
+              <DashboardEmptyState className="statistician-recent-empty">
+                No recent statistician activity.
+              </DashboardEmptyState>
+            ) : (
+              <ol className="statistician-recent-list">
+                {projection.recent_activity.map((activity) => (
+                  <li key={activity.id}>
+                    <span aria-hidden="true" />
+                    <div>
+                      <strong>{statisticianActivityLabel(activity.type)}</strong>
+                      <p title={activity.title}>{activity.title}</p>
+                    </div>
+                    <time dateTime={activity.occurred_at}>
+                      {formatDate(activity.occurred_at)}
+                    </time>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </aside>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function StatisticianWorkloadRow({
+  item,
+  onOpen,
+}: {
+  item: StatisticianDashboardWorkloadItem;
+  onOpen: () => void;
+}) {
+  const inReview = ["in_progress", "returned_for_clarification"].includes(
+    item.review_status,
+  );
+  return (
+    <div className="statistician-workload-row" role="row">
+      <span role="cell" className="statistician-study-title" title={item.title}>
+        {item.title}
+      </span>
+      <span role="cell">
+        <span
+          className={`statistician-status-badge ${inReview ? "is-review" : "is-pending"}`}
+        >
+          {inReview ? "In review" : "Pending"}
+        </span>
+      </span>
+      <span role="cell">
+        {item.due_at ? formatDate(item.due_at) : "No due date"}
+      </span>
+      <span role="cell">
+        <Button onClick={onOpen}>{inReview ? "Open" : "Review"}</Button>
+      </span>
+    </div>
+  );
+}
+
+function statisticianActivityLabel(
+  type: StatisticianDashboardProjection["recent_activity"][number]["type"],
+) {
+  return {
+    study_assigned: "Study assigned",
+    review_started: "Review started",
+    review_completed: "Review completed",
+    sign_off_requested: "Sign-off requested",
+    sign_off_completed: "Sign-off completed",
+  }[type];
+}
+
+function LibrarianDashboard({
+  projection,
+  navigate,
+}: {
+  projection: LibrarianDashboardProjection;
+  navigate: (path: string) => void;
+}) {
+  const [queueFilter, setQueueFilter] = useState<
+    "all" | "pending" | "ready"
+  >("all");
+  const queue = projection.queue.filter((item) => {
+    if (queueFilter === "pending") {
+      return ["pending", "validating"].includes(item.status);
+    }
+    if (queueFilter === "ready") return item.status === "ready";
+    return true;
+  });
+  const queueTotal =
+    projection.queue_status.pending +
+    projection.queue_status.validating +
+    projection.queue_status.ready;
+  const pendingEnd = queueTotal
+    ? (projection.queue_status.pending / queueTotal) * 100
+    : 0;
+  const validatingEnd = queueTotal
+    ? pendingEnd + (projection.queue_status.validating / queueTotal) * 100
+    : 0;
+
+  return (
+    <div className="librarian-dashboard" data-testid="librarian-dashboard">
+      <div className="librarian-kpi-grid">
+        <DashboardKpiCard
+          icon={SquareStack}
+          label="Archiving queue"
+          value={projection.counts.archiving_queue}
+          description="Studies awaiting review."
+        />
+        <DashboardKpiCard
+          icon={Tags}
+          label="Metadata validation"
+          value={projection.counts.metadata_validation}
+          description="Records requiring validation."
+        />
+        <DashboardKpiCard
+          icon={Database}
+          label="Repository records"
+          value={projection.counts.repository_records}
+          description="Total records in the repository."
+        />
+        <DashboardKpiCard
+          icon={CheckCircle2}
+          label="Archived this month"
+          value={projection.counts.archived_this_month}
+          description="Studies archived this month."
+        />
+      </div>
+
+      <section className="librarian-queue-card" data-testid="librarian-queue-card">
+        <div className="librarian-queue-main">
+          <header className="librarian-section-heading">
+            <h2>Archiving queue</h2>
+            <div className="librarian-queue-filters" aria-label="Queue filters">
+              {(["all", "pending", "ready"] as const).map((value) => (
+                <button
+                  type="button"
+                  key={value}
+                  aria-pressed={queueFilter === value}
+                  onClick={() => setQueueFilter(value)}
+                >
+                  {value === "all"
+                    ? "All"
+                    : value === "pending"
+                      ? "Pending"
+                      : "Ready"}
+                </button>
+              ))}
+            </div>
+          </header>
+          {queue.length === 0 ? (
+            <DashboardEmptyState>
+              No studies are currently awaiting librarian review.
+            </DashboardEmptyState>
+          ) : (
+            <div
+              className="librarian-queue-table"
+              role="table"
+              aria-label="Archiving queue"
+            >
+              <div className="librarian-queue-head" role="row">
+                <span role="columnheader">Study</span>
+                <span role="columnheader">Submitted by</span>
+                <span role="columnheader">Stage</span>
+                <span role="columnheader">Action</span>
+              </div>
+              {queue.map((item) => (
+                <div
+                  className="librarian-queue-row"
+                  role="row"
+                  key={item.research_document_id}
+                >
+                  <span role="cell" title={item.title}>
+                    {item.title}
+                  </span>
+                  <span role="cell">{item.submitted_by}</span>
+                  <span role="cell">
+                    <span className={`librarian-status-badge is-${item.status}`}>
+                      {item.status === "validating"
+                        ? "Validating"
+                        : item.status === "ready"
+                          ? "Ready"
+                          : "Pending"}
+                    </span>
+                  </span>
+                  <span role="cell">
+                    <Button
+                      onClick={() =>
+                        navigate(`/research/${item.research_document_id}`)
+                      }
+                    >
+                      {item.status === "ready" ? "Open" : "Review"}
+                    </Button>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <aside className="librarian-queue-summary">
+          <h2>Queue status</h2>
+          {queueTotal === 0 ? (
+            <DashboardEmptyState>No active archiving requests.</DashboardEmptyState>
+          ) : (
+            <div className="librarian-status-visual">
+              <div
+                className="librarian-donut"
+                role="img"
+                aria-label={`Queue status: ${projection.queue_status.pending} pending, ${projection.queue_status.validating} validating, ${projection.queue_status.ready} ready`}
+                style={
+                  {
+                    "--pending-end": `${pendingEnd}%`,
+                    "--validating-end": `${validatingEnd}%`,
+                  } as CSSProperties
+                }
+              >
+                <span>
+                  <strong>{queueTotal}</strong>
+                  <small>Total requests</small>
+                </span>
+              </div>
+              <dl className="librarian-status-legend">
+                {(
+                  [
+                    ["Pending", projection.queue_status.pending],
+                    ["Validating", projection.queue_status.validating],
+                    ["Ready", projection.queue_status.ready],
+                  ] as const
+                ).map(([label, value]) => (
+                  <div key={label}>
+                    <dt>{label}</dt>
+                    <dd>{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
+        </aside>
+      </section>
+
+      <section
+        className="librarian-recent-activity librarian-recent-activity-card"
+        data-testid="librarian-recent-activity-card"
+      >
+          <h2>Recent activity</h2>
+          {projection.recent_activity.length === 0 ? (
+            <DashboardEmptyState>No recent librarian activity.</DashboardEmptyState>
+          ) : (
+            <ol className="librarian-recent-list">
+              {projection.recent_activity.map((item) => (
+                <li key={item.id}>
+                  <span aria-hidden="true" />
+                  <div>
+                    <strong>{librarianActivityLabel(item.type)}</strong>
+                    <p title={item.title}>{item.title}</p>
+                  </div>
+                  <time dateTime={item.occurred_at}>{formatDate(item.occurred_at)}</time>
+                </li>
+              ))}
+            </ol>
+          )}
+      </section>
+    </div>
+  );
+}
+
+function librarianActivityLabel(
+  type: LibrarianDashboardProjection["recent_activity"][number]["type"],
+) {
+  return {
+    record_archived: "Record archived",
+    metadata_updated: "Metadata updated",
+    record_returned: "Record returned for correction",
+    archiving_review_completed: "Archiving review completed",
+  }[type];
+}
+
 function PanelDashboardOperations({
   sections,
   config,
@@ -895,9 +1477,7 @@ function PanelDashboardOperations({
         </header>
         <div>
           <span>{assignedTitle}</span>
-          <strong
-            aria-label={`${assignedTitle}: ${assigned?.total ?? 0} total`}
-          >
+          <strong aria-label={`${assignedTitle}: ${assigned?.total ?? 0} total`}>
             {assigned?.total ?? 0}
           </strong>
         </div>

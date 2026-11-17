@@ -49,7 +49,6 @@ const listData = (data: unknown[]) => new Response(JSON.stringify({ data }));
 const draftResource = (overrides: Record<string, unknown> = {}) => ({
   id: 7,
   submitted_by: "member@example.test",
-  category_id: 2,
   title: "My study title",
   normalized_title: null,
   abstract: "A study about learning.",
@@ -78,13 +77,6 @@ const draftResource = (overrides: Record<string, unknown> = {}) => ({
       is_corresponding_author: true,
     },
   ],
-  category: {
-    id: 2,
-    name: "Education",
-    slug: "education",
-    description: null,
-    is_active: true,
-  },
   ...overrides,
 });
 
@@ -856,7 +848,6 @@ describe("role workspace pages", () => {
               title: "Accepted editorial review",
               researchers: ["Student Two"],
               program: null,
-              category: null,
               academic_year: 2026,
               research_stage: "ongoing",
               submission_status: "under_review",
@@ -950,6 +941,7 @@ describe("role workspace pages", () => {
     {
       role: "panel",
       destinations: [
+        ["Repository", "Repository"],
         ["Evaluation Form", "Evaluation form"],
         ["Panel History", "Panel history"],
       ],
@@ -957,6 +949,7 @@ describe("role workspace pages", () => {
     {
       role: "statistician",
       destinations: [
+        ["Repository", "Repository"],
         ["Methodology Checklist", "Methodology checklist"],
         ["Sign-offs Issued", "Sign-offs issued"],
       ],
@@ -972,7 +965,7 @@ describe("role workspace pages", () => {
     {
       role: "librarian",
       destinations: [
-        ["Repository Catalog", "Repository catalog"],
+        ["Repository", "Repository"],
         ["Metadata Standards", "Metadata standards"],
         ["Retention & Compliance", "Retention & compliance"],
       ],
@@ -1016,6 +1009,128 @@ describe("role workspace pages", () => {
       }
     },
   );
+
+  it.each(["panel", "statistician", "research_editor"] as const)(
+    "renders an archived-only repository for %s",
+    async (role) => {
+      const requests: string[] = [];
+      stubFetch([
+        [
+          /\/api\/archived-repository(\?|$)/,
+          (input) => {
+            requests.push(String(input));
+            return new Response(
+              JSON.stringify({
+                data: [
+                  {
+                    id: 17,
+                    title: "Archived coastal study",
+                    authors: [
+                      { id: 1, author_name: "Archive Author", author_order: 1 },
+                    ],
+                    publication_year: 2026,
+                    institution_name: "Tangub City Global College",
+                    institute: "Institute of Computer Studies",
+                    degree_program: "BS Computer Science",
+                    abstract: "Archived abstract",
+                    keywords: ["archive"],
+                    research_stage: "completed",
+                  },
+                ],
+                links: { first: null, last: null, prev: null, next: null },
+                meta: {
+                  current_page: 1,
+                  from: 1,
+                  last_page: 1,
+                  path: "/api/archived-repository",
+                  per_page: 100,
+                  to: 1,
+                  total: 1,
+                },
+                filters: { years: [2026, 2025, 2021] },
+              }),
+            );
+          },
+        ],
+      ]);
+
+      render(
+        <RoleSidebarPage
+          role={role}
+          selectedNav="Repository"
+          navigate={vi.fn()}
+        />,
+      );
+
+      expect(
+        await screen.findByText("Archived coastal study"),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Repository references")).toBeInTheDocument();
+      expect(screen.queryByText("Visibility")).not.toBeInTheDocument();
+      expect(screen.queryByText("Approved")).not.toBeInTheDocument();
+      expect(requests.every((url) => !url.includes("/librarian/"))).toBe(true);
+    },
+  );
+
+  it("renders a searchable read-only librarian repository", async () => {
+    const requests: string[] = [];
+    stubFetch([
+      [
+        /\/api\/librarian\/catalog(\?|$)/,
+        (input) => {
+          requests.push(String(input));
+          return new Response(
+            JSON.stringify({
+              data: [
+                {
+                  id: 17,
+                  title: "Coastal resilience study",
+                  submission_status: "archived",
+                  archive_status: "archived",
+                  visibility: "public",
+                  publication_year: 2026,
+                  updated_at: "2026-11-16T08:00:00Z",
+                },
+              ],
+              meta: { current_page: 1, last_page: 1, total: 1, per_page: 25 },
+            }),
+          );
+        },
+      ],
+    ]);
+
+    render(
+      <RoleSidebarPage
+        role="librarian"
+        selectedNav="Repository"
+        navigate={vi.fn()}
+      />,
+    );
+
+    expect(
+      await screen.findByText("Coastal resilience study"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Repository" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /edit|delete|restore|add study/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("combobox", { name: /category/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("columnheader", { name: /category/i }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Search"), {
+      target: { value: "coastal" },
+    });
+    await waitFor(() =>
+      expect(requests.some((url) => url.includes("search=coastal"))).toBe(true),
+    );
+    expect(requests.every((url) => !url.includes("category="))).toBe(true);
+  });
 
   it("clears visible user logs without deleting audit history", async () => {
     let cleared = false;
@@ -1074,9 +1189,16 @@ describe("role workspace pages", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Clear Logs" }));
 
-    expect(screen.getByText("Are you sure to clear logs?")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Are you sure you want to clear all logs? This action cannot be undone.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Clear Logs" })).toHaveClass(
+      "clear-logs-confirmation",
+    );
 
-    fireEvent.click(screen.getByRole("button", { name: "Clear logs" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Clear Logs" })[1]);
 
     await waitFor(() => {
       expect(screen.queryByText("VISIBLE EVENT")).not.toBeInTheDocument();
@@ -1090,6 +1212,43 @@ describe("role workspace pages", () => {
       "/api/user-logs/clear",
       expect.objectContaining({ method: "POST" }),
     );
+  });
+
+  it("renders visible icon-only user log actions", async () => {
+    stubFetch([
+      [
+        /^\/api\/user-logs$/,
+        () =>
+          new Response(
+            JSON.stringify(
+              pageResponse([
+                {
+                  id: 1,
+                  action: "LOG_VIEWED",
+                  description: "Viewed logs.",
+                  created_at: "2026-09-19T08:00:00+08:00",
+                },
+              ]),
+            ),
+          ),
+      ],
+    ]);
+
+    render(
+      <RoleSidebarPage
+        role="librarian"
+        selectedNav="User Logs"
+        navigate={vi.fn()}
+      />,
+    );
+
+    await screen.findByText("LOG VIEWED");
+    const clear = screen.getByRole("button", { name: "Clear Logs" });
+    const refresh = screen.getByRole("button", { name: "Refresh" });
+    expect(clear).toHaveClass("icon-button");
+    expect(refresh).toHaveClass("icon-button");
+    expect(clear.querySelector("svg")).toBeInTheDocument();
+    expect(refresh.querySelector("svg")).toBeInTheDocument();
   });
 
   it("uses the manuscript queue and filters its returned submissions by status", async () => {
@@ -1180,7 +1339,6 @@ describe("role workspace pages", () => {
         /\/api\/research\?/,
         () => new Response(JSON.stringify(pageResponse([draft]))),
       ],
-      [/\/api\/categories$/, () => listData([draft.category])],
       [
         /^\/api\/research\/7$/,
         (_input, init) =>
@@ -1277,10 +1435,7 @@ describe("role workspace pages", () => {
     expect(
       fetchMock.mock.calls
         .map(([input]) => String(input))
-        .filter(
-          (path) =>
-            path !== "/api/categories" && !path.includes("/api/research?"),
-        ),
+        .filter((path) => !path.includes("/api/research?")),
     ).toEqual([
       "/api/research/7",
       "/api/research/7/files",
@@ -1293,7 +1448,6 @@ describe("role workspace pages", () => {
     const updated = draftResource({ title: "Updated study title" });
     let listRequests = 0;
     const fetchMock = stubFetch([
-      [/\/api\/categories$/, () => listData([draft.category])],
       [
         /\/api\/research\?/,
         () => {
@@ -1358,7 +1512,6 @@ describe("role workspace pages", () => {
         /\/api\/research\?/,
         () => new Response(JSON.stringify(pageResponse([draft]))),
       ],
-      [/\/api\/categories$/, () => listData([draft.category])],
     ]);
     render(
       <RoleSidebarPage
@@ -1397,7 +1550,6 @@ describe("role workspace pages", () => {
     const draft = {
       id: 7,
       submitted_by: "member@example.test",
-      category_id: 2,
       title: "My study title",
       normalized_title: null,
       abstract: null,
@@ -1417,7 +1569,6 @@ describe("role workspace pages", () => {
       approved_at: null,
       archived_at: null,
       authors: [],
-      category: null,
     };
     const submitted = {
       ...draft,
@@ -1482,7 +1633,6 @@ describe("role workspace pages", () => {
         /\/api\/research\?/,
         () => new Response(JSON.stringify(pageResponse([revision]))),
       ],
-      [/\/api\/categories$/, () => listData([revision.category])],
     ]);
     render(
       <RoleSidebarPage
@@ -1520,7 +1670,6 @@ describe("role workspace pages", () => {
         /\/api\/research\?/,
         () => new Response(JSON.stringify(pageResponse([draft]))),
       ],
-      [/\/api\/categories$/, () => listData([draft.category])],
     ]);
     render(
       <RoleSidebarPage
@@ -1733,7 +1882,6 @@ describe("role workspace pages", () => {
               institution_location: null,
               institute: null,
               degree_program: null,
-              category: { name: "Education" },
               abstract: null,
               keywords: [],
               research_stage: "completed",
@@ -2835,9 +2983,8 @@ describe("role workspace pages", () => {
     fireEvent.change(screen.getByLabelText("Search"), {
       target: { value: "" },
     });
-    fireEvent.change(screen.getByLabelText("Role"), {
-      target: { value: "panel" },
-    });
+    fireEvent.click(screen.getByLabelText("Role"));
+    fireEvent.click(screen.getByRole("option", { name: "Panel" }));
     await waitFor(() =>
       expect(
         fetchMock.mock.calls.some(([input]) =>
@@ -2846,12 +2993,10 @@ describe("role workspace pages", () => {
       ).toBe(true),
     );
 
-    fireEvent.change(screen.getByLabelText("Role"), {
-      target: { value: "" },
-    });
-    fireEvent.change(screen.getByLabelText("Access status"), {
-      target: { value: "active" },
-    });
+    fireEvent.click(screen.getByLabelText("Role"));
+    fireEvent.click(screen.getByRole("option", { name: "All roles" }));
+    fireEvent.click(screen.getByLabelText("Access status"));
+    fireEvent.click(screen.getByRole("option", { name: "Active" }));
     await waitFor(() =>
       expect(
         fetchMock.mock.calls.some(([input]) =>
@@ -2859,5 +3004,280 @@ describe("role workspace pages", () => {
         ),
       ).toBe(true),
     );
+  });
+
+  it("uses the matched repository author in the files modal", async () => {
+    const requests: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        requests.push(url);
+        if (url === "/api/librarian/catalog/42/files") {
+          return new Response(
+            JSON.stringify({
+              data: [
+                {
+                  id: 7,
+                  research_document_id: 42,
+                  document_type: "final_manuscript",
+                  version_number: 1,
+                  original_filename: "study.pdf",
+                  file_extension: "pdf",
+                  mime_type: "application/pdf",
+                  file_size: 100,
+                  is_current: true,
+                  uploaded_at: null,
+                },
+              ],
+            }),
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            data: {
+              data: [
+                {
+                  id: 42,
+                  title: "Repository study",
+                  submission_status: "approved",
+                  archive_status: "not_archived",
+                  visibility: "private",
+                  publication_year: 2026,
+                  updated_at: null,
+                  authors: [
+                    { id: 1, author_name: "Ada Rivera" },
+                    { id: 2, author_name: "Ben Santos" },
+                    { id: 3, author_name: "Roger Ondac Lambojon" },
+                    { id: 4, author_name: "ada rivera" },
+                  ],
+                },
+              ],
+              current_page: 1,
+              from: 1,
+              last_page: 1,
+              links: [],
+              path: "/api/librarian/catalog",
+              per_page: 25,
+              to: 1,
+              total: 1,
+              first_page_url: null,
+              last_page_url: null,
+              prev_page_url: null,
+              next_page_url: null,
+            },
+            filters: { years: [2026] },
+          }),
+        );
+      }),
+    );
+
+    render(
+      <RoleSidebarPage
+        role="librarian"
+        selectedNav="Repository"
+        navigate={vi.fn()}
+      />,
+    );
+
+    await screen.findByText("Repository study");
+    expect(screen.queryByRole("columnheader", { name: /Archive/ })).toBeNull();
+    expect(
+      screen.getByPlaceholderText("Search by title or author"),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Search"), {
+      target: { value: "  ondac   lambojon  " },
+    });
+    await waitFor(() =>
+      expect(
+        requests.some((url) => url.includes("search=++ondac+++lambojon++")),
+      ).toBe(true),
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "View files for Repository study" }),
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "Files for Repository study",
+    });
+    expect(within(dialog).getByText("study.pdf")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText("Roger Ondac Lambojon et al."),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByText("Repository files")).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole("link", { name: "View study.pdf" }),
+    ).toHaveAttribute("href", "/api/librarian/catalog/42/files/7/preview");
+  });
+
+  it.each([
+    {
+      name: "first author by default",
+      search: "",
+      authors: ["Alma Cancio Lada", "Roger Ondac Lambojon"],
+      expected: "Alma Cancio Lada et al.",
+    },
+    {
+      name: "first author for a title match",
+      search: "Repository study",
+      authors: ["Alma Cancio Lada", "Roger Ondac Lambojon"],
+      expected: "Alma Cancio Lada et al.",
+    },
+    {
+      name: "single author without et al",
+      search: "Garbo",
+      authors: ["Analia Pepito Garbo"],
+      expected: "Analia Pepito Garbo",
+    },
+    {
+      name: "first matching author in stored order",
+      search: "Lambojon",
+      authors: [
+        "Creselie Ramirez Lambojon",
+        "Roger Ondac Lambojon",
+        "Alma Cancio Lada",
+      ],
+      expected: "Creselie Ramirez Lambojon et al.",
+    },
+  ])("displays the $name", async ({ search, authors, expected }) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        if (String(input) === "/api/librarian/catalog/42/files") {
+          return new Response(JSON.stringify({ data: [] }));
+        }
+        return new Response(
+          JSON.stringify({
+            data: {
+              data: [
+                {
+                  id: 42,
+                  title: "Repository study",
+                  submission_status: "approved",
+                  archive_status: "not_archived",
+                  visibility: "private",
+                  publication_year: 2026,
+                  updated_at: null,
+                  authors: authors.map((author_name, index) => ({
+                    id: index + 1,
+                    author_name,
+                  })),
+                },
+              ],
+              current_page: 1,
+              from: 1,
+              last_page: 1,
+              links: [],
+              path: "/api/librarian/catalog",
+              per_page: 25,
+              to: 1,
+              total: 1,
+              first_page_url: null,
+              last_page_url: null,
+              prev_page_url: null,
+              next_page_url: null,
+            },
+            filters: { years: [2026] },
+          }),
+        );
+      }),
+    );
+    render(
+      <RoleSidebarPage
+        role="librarian"
+        selectedNav="Repository"
+        navigate={vi.fn()}
+      />,
+    );
+    await screen.findByText("Repository study");
+    if (search) {
+      fireEvent.change(screen.getByLabelText("Search"), {
+        target: { value: search },
+      });
+      await waitFor(() =>
+        expect(screen.getByLabelText("Search")).toHaveValue(search),
+      );
+    }
+    fireEvent.click(
+      screen.getByRole("button", { name: "View files for Repository study" }),
+    );
+    expect(
+      await screen.findByText(expected, {
+        selector: ".librarian-files-authors p",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("returns to the first author after clearing repository search", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        if (String(input) === "/api/librarian/catalog/42/files") {
+          return new Response(JSON.stringify({ data: [] }));
+        }
+        return new Response(
+          JSON.stringify({
+            data: {
+              data: [
+                {
+                  id: 42,
+                  title: "Repository study",
+                  submission_status: "approved",
+                  archive_status: "not_archived",
+                  visibility: "private",
+                  publication_year: 2026,
+                  updated_at: null,
+                  authors: [
+                    { id: 1, author_name: "Alma Cancio Lada" },
+                    { id: 2, author_name: "Roger Ondac Lambojon" },
+                  ],
+                },
+              ],
+              current_page: 1,
+              from: 1,
+              last_page: 1,
+              links: [],
+              path: "/api/librarian/catalog",
+              per_page: 25,
+              to: 1,
+              total: 1,
+              first_page_url: null,
+              last_page_url: null,
+              prev_page_url: null,
+              next_page_url: null,
+            },
+            filters: { years: [2026] },
+          }),
+        );
+      }),
+    );
+    render(
+      <RoleSidebarPage
+        role="librarian"
+        selectedNav="Repository"
+        navigate={vi.fn()}
+      />,
+    );
+    await screen.findByText("Repository study");
+    fireEvent.change(screen.getByLabelText("Search"), {
+      target: { value: "Roger" },
+    });
+    await waitFor(() =>
+      expect(screen.getByLabelText("Search")).toHaveValue("Roger"),
+    );
+    fireEvent.change(screen.getByLabelText("Search"), {
+      target: { value: "" },
+    });
+    await waitFor(() =>
+      expect(screen.getByLabelText("Search")).toHaveValue(""),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "View files for Repository study" }),
+    );
+    expect(
+      await screen.findByText("Alma Cancio Lada et al.", {
+        selector: ".librarian-files-authors p",
+      }),
+    ).toBeInTheDocument();
   });
 });

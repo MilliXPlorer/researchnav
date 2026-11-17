@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Models\Category;
 use App\Models\ResearchAuthor;
 use App\Models\ResearchDocument;
 use App\Models\User;
@@ -17,11 +16,8 @@ class ResearchSubmissionTest extends TestCase
     public function test_owner_can_update_editable_metadata_and_authors_on_their_draft(): void
     {
         $owner = User::factory()->create();
-        $originalCategory = Category::query()->create(['name' => 'Education', 'slug' => 'education']);
-        $updatedCategory = Category::query()->create(['name' => 'Information Systems', 'slug' => 'information-systems']);
         $draft = ResearchDocument::factory()->create([
             'submitted_by' => $owner->id,
-            'category_id' => $originalCategory->id,
             'title' => 'Original title',
             'abstract' => 'Original abstract.',
             'keywords' => 'original',
@@ -35,7 +31,6 @@ class ResearchSubmissionTest extends TestCase
         ]);
 
         $this->as($owner)->patchJson('/api/research/'.$draft->id, [
-            'category_id' => $updatedCategory->id,
             'title' => 'Updated owner study',
             'abstract' => 'The researcher updated this abstract.',
             'keywords' => 'repository, ownership, editing',
@@ -62,7 +57,6 @@ class ResearchSubmissionTest extends TestCase
             ->assertJsonPath('data.research_stage', 'ongoing')
             ->assertJsonPath('data.sdgs.0.id', 4)
             ->assertJsonPath('data.sdgs.1.id', 9)
-            ->assertJsonPath('data.category.id', $updatedCategory->id)
             ->assertJsonPath('data.authors.0.author_name', 'Research Owner')
             ->assertJsonPath('data.authors.1.author_name', 'Research Collaborator');
 
@@ -73,7 +67,6 @@ class ResearchSubmissionTest extends TestCase
         $this->assertSame('repository, ownership, editing', $draft->keywords);
         $this->assertSame(2026, $draft->publication_year);
         $this->assertSame('ongoing', $draft->research_stage);
-        $this->assertSame($updatedCategory->id, $draft->category_id);
         $this->assertSame('draft', $draft->submission_status);
         $this->assertSame('private', $draft->visibility);
         $this->assertSame([4, 9], $draft->sdgs()->pluck('sdgs.id')->all());
@@ -179,12 +172,11 @@ class ResearchSubmissionTest extends TestCase
         ]);
 
         $this->as($intruder)->patchJson('/api/research/'.$research->id, [
-            'category_id' => 999999,
             'abstract' => 'Intruder abstract.',
             'authors' => [['user_id' => 'not-a-uuid', 'author_name' => 'Intruder']],
         ], $this->origin())
             ->assertForbidden()
-            ->assertJsonMissingValidationErrors(['category_id', 'authors.0.user_id']);
+            ->assertJsonMissingValidationErrors(['authors.0.user_id']);
 
         $this->assertSame('Owner abstract.', $research->refresh()->abstract);
     }
@@ -194,7 +186,6 @@ class ResearchSubmissionTest extends TestCase
         $owner = User::factory()->create();
         $draft = ResearchDocument::factory()->create([
             'submitted_by' => $owner->id,
-            'category_id' => null,
             'title' => '   ',
         ]);
         $this->assignResearcherToDocument($owner, $draft);
@@ -228,7 +219,6 @@ class ResearchSubmissionTest extends TestCase
         $owner = User::factory()->create();
         $draft = ResearchDocument::factory()->create([
             'submitted_by' => $owner->id,
-            'category_id' => null,
             'institute' => 'Institute of Teacher Education',
             'degree_program' => 'Bachelor of Secondary Education major in English',
         ]);
@@ -249,11 +239,11 @@ class ResearchSubmissionTest extends TestCase
     {
         $owner = User::factory()->create();
         $intruder = User::factory()->create();
-        $draft = ResearchDocument::factory()->create(['submitted_by' => $owner->id, 'category_id' => null]);
+        $draft = ResearchDocument::factory()->create(['submitted_by' => $owner->id]);
 
         $this->as($intruder)->postJson('/api/research/'.$draft->id.'/submit', [], $this->origin())
             ->assertForbidden()
-            ->assertJsonMissingValidationErrors(['category_id', 'authors']);
+            ->assertJsonMissingValidationErrors(['authors']);
     }
 
     public function test_linked_co_researcher_can_view_and_edit_an_editable_research_record(): void

@@ -228,7 +228,7 @@ export function SimilarityBadge({
   );
 }
 
-/** Explains the service-provided categories without duplicating policy thresholds. */
+/** Explains the service-provided score bands without duplicating policy thresholds. */
 export function SimilarityLegend() {
   return (
     <ul className="similarity-legend" aria-label="Similarity score bands">
@@ -419,6 +419,7 @@ export function SearchBox({
   placeholder = "Search titles, authors, or keywords",
   label = "Search the repository",
   large = false,
+  submitIcon = "arrow",
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -426,17 +427,18 @@ export function SearchBox({
   placeholder?: string;
   label?: string;
   large?: boolean;
+  submitIcon?: "arrow" | "search";
 }) {
   return (
     <form
-      className={`search-box ${large ? "search-box-large" : ""}`}
+      className={`search-box ${large ? "search-box-large" : ""}${submitIcon === "search" ? " search-box-submit-icon" : ""}`}
       role="search"
       onSubmit={(event) => {
         event.preventDefault();
         onSubmit();
       }}
     >
-      <Search aria-hidden="true" />
+      {submitIcon !== "search" && <Search aria-hidden="true" />}
       <label
         className="sr-only"
         htmlFor={large ? "hero-search" : "catalog-search"}
@@ -460,7 +462,16 @@ export function SearchBox({
         </button>
       )}
       <Button type="submit">
-        Search <ArrowRight aria-hidden="true" />
+        {submitIcon === "search" ? (
+          <>
+            <span className="sr-only">Search</span>
+            <Search aria-hidden="true" />
+          </>
+        ) : (
+          <>
+            Search <ArrowRight aria-hidden="true" />
+          </>
+        )}
       </Button>
     </form>
   );

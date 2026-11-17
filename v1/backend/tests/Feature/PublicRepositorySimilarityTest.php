@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Models\Category;
 use App\Models\DocumentFile;
 use App\Models\ManuscriptSearchDocument;
 use App\Models\ResearchAuthor;
@@ -468,11 +467,9 @@ class PublicRepositorySimilarityTest extends TestCase
     /** @param array<string, mixed> $attributes */
     private function document(array $attributes = []): ResearchDocument
     {
-        $category = Category::query()->first() ?? Category::query()->create(['name' => 'Similarity', 'slug' => 'similarity']);
         $user = User::factory()->create();
 
         return ResearchDocument::factory()->create(array_merge([
-            'category_id' => $category->id,
             'submitted_by' => $user->id,
         ], $attributes));
     }

@@ -32,7 +32,6 @@ class PublicRepositorySimilarityResource extends JsonResource
             'has_downloadable_manuscript' => app(PublicManuscriptAvailability::class)
                 ->hasAvailableFile($this->resource['research']),
             'authors' => PublicResearchAuthorResource::collection($this->resource['research']->authors),
-            'category' => new CategoryResource($this->resource['research']->category),
             'sdgs' => SdgResource::collection($this->resource['research']->sdgs),
             'title_similarity_score' => $this->resource['title_similarity_score'],
             'title_similarity_percentage' => $this->resource['title_similarity_percentage'],

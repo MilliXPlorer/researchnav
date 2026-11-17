@@ -303,7 +303,6 @@ class ConsolidatedReadAdapter
                     'abstract_complete' => $row->abstract_complete,
                     'authors_complete' => $row->authors_complete,
                     'keywords_complete' => $row->keywords_complete,
-                    'category_complete' => $row->category_complete,
                     'notes' => $row->notes,
                 ];
             }

@@ -21,7 +21,7 @@ class CanonicalResearchSchemaTest extends TestCase
     public function test_canonical_tables_and_user_adoption_columns_are_migrated(): void
     {
         foreach ([
-            'user_roles', 'users', 'categories', 'research_documents', 'research_authors', 'document_files',
+            'user_roles', 'users', 'research_documents', 'research_authors', 'document_files',
             'similarity_results', 'feedback_comments', 'revisions', 'monitoring_logs', 'notifications',
             'title_validations', 'audit_logs', 'research_review_assignments', 'class_sections',
             'class_section_members', 'defense_schedules', 'evaluations', 'methodology_reviews',
@@ -35,6 +35,7 @@ class CanonicalResearchSchemaTest extends TestCase
             'account_status', 'email_verified_at', 'remember_token', 'deleted_at', 'role', 'access_status',
         ]));
         $this->assertFalse(Schema::hasTable('app_users'));
+        $this->assertFalse(Schema::hasTable('categories'));
         $this->assertSame(9, UserRole::query()->count());
 
         $this->assertTrue(Schema::hasColumns('similarity_results', [
@@ -67,6 +68,7 @@ class CanonicalResearchSchemaTest extends TestCase
             'user_id', 'action', 'entity_type', 'entity_id', 'description', 'ip_address', 'user_agent', 'created_at',
         ]));
         $this->assertTrue(Schema::hasColumn('research_documents', 'section_id'));
+        $this->assertFalse(Schema::hasColumn('research_documents', 'category_id'));
         $this->assertTrue(Schema::hasColumns('class_sections', ['instructor_id', 'name', 'section_code', 'academic_year', 'is_active']));
         $this->assertTrue(Schema::hasColumns('class_section_members', ['class_section_id', 'research_document_id', 'user_id']));
         $this->assertTrue(Schema::hasColumns('defense_schedules', ['research_document_id', 'created_by', 'scheduled_at', 'status']));
@@ -74,6 +76,8 @@ class CanonicalResearchSchemaTest extends TestCase
         $this->assertTrue(Schema::hasColumns('methodology_reviews', ['research_document_id', 'statistician_id', 'design_fit', 'sample_size', 'review_status']));
         $this->assertTrue(Schema::hasColumns('compliance_reviews', ['research_document_id', 'reviewed_by', 'format_compliant', 'review_status', 'decided_at']));
         $this->assertTrue(Schema::hasColumns('metadata_reviews', ['research_document_id', 'reviewed_by', 'title_complete', 'review_status']));
+        $this->assertFalse(Schema::hasColumn('metadata_reviews', 'category_complete'));
+        $this->assertFalse(Schema::hasColumn('research_review_records', 'category_complete'));
         $this->assertTrue(Schema::hasColumns('retention_logs', ['research_document_id', 'performed_by', 'action', 'activity_date']));
         $this->assertTrue(Schema::hasColumns('privacy_logs', ['user_id', 'performed_by', 'action', 'details', 'activity_date']));
         $this->assertFalse(Schema::hasColumn('retention_logs', 'updated_at'));

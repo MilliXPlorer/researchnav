@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Models\Category;
 use App\Models\ClassSection;
 use App\Models\DocumentFile;
 use App\Models\FeedbackComment;
@@ -162,8 +161,7 @@ class ResearcherWorkflowGapsTest extends TestCase
 
     private function research(User $owner, array $attributes = []): ResearchDocument
     {
-        $category = Category::query()->create(['name' => 'Education '.fake()->unique()->word(), 'slug' => 'education-'.fake()->unique()->numberBetween(1, 999999)]);
-        $research = ResearchDocument::factory()->create(array_merge(['submitted_by' => $owner->id, 'category_id' => $category->id], $attributes));
+        $research = ResearchDocument::factory()->create(array_merge(['submitted_by' => $owner->id], $attributes));
         $this->assignResearcherToDocument($owner, $research);
         ResearchAuthor::factory()->create(['research_document_id' => $research->id, 'user_id' => $owner->id]);
 

@@ -85,16 +85,22 @@ export default function ConsentNotice({
         </label>
       )}
 
-      <div className="consent-actions">
-        <Button variant="secondary" onClick={onDecline}>
-          {readOnly ? "Close" : "Cancel"}
-        </Button>
-        {!readOnly && (
+      {readOnly ? (
+        <div className="consent-actions">
+          <Button variant="secondary" onClick={onDecline}>
+            Close
+          </Button>
+        </div>
+      ) : (
+        <div className="consent-actions">
+          <Button variant="secondary" onClick={onDecline}>
+            Cancel
+          </Button>
           <Button disabled={!agreed} onClick={onAccept}>
             Agree and continue
           </Button>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Models\Category;
 use App\Models\DocumentFile;
 use App\Models\FeedbackComment;
 use App\Models\PdfAnnotation;
@@ -176,8 +175,7 @@ class PdfAnnotationApiTest extends TestCase
     private function researchWithPdf(): array
     {
         $owner = User::factory()->create(['role' => 'researcher']);
-        $category = Category::query()->create(['name' => fake()->unique()->words(2, true), 'slug' => fake()->unique()->slug()]);
-        $research = ResearchDocument::factory()->create(['submitted_by' => $owner->id, 'category_id' => $category->id]);
+        $research = ResearchDocument::factory()->create(['submitted_by' => $owner->id]);
         $this->assignResearcherToDocument($owner, $research);
         $file = $this->file($research, 'application/pdf', 'pdf', "%PDF-1.4\n");
 

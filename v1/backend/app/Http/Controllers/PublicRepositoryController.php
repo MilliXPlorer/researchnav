@@ -30,8 +30,6 @@ class PublicRepositoryController extends Controller
             'q' => ['nullable', 'string', 'max:200'],
             'author' => ['nullable', 'string', 'max:200'],
             'keywords' => ['nullable', 'string', 'max:200'],
-            'category_id' => ['nullable', 'integer', 'exists:categories,id'],
-            'category' => ['nullable', 'string', 'max:180'],
             'institute' => ['nullable', 'string', 'max:255'],
             'sdg_ids' => ['nullable', 'array', 'max:17'],
             'sdg_ids.*' => ['integer', 'distinct', 'exists:sdgs,id'],
@@ -49,6 +47,14 @@ class PublicRepositoryController extends Controller
         }
 
         return PublicResearchDocumentResource::collection($service->search($filters));
+    }
+
+    public function archivedIndex(Request $request, PublicRepositoryService $service)
+    {
+        $response = $this->index($request, $service)->response()->getData(true);
+
+        return response()->json([...$response, 'filters' => ['years' => $service->years()]])
+            ->header('Cache-Control', 'private, no-store');
     }
 
     public function show(ResearchDocument $researchDocument, PublicRepositoryService $service)

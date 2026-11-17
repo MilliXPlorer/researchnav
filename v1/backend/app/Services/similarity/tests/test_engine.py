@@ -5,6 +5,8 @@ import sys
 from io import BytesIO, StringIO
 from pathlib import Path
 
+import pytest
+
 from similarity import cli as cli_module
 from similarity.engine import (
     InvalidWorkerInput,
@@ -562,7 +564,7 @@ def test_cli_preserves_uploaded_scope_and_capacity_error_codes() -> None:
         check=False,
     )
     assert scope.returncode == 2
-    assert json.loads(scope.stdout) == {"error": {"code": "INVALID_UPLOAD_SCOPE"}}
+    assert json.loads(scope.stdout) == {"error": {"code": "CHAPTER_ONE_NOT_FOUND"}}
 
     capacity = subprocess.run(
         [sys.executable, str(cli)],
@@ -901,6 +903,112 @@ def test_uploaded_content_uses_flattened_upload_scope_fallback() -> None:
     )[0]
 
     assert float(result["content_similarity_score"]) > 0
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Chapter 1\nINTRODUCTION\nBody",
+        "CHAPTER 1\nINTRODUCTION\nBody",
+        "Chapter\u00a01\nINTRODUCTION\nBody",
+        "Chapter     1\nINTRODUCTION\nBody",
+        "Chapter\n1\nINTRODUCTION\nBody",
+        "Chapter\f1\nINTRODUCTION\nBody",
+        "Chapter 1 INTRODUCTION Body",
+        "Chapter One\nINTRODUCTION\nBody",
+        "Kabanata 1\nPANIMULA\nBody",
+        "Kabanata Uno\nPANIMULA\nBody",
+        "Tsapter I\nPANIMULA\nBody",
+        "Chpter 1\nINTRODUCTION\nBody",
+    ],
+)
+def test_uploaded_content_accepts_normalized_chapter_one_variants(text: str) -> None:
+    assert engine_module.uploaded_content_scope_diagnostic(text)["chapters"][0] == 1
+
+
+def test_uploaded_content_prefers_real_body_after_toc_chapter_one() -> None:
+    text = (
+        "TABLE OF CONTENTS\nChapter 1 Introduction 1\nChapter 2 Methods 10\n"
+        "Chapter 1\nINTRODUCTION\nReal manuscript body\nChapter 2\nMETHODS\nBody"
+    )
+    scope = engine_module._uploaded_content_scope(text)
+    assert scope.text.startswith("CHAPTER 1")
+    assert "Real manuscript body" in scope.text
+
+
+@pytest.mark.parametrize("family", ["Chapter", "Kabanata", "Tsapter", "Chpter"])
+def test_uploaded_content_accepts_full_toc_before_repeated_body(family: str) -> None:
+    toc = "\n".join(f"{family} {number} Title {number}" for number in range(1, 6))
+    body = "\n".join(
+        f"{family} {number}\n{'INTRODUCTION' if number == 1 else f'BODY {number}'}\nReadable content {number}"
+        for number in range(1, 6)
+    )
+    text = f"TABLE OF CONTENTS\n{toc}\n{body}"
+
+    diagnostic = engine_module.uploaded_content_scope_diagnostic(text, False)
+
+    assert diagnostic["chapters"] == [1, 2, 3, 4, 5]
+
+
+def test_uploaded_content_accepts_sparse_toc_and_mixed_heading_format() -> None:
+    text = (
+        "Table of Contents\nChapter One Introduction 1\n"
+        "cHaPtEr\nONE\nINTRODUCTION\nReadable body\n"
+        "CHAPTER\u00a0 2\nMETHODS\nReadable methods\n"
+        "Chapter   3\nRESULTS\nReadable results"
+    )
+
+    assert engine_module.uploaded_content_scope_diagnostic(text, False)["chapters"] == [1, 2, 3]
+
+
+def test_uploaded_content_ignores_chapter_reference_after_back_matter_boundary() -> None:
+    text = (
+        "CHAPTER 1\nINTRODUCTION\nReadable body\nCHAPTER 2\nMETHODS\nReadable methods\n"
+        "CURRICULUM VITAE\nChapter 1\nPrevious publication heading"
+    )
+
+    assert engine_module.uploaded_content_scope_diagnostic(text, False)["chapters"] == [1, 2]
+
+
+def test_uploaded_content_rejects_line_start_prose() -> None:
+    with pytest.raises(engine_module.InvalidUploadedContentScope) as error:
+        engine_module.uploaded_content_scope_diagnostic(
+            "Chapter 1 explains the model.\nThe discussion continues here."
+        )
+    assert error.value.reason == "chapter_one_not_found"
+
+
+def test_relaxed_scope_still_validates_order_and_content() -> None:
+    with pytest.raises(engine_module.InvalidUploadedContentScope) as order_error:
+        engine_module.uploaded_content_scope_diagnostic(
+            "CHAPTER 3\nResults\nCHAPTER 2\nMethods", False
+        )
+    assert order_error.value.reason == "chapter_order_invalid"
+
+    with pytest.raises(engine_module.InvalidUploadedContentScope) as empty_error:
+        engine_module.uploaded_content_scope_diagnostic("CHAPTER 2", False)
+    assert empty_error.value.reason == "chapter_scope_empty"
+
+    with pytest.raises(engine_module.InvalidUploadedContentScope) as repeated_error:
+        engine_module.uploaded_content_scope_diagnostic(
+            "CHAPTER 2\nMethods\nCHAPTER 3\nResults\nCHAPTER 2\nAppendix copy", False
+        )
+    assert repeated_error.value.reason == "chapter_order_invalid"
+
+
+@pytest.mark.parametrize(
+    ("text", "reason"),
+    [
+        ("This is discussed in chapter 1 of the reference book.", "chapter_one_not_found"),
+        ("CHAPTER 2\nMethods\nCHAPTER 1\nIntroduction\nBody", "chapter_order_invalid"),
+        ("CHAPTER 1", "chapter_scope_empty"),
+        ("TABLE OF CONTENTS\nChapter 1 Introduction 1\nChapter 2 Methods 10", "chapter_one_not_found"),
+    ],
+)
+def test_uploaded_content_rejects_unsafe_or_invalid_scope(text: str, reason: str) -> None:
+    with pytest.raises(engine_module.InvalidUploadedContentScope) as error:
+        engine_module.uploaded_content_scope_diagnostic(text)
+    assert error.value.reason == reason
 
 
 def test_uploaded_content_rejects_a_missing_or_out_of_order_chapter_one_scope() -> None:

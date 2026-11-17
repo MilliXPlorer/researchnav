@@ -12,6 +12,7 @@ class UploadedContentSimilarityService
     public function __construct(
         private readonly ManuscriptTextExtractor $extractor,
         private readonly PublicRepositorySimilarityService $similarity,
+        private readonly SimilarityProcessRunner $runner,
     ) {}
 
     /** @param list<UploadedFile> $uploads
@@ -29,6 +30,7 @@ class UploadedContentSimilarityService
         $diagnostics = [];
         $seenHashes = [];
         $seenTexts = [];
+        $extracted = [];
 
         try {
             $canonicalPrivateRoot = realpath($privateRoot);
@@ -83,21 +85,28 @@ class UploadedContentSimilarityService
                 }
                 $textHash = hash('sha256', preg_replace('/\s+/u', ' ', mb_strtolower($cleanText)) ?? $cleanText);
                 if (isset($seenTexts[$textHash])) {
-                    $diagnostics[] = $this->diagnostic($index, 'duplicate', 'duplicate_content');
+                    $diagnostics[] = $this->diagnostic($index, 'duplicate', 'duplicate_content', strlen($cleanText), [], $cleanText);
 
                     continue;
                 }
                 $seenTexts[$textHash] = true;
-                $chapters = $this->chapters($cleanText);
-                if ($chapters === []) {
-                    $diagnostics[] = $this->diagnostic($index, 'excluded', 'supporting_document', strlen($cleanText));
-
-                    continue;
-                }
-                $parts[] = ['index' => $index, 'text' => $cleanText, 'chapters' => $chapters, 'sha256' => $sha256];
-                $diagnostics[] = $this->diagnostic($index, 'included', null, strlen($cleanText), $chapters);
+                $extracted[] = ['index' => $index, 'text' => $cleanText, 'sha256' => $sha256];
             }
-        } catch (UploadedContentUnreadableException $exception) {
+
+            if ($extracted !== []) {
+                $scopeResults = $this->runner->detectUploadedContentChaptersBatch(array_column($extracted, 'text'));
+                foreach ($extracted as $position => $file) {
+                    $chapters = $scopeResults[$position];
+                    if ($chapters === []) {
+                        $diagnostics[] = $this->diagnostic($file['index'], 'excluded', 'supporting_document', strlen($file['text']), [], $file['text']);
+
+                        continue;
+                    }
+                    $parts[] = [...$file, 'chapters' => $chapters];
+                    $diagnostics[] = $this->diagnostic($file['index'], 'included', null, strlen($file['text']), $chapters, $file['text']);
+                }
+            }
+        } catch (UploadedContentUnreadableException|UploadedContentInvalidScopeException|SimilarityProcessException|PublicRepositorySimilarityCapacityException $exception) {
             throw $exception;
         } catch (Throwable) {
             throw new UploadedContentUnreadableException;
@@ -121,6 +130,7 @@ class UploadedContentSimilarityService
 
             return $diagnostic;
         }, $diagnostics);
+        usort($diagnostics, fn (array $left, array $right): int => $left['index'] <=> $right['index']);
 
         return ['matches' => $this->similarity->compareUploadedContent($canonical, $selectedHashes), 'diagnostics' => $diagnostics, 'extracted_text' => $canonical];
     }
@@ -134,9 +144,11 @@ class UploadedContentSimilarityService
             if ($text === '') {
                 continue;
             }
-            $chapters = $this->chapters($text);
-            if ($chapters !== []) {
+            try {
+                $chapters = $this->runner->detectUploadedContentChapters($text);
                 $parts[] = ['index' => $file['index'], 'text' => $text, 'chapters' => $chapters, 'sha256' => ''];
+            } catch (UploadedContentChapterOneNotFoundException) {
+                continue;
             }
         }
 
@@ -148,14 +160,15 @@ class UploadedContentSimilarityService
     private function canonicalManuscript(array $parts): array
     {
         if ($parts === []) {
-            throw new UploadedContentInvalidScopeException;
+            throw new UploadedContentChapterOneNotFoundException;
         }
         $withChapterOne = array_values(array_filter($parts, fn (array $part): bool => in_array(1, $part['chapters'], true)));
         if ($withChapterOne === []) {
-            throw new UploadedContentInvalidScopeException;
+            throw new UploadedContentChapterOneNotFoundException;
         }
         usort($withChapterOne, fn (array $left, array $right): int => count($right['chapters']) <=> count($left['chapters']) ?: $left['index'] <=> $right['index']);
         $primary = $withChapterOne[0];
+        $this->runner->detectUploadedContentChapters($primary['text'], true);
         $selectedParts = [$primary];
         $coveredChapters = array_fill_keys($primary['chapters'], true);
         $remaining = array_values(array_filter($parts, fn (array $part): bool => $part['index'] !== $primary['index']));
@@ -166,7 +179,7 @@ class UploadedContentSimilarityService
                 continue;
             }
             if (count($uncovered) !== count($part['chapters']) || min($part['chapters']) <= max(array_keys($coveredChapters))) {
-                throw new UploadedContentInvalidScopeException;
+                throw new UploadedContentChapterOrderException('chapter_order_invalid');
             }
             $selectedParts[] = $part;
             foreach ($part['chapters'] as $chapter) {
@@ -177,28 +190,10 @@ class UploadedContentSimilarityService
         return [implode("\n\n", array_map(fn (array $part): string => $part['text'], $selectedParts)), array_column($selectedParts, 'index')];
     }
 
-    /** @return list<int> */
-    private function chapters(string $text): array
-    {
-        preg_match_all('/^[ \t]*(?:chapter|chpter|kabanata|tsapter)[ \t]+(?<number>10|[1-9]|one|two|three|four|five|six|seven|eight|nine|ten|viii|vii|vi|iv|iii|ii|ix|x|v|i)(?!\w)[^\r\n]*$/imu', $text, $matches);
-        $numbers = array_map(fn (string $value): int => $this->chapterNumber($value), $matches['number'] ?? []);
-
-        return array_values(array_unique(array_filter($numbers, fn (int $number): bool => $number > 0)));
-    }
-
-    private function chapterNumber(string $value): int
-    {
-        $normalized = mb_strtoupper($value);
-        $words = ['ONE' => 1, 'TWO' => 2, 'THREE' => 3, 'FOUR' => 4, 'FIVE' => 5, 'SIX' => 6, 'SEVEN' => 7, 'EIGHT' => 8, 'NINE' => 9, 'TEN' => 10];
-        $roman = ['I' => 1, 'II' => 2, 'III' => 3, 'IV' => 4, 'V' => 5, 'VI' => 6, 'VII' => 7, 'VIII' => 8, 'IX' => 9, 'X' => 10];
-
-        return ctype_digit($normalized) ? (int) $normalized : ($words[$normalized] ?? $roman[$normalized] ?? 0);
-    }
-
     /** @return array<string, mixed> */
-    private function diagnostic(int $index, string $status, ?string $reason, int $textLength = 0, array $chapters = []): array
+    private function diagnostic(int $index, string $status, ?string $reason, int $textLength = 0, array $chapters = [], ?string $extractedText = null): array
     {
-        return ['index' => $index, 'status' => $status, 'reason' => $reason, 'extraction_success' => $status !== 'error', 'text_length' => $textLength, 'detected_chapters' => $chapters, 'kind' => $status === 'included' ? 'manuscript' : ($status === 'excluded' ? 'supporting_document' : 'unknown'), 'eligible' => $status === 'included'];
+        return ['index' => $index, 'status' => $status, 'reason' => $reason, 'extraction_success' => $status !== 'error', 'text_length' => $textLength, 'detected_chapters' => $chapters, 'kind' => $status === 'included' ? 'manuscript' : ($status === 'excluded' ? 'supporting_document' : 'unknown'), 'eligible' => $status === 'included', 'extracted_text' => $extractedText];
     }
 
     private function removeTemporaryDirectory(string $directory): void

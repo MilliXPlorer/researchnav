@@ -6,7 +6,6 @@ const research = {
   id: 42,
   submission_reference: "RN-2026-AB12CD34",
   submitted_by: "researcher@example.test",
-  category_id: 2,
   title: "Revision-ready study",
   normalized_title: null,
   abstract: "An owned research record.",
@@ -34,13 +33,6 @@ const research = {
       is_corresponding_author: true,
     },
   ],
-  category: {
-    id: 2,
-    name: "Education",
-    slug: "education",
-    description: null,
-    is_active: true,
-  },
 };
 
 const files = [
@@ -249,7 +241,6 @@ function installApi(
       if (path === "/api/research/42/similarity") return response([]);
       if (path === "/api/research/42/monitoring" && init?.method === "POST")
         return response({});
-      if (path === "/api/categories") return response([research.category]);
       if (path === "/api/research/42/revisions/6/resubmit") return response({});
       return new Response(JSON.stringify({ error: "NOT_FOUND" }), {
         status: 404,

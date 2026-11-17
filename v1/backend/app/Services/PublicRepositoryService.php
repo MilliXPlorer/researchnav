@@ -15,7 +15,7 @@ class PublicRepositoryService
     /** @param array<string, mixed> $filters */
     public function search(array $filters)
     {
-        $query = $this->publicScope()->select('research_documents.*')->with(['authors', 'category', 'sdgs', 'files' => fn ($files) => $files->select(['id', 'research_document_id', 'document_type', 'is_current', 'stored_filename', 'file_path'])->current()->where('document_type', 'final_manuscript')]);
+        $query = $this->publicScope()->select('research_documents.*')->with(['authors', 'sdgs', 'files' => fn ($files) => $files->select(['id', 'research_document_id', 'document_type', 'is_current', 'stored_filename', 'file_path'])->current()->where('document_type', 'final_manuscript')]);
         if ($term = $filters['q'] ?? null) {
             $like = $this->like($term);
             $metadataMatch = fn (Builder $q) => $q->whereRaw("research_documents.title LIKE ? ESCAPE '!'", [$like])
@@ -50,12 +50,6 @@ class PublicRepositoryService
         if ($keywords = $filters['keywords'] ?? null) {
             $query->whereRaw("keywords LIKE ? ESCAPE '!'", [$this->like($keywords)]);
         }
-        if (isset($filters['category_id'])) {
-            $query->where('category_id', $filters['category_id']);
-        }
-        if ($category = $filters['category'] ?? null) {
-            $query->whereHas('category', fn (Builder $categories) => $categories->where('slug', $category)->orWhere('name', $category));
-        }
         if ($institute = $filters['institute'] ?? null) {
             $query->where('institute', $institute);
         }
@@ -86,10 +80,23 @@ class PublicRepositoryService
 
     public function find(int $id): ResearchDocument
     {
-        $research = $this->publicScope()->select('research_documents.*')->with(['authors', 'category', 'sdgs', 'files'])->findOrFail($id);
+        $research = $this->publicScope()->select('research_documents.*')->with(['authors', 'sdgs', 'files'])->findOrFail($id);
         $this->setDownloadAvailability($research);
 
         return $research;
+    }
+
+    /** @return list<int> */
+    public function years(): array
+    {
+        return $this->publicScope()
+            ->whereNotNull('publication_year')
+            ->distinct()
+            ->orderByDesc('publication_year')
+            ->pluck('publication_year')
+            ->map(fn ($year): int => (int) $year)
+            ->values()
+            ->all();
     }
 
     private function setDownloadAvailability(ResearchDocument $research): void

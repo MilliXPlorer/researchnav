@@ -41,7 +41,7 @@ import {
 } from "./api";
 import { Button, Pagination, SortableHeader } from "./components";
 import { DatePickerInput } from "./dateControls";
-import { Modal } from "./Modal";
+import { ConfirmDialog, Modal } from "./Modal";
 import ManageRepository from "./ManageRepository";
 import { useLiveFilters } from "./useLiveFilters";
 import { useClientSorting } from "./useClientSorting";
@@ -897,6 +897,9 @@ function AllUsers({ onAdd }: { onAdd?: () => void }) {
   const [removingInstitute, setRemovingInstitute] = useState<string | null>(
     null,
   );
+  const [confirmRemoveInstitute, setConfirmRemoveInstitute] = useState<
+    string | null
+  >(null);
   const [saveMessage, setSaveMessage] = useState("");
 
   async function addManagedInstitute() {
@@ -924,6 +927,7 @@ function AllUsers({ onAdd }: { onAdd?: () => void }) {
     try {
       await deleteInstitute(name);
       setSaveMessage(`Removed ${name}.`);
+      setConfirmRemoveInstitute(null);
       refreshInstitutes();
     } catch (requestError) {
       setSaveMessage(
@@ -1018,7 +1022,7 @@ function AllUsers({ onAdd }: { onAdd?: () => void }) {
                     className="icon-button"
                     aria-label={`Remove ${institute}`}
                     disabled={removingInstitute === institute}
-                    onClick={() => void removeManagedInstitute(institute)}
+                    onClick={() => setConfirmRemoveInstitute(institute)}
                   >
                     <Trash2 />
                   </Button>
@@ -1027,6 +1031,16 @@ function AllUsers({ onAdd }: { onAdd?: () => void }) {
             </div>
           </div>
         </Modal>
+      )}
+      {confirmRemoveInstitute && (
+        <ConfirmDialog
+          title="Remove institute?"
+          message={`Remove ${confirmRemoveInstitute} from the institute options? This cannot be undone.`}
+          confirmLabel="Remove institute"
+          busy={removingInstitute !== null}
+          onConfirm={() => void removeManagedInstitute(confirmRemoveInstitute)}
+          onCancel={() => setConfirmRemoveInstitute(null)}
+        />
       )}
     </>
   );

@@ -30,6 +30,24 @@
   font-size: 12px;
 }
 
+.manage-repository-header-actions .manage-repository-add-study {
+  width: 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0;
+  color: var(--paper);
+  background: var(--moss);
+  border-color: var(--moss);
+  box-shadow: var(--shadow-brand);
+}
+
+.manage-repository-header-actions
+  .manage-repository-add-study:hover:not(:disabled) {
+  color: var(--paper);
+  background: var(--canopy);
+  border-color: var(--canopy);
+}
+
 .manage-repository-tabs {
   display: flex;
   gap: 22px;
@@ -165,7 +183,6 @@
   background: var(--paper);
   font: inherit;
   font-size: 12px;
-  appearance: auto;
 }
 
 .manage-repository-filter-row input::placeholder {

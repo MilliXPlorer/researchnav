@@ -21,7 +21,6 @@ class OfficeRepositoryUpdateRequest extends FormRequest
     {
         return [
             'expected_updated_at' => ['required', 'date'],
-            'category_id' => ['sometimes', 'nullable', 'integer', 'exists:categories,id'],
             'title' => ['sometimes', 'filled', 'string', 'max:500'],
             'abstract' => ['sometimes', 'nullable', 'string', 'max:50000'],
             'keywords' => ['sometimes', 'nullable', 'string', 'max:5000'],
@@ -67,7 +66,7 @@ class OfficeRepositoryUpdateRequest extends FormRequest
     {
         $validator->after(function () use ($validator): void {
             $this->rejectUnknownFields($validator, [
-                'expected_updated_at', 'category_id', 'title', 'abstract', 'keywords', 'publication_year', 'sdg_ids',
+                'expected_updated_at', 'title', 'abstract', 'keywords', 'publication_year', 'sdg_ids',
                 'institute', 'degree_program', 'manuscript_date_label', 'research_stage', 'authors',
             ]);
 

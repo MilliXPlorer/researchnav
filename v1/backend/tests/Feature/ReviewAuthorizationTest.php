@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Models\Category;
 use App\Models\ResearchDocument;
 use App\Models\ReviewAssignment;
 use App\Models\User;
@@ -91,9 +90,7 @@ class ReviewAuthorizationTest extends TestCase
     private function research(): array
     {
         $owner = User::factory()->create(['access_status' => 'active']);
-        $category = Category::query()->create(['name' => 'Category '.fake()->unique()->word(), 'slug' => 'category-'.fake()->unique()->numberBetween(1, 999999)]);
         $research = app(ResearchService::class)->createDraft($owner, [
-            'category_id' => $category->id,
             'title' => 'Research '.fake()->unique()->word(),
             'abstract' => 'Abstract',
             'keywords' => 'research',

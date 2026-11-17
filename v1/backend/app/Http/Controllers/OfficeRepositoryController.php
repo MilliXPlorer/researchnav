@@ -122,7 +122,7 @@ class OfficeRepositoryController extends DomainController
     {
         return ResearchDocument::withTrashed()
             ->select([
-                'id', 'submission_reference', 'category_id', 'title', 'normalized_title', 'abstract', 'keywords',
+                'id', 'submission_reference', 'title', 'normalized_title', 'abstract', 'keywords',
                 'publication_year', 'institute', 'degree_program', 'manuscript_date_label', 'research_stage',
                 'submission_status', 'archive_status', 'visibility', 'submitted_at', 'approved_at', 'archived_at',
                 'updated_at', 'deleted_at',
@@ -135,7 +135,6 @@ class OfficeRepositoryController extends DomainController
     private function detailRelations(): array
     {
         return [
-            'category:id,name,slug',
             'sdgs:id,code,title,short_title,color_hex',
             'authors:id,research_document_id,user_id,author_name,author_order,is_corresponding_author',
             'authors.user:id,email,first_name,middle_name,last_name,role,institute,access_status,account_status,deleted_at',

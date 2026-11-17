@@ -45,7 +45,7 @@ class ResearchDocument extends Model
     ];
 
     protected $fillable = [
-        'submitted_by', 'submission_reference', 'category_id', 'section_id', 'title', 'normalized_title', 'abstract', 'keywords', 'publication_year',
+        'submitted_by', 'submission_reference', 'section_id', 'title', 'normalized_title', 'abstract', 'keywords', 'publication_year',
         'institution_name', 'institution_location', 'institute', 'degree_program', 'manuscript_date_label', 'abstract_provenance',
         'research_stage', 'submission_status', 'archive_status', 'visibility', 'submitted_at', 'approved_at', 'archived_at',
         'import_source_sha256', 'import_source_filename', 'import_group_name',
@@ -100,11 +100,6 @@ class ResearchDocument extends Model
     public function submitter(): BelongsTo
     {
         return $this->belongsTo(User::class, 'submitted_by');
-    }
-
-    public function category(): BelongsTo
-    {
-        return $this->belongsTo(Category::class);
     }
 
     public function sdgs(): BelongsToMany

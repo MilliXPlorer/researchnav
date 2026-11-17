@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\MetadataReview;
+use App\Models\MethodologyReview;
 use App\Models\ResearchDocument;
 use App\Models\ReviewAssignment;
 use App\Models\SimilarityResult;
@@ -94,6 +95,153 @@ class DashboardTest extends TestCase
 
         $this->assertSame(0, $sections['metadata_validation']['total']);
         $this->assertSame('status', MetadataReview::column('review_status'));
+    }
+
+    public function test_librarian_dashboard_projection_is_repository_scoped_and_consistent(): void
+    {
+        Carbon::setTestNow('2026-08-22 12:00:00');
+        try {
+            $librarian = $this->user('librarian');
+            $submitter = $this->user('researcher');
+            $pending = $this->document([
+                'submitted_by' => $submitter->id,
+                'title' => 'Pending archive',
+                'submission_status' => 'approved',
+                'archive_status' => 'pending_archiving',
+            ]);
+            $ready = $this->document([
+                'submitted_by' => $submitter->id,
+                'title' => 'Ready archive',
+                'submission_status' => 'approved',
+                'archive_status' => 'pending_archiving',
+            ]);
+            $archived = $this->document([
+                'title' => 'Archived record',
+                'submission_status' => 'archived',
+                'archive_status' => 'archived',
+                'visibility' => 'public',
+                'archived_at' => '2026-08-10 08:00:00',
+            ]);
+            $privateArchive = $this->document([
+                'title' => 'Private archive',
+                'submission_status' => 'archived',
+                'archive_status' => 'archived',
+                'visibility' => 'private',
+                'archived_at' => '2026-08-11 08:00:00',
+            ]);
+            MetadataReview::query()->create([
+                'research_document_id' => $ready->id,
+                'reviewed_by' => $librarian->id,
+                'review_status' => 'complete',
+            ]);
+            $returned = MetadataReview::query()->create([
+                'research_document_id' => $pending->id,
+                'reviewed_by' => $librarian->id,
+                'review_status' => 'needs_correction',
+            ]);
+            $returned->forceFill(['updated_at' => '2026-07-15 08:00:00'])->saveQuietly();
+
+            $projection = $this->dashboard($librarian)->assertOk()->json('data.librarian');
+
+            $this->assertSame([
+                'archiving_queue' => 2,
+                'metadata_validation' => 1,
+                'repository_records' => 1,
+                'archived_this_month' => 1,
+            ], $projection['counts']);
+            $this->assertEqualsCanonicalizing(
+                [$pending->id, $ready->id],
+                array_column($projection['queue'], 'research_document_id'),
+            );
+            $this->assertNotContains($archived->id, array_column($projection['queue'], 'research_document_id'));
+            $this->assertNotContains($privateArchive->id, array_column($projection['queue'], 'research_document_id'));
+            $this->assertSame(2, array_sum($projection['queue_status']));
+            $this->assertSame(1, array_sum(array_column($projection['activity']['six_months']['months'], 'archived')));
+            $this->assertSame(1, array_sum(array_column($projection['activity']['six_months']['months'], 'returned')));
+            $this->assertSame(
+                collect($projection['recent_activity'])->pluck('occurred_at')->sortDesc()->values()->all(),
+                array_column($projection['recent_activity'], 'occurred_at'),
+            );
+            $this->assertArrayNotHasKey('notes', $projection['recent_activity'][0]);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_statistician_dashboard_projection_is_assignment_scoped_and_consistent(): void
+    {
+        Carbon::setTestNow('2026-08-22 12:00:00');
+        try {
+            $statistician = $this->user('statistician');
+            $other = $this->user('statistician');
+            $pending = $this->document(['title' => 'Pending study']);
+            $inReview = $this->document(['title' => 'In review study']);
+            $completed = $this->document(['title' => 'Completed study']);
+            $foreign = $this->document(['title' => 'Foreign study']);
+            $revoked = $this->document(['title' => 'Revoked study']);
+
+            $this->assign($pending, $statistician, 'statistician');
+            $this->assign($inReview, $statistician, 'statistician');
+            $this->assign($completed, $statistician, 'statistician');
+            $this->assign($foreign, $other, 'statistician');
+            $this->assign($revoked, $statistician, 'statistician', false);
+
+            $inProgressReview = MethodologyReview::query()->create([
+                'research_document_id' => $inReview->id,
+                'statistician_id' => $statistician->id,
+                'review_status' => 'in_progress',
+            ]);
+            $inProgressReview->forceFill([
+                'created_at' => '2026-07-10 08:00:00',
+                'updated_at' => '2026-07-11 08:00:00',
+            ])->saveQuietly();
+            $completedReview = MethodologyReview::query()->create([
+                'research_document_id' => $completed->id,
+                'statistician_id' => $statistician->id,
+                'review_status' => 'signed_off',
+                'signed_off_at' => '2026-08-15 08:00:00',
+            ]);
+            $completedReview->forceFill([
+                'created_at' => '2026-08-10 08:00:00',
+                'updated_at' => '2026-08-15 08:00:00',
+            ])->saveQuietly();
+            foreach ([$foreign, $revoked] as $document) {
+                MethodologyReview::query()->create([
+                    'research_document_id' => $document->id,
+                    'statistician_id' => $document->is($foreign) ? $other->id : $statistician->id,
+                    'review_status' => 'signed_off',
+                    'signed_off_at' => now(),
+                ]);
+            }
+
+            $projection = $this->dashboard($statistician)->assertOk()->json('data.statistician');
+
+            $this->assertSame([
+                'assigned' => 3,
+                'pending' => 1,
+                'in_review' => 1,
+                'for_sign_off' => 1,
+                'completed' => 1,
+            ], $projection['counts']);
+            $this->assertEqualsCanonicalizing(
+                [$pending->id, $inReview->id],
+                array_column($projection['workload'], 'research_document_id'),
+            );
+            $this->assertNotContains($foreign->id, array_column($projection['workload'], 'research_document_id'));
+            $this->assertNotContains($revoked->id, array_column($projection['workload'], 'research_document_id'));
+            $this->assertSame([0, 0, 0, 0, 1, 1], array_column($projection['activity']['months'], 'started'));
+            $this->assertSame([0, 0, 0, 0, 0, 1], array_column($projection['activity']['months'], 'completed'));
+            $completedEvent = collect($projection['recent_activity'])->firstWhere('type', 'sign_off_completed');
+            $this->assertSame($completed->id, $completedEvent['research_document_id']);
+            $this->assertSame(
+                collect($projection['recent_activity'])->pluck('occurred_at')->sortDesc()->values()->all(),
+                array_column($projection['recent_activity'], 'occurred_at'),
+            );
+            $this->assertArrayNotHasKey('remarks', $projection['recent_activity'][0]);
+            $this->assertNull($projection['workload'][0]['due_at']);
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_adviser_and_instructor_only_see_their_active_matching_assignments(): void

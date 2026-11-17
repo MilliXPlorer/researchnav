@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Models\Category;
 use App\Models\DocumentFile;
 use App\Models\ManuscriptSearchDocument;
 use App\Models\ResearchDocument;
@@ -729,9 +728,7 @@ class SimilarityCheckTest extends TestCase
     /** @param array<string, mixed> $attributes */
     private function document(array $attributes = []): ResearchDocument
     {
-        $category = Category::query()->first() ?? Category::query()->create(['name' => 'Similarity', 'slug' => 'similarity']);
-
-        return ResearchDocument::factory()->create(array_merge(['category_id' => $category->id], $attributes));
+        return ResearchDocument::factory()->create($attributes);
     }
 
     private function similarityCheck(User $actor, ResearchDocument $source)

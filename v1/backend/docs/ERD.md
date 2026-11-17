@@ -13,7 +13,7 @@ The thesis model contains exactly these eight major entities:
 7. `NOTIFICATIONS`
 8. `MONITORING_LOGS`
 
-The diagram also shows the six supporting implementation tables required by the active Laravel services: `CATEGORIES`, `RESEARCH_AUTHORS`, `DOCUMENT_FILES`, `TITLE_VALIDATIONS`, `AUDIT_LOGS`, and `RESEARCH_REVIEW_ASSIGNMENTS`. Framework tables `SESSIONS` and `MIGRATIONS` are listed separately and are intentionally not in the application ERD.
+The diagram also shows the five supporting implementation tables required by the active Laravel services: `RESEARCH_AUTHORS`, `DOCUMENT_FILES`, `TITLE_VALIDATIONS`, `AUDIT_LOGS`, and `RESEARCH_REVIEW_ASSIGNMENTS`. Framework tables `SESSIONS` and `MIGRATIONS` are listed separately and are intentionally not in the application ERD.
 
 ```mermaid
 erDiagram
@@ -35,17 +35,9 @@ erDiagram
         uuid invited_by FK
         datetime deleted_at
     }
-    CATEGORIES {
-        bigint id PK
-        string name UK
-        string slug UK
-        boolean is_active
-        datetime deleted_at
-    }
     RESEARCH_DOCUMENTS {
         bigint id PK
         uuid submitted_by FK
-        bigint category_id FK
         string title
         string normalized_title
         string institution_name
@@ -145,7 +137,6 @@ erDiagram
     USER_ROLES ||--o{ USERS : defines
     USERS ||--o{ USERS : invites
     USERS ||--o{ RESEARCH_DOCUMENTS : submits
-    CATEGORIES ||--o{ RESEARCH_DOCUMENTS : classifies
     RESEARCH_DOCUMENTS ||--o{ RESEARCH_AUTHORS : has
     USERS o|--o{ RESEARCH_AUTHORS : optionally_identifies
     RESEARCH_DOCUMENTS ||--o{ DOCUMENT_FILES : stores_versions
@@ -175,7 +166,6 @@ erDiagram
 
 Supporting implementation tables:
 
-- `CATEGORIES` classifies documents and is soft-deletable.
 - `RESEARCH_AUTHORS` stores ordered author names and optionally links an author to a UUID user.
 - `DOCUMENT_FILES` stores private file metadata. Versions are per document and `document_type`, begin at `1`, and use `is_current` to identify the current version.
 - `TITLE_VALIDATIONS` stores explicit human decisions: `pending`, `approved`, `revision_required`, or `rejected`.
@@ -199,4 +189,4 @@ Framework tables:
 - Public repository reads use the exact predicate: `submission_status IN ('approved', 'archived') AND archive_status = 'archived' AND visibility = 'public'`.
 - Imported source identity fields are private operational metadata. Public resources expose institution/program metadata and abstract provenance, but never source filenames, checksums, storage paths, or workflow-internal fields.
 - `NOTIFICATIONS.notifiable_type` and `notifiable_id` are a Laravel polymorphic runtime link. The diagram uses a dotted relationship to show that it is not a database FK. The only notification FK is the nullable `research_document_id`.
-- User primary and foreign keys are UUID strings. The role, document, category, file, result, feedback, revision, log, validation, audit, and assignment identifiers are unsigned `BIGINT` values, except for notification UUIDs.
+- User primary and foreign keys are UUID strings. The role, document, file, result, feedback, revision, log, validation, audit, and assignment identifiers are unsigned `BIGINT` values, except for notification UUIDs.

@@ -35,7 +35,7 @@ class RoleWorkspaceApiSecondTest extends TestCase
 
         $this->as($librarian)->putJson('/api/librarian/metadata/'.$approved->id, [
             'title_complete' => true, 'abstract_complete' => true, 'authors_complete' => true,
-            'keywords_complete' => false, 'category_complete' => true, 'review_status' => 'complete',
+            'keywords_complete' => false, 'review_status' => 'complete',
         ], $this->origin())->assertOk()->assertJsonPath('data.review_status', 'complete');
         $this->assertDatabaseHas('audit_logs', ['action' => 'METADATA_REVIEWED']);
 

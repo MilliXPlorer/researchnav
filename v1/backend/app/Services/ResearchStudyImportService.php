@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Models\AuditLog;
-use App\Models\Category;
 use App\Models\DocumentFile;
 use App\Models\MonitoringLog;
 use App\Models\ResearchAuthor;
@@ -67,12 +66,10 @@ class ResearchStudyImportService
                         throw new RuntimeException('The import source identity cannot be changed.');
                     }
 
-                    $category = $this->upsertCategory($study['category']);
                     $wasArchived = ! $isNew && $document->submission_status === 'archived' && $document->archive_status === 'archived';
 
                     $document ??= new ResearchDocument;
                     $document->fill([
-                        'category_id' => $category->id,
                         'title' => $study['title'],
                         'normalized_title' => $normalizedTitle,
                         'abstract' => $study['abstract'],
@@ -152,7 +149,6 @@ class ResearchStudyImportService
         $studies = [];
         $declaredFilenames = [];
         $titles = [];
-        $categoryDefinitions = [];
         $duplicateCount = 0;
         foreach ($catalog['studies'] as $study) {
             if (! is_array($study)) {
@@ -167,13 +163,6 @@ class ResearchStudyImportService
             }
             $titles[$title] = true;
             $declaredFilenames[$canonicalFilename] = $study['source_sha256'];
-
-            $category = $study['category'];
-            $categoryKey = $category['slug'];
-            if (isset($categoryDefinitions[$categoryKey]) && $categoryDefinitions[$categoryKey] !== $category) {
-                throw new RuntimeException('The import catalog has conflicting category data.');
-            }
-            $categoryDefinitions[$categoryKey] = $category;
 
             foreach ($study['duplicate_filenames'] ?? [] as $duplicateFilename) {
                 if (isset($declaredFilenames[$duplicateFilename])) {
@@ -267,7 +256,6 @@ class ResearchStudyImportService
             throw new RuntimeException('The import catalog abstract must contain 100 to 220 words.');
         }
 
-        $this->validateCategory($study['category'] ?? null);
         if (isset($study['duplicate_filenames'])) {
             if (! is_array($study['duplicate_filenames'])) {
                 throw new RuntimeException('The import catalog has an invalid duplicate declaration.');
@@ -277,13 +265,6 @@ class ResearchStudyImportService
                     throw new RuntimeException('The import catalog has an invalid duplicate declaration.');
                 }
             }
-        }
-    }
-
-    private function validateCategory(mixed $category): void
-    {
-        if (! is_array($category) || ! isset($category['name'], $category['slug'], $category['description']) || ! is_string($category['name']) || ! is_string($category['slug']) || ! is_string($category['description']) || trim($category['name']) === '' || trim($category['description']) === '' || mb_strlen($category['name']) > 150 || mb_strlen($category['slug']) > 255 || ! preg_match('/^[a-z0-9]+(?:-[a-z0-9]+)*$/', $category['slug'])) {
-            throw new RuntimeException('The import catalog has invalid category data.');
         }
     }
 
@@ -390,22 +371,6 @@ class ResearchStudyImportService
         }
 
         return false;
-    }
-
-    /** @param array<string, string> $categoryData */
-    private function upsertCategory(array $categoryData): Category
-    {
-        $category = Category::withTrashed()->where('slug', $categoryData['slug'])->lockForUpdate()->first();
-        if ($category === null) {
-            return Category::query()->create($categoryData + ['is_active' => true]);
-        }
-
-        if ($category->trashed()) {
-            $category->restore();
-        }
-        $category->fill($categoryData + ['is_active' => true])->save();
-
-        return $category;
     }
 
     private function findDocument(string $sourceSha256): ?ResearchDocument

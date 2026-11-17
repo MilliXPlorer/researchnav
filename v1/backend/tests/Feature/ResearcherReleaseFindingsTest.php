@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Models\Category;
 use App\Models\DocumentFile;
 use App\Models\FeedbackComment;
 use App\Models\MonitoringLog;
@@ -135,8 +134,7 @@ class ResearcherReleaseFindingsTest extends TestCase
                 ->assertJsonPath('data.submission_status', $research->submission_status);
             $this->as($reviewer)->getJson('/api/research/'.$research->id.'/files')->assertOk();
             $this->as($reviewer)->getJson('/api/research/'.$research->id.'/similarity')->assertOk();
-            $feedbackResponse = $this->as($reviewer)->getJson('/api/research/'.$research->id.'/feedback');
-            $role === 'statistician' ? $feedbackResponse->assertForbidden() : $feedbackResponse->assertOk();
+            $this->as($reviewer)->getJson('/api/research/'.$research->id.'/feedback')->assertOk();
             $this->as($reviewer)->getJson('/api/research/'.$research->id.'/revisions')->assertOk();
             $this->as($reviewer)->getJson('/api/research/'.$research->id.'/monitoring')->assertOk();
             $this->as($reviewer)->getJson('/api/research/'.$research->id.'/validation')->assertOk();
@@ -147,9 +145,9 @@ class ResearcherReleaseFindingsTest extends TestCase
             'feedback_type' => 'comment',
         ], $this->origin())->assertCreated();
         $this->as($reviewers['statistician'])->postJson('/api/research/'.$research->id.'/feedback', [
-            'comment' => 'Statistician records are read-only.',
+            'comment' => 'Statistician methodology feedback is permitted.',
             'feedback_type' => 'comment',
-        ], $this->origin())->assertForbidden();
+        ], $this->origin())->assertCreated();
     }
 
     public function test_disabled_reviewer_roles_lose_assignment_based_document_access(): void
@@ -161,6 +159,33 @@ class ResearcherReleaseFindingsTest extends TestCase
 
         $this->as($reviewer)->getJson('/api/research/'.$research->id.'/files')->assertForbidden();
         $this->as($reviewer)->getJson('/api/research/'.$research->id.'/feedback')->assertForbidden();
+    }
+
+    public function test_support_specialists_can_author_feedback_only_while_actively_assigned(): void
+    {
+        [, $research] = $this->research();
+
+        foreach (['statistician', 'research_editor', 'librarian'] as $role) {
+            $reviewer = User::factory()->create(['role' => $role]);
+            $assignment = ReviewAssignment::query()->create([
+                'research_document_id' => $research->id,
+                'reviewer_id' => $reviewer->id,
+                'assigned_by' => User::factory()->create(['role' => 'research-office'])->id,
+                'review_role' => $role,
+                'is_active' => true,
+            ]);
+
+            $this->as($reviewer)->postJson('/api/research/'.$research->id.'/feedback', [
+                'comment' => $role.' feedback is assignment scoped.',
+                'feedback_type' => 'comment',
+            ], $this->origin())->assertCreated();
+
+            $assignment->update(['is_active' => false]);
+            $this->as($reviewer)->postJson('/api/research/'.$research->id.'/feedback', [
+                'comment' => 'Revoked feedback must be denied.',
+                'feedback_type' => 'comment',
+            ], $this->origin())->assertForbidden();
+        }
     }
 
     public function test_feedback_notifications_skip_removed_researchers_and_revoked_authors(): void
@@ -289,8 +314,7 @@ class ResearcherReleaseFindingsTest extends TestCase
         if (! $owner instanceof User) {
             $owner = User::query()->findOrFail($owner);
         }
-        $category = Category::query()->create(['name' => 'Category '.fake()->unique()->word(), 'slug' => 'category-'.fake()->unique()->numberBetween(1, 999999)]);
-        $research = ResearchDocument::factory()->create(array_merge(['submitted_by' => $owner->id, 'category_id' => $category->id], $attributes));
+        $research = ResearchDocument::factory()->create(array_merge(['submitted_by' => $owner->id], $attributes));
         $this->assignResearcherToDocument($owner, $research);
         ResearchAuthor::factory()->create(['research_document_id' => $research->id, 'user_id' => $owner->id]);
 

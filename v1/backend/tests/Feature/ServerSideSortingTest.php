@@ -3,8 +3,8 @@
 namespace Tests\Feature;
 
 use App\Models\AuditLog;
-use App\Models\Category;
 use App\Models\ResearchDocument;
+use App\Models\ResearchAuthor;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
@@ -96,18 +96,88 @@ class ServerSideSortingTest extends TestCase
         $this->assertSame([$later->id, $earlier->id], $response->json('data.*.id'));
     }
 
-    public function test_librarian_catalog_sorts_by_category_name(): void
+    public function test_librarian_catalog_rejects_removed_category_sort(): void
     {
         $librarian = $this->user(['role' => 'librarian']);
-        $zulu = Category::query()->create(['name' => 'Zulu', 'slug' => 'zulu']);
-        $alpha = Category::query()->create(['name' => 'Alpha', 'slug' => 'alpha']);
-        $this->document(['title' => 'Zulu study', 'category_id' => $zulu->id]);
-        $this->document(['title' => 'Alpha study', 'category_id' => $alpha->id]);
 
         $response = $this->as($librarian)->getJson('/api/librarian/catalog?sort=category&direction=asc');
 
-        $response->assertOk();
-        $this->assertSame(['Alpha study', 'Zulu study'], $response->json('data.data.*.title'));
+        $response->assertUnprocessable()->assertJsonValidationErrors('sort');
+    }
+
+    public function test_librarian_catalog_filters_visibility_and_publication_year(): void
+    {
+        $librarian = $this->user(['role' => 'librarian']);
+        $matching = $this->document([
+            'title' => 'Private 2025 study',
+            'submission_status' => 'approved',
+            'visibility' => 'private',
+            'publication_year' => 2025,
+        ]);
+        $this->document([
+            'title' => 'Registered 2025 study',
+            'submission_status' => 'approved',
+            'visibility' => 'registered_only',
+            'publication_year' => 2025,
+        ]);
+        $this->document([
+            'title' => 'Public 2024 study',
+            'submission_status' => 'approved',
+            'visibility' => 'public',
+            'publication_year' => 2024,
+        ]);
+
+        $response = $this->as($librarian)->getJson('/api/librarian/catalog?visibility=private&year=2025');
+
+        $response->assertOk()
+            ->assertJsonCount(1, 'data.data')
+            ->assertJsonPath('data.data.0.id', $matching->id)
+            ->assertJsonPath('filters.years', [2025, 2024]);
+    }
+
+    public function test_librarian_catalog_searches_titles_and_authors_and_returns_author_names(): void
+    {
+        $librarian = $this->user(['role' => 'librarian']);
+        $authorMatch = $this->document(['title' => 'Unrelated study', 'submission_status' => 'approved']);
+        ResearchAuthor::query()->create([
+            'research_document_id' => $authorMatch->id,
+            'author_name' => 'Ada Rivera',
+            'author_order' => 1,
+        ]);
+        $this->document(['title' => 'Different study', 'submission_status' => 'approved']);
+
+        $response = $this->as($librarian)->getJson('/api/librarian/catalog?search=Ada');
+
+        $response->assertOk()
+            ->assertJsonCount(1, 'data.data')
+            ->assertJsonPath('data.data.0.id', $authorMatch->id)
+            ->assertJsonPath('data.data.0.authors.0.author_name', 'Ada Rivera');
+    }
+
+    public function test_librarian_catalog_author_search_normalizes_whitespace_and_matches_all_name_tokens(): void
+    {
+        $librarian = $this->user(['role' => 'librarian']);
+        $match = $this->document(['title' => 'Author token study', 'submission_status' => 'approved']);
+        ResearchAuthor::query()->create([
+            'research_document_id' => $match->id,
+            'author_name' => 'ROGER ONDAC LAMBOJON',
+            'author_order' => 1,
+        ]);
+        $wrongAuthor = $this->document(['title' => 'Split token study', 'submission_status' => 'approved']);
+        ResearchAuthor::query()->create([
+            'research_document_id' => $wrongAuthor->id,
+            'author_name' => 'Roger Santos',
+            'author_order' => 1,
+        ]);
+        ResearchAuthor::query()->create([
+            'research_document_id' => $wrongAuthor->id,
+            'author_name' => 'Maria Lambojon',
+            'author_order' => 2,
+        ]);
+
+        $response = $this->as($librarian)->getJson('/api/librarian/catalog?search=++roger+++lambojon++');
+
+        $response->assertOk()->assertJsonCount(1, 'data.data')->assertJsonPath('data.data.0.id', $match->id);
     }
 
     public function test_office_users_sort_by_last_name(): void

@@ -37,6 +37,7 @@ import type {
 import type { Role } from "./types";
 import { SdgBadges } from "./SdgMetadata";
 import DefenseTeamRoster from "./DefenseTeamRoster";
+import ResearchTeamView from "./ResearchTeamView";
 
 type WorkspaceTab = ResearchWorkspaceTab;
 
@@ -300,6 +301,13 @@ export default function StudyWorkspace({
         </span>
       </div>
     ));
+  const usesCanonicalReadOnlyTeam = [
+    "adviser",
+    "panel",
+    "research_editor",
+    "statistician",
+    "librarian",
+  ].includes(role);
 
   return (
     <div
@@ -571,274 +579,289 @@ export default function StudyWorkspace({
 
       {tab === "team" && (
         <div className="project-workspace-section project-team-layout">
-          {role !== "research-office" && (
-            <div className="project-section-heading">
-              <div>
-                <p className="eyebrow">Research Team</p>
-                <h4>People assigned to this study</h4>
-              </div>
-              {controls?.onManageAssignments && (
-                <Button
-                  variant="secondary"
-                  onClick={() =>
-                    controls.onManageAssignments?.(defenseTeamStage)
-                  }
-                >
-                  <UsersRound /> Manage assignments
-                </Button>
-              )}
-            </div>
-          )}
-          <section className="project-team-block">
-            <div className="project-team-block-heading">
-              <div>
-                {role === "research-office" && (
-                  <p className="eyebrow">Research Team</p>
-                )}
-                <h5>Student researchers</h5>
-                <span>{researchers.length} assigned</span>
-              </div>
-            </div>
-            {researchers.length === 0 ? (
-              <p className="project-empty-copy">
-                No students are assigned to this research title.
-              </p>
-            ) : (
-              <ul
-                className={
-                  role === "research-office"
-                    ? "project-compact-list project-researcher-list"
-                    : "title-member-list project-researcher-list"
-                }
-              >
-                {researchers.map((researcher) => (
-                  <li key={researcher.id}>
-                    {role === "research-office" && (
-                      <span
-                        className="project-person-avatar"
-                        aria-hidden="true"
-                      >
-                        {researcher.name.slice(0, 1).toUpperCase()}
-                      </span>
-                    )}
-                    <span>
-                      <strong>{researcher.name}</strong>
-                      <small>
-                        {role === "research-office"
-                          ? "Student researcher"
-                          : (researcher.email ?? "Researcher")}
-                      </small>
-                    </span>
-                    {controls?.onRemoveResearcher && (
-                      <Button
-                        variant="quiet"
-                        className="icon-button"
-                        aria-label={`Remove ${researcher.name}`}
-                        title="Remove student from this study"
-                        disabled={controls.researcherActionsDisabled}
-                        onClick={() =>
-                          controls.onRemoveResearcher?.(researcher)
-                        }
-                      >
-                        <Trash2 />
-                      </Button>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-          <div className="project-defense-team-section">
-            {!controls?.onDefenseTeamStageChange && !projectTeam ? (
-              <DefenseTeamRoster
-                researchDocumentId={researchDocumentId}
-                people={people ?? { section: null, reviewers: [] }}
-              />
-            ) : teamLoading ? (
-              <WorkspaceLoading label="Loading current team assignments" />
-            ) : (
-              <>
-                <div className="project-team-stage-control">
-                  <label>
-                    Defense team
-                    <select
-                      value={defenseTeamStage}
-                      onChange={(event) => {
-                        const stage = event.target.value as
-                          "proposal" | "final";
-                        setDefenseTeamStage(stage);
-                        controls?.onDefenseTeamStageChange?.(stage);
-                      }}
+          {usesCanonicalReadOnlyTeam ? (
+            <ResearchTeamView
+              researchDocumentId={researchDocumentId}
+              researchers={researchers}
+              people={people ?? { section: null, reviewers: [] }}
+              initialTeam={projectTeam}
+            />
+          ) : (
+            <>
+              {role !== "research-office" && (
+                <div className="project-section-heading">
+                  <div>
+                    <p className="eyebrow">Research Team</p>
+                    <h4>People assigned to this study</h4>
+                  </div>
+                  {controls?.onManageAssignments && (
+                    <Button
+                      variant="secondary"
+                      onClick={() =>
+                        controls.onManageAssignments?.(defenseTeamStage)
+                      }
                     >
-                      <option value="proposal">Proposal Defense</option>
-                      <option value="final">Final Defense</option>
-                    </select>
-                  </label>
-                </div>
-
-                <div className="project-stage-columns">
-                  {defenseTeamStage === "proposal" ? (
-                    <>
-                      <section className="project-team-block">
-                        <div className="project-team-block-heading">
-                          <div>
-                            <p className="eyebrow">Before Proposal Defense</p>
-                            <h5>Pre-defense team</h5>
-                          </div>
-
-                          {readinessAvailable && (
-                            <span
-                              className={
-                                currentTeam!.pre_defense_ready
-                                  ? "status-dot is-ready"
-                                  : "status-dot"
-                              }
-                            >
-                              {currentTeam!.pre_defense_ready
-                                ? "Ready"
-                                : "Incomplete"}
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="project-actor-grid">
-                          {actorRows(
-                            [
-                              ["Research Instructor", instructorName],
-                              ["Research Adviser", adviserName],
-                              ["Editor", editorName],
-                              ["Statistician", statisticianName],
-                              ["Librarian", librarianName],
-                            ],
-                            "pre",
-                          )}
-                        </div>
-                      </section>
-
-                      <section className="project-team-block">
-                        <div className="project-team-block-heading">
-                          <div>
-                            <p className="eyebrow">After Proposal Defense</p>
-                            <h5>Post-defense team</h5>
-                          </div>
-
-                          {readinessAvailable && (
-                            <span
-                              className={
-                                currentTeam!.post_defense_ready
-                                  ? "status-dot is-ready"
-                                  : "status-dot"
-                              }
-                            >
-                              {currentTeam!.post_defense_ready
-                                ? "Ready"
-                                : "Incomplete"}
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="project-actor-grid">
-                          {actorRows(
-                            [
-                              ["Research Instructor", instructorName],
-                              ["Research Adviser", adviserName],
-                              ["Editor", editorName],
-                              ["Librarian", librarianName],
-                              ["Panel 1", panelNames[0]],
-                              ["Panel 2", panelNames[1]],
-                              ["Panel 3", panelNames[2]],
-                              ["Research Rep", representativeName],
-                              ["Chair", chairName],
-                            ],
-                            "post",
-                          )}
-                        </div>
-                      </section>
-                    </>
-                  ) : (
-                    <>
-                      <section className="project-team-block">
-                        <div className="project-team-block-heading">
-                          <div>
-                            <p className="eyebrow">Before Final Defense</p>
-                            <h5>Pre-defense team</h5>
-                          </div>
-
-                          {readinessAvailable && (
-                            <span
-                              className={
-                                currentTeam!.pre_defense_ready
-                                  ? "status-dot is-ready"
-                                  : "status-dot"
-                              }
-                            >
-                              {currentTeam!.pre_defense_ready
-                                ? "Ready"
-                                : "Incomplete"}
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="project-actor-grid">
-                          {actorRows(
-                            [
-                              ["Research Instructor", instructorName],
-                              ["Research Adviser", adviserName],
-                              ["Editor", editorName],
-                              ["Statistician", statisticianName],
-                              ["Librarian", librarianName],
-                            ],
-                            "pre",
-                          )}
-                        </div>
-                      </section>
-
-                      <section className="project-team-block">
-                        <div className="project-team-block-heading">
-                          <div>
-                            <p className="eyebrow">After Final Defense</p>
-                            <h5>Post-defense team</h5>
-                          </div>
-
-                          {readinessAvailable && (
-                            <span
-                              className={
-                                currentTeam!.post_defense_ready
-                                  ? "status-dot is-ready"
-                                  : "status-dot"
-                              }
-                            >
-                              {currentTeam!.post_defense_ready
-                                ? "Ready"
-                                : "Incomplete"}
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="project-actor-grid">
-                          {actorRows(
-                            [
-                              ["Research Instructor", instructorName],
-                              ["Research Adviser", adviserName],
-                              ["Editor", editorName],
-                              ["Librarian", librarianName],
-                              ["Panel 1", panelNames[0]],
-                              ["Panel 2", panelNames[1]],
-                              ["Panel 3", panelNames[2]],
-                              ["Research Rep", representativeName],
-                              ["Chair", chairName],
-                            ],
-                            "post",
-                          )}
-                        </div>
-                      </section>
-                    </>
+                      <UsersRound /> Manage assignments
+                    </Button>
                   )}
                 </div>
-              </>
-            )}
-          </div>
-          {actorExtension}
+              )}
+              <section className="project-team-block">
+                <div className="project-team-block-heading">
+                  <div>
+                    {role === "research-office" && (
+                      <p className="eyebrow">Research Team</p>
+                    )}
+                    <h5>Student researchers</h5>
+                    <span>{researchers.length} assigned</span>
+                  </div>
+                </div>
+                {researchers.length === 0 ? (
+                  <p className="project-empty-copy">
+                    No students are assigned to this research title.
+                  </p>
+                ) : (
+                  <ul
+                    className={
+                      role === "research-office"
+                        ? "project-compact-list project-researcher-list"
+                        : "title-member-list project-researcher-list"
+                    }
+                  >
+                    {researchers.map((researcher) => (
+                      <li key={researcher.id}>
+                        {role === "research-office" && (
+                          <span
+                            className="project-person-avatar"
+                            aria-hidden="true"
+                          >
+                            {researcher.name.slice(0, 1).toUpperCase()}
+                          </span>
+                        )}
+                        <span>
+                          <strong>{researcher.name}</strong>
+                          <small>
+                            {role === "research-office"
+                              ? "Student researcher"
+                              : (researcher.email ?? "Researcher")}
+                          </small>
+                        </span>
+                        {controls?.onRemoveResearcher && (
+                          <Button
+                            variant="quiet"
+                            className="icon-button"
+                            aria-label={`Remove ${researcher.name}`}
+                            title="Remove student from this study"
+                            disabled={controls.researcherActionsDisabled}
+                            onClick={() =>
+                              controls.onRemoveResearcher?.(researcher)
+                            }
+                          >
+                            <Trash2 />
+                          </Button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+              <div className="project-defense-team-section">
+                {!controls?.onDefenseTeamStageChange && !projectTeam ? (
+                  <DefenseTeamRoster
+                    researchDocumentId={researchDocumentId}
+                    people={people ?? { section: null, reviewers: [] }}
+                  />
+                ) : teamLoading ? (
+                  <WorkspaceLoading label="Loading current team assignments" />
+                ) : (
+                  <>
+                    <div className="project-team-stage-control">
+                      <label>
+                        Defense team
+                        <select
+                          value={defenseTeamStage}
+                          onChange={(event) => {
+                            const stage = event.target.value as
+                              "proposal" | "final";
+                            setDefenseTeamStage(stage);
+                            controls?.onDefenseTeamStageChange?.(stage);
+                          }}
+                        >
+                          <option value="proposal">Proposal Defense</option>
+                          <option value="final">Final Defense</option>
+                        </select>
+                      </label>
+                    </div>
+
+                    <div className="project-stage-columns">
+                      {defenseTeamStage === "proposal" ? (
+                        <>
+                          <section className="project-team-block">
+                            <div className="project-team-block-heading">
+                              <div>
+                                <p className="eyebrow">
+                                  Before Proposal Defense
+                                </p>
+                                <h5>Pre-defense team</h5>
+                              </div>
+
+                              {readinessAvailable && (
+                                <span
+                                  className={
+                                    currentTeam!.pre_defense_ready
+                                      ? "status-dot is-ready"
+                                      : "status-dot"
+                                  }
+                                >
+                                  {currentTeam!.pre_defense_ready
+                                    ? "Ready"
+                                    : "Incomplete"}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="project-actor-grid">
+                              {actorRows(
+                                [
+                                  ["Research Instructor", instructorName],
+                                  ["Research Adviser", adviserName],
+                                  ["Editor", editorName],
+                                  ["Statistician", statisticianName],
+                                  ["Librarian", librarianName],
+                                ],
+                                "pre",
+                              )}
+                            </div>
+                          </section>
+
+                          <section className="project-team-block">
+                            <div className="project-team-block-heading">
+                              <div>
+                                <p className="eyebrow">
+                                  After Proposal Defense
+                                </p>
+                                <h5>Post-defense team</h5>
+                              </div>
+
+                              {readinessAvailable && (
+                                <span
+                                  className={
+                                    currentTeam!.post_defense_ready
+                                      ? "status-dot is-ready"
+                                      : "status-dot"
+                                  }
+                                >
+                                  {currentTeam!.post_defense_ready
+                                    ? "Ready"
+                                    : "Incomplete"}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="project-actor-grid">
+                              {actorRows(
+                                [
+                                  ["Research Instructor", instructorName],
+                                  ["Research Adviser", adviserName],
+                                  ["Editor", editorName],
+                                  ["Librarian", librarianName],
+                                  ["Panel 1", panelNames[0]],
+                                  ["Panel 2", panelNames[1]],
+                                  ["Panel 3", panelNames[2]],
+                                  ["Research Rep", representativeName],
+                                  ["Chair", chairName],
+                                ],
+                                "post",
+                              )}
+                            </div>
+                          </section>
+                        </>
+                      ) : (
+                        <>
+                          <section className="project-team-block">
+                            <div className="project-team-block-heading">
+                              <div>
+                                <p className="eyebrow">Before Final Defense</p>
+                                <h5>Pre-defense team</h5>
+                              </div>
+
+                              {readinessAvailable && (
+                                <span
+                                  className={
+                                    currentTeam!.pre_defense_ready
+                                      ? "status-dot is-ready"
+                                      : "status-dot"
+                                  }
+                                >
+                                  {currentTeam!.pre_defense_ready
+                                    ? "Ready"
+                                    : "Incomplete"}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="project-actor-grid">
+                              {actorRows(
+                                [
+                                  ["Research Instructor", instructorName],
+                                  ["Research Adviser", adviserName],
+                                  ["Editor", editorName],
+                                  ["Statistician", statisticianName],
+                                  ["Librarian", librarianName],
+                                ],
+                                "pre",
+                              )}
+                            </div>
+                          </section>
+
+                          <section className="project-team-block">
+                            <div className="project-team-block-heading">
+                              <div>
+                                <p className="eyebrow">After Final Defense</p>
+                                <h5>Post-defense team</h5>
+                              </div>
+
+                              {readinessAvailable && (
+                                <span
+                                  className={
+                                    currentTeam!.post_defense_ready
+                                      ? "status-dot is-ready"
+                                      : "status-dot"
+                                  }
+                                >
+                                  {currentTeam!.post_defense_ready
+                                    ? "Ready"
+                                    : "Incomplete"}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="project-actor-grid">
+                              {actorRows(
+                                [
+                                  ["Research Instructor", instructorName],
+                                  ["Research Adviser", adviserName],
+                                  ["Editor", editorName],
+                                  ["Librarian", librarianName],
+                                  ["Panel 1", panelNames[0]],
+                                  ["Panel 2", panelNames[1]],
+                                  ["Panel 3", panelNames[2]],
+                                  ["Research Rep", representativeName],
+                                  ["Chair", chairName],
+                                ],
+                                "post",
+                              )}
+                            </div>
+                          </section>
+                        </>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+              {actorExtension}
+            </>
+          )}
         </div>
       )}
 

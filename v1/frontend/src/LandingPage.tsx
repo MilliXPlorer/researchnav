@@ -24,6 +24,7 @@ import { Modal } from "./Modal";
 import ConsentNotice from "./ConsentNotice";
 import { instituteNames, roleConfigs } from "./data";
 import type { ResearchRecord, UserSession } from "./types";
+import SelectMenu from "./SelectMenu";
 
 export default function LandingPage({
   onSignIn,
@@ -77,7 +78,7 @@ export default function LandingPage({
     string | number | null
   >(null);
   const recent = [...records]
-    .sort((a, b) => Number(a.id) - Number(b.id))
+    .sort((a, b) => b.year - a.year || Number(b.id) - Number(a.id))
     .slice(0, 3);
   const instituteCount = instituteNames.length;
   const earliestYear = records.length
@@ -157,29 +158,29 @@ export default function LandingPage({
               onChange={setQuery}
               onSubmit={search}
               large
+              submitIcon="search"
             />
             <div className="hero-filters" aria-label="Search filters">
               <label>
                 <span className="sr-only">Browse by year</span>
-                <select
-                  defaultValue=""
-                  onChange={(event) =>
-                    event.target.value &&
-                    navigate(
-                      `/catalog?year_from=${event.target.value}&year_to=${event.target.value}`,
-                    )
+                <SelectMenu
+                  label="Browse by year"
+                  className="hero-year-select"
+                  value=""
+                  onChange={(value) =>
+                    value &&
+                    navigate(`/catalog?year_from=${value}&year_to=${value}`)
                   }
-                >
-                  <option value="">All years</option>
-                  {[...new Set(records.map((record) => record.year))]
-                    .sort((a, b) => b - a)
-                    .map((year) => (
-                      <option key={year} value={year}>
-                        {year}
-                      </option>
-                    ))}
-                </select>
-                <ChevronDown />
+                  options={[
+                    { value: "", label: "All years" },
+                    ...[...new Set(records.map((record) => record.year))]
+                      .sort((a, b) => b - a)
+                      .map((year) => ({
+                        value: String(year),
+                        label: String(year),
+                      })),
+                  ]}
+                />
               </label>
               <button
                 type="button"
@@ -191,21 +192,22 @@ export default function LandingPage({
               </button>
               <label>
                 <span className="sr-only">Browse by institute</span>
-                <select
-                  defaultValue=""
-                  onChange={(event) =>
-                    event.target.value &&
-                    navigate(
-                      `/catalog?institute=${encodeURIComponent(event.target.value)}`,
-                    )
+                <SelectMenu
+                  label="Browse by institute"
+                  className="hero-institute-select"
+                  value=""
+                  onChange={(value) =>
+                    value &&
+                    navigate(`/catalog?institute=${encodeURIComponent(value)}`)
                   }
-                >
-                  <option value="">All institutes</option>
-                  {instituteNames.map((institute) => (
-                    <option key={institute}>{institute}</option>
-                  ))}
-                </select>
-                <ChevronDown />
+                  options={[
+                    { value: "", label: "All institutes" },
+                    ...instituteNames.map((institute) => ({
+                      value: institute,
+                      label: institute,
+                    })),
+                  ]}
+                />
               </label>
             </div>
             {session === null && (
@@ -314,10 +316,7 @@ export default function LandingPage({
             <article>
               <Search />
               <strong>Discover</strong>
-              <p>
-                Search across titles, authors, years, categories, and
-                institutes.
-              </p>
+              <p>Search across titles, authors, years, and institutes.</p>
             </article>
             <article>
               <GraduationCap />

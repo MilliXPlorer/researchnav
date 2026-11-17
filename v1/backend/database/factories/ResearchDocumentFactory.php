@@ -2,7 +2,6 @@
 
 namespace Database\Factories;
 
-use App\Models\Category;
 use App\Models\ResearchDocument;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -18,7 +17,6 @@ class ResearchDocumentFactory extends Factory
 
         return [
             'submitted_by' => User::factory(),
-            'category_id' => Category::query()->first()?->id ?? Category::query()->create(['name' => 'General Research', 'slug' => 'general-research'])->id,
             'title' => $title,
             'normalized_title' => str($title)->lower()->replaceMatches('/[^a-z0-9]+/', ' ')->trim()->toString(),
             'abstract' => fake()->paragraph(),

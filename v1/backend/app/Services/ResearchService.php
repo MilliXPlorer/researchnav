@@ -45,7 +45,7 @@ class ResearchService
             $this->monitoring->log($research, 'RESEARCH_CREATED', $actor, 'Research draft created.', null, 'draft', 'open');
             $this->audit->log($actor, 'RESEARCH_CREATED', $research, 'Created research draft.', $request);
 
-            return $research->load(['authors.user', 'category', 'sdgs', 'submitter']);
+            return $research->load(['authors.user', 'sdgs', 'submitter']);
         });
     }
 
@@ -80,7 +80,7 @@ class ResearchService
             $this->monitoring->log($locked, 'RESEARCH_UPDATED', $actor, 'Research metadata updated.', $locked->submission_status, $locked->submission_status, 'open');
             $this->audit->log($actor, 'RESEARCH_UPDATED', $locked, 'Updated editable research metadata.', $request);
 
-            return $locked->fresh(['authors.user', 'category', 'sdgs', 'submitter']);
+            return $locked->fresh(['authors.user', 'sdgs', 'submitter']);
         });
     }
 
@@ -125,7 +125,7 @@ class ResearchService
             $this->audit->log($actor, 'RESEARCH_SUBMITTED', $locked, 'Research was submitted for review.', $request);
             $locked->submitter?->notify(new ResearchActivityNotification($locked, 'RESEARCH_SUBMITTED', 'Research activity', 'Research was submitted for review.'));
 
-            return $locked->fresh(['authors.user', 'category', 'sdgs', 'submitter']);
+            return $locked->fresh(['authors.user', 'sdgs', 'submitter']);
         });
     }
 
@@ -160,14 +160,14 @@ class ResearchService
             $this->audit->log($actor, 'RESEARCH_ARCHIVED', $locked, 'Archived approved research.', $request);
             $locked->submitter?->notify(new ResearchActivityNotification($locked, 'RESEARCH_ARCHIVED', 'Research archived', 'Your research has been archived.'));
 
-            return $locked->fresh(['authors.user', 'category', 'sdgs', 'submitter']);
+            return $locked->fresh(['authors.user', 'sdgs', 'submitter']);
         });
     }
 
     /** @param array<string, mixed> $data @return array<string, mixed> */
     private function metadata(array $data): array
     {
-        $allowed = array_intersect_key($data, array_flip(['category_id', 'title', 'abstract', 'keywords', 'publication_year', 'institute', 'degree_program', 'manuscript_date_label', 'research_stage']));
+        $allowed = array_intersect_key($data, array_flip(['title', 'abstract', 'keywords', 'publication_year', 'institute', 'degree_program', 'manuscript_date_label', 'research_stage']));
         if (isset($allowed['title'])) {
             $allowed['normalized_title'] = str($allowed['title'])->lower()->replaceMatches('/[^a-z0-9]+/', ' ')->trim()->toString();
         }
@@ -262,7 +262,7 @@ class ResearchService
             $this->audit->log($actor, $activity, $research, $remarks, $request);
             $research->submitter?->notify(new ResearchActivityNotification($research, $activity, 'Research activity', $remarks));
 
-            return $research->fresh(['authors.user', 'category', 'sdgs', 'submitter']);
+            return $research->fresh(['authors.user', 'sdgs', 'submitter']);
         });
     }
 

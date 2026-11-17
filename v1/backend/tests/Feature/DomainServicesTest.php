@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Http\Resources\DocumentFileResource;
 use App\Models\AuditLog;
-use App\Models\Category;
 use App\Models\DocumentFile;
 use App\Models\MonitoringLog;
 use App\Models\ResearchAuthor;
@@ -35,8 +34,7 @@ class DomainServicesTest extends TestCase
     public function test_draft_creation_orders_historical_authors_and_records_audit_and_monitoring(): void
     {
         $actor = User::factory()->create();
-        $category = $this->category();
-        $research = app(ResearchService::class)->createDraft($actor, $this->metadata($category), [
+        $research = app(ResearchService::class)->createDraft($actor, $this->metadata(), [
             ['user_id' => $actor->id, 'author_name' => 'Current Author', 'is_corresponding_author' => true],
             ['author_name' => 'Historical Author'],
         ]);
@@ -50,9 +48,8 @@ class DomainServicesTest extends TestCase
     public function test_draft_transaction_rolls_back_when_author_insert_fails(): void
     {
         $actor = User::factory()->create();
-        $category = $this->category();
         try {
-            app(ResearchService::class)->createDraft($actor, $this->metadata($category), [['author_name' => 'Duplicate'], ['author_name' => 'Duplicate']]);
+            app(ResearchService::class)->createDraft($actor, $this->metadata(), [['author_name' => 'Duplicate'], ['author_name' => 'Duplicate']]);
             $this->fail('Expected unique-author insert failure.');
         } catch (\Throwable) {
             $this->assertDatabaseCount('research_documents', 0);
@@ -455,7 +452,6 @@ class DomainServicesTest extends TestCase
         $filtered = app(PublicRepositoryService::class)->search([
             'author' => $public->authors()->firstOrFail()->author_name,
             'keywords' => 'water',
-            'category' => $public->category->slug,
             'year' => 2025,
         ]);
         $this->assertSame([$public->id], $filtered->pluck('id')->all());
@@ -498,16 +494,15 @@ class DomainServicesTest extends TestCase
     private function research(array $overrides = []): array
     {
         $actor = User::factory()->create();
-        $research = app(ResearchService::class)->createDraft($actor, array_merge($this->metadata($this->category()), $overrides), [['user_id' => $actor->id, 'author_name' => 'Author '.$actor->id]]);
+        $research = app(ResearchService::class)->createDraft($actor, array_merge($this->metadata(), $overrides), [['user_id' => $actor->id, 'author_name' => 'Author '.$actor->id]]);
         $this->assignResearcherToDocument($actor, $research);
 
         return [$actor, $research];
     }
 
-    private function metadata(Category $category): array
+    private function metadata(): array
     {
         return [
-            'category_id' => $category->id,
             'title' => 'Research '.fake()->unique()->word(),
             'abstract' => 'An abstract.',
             'keywords' => 'research',
@@ -516,11 +511,6 @@ class DomainServicesTest extends TestCase
             'degree_program' => 'Bachelor of Science in Computer Science',
             'research_stage' => 'title_proposal',
         ];
-    }
-
-    private function category(): Category
-    {
-        return Category::query()->create(['name' => 'Category '.fake()->unique()->word(), 'slug' => 'category-'.fake()->unique()->numberBetween(1000, 999999)]);
     }
 
     private function assignReviewer(ResearchDocument $research, User $reviewer, string $role = 'adviser'): ReviewAssignment

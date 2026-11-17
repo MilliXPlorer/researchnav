@@ -47,6 +47,7 @@ import {
   runTitleSimilarityCheck,
   searchEligibleSupportAccounts,
   searchPublicResearch,
+  searchArchivedRoleRepository,
   searchPublicResearchBySimilarity,
   resubmitResearchRevision,
   returnMethodologyForClarification,
@@ -111,7 +112,6 @@ const resource = (id: number, authorName: string, authorOrder = 1) => ({
   institution_name: "Example College",
   institute: "Example Unit",
   degree_program: "Example Program",
-  category: { name: "Example Category" },
   sdgs: [
     {
       id: 4,
@@ -227,7 +227,7 @@ describe("public repository API", () => {
     await expect(listPublicResearch()).resolves.toEqual([]);
   });
 
-  it("sends author, keyword, category, and year filtering to the repository endpoint", async () => {
+  it("sends author, keyword, and year filtering to the repository endpoint", async () => {
     let requestedUrl = "";
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       requestedUrl = String(input);
@@ -244,7 +244,6 @@ describe("public repository API", () => {
       searchPublicResearch({
         author: "Dela Cruz",
         keywords: "inventory",
-        category: "Web-based",
         sdgIds: [4, 13],
         year: 2024,
       }),
@@ -254,7 +253,7 @@ describe("public repository API", () => {
     expect(requested.pathname).toBe("/api/repository");
     expect(requested.searchParams.get("author")).toBe("Dela Cruz");
     expect(requested.searchParams.get("keywords")).toBe("inventory");
-    expect(requested.searchParams.get("category")).toBe("Web-based");
+    expect(requested.searchParams.has("category")).toBe(false);
     expect(requested.searchParams.getAll("sdg_ids[]")).toEqual(["4", "13"]);
     expect(requested.searchParams.get("year")).toBe("2024");
   });
@@ -274,6 +273,44 @@ describe("public repository API", () => {
     expect(requested.searchParams.has("keywords")).toBe(false);
     expect(requested.searchParams.has("q")).toBe(false);
     expect(requested.searchParams.get("per_page")).toBe("50");
+  });
+
+  it("loads the role repository from the archived-only endpoint", async () => {
+    let requestedUrl = "";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      requestedUrl = String(input);
+      return new Response(
+        JSON.stringify({
+          data: [resource(1, "Archived Author")],
+          links: { first: null, last: null, prev: null, next: null },
+          meta: {
+            current_page: 1,
+            from: 1,
+            last_page: 1,
+            path: "/api/archived-repository",
+            per_page: 25,
+            to: 1,
+            total: 1,
+          },
+          filters: { years: [2026, 2025, 2021] },
+        }),
+      );
+    });
+
+    await expect(
+      searchArchivedRoleRepository(
+        { q: "archive", year: 2026, perPage: 25 },
+        fetchMock,
+      ),
+    ).resolves.toMatchObject({
+      data: [{ id: "1", authors: "Archived Author, Second Author" }],
+      meta: { total: 1 },
+      years: [2026, 2025, 2021],
+    });
+    const requested = new URL(requestedUrl, "http://researchnav.local");
+    expect(requested.pathname).toBe("/api/archived-repository");
+    expect(requested.searchParams.get("q")).toBe("archive");
+    expect(requested.searchParams.get("year")).toBe("2026");
   });
 
   it("posts the submitted query to the public similarity endpoint", async () => {
@@ -649,8 +686,6 @@ describe("office repository API", () => {
       can_edit: true,
       can_delete: true,
       can_restore: false,
-      category_id: null,
-      category: null,
       abstract: null,
       keywords: null,
       degree_program: null,
@@ -1001,7 +1036,6 @@ describe("specialist workspace API routes", () => {
       {
         id: 7,
         title: "Catalog record",
-        category: null,
         submission_status: "approved",
         archive_status: "archived",
         visibility: "public",
@@ -1045,12 +1079,18 @@ describe("specialist workspace API routes", () => {
     };
     const fetchMock = vi.fn(
       async () =>
-        new Response(JSON.stringify({ data: paginator, schema_version: 1 })),
+        new Response(
+          JSON.stringify({
+            data: paginator,
+            filters: { years: [2026, 2025] },
+            schema_version: 1,
+          }),
+        ),
     );
 
     await expect(
       listRepositoryCatalog({ sort: "title", direction: "asc" }, fetchMock),
-    ).resolves.toEqual(normalized);
+    ).resolves.toEqual({ ...normalized, filters: { years: [2026, 2025] } });
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/librarian/catalog?sort=title&direction=asc",
       expect.anything(),
@@ -1078,7 +1118,7 @@ describe("specialist workspace API routes", () => {
       fetchMock,
     );
     await listRepositoryCatalog(
-      { search: "records", category: 2, page: 3, per_page: 25 },
+      { search: "records", page: 3, per_page: 25 },
       fetchMock,
     );
     await listComplianceQueue(fetchMock);
@@ -1117,7 +1157,7 @@ describe("specialist workspace API routes", () => {
         body: JSON.stringify({ remarks: "Clarify the sample frame." }),
       },
       {
-        path: "/api/librarian/catalog?search=records&category=2&page=3&per_page=25",
+        path: "/api/librarian/catalog?search=records&page=3&per_page=25",
         method: "GET",
         body: undefined,
       },
@@ -1610,6 +1650,19 @@ describe("similarity API", () => {
             data: [],
             extracted_text: "CHAPTER 1\nManuscript text",
             file_name: "draft.pdf",
+            file_diagnostics: [
+              {
+                index: 0,
+                status: "included",
+                reason: null,
+                extraction_success: true,
+                text_length: 25,
+                detected_chapters: [1],
+                kind: "manuscript",
+                eligible: true,
+                extracted_text: "CHAPTER 1\nManuscript text",
+              },
+            ],
           }),
         );
       },
@@ -1622,7 +1675,19 @@ describe("similarity API", () => {
       checkContentUploadSimilarity([file], fetchMock),
     ).resolves.toEqual({
       matches: [],
-      diagnostics: [],
+      diagnostics: [
+        {
+          index: 0,
+          status: "included",
+          reason: null,
+          extractionSuccess: true,
+          textLength: 25,
+          detectedChapters: [1],
+          kind: "manuscript",
+          eligible: true,
+          extractedText: "CHAPTER 1\nManuscript text",
+        },
+      ],
       fileName: "draft.pdf",
       extractedText: "CHAPTER 1\nManuscript text",
     });

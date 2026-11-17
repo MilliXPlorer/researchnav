@@ -166,6 +166,7 @@ export function ConfirmDialog({
   message,
   confirmLabel,
   busy = false,
+  className = "",
   onConfirm,
   onCancel,
   children,
@@ -174,12 +175,13 @@ export function ConfirmDialog({
   message: string;
   confirmLabel: string;
   busy?: boolean;
+  className?: string;
   onConfirm: () => void;
   onCancel: () => void;
   children?: ReactNode;
 }) {
   return (
-    <Modal label={title} onClose={onCancel} busy={busy}>
+    <Modal label={title} onClose={onCancel} busy={busy} className={className}>
       <div className="confirm-card">
         <p className="eyebrow">Please confirm</p>
         <h2>{title}</h2>

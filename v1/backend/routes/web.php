@@ -4,7 +4,6 @@ use App\Http\Controllers\AccessRequestController;
 use App\Http\Controllers\AdminController;
 use App\Http\Controllers\AdviserController;
 use App\Http\Controllers\ApiController;
-use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\CoordinatorWorkspaceController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DocumentFileController;
@@ -194,6 +193,9 @@ Route::prefix('api')
             Route::put('research/{researchDocument}/monitoring', [LibrarianController::class, 'saveMonitoring'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('archiving-queue', [LibrarianController::class, 'archivingQueue']);
             Route::get('catalog', [LibrarianController::class, 'repositoryCatalog']);
+            Route::get('catalog/{researchDocument}/files', [LibrarianController::class, 'repositoryFiles'])->whereNumber('researchDocument');
+            Route::get('catalog/{researchDocument}/files/{documentFile}/preview', [LibrarianController::class, 'previewRepositoryFile'])->middleware('throttle:research-file-access')->whereNumber(['researchDocument', 'documentFile']);
+            Route::get('catalog/{researchDocument}/files/{documentFile}/download', [LibrarianController::class, 'downloadRepositoryFile'])->middleware('throttle:research-file-access')->whereNumber(['researchDocument', 'documentFile']);
             Route::get('metadata-standards', [LibrarianController::class, 'metadataStandards']);
             Route::put('metadata/{researchDocument}', [LibrarianController::class, 'saveMetadataReview'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('retention-logs', [LibrarianController::class, 'retentionLogs']);
@@ -207,6 +209,9 @@ Route::prefix('api')
             Route::get('monitoring', [EditorController::class, 'monitoring']);
             Route::put('research/{researchDocument}/monitoring', [EditorController::class, 'saveMonitoring'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
         });
+
+        Route::get('archived-repository', [PublicRepositoryController::class, 'archivedIndex'])
+            ->middleware(['current.user', 'account.active', 'role:panel,statistician,research_editor', 'throttle:public-search']);
 
         Route::prefix('office')->middleware(['current.user', 'account.active', 'office.authority'])->group(function (): void {
             Route::get('author-accounts', [ResearchOfficeController::class, 'authorAccounts'])
@@ -243,7 +248,6 @@ Route::prefix('api')
         // Public repository reads remain sessionless and never initialize a
         // browser session for repository visitors.
         Route::middleware([])->withoutMiddleware([StartSession::class, ShareErrorsFromSession::class, PreventRequestForgery::class])->group(function (): void {
-            Route::get('categories', [CategoryController::class, 'index']);
             Route::get('sdgs', [SdgController::class, 'index']);
             Route::get('repository', [PublicRepositoryController::class, 'index'])->middleware('throttle:public-search');
             Route::get('repository/{researchDocument}', [PublicRepositoryController::class, 'show']);
@@ -319,8 +323,6 @@ Route::prefix('api')
             Route::patch('notifications/{notification}/read', [NotificationController::class, 'read'])->middleware('origin.allowed');
             Route::delete('notifications/{notification}', [NotificationController::class, 'destroy'])->middleware('origin.allowed');
 
-            Route::post('categories', [CategoryController::class, 'store'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
-            Route::patch('categories/{category}', [CategoryController::class, 'update'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('repository/{researchDocument}/download', [PublicRepositoryController::class, 'download'])->name('repository.download')->middleware('throttle:catalog-download');
         });
     });

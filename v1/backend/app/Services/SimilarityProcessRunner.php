@@ -197,6 +197,61 @@ class SimilarityProcessRunner implements SimilarityProcess
             ->all();
     }
 
+    /** @return list<int> */
+    public function detectUploadedContentChapters(string $uploadedContent, bool $requireChapterOne = false): array
+    {
+        $decoded = $this->execute([
+            'scope_text' => $uploadedContent,
+            'require_chapter_one' => $requireChapterOne,
+        ]);
+        if (array_keys($decoded) !== ['status', 'chapters', 'scope_characters']
+            || $decoded['status'] !== 'valid'
+            || ! is_array($decoded['chapters'])
+            || ! is_int($decoded['scope_characters'])
+            || $decoded['scope_characters'] < 1) {
+            throw new SimilarityProcessException('Similarity worker scope response is invalid.');
+        }
+        foreach ($decoded['chapters'] as $chapter) {
+            if (! is_int($chapter) || $chapter < 1 || $chapter > 10) {
+                throw new SimilarityProcessException('Similarity worker scope response is invalid.');
+            }
+        }
+
+        return array_values(array_unique($decoded['chapters']));
+    }
+
+    /**
+     * @param  list<string>  $uploadedContents
+     * @return list<list<int>>
+     */
+    public function detectUploadedContentChaptersBatch(array $uploadedContents): array
+    {
+        $decoded = $this->execute(['scope_texts' => array_map(
+            fn (string $text): array => ['text' => $text, 'require_chapter_one' => false],
+            $uploadedContents,
+        )]);
+        if (array_keys($decoded) !== ['results'] || ! is_array($decoded['results']) || count($decoded['results']) !== count($uploadedContents)) {
+            throw new SimilarityProcessException('Similarity worker scope response is invalid.');
+        }
+
+        $chapters = [];
+        foreach ($decoded['results'] as $result) {
+            if (! is_array($result) || array_keys($result) !== ['status', 'chapters']
+                || ! in_array($result['status'], ['valid', 'supporting'], true) || ! is_array($result['chapters'])
+                || ($result['status'] === 'supporting' && $result['chapters'] !== [])) {
+                throw new SimilarityProcessException('Similarity worker scope response is invalid.');
+            }
+            foreach ($result['chapters'] as $chapter) {
+                if (! is_int($chapter) || $chapter < 1 || $chapter > 10) {
+                    throw new SimilarityProcessException('Similarity worker scope response is invalid.');
+                }
+            }
+            $chapters[] = array_values(array_unique($result['chapters']));
+        }
+
+        return $chapters;
+    }
+
     /**
      * @param  Collection<int, ResearchDocument>  $candidates
      * @return array<int, array<string, mixed>>
@@ -439,8 +494,14 @@ class SimilarityProcessRunner implements SimilarityProcess
             throw new SimilarityProcessException('Similarity worker returned an unsuccessful status.');
         }
 
-        if ($code === 'INVALID_UPLOAD_SCOPE') {
-            throw new UploadedContentInvalidScopeException('Uploaded manuscript chapter scope is invalid.');
+        if ($code === 'CHAPTER_ONE_NOT_FOUND' || $code === 'INVALID_UPLOAD_SCOPE') {
+            throw new UploadedContentChapterOneNotFoundException;
+        }
+        if ($code === 'CHAPTER_ORDER_INVALID') {
+            throw new UploadedContentChapterOrderException('chapter_order_invalid');
+        }
+        if ($code === 'CHAPTER_SCOPE_EMPTY') {
+            throw new UploadedContentEmptyScopeException('chapter_scope_empty');
         }
         if ($code === 'CAPACITY_EXCEEDED') {
             throw new PublicRepositorySimilarityCapacityException('Public similarity capacity exceeded.');

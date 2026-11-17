@@ -24,7 +24,7 @@ class ResearchController extends DomainController
     {
         $actor = $this->actor($request);
         $input = $request->validated();
-        $query = ResearchDocument::query()->with(['authors', 'category', 'sdgs']);
+        $query = ResearchDocument::query()->with(['authors', 'sdgs']);
         if (! DomainAuthorization::isOffice($actor)) {
             $query->where(function ($query) use ($actor): void {
                 if (DomainAuthorization::isResearcher($actor)) {
@@ -83,7 +83,7 @@ class ResearchController extends DomainController
     {
         $this->allowed((new ResearchDocumentPolicy)->view($this->actor($request), $researchDocument));
 
-        return new ResearchDocumentResource($researchDocument->load(['authors', 'category', 'sdgs']));
+        return new ResearchDocumentResource($researchDocument->load(['authors', 'sdgs']));
     }
 
     public function update(UpdateResearchRequest $request, ResearchDocument $researchDocument, ResearchService $service)

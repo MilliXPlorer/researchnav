@@ -26,7 +26,6 @@ class UpdateResearchRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'category_id' => ['sometimes', 'nullable', 'integer', 'exists:categories,id'],
             'title' => ['sometimes', 'filled', 'string', 'max:500'],
             'abstract' => ['sometimes', 'nullable', 'string', 'max:50000'],
             'keywords' => ['sometimes', 'nullable', 'string', 'max:5000'],
@@ -48,7 +47,7 @@ class UpdateResearchRequest extends FormRequest
     public function withValidator(Validator $validator): void
     {
         $validator->after(function () use ($validator): void {
-            $this->rejectUnknownFields($validator, ['category_id', 'title', 'abstract', 'keywords', 'publication_year', 'sdg_ids', 'institute', 'degree_program', 'manuscript_date_label', 'research_stage', 'authors']);
+            $this->rejectUnknownFields($validator, ['title', 'abstract', 'keywords', 'publication_year', 'sdg_ids', 'institute', 'degree_program', 'manuscript_date_label', 'research_stage', 'authors']);
             $institute = $this->input('institute', $this->route('researchDocument')?->institute);
             $program = $this->input('degree_program', $this->route('researchDocument')?->degree_program);
             if ($program !== null && ! in_array($program, ResearchDocument::PROGRAMS_BY_INSTITUTE[$institute] ?? [], true)) {

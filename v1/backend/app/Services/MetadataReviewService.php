@@ -20,9 +20,8 @@ class MetadataReviewService
 
             return ResearchDocument::query()
                 ->whereIn('submission_status', ['approved', 'archived'])
-                ->with('category:id,name')
                 ->orderByDesc('updated_at')
-                ->get(['id', 'title', 'submission_status', 'archive_status', 'abstract', 'keywords', 'publication_year', 'category_id'])
+                ->get(['id', 'title', 'submission_status', 'archive_status', 'abstract', 'keywords', 'publication_year'])
                 ->map(function (ResearchDocument $document) use ($reviews): array {
                     $document->setRelation('metadataReview', $reviews->get($document->id));
 
@@ -32,14 +31,12 @@ class MetadataReviewService
                         'submission_status' => $document->submission_status,
                         'archive_status' => $document->archive_status,
                         'publication_year' => $document->publication_year,
-                        'category' => $document->category?->name,
                         'metadata_review' => $document->metadataReview === null ? null : [
                             'id' => $document->metadataReview->id,
                             'title_complete' => $document->metadataReview->title_complete,
                             'abstract_complete' => $document->metadataReview->abstract_complete,
                             'authors_complete' => $document->metadataReview->authors_complete,
                             'keywords_complete' => $document->metadataReview->keywords_complete,
-                            'category_complete' => $document->metadataReview->category_complete,
                             'notes' => $document->metadataReview->notes,
                             'review_status' => $document->metadataReview->review_status,
                         ],
@@ -49,22 +46,20 @@ class MetadataReviewService
 
         return ResearchDocument::query()
             ->whereIn('submission_status', ['approved', 'archived'])
-            ->with(['metadataReview', 'category:id,name'])
+            ->with('metadataReview')
             ->orderByDesc('updated_at')
-            ->get(['id', 'title', 'submission_status', 'archive_status', 'abstract', 'keywords', 'publication_year', 'category_id'])
+            ->get(['id', 'title', 'submission_status', 'archive_status', 'abstract', 'keywords', 'publication_year'])
             ->map(fn (ResearchDocument $document) => [
                 'research_document_id' => $document->id,
                 'title' => $document->title,
                 'submission_status' => $document->submission_status,
                 'archive_status' => $document->archive_status,
                 'publication_year' => $document->publication_year,
-                'category' => $document->category?->name,
                 'metadata_completeness' => [
                     'title' => $document->title !== null && $document->title !== '',
                     'abstract' => $document->abstract !== null && $document->abstract !== '',
                     'keywords' => $document->keywords !== null && $document->keywords !== '',
                     'authors' => $document->authors()->exists(),
-                    'category' => $document->category_id !== null,
                 ],
                 'metadata_review' => $document->metadataReview === null ? null : [
                     'id' => $document->metadataReview->id,
@@ -72,7 +67,6 @@ class MetadataReviewService
                     'abstract_complete' => $document->metadataReview->abstract_complete,
                     'authors_complete' => $document->metadataReview->authors_complete,
                     'keywords_complete' => $document->metadataReview->keywords_complete,
-                    'category_complete' => $document->metadataReview->category_complete,
                     'notes' => $document->metadataReview->notes,
                     'review_status' => $document->metadataReview->review_status,
                 ],
@@ -93,7 +87,6 @@ class MetadataReviewService
                         'abstract_complete' => $data['abstract_complete'] ?? false,
                         'authors_complete' => $data['authors_complete'] ?? false,
                         'keywords_complete' => $data['keywords_complete'] ?? false,
-                        'category_complete' => $data['category_complete'] ?? false,
                         'notes' => $data['notes'] ?? null,
                         'review_status' => $data['review_status'] ?? 'complete',
                     ],

@@ -31,7 +31,6 @@ export interface ResearchRecord {
   degreeProgram: string;
   /** @deprecated Use degreeProgram. Kept for existing workspace layouts. */
   program: string;
-  category: string;
   sdgs?: Array<{
     id: number;
     code: string;

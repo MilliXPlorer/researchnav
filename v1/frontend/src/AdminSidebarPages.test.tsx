@@ -899,9 +899,8 @@ describe("administrator sidebar pages", () => {
     render(<AdminSidebarPage selectedNav="All Users" />);
     await screen.findByText("page-1@example.test");
 
-    fireEvent.change(screen.getByLabelText("Access status"), {
-      target: { value: "active" },
-    });
+    fireEvent.click(screen.getByLabelText("Access status"));
+    fireEvent.click(screen.getByRole("option", { name: "Active" }));
     fireEvent.click(await screen.findByRole("button", { name: "Page 2" }));
     await screen.findByText("page-2@example.test");
 

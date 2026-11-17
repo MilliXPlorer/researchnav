@@ -19,7 +19,6 @@ const fallbackRecord: ResearchRecord = {
   institute: "Example Unit",
   degreeProgram: "Example Program",
   program: "Example Program",
-  category: "Example Category",
   abstract:
     "This record must not be client-filtered during a similarity search.",
   keywords: ["literal"],
@@ -62,7 +61,6 @@ function resource(
     institution_name: "Example College",
     institute: "Example Unit",
     degree_program: "Example Program",
-    category: { name: "Example Category" },
     abstract: "Algorithm-scored public metadata.",
     keywords: ["algorithm"],
     research_stage: "completed",
@@ -271,32 +269,27 @@ describe("CatalogPage public similarity search", () => {
     expect(toolbar?.nextElementSibling).toHaveTextContent("Search tip");
   });
 
-  it("shows a year range dropdown, category, and institute metadata filters", () => {
+  it("shows year range, SDG, and institute metadata filters", () => {
     renderCatalog();
 
-    const from = screen.getByLabelText(
-      "Filter from publication year",
-    ) as HTMLSelectElement;
-    const to = screen.getByLabelText(
-      "Filter to publication year",
-    ) as HTMLSelectElement;
-    expect(from.tagName).toBe("SELECT");
-    expect(to.tagName).toBe("SELECT");
     expect(
-      screen.getByRole("combobox", { name: /filter from publication year/i }),
+      screen.getByRole("button", { name: /filter from publication year/i }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("combobox", { name: /filter to publication year/i }),
+      screen.getByRole("button", { name: /filter to publication year/i }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "All SDGs" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("combobox", { name: /filter by institute/i }),
+      screen.getByRole("button", { name: /filter by institute/i }),
     ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: /filter by institute/i }),
+    );
     expect(
       within(
-        screen.getByRole("combobox", { name: /filter by institute/i }),
+        screen.getByRole("listbox", { name: "Filter by institute" }),
       ).getAllByRole("option"),
     ).toHaveLength(7);
     expect(
@@ -320,23 +313,23 @@ describe("CatalogPage public similarity search", () => {
     );
     renderCatalog();
 
-    const from = screen.getByLabelText("Filter from publication year");
-    const to = screen.getByLabelText("Filter to publication year");
-    fireEvent.change(from, { target: { value: "2022" } });
-    fireEvent.change(to, { target: { value: "2024" } });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Filter from publication year" }),
+    );
+    fireEvent.click(screen.getByRole("option", { name: "2022" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Filter to publication year" }),
+    );
+    fireEvent.click(screen.getByRole("option", { name: "2024" }));
 
     expect(window.location.search).toContain("year_from=2022");
     expect(window.location.search).toContain("year_to=2024");
     expect(
-      within(to)
-        .getAllByRole("option")
-        .map((option) => option.textContent),
-    ).not.toContain("2020");
+      screen.queryByRole("option", { name: "2020" }),
+    ).not.toBeInTheDocument();
     expect(
-      within(from)
-        .getAllByRole("option")
-        .map((option) => option.textContent),
-    ).not.toContain("2026");
+      screen.queryByRole("option", { name: "2026" }),
+    ).not.toBeInTheDocument();
     expect(
       await screen.findByText("No studies match these filters"),
     ).toBeInTheDocument();
@@ -350,9 +343,11 @@ describe("CatalogPage public similarity search", () => {
     vi.stubGlobal("fetch", fetchMock);
     renderCatalog();
 
-    fireEvent.change(
-      screen.getByRole("combobox", { name: /filter by institute/i }),
-      { target: { value: "Institute of Teacher Education" } },
+    fireEvent.click(
+      screen.getByRole("button", { name: /filter by institute/i }),
+    );
+    fireEvent.click(
+      screen.getByRole("option", { name: "Institute of Teacher Education" }),
     );
 
     await waitFor(() =>

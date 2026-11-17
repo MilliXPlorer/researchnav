@@ -37,8 +37,6 @@ const item: OfficeRepositoryItemResource = {
 
 const detail: OfficeRepositoryDetailResource = {
   ...item,
-  category_id: null,
-  category: null,
   abstract: "A safe abstract.",
   keywords: null,
   degree_program: null,
@@ -148,8 +146,6 @@ function installFetch({
             ],
           }),
         );
-      if (path === "/api/categories")
-        return new Response(JSON.stringify({ data: [] }));
       if (path.includes("bucket=recycle")) {
         return new Response(
           JSON.stringify(
@@ -253,9 +249,10 @@ describe("ManageRepository", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(String(fetchMock.mock.calls[1][0])).toContain("search=coastal");
 
-    fireEvent.change(screen.getByLabelText("Institute"), {
-      target: { value: "Institute of Computer Studies" },
-    });
+    fireEvent.click(screen.getByRole("button", { name: "Institute" }));
+    fireEvent.click(
+      screen.getByRole("option", { name: "Institute of Computer Studies" }),
+    );
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
     expect(String(fetchMock.mock.calls[2][0])).toContain(
       "institute=Institute+of+Computer+Studies",
@@ -338,6 +335,10 @@ describe("ManageRepository", () => {
       name: "Repository record details",
     });
     const title = await within(dialog).findByLabelText("Title");
+    expect(within(dialog).queryByLabelText("Category")).not.toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(([path]) => String(path) === "/api/categories"),
+    ).toBe(false);
     fireEvent.change(title, { target: { value: "Updated study title" } });
     fireEvent.click(
       within(dialog).getByRole("button", { name: "Add researcher" }),
@@ -376,6 +377,9 @@ describe("ManageRepository", () => {
         },
       ],
     });
+    expect(
+      JSON.parse(String((patch?.[1] as RequestInit).body)),
+    ).not.toHaveProperty("category_id");
   });
 
   it("keeps the draft open after a version conflict", async () => {

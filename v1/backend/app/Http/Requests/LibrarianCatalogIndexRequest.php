@@ -16,8 +16,9 @@ class LibrarianCatalogIndexRequest extends FormRequest
     {
         return [
             'search' => ['nullable', 'string', 'max:200'],
-            'category' => ['nullable', 'integer'],
-            'sort' => ['nullable', 'string', Rule::in(['title', 'category', 'submission_status', 'archive_status', 'visibility', 'publication_year', 'updated_at'])],
+            'visibility' => ['nullable', 'string', Rule::in(['private', 'registered_only', 'public'])],
+            'year' => ['nullable', 'integer', 'min:1900', 'max:'.(now()->year + 1)],
+            'sort' => ['nullable', 'string', Rule::in(['title', 'submission_status', 'archive_status', 'visibility', 'publication_year', 'updated_at'])],
             'direction' => ['nullable', 'string', Rule::in(['asc', 'desc'])],
             'page' => ['nullable', 'integer', 'min:1'],
         ];

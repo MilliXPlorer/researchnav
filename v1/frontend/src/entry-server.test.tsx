@@ -17,7 +17,6 @@ const record = {
   institution_name: "Example College",
   institute: "Institute of Computing",
   degree_program: "Computer Science",
-  category: { name: "Repositories" },
   abstract: "Rendered before hydration.",
   keywords: ["ssr"],
   research_stage: "completed",

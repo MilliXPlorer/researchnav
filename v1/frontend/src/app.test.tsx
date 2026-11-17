@@ -26,7 +26,6 @@ const reviewedRecord: ResearchRecord = {
   degreeProgram: "API Program",
   institute: "API Academic Unit",
   program: "API Program",
-  category: "API Category",
   abstract: "A public repository response.",
   keywords: ["api", "repository"],
   researchStage: "Completed",
@@ -54,7 +53,6 @@ const repositoryResource = {
   institution_location: "Tangub City",
   institute: "API Academic Unit",
   degree_program: "API Program",
-  category: { name: "API Category" },
   abstract: "A public repository response.",
   keywords: "api, repository",
   manuscript_date_label: "June 2026",
@@ -371,6 +369,7 @@ describe("role workspaces", () => {
     expect(navFor("librarian")).toEqual([
       "Dashboard",
       "Assigned Research",
+      "Repository",
       "User Logs",
     ]);
 
@@ -711,7 +710,6 @@ describe("role workspaces", () => {
                 abstract: null,
                 keywords: null,
                 publication_year: null,
-                category: null,
                 authors: [],
                 submitted_at: null,
               },
@@ -756,6 +754,461 @@ describe("role workspaces", () => {
       dashboard: dashboardFor(role, key),
     },
     onRetry: vi.fn(),
+  });
+
+  const statisticianProjection = {
+    schema_version: 1 as const,
+    counts: {
+      assigned: 4,
+      pending: 1,
+      in_review: 1,
+      for_sign_off: 1,
+      completed: 2,
+    },
+    workload: [
+      {
+        research_document_id: 71,
+        title: "Pending methodology study with a complete accessible title",
+        research_stage: "proposal",
+        submission_status: "under_review",
+        review_status: "pending" as const,
+        due_at: null,
+        started_at: null,
+        completed_at: null,
+        updated_at: "2026-11-14T08:00:00Z",
+      },
+      {
+        research_document_id: 72,
+        title: "Active methodology review",
+        research_stage: "ongoing",
+        submission_status: "under_review",
+        review_status: "in_progress" as const,
+        due_at: "2026-11-30T08:00:00Z",
+        started_at: "2026-11-10T08:00:00Z",
+        completed_at: null,
+        updated_at: "2026-11-15T08:00:00Z",
+      },
+    ],
+    workload_status: { pending: 1, in_review: 1, completed: 2 },
+    activity: {
+      months: [
+        { key: "2026-06", label: "Jun", started: 0, completed: 0 },
+        { key: "2026-07", label: "Jul", started: 1, completed: 0 },
+        { key: "2026-08", label: "Aug", started: 1, completed: 1 },
+        { key: "2026-09", label: "Sep", started: 0, completed: 0 },
+        { key: "2026-10", label: "Oct", started: 1, completed: 1 },
+        { key: "2026-11", label: "Nov", started: 1, completed: 0 },
+      ],
+    },
+    recent_activity: [
+      {
+        id: "newer",
+        research_document_id: 72,
+        title: "Active methodology review",
+        type: "review_started" as const,
+        occurred_at: "2026-11-15T08:00:00Z",
+      },
+      {
+        id: "older",
+        research_document_id: 71,
+        title: "Pending methodology study",
+        type: "study_assigned" as const,
+        occurred_at: "2026-11-14T08:00:00Z",
+      },
+    ],
+  };
+
+  const librarianProjection = {
+    schema_version: 1 as const,
+    counts: {
+      archiving_queue: 2,
+      metadata_validation: 1,
+      repository_records: 14,
+      archived_this_month: 3,
+    },
+    queue: [
+      {
+        research_document_id: 81,
+        title: "Pending librarian review",
+        submitted_by: "Ada Researcher",
+        research_stage: "completed",
+        status: "pending" as const,
+        updated_at: "2026-11-15T08:00:00Z",
+      },
+      {
+        research_document_id: 82,
+        title: "Archive ready record",
+        submitted_by: "Grace Researcher",
+        research_stage: "completed",
+        status: "ready" as const,
+        updated_at: "2026-11-14T08:00:00Z",
+      },
+    ],
+    queue_status: { pending: 1, validating: 0, ready: 1 },
+    activity: {
+      six_months: {
+        months: [
+          { key: "2026-06", label: "Jun", archived: 0, returned: 0 },
+          { key: "2026-07", label: "Jul", archived: 1, returned: 0 },
+          { key: "2026-08", label: "Aug", archived: 0, returned: 1 },
+          { key: "2026-09", label: "Sep", archived: 1, returned: 0 },
+          { key: "2026-10", label: "Oct", archived: 1, returned: 0 },
+          { key: "2026-11", label: "Nov", archived: 3, returned: 0 },
+        ],
+      },
+      twelve_months: {
+        months: Array.from({ length: 12 }, (_, index) => ({
+          key: `2025-${String(index + 1).padStart(2, "0")}`,
+          label: `M${index + 1}`,
+          archived: index === 11 ? 1 : 0,
+          returned: 0,
+        })),
+      },
+    },
+    recent_activity: [
+      {
+        id: "newer",
+        research_document_id: 82,
+        title: "Archive ready record",
+        type: "archiving_review_completed" as const,
+        occurred_at: "2026-11-15T08:00:00Z",
+      },
+      {
+        id: "older",
+        research_document_id: 81,
+        title: "Pending librarian review",
+        type: "record_returned" as const,
+        occurred_at: "2026-11-14T08:00:00Z",
+      },
+    ],
+  };
+
+  it("renders the combined librarian dashboard with scoped filters and actions", () => {
+    const navigate = vi.fn();
+    const dashboard = dashboardFor("librarian", "repository_records");
+    const { container } = render(
+      <RoleWorkspace
+        {...readyProps("librarian", "repository_records")}
+        navigate={navigate}
+        dashboardState={{
+          scope: dashboardScopeFor("librarian"),
+          status: "ready",
+          dashboard: { ...dashboard, librarian: librarianProjection },
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByText(
+        "Manage archiving requests, validate repository metadata, and monitor collection activity.",
+      ),
+    ).toBeInTheDocument();
+    for (const [label, value] of [
+      ["Archiving queue", "2"],
+      ["Metadata validation", "1"],
+      ["Repository records", "14"],
+      ["Archived this month", "3"],
+    ]) {
+      const kpiGrid = container.querySelector<HTMLElement>(
+        ".librarian-kpi-grid",
+      )!;
+      expect(
+        within(kpiGrid).getByRole("heading", { name: label }).parentElement,
+      ).toHaveTextContent(value);
+    }
+    expect(container.querySelectorAll(".dashboard-kpi-card")).toHaveLength(4);
+    expect(screen.getByTestId("librarian-queue-card")).toContainElement(
+      screen.getByRole("heading", { name: "Queue status" }),
+    );
+    expect(
+      screen.getByTestId("librarian-recent-activity-card"),
+    ).toContainElement(
+      screen.getByRole("heading", { name: "Recent activity" }),
+    );
+    expect(screen.getByText("Archiving review completed")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Ready" }));
+    const queueCard = screen.getByTestId("librarian-queue-card");
+    expect(
+      within(queueCard).getByText("Archive ready record"),
+    ).toBeInTheDocument();
+    expect(
+      within(queueCard).queryByText("Pending librarian review"),
+    ).not.toBeInTheDocument();
+    fireEvent.click(within(queueCard).getByRole("button", { name: "Open" }));
+    expect(navigate).toHaveBeenCalledWith("/research/82");
+
+    expect(
+      screen.queryByRole("heading", { name: "Repository activity" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders compact librarian empty states", () => {
+    const dashboard = dashboardFor("librarian", "repository_records");
+    render(
+      <RoleWorkspace
+        {...readyProps("librarian", "repository_records")}
+        dashboardState={{
+          scope: dashboardScopeFor("librarian"),
+          status: "ready",
+          dashboard: {
+            ...dashboard,
+            librarian: {
+              ...librarianProjection,
+              counts: {
+                archiving_queue: 0,
+                metadata_validation: 0,
+                repository_records: 0,
+                archived_this_month: 0,
+              },
+              queue: [],
+              queue_status: { pending: 0, validating: 0, ready: 0 },
+              activity: {
+                six_months: {
+                  months: librarianProjection.activity.six_months.months.map(
+                    (month) => ({ ...month, archived: 0, returned: 0 }),
+                  ),
+                },
+                twelve_months: librarianProjection.activity.twelve_months,
+              },
+              recent_activity: [],
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByText("No studies are currently awaiting librarian review."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("No active archiving requests."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("No recent librarian activity."),
+    ).toBeInTheDocument();
+  });
+
+  it("renders the scoped statistician dashboard and filters its current workload", () => {
+    const navigate = vi.fn();
+    const dashboard = dashboardFor("statistician", "methodology_reviews");
+    render(
+      <RoleWorkspace
+        {...readyProps("statistician", "methodology_reviews")}
+        navigate={navigate}
+        dashboardState={{
+          scope: dashboardScopeFor("statistician"),
+          status: "ready",
+          dashboard: { ...dashboard, statistician: statisticianProjection },
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByText(
+        "Overview of your assigned studies, workload, and recent activity.",
+      ),
+    ).toBeInTheDocument();
+    for (const [label, value] of [
+      ["Assigned studies", "4"],
+      ["Pending reviews", "1"],
+      ["For sign-off", "1"],
+      ["Completed", "2"],
+    ]) {
+      expect(
+        screen.getByRole("heading", { name: label }).parentElement,
+      ).toHaveTextContent(value);
+    }
+    expect(screen.queryByText("Completed references")).not.toBeInTheDocument();
+    expect(screen.getByText("No due date")).toBeInTheDocument();
+    expect(
+      screen.getByRole("img", { name: /1 pending, 1 in review, 2 completed/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Review started")).toBeInTheDocument();
+    const activityItems = screen
+      .getByRole("heading", { name: "Recent activity" })
+      .closest("section")!
+      .querySelectorAll("li");
+    expect(activityItems[0]).toHaveTextContent("Active methodology review");
+
+    fireEvent.click(screen.getByRole("button", { name: "Pending" }));
+    const workloadCard = screen
+      .getByRole("heading", { name: "Current workload" })
+      .closest("section")!;
+    expect(
+      within(workloadCard).getByText(
+        "Pending methodology study with a complete accessible title",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(workloadCard).queryByText("Active methodology review"),
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      within(workloadCard).getByRole("button", { name: "Review" }),
+    );
+    expect(navigate).toHaveBeenCalledWith("/research/71");
+
+    fireEvent.click(screen.getByRole("button", { name: "In review" }));
+    expect(
+      within(workloadCard).getByText("Active methodology review"),
+    ).toBeInTheDocument();
+    fireEvent.click(within(workloadCard).getByRole("button", { name: "Open" }));
+    expect(navigate).toHaveBeenCalledWith("/research/72");
+  });
+
+  it("renders compact statistician dashboard empty states", () => {
+    const dashboard = dashboardFor("statistician", "methodology_reviews");
+    render(
+      <RoleWorkspace
+        {...readyProps("statistician", "methodology_reviews")}
+        dashboardState={{
+          scope: dashboardScopeFor("statistician"),
+          status: "ready",
+          dashboard: {
+            ...dashboard,
+            statistician: {
+              ...statisticianProjection,
+              counts: {
+                assigned: 0,
+                pending: 0,
+                in_review: 0,
+                for_sign_off: 0,
+                completed: 0,
+              },
+              workload: [],
+              workload_status: { pending: 0, in_review: 0, completed: 0 },
+              activity: {
+                months: statisticianProjection.activity.months.map((month) => ({
+                  ...month,
+                  started: 0,
+                  completed: 0,
+                })),
+              },
+              recent_activity: [],
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByText("No methodology reviews are currently assigned to you."),
+    ).toHaveClass("dashboard-compact-empty");
+    expect(
+      screen.getByText("No workload status is available."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("No review activity in the last 6 months."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("No recent statistician activity."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Review activity for the last six months"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText("No review activity in the last 6 months."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("No review activity in the last 6 months.")
+        .parentElement,
+    ).toHaveClass("statistician-activity-empty");
+  });
+
+  it("combines statistician workload and activity sections without changing their data", () => {
+    const dashboard = dashboardFor("statistician", "methodology_reviews");
+    const props = readyProps("statistician", "methodology_reviews");
+    const { container, rerender } = render(
+      <RoleWorkspace
+        {...props}
+        dashboardState={{
+          scope: dashboardScopeFor("statistician"),
+          status: "ready",
+          dashboard: {
+            ...dashboard,
+            statistician: {
+              ...statisticianProjection,
+              workload: statisticianProjection.workload.slice(0, 1),
+            },
+          },
+        }}
+      />,
+    );
+
+    const workloadCard = screen
+      .getByRole("heading", { name: "Current workload" })
+      .closest("section")!;
+    expect(workloadCard).toHaveClass("statistician-workload-card");
+    expect(within(workloadCard).getAllByRole("row")).toHaveLength(2);
+    expect(
+      within(workloadCard).getByText("Showing 1 of 1 assigned study"),
+    ).toBeInTheDocument();
+    expect(container.querySelectorAll(".dashboard-kpi-card")).toHaveLength(4);
+    expect(
+      container.querySelector(".statistician-kpi-grid"),
+    ).toBeInTheDocument();
+    expect(
+      container.querySelector(".statistician-dashboard"),
+    ).toBeInTheDocument();
+    expect(
+      container.querySelector(".statistician-dashboard-workspace"),
+    ).toBeInTheDocument();
+    const workloadCombinedCard = screen.getByTestId(
+      "statistician-workload-card",
+    );
+    const activityCombinedCard = screen.getByTestId(
+      "statistician-activity-card",
+    );
+    expect(workloadCombinedCard).toHaveClass("statistician-workload-card");
+    expect(activityCombinedCard).toHaveClass("statistician-activity-card");
+    expect(workloadCombinedCard).toContainElement(
+      screen.getByRole("heading", { name: "Current workload" }),
+    );
+    expect(workloadCombinedCard).toContainElement(
+      screen.getByRole("heading", { name: "Workload status" }),
+    );
+    expect(activityCombinedCard).toContainElement(
+      screen.getByRole("heading", { name: "Activity" }),
+    );
+    expect(activityCombinedCard).toContainElement(
+      screen.getByRole("heading", { name: "Recent activity" }),
+    );
+    expect(
+      workloadCombinedCard.compareDocumentPosition(activityCombinedCard),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(
+      screen.getByRole("button", { name: "Review activity" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Recent activity" }));
+    expect(
+      screen.getByRole("button", { name: "Recent activity" }),
+    ).toHaveAttribute("aria-pressed", "true");
+
+    rerender(
+      <RoleWorkspace
+        {...props}
+        dashboardState={{
+          scope: dashboardScopeFor("statistician"),
+          status: "ready",
+          dashboard: { ...dashboard, statistician: statisticianProjection },
+        }}
+      />,
+    );
+
+    expect(
+      within(
+        screen
+          .getByRole("heading", { name: "Current workload" })
+          .closest("section")!,
+      ).getAllByRole("row"),
+    ).toHaveLength(3);
+    expect(
+      within(
+        screen
+          .getByRole("heading", { name: "Current workload" })
+          .closest("section")!,
+      ).getByText("Showing 2 of 2 assigned studies"),
+    ).toBeInTheDocument();
   });
 
   it.each(cases)(

@@ -15,6 +15,9 @@ use App\Services\PublicRepositorySimilarityService;
 use App\Services\SimilarityProcessException;
 use App\Services\SimilarityService;
 use App\Services\SimilarityUnavailableException;
+use App\Services\UploadedContentChapterOneNotFoundException;
+use App\Services\UploadedContentChapterOrderException;
+use App\Services\UploadedContentEmptyScopeException;
 use App\Services\UploadedContentInvalidScopeException;
 use App\Services\UploadedContentSimilarityService;
 use App\Services\UploadedContentUnreadableException;
@@ -91,6 +94,8 @@ class SimilarityController extends DomainController
 
     public function contentUpload(ContentUploadSimilarityRequest $request, UploadedContentSimilarityService $service)
     {
+        set_time_limit((int) config('researchnav.similarity.timeout_seconds') + 30);
+
         try {
             $uploads = $request->hasFile('files') ? $request->file('files') : [$request->file('file')];
             $result = $service->compare($uploads);
@@ -103,7 +108,13 @@ class SimilarityController extends DomainController
                 'extracted_text' => $result['extracted_text'],
             ]);
         } catch (UploadedContentUnreadableException) {
-            return response()->json(['error' => 'CONTENT_UPLOAD_UNREADABLE'], 422);
+            return response()->json(['error' => 'CONTENT_UPLOAD_PDF_TEXT_UNREADABLE'], 422);
+        } catch (UploadedContentChapterOneNotFoundException) {
+            return response()->json(['error' => 'CONTENT_UPLOAD_CHAPTER_ONE_NOT_FOUND'], 422);
+        } catch (UploadedContentChapterOrderException) {
+            return response()->json(['error' => 'CONTENT_UPLOAD_CHAPTER_ORDER_INVALID'], 422);
+        } catch (UploadedContentEmptyScopeException) {
+            return response()->json(['error' => 'CONTENT_UPLOAD_CHAPTER_SCOPE_EMPTY'], 422);
         } catch (UploadedContentInvalidScopeException) {
             return response()->json(['error' => 'CONTENT_UPLOAD_INVALID_SCOPE'], 422);
         } catch (PublicRepositorySimilarityCapacityException) {

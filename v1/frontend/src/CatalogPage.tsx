@@ -26,7 +26,6 @@ import {
 } from "./api";
 import ProfileDialog, { ProfileAvatar } from "./ProfileDialog";
 import { instituteNames } from "./data";
-import { YearRangeSelect } from "./dateControls";
 import { classificationLabel, formatSimilarityPercentage } from "./similarity";
 import type { SimilarityClassification } from "./similarity";
 import type { ResearchRecord, UserSession } from "./types";
@@ -35,6 +34,8 @@ import { useDialogFocus } from "./useDialogFocus";
 import { SdgBadges } from "./SdgMetadata";
 import SdgPickerModal from "./SdgPickerModal";
 import ProtectedFileAccess from "./ProtectedFileAccess";
+import SelectMenu from "./SelectMenu";
+import { philippineYear } from "./dateTime";
 
 type SimilaritySearchResponse =
   | {
@@ -50,6 +51,25 @@ type SimilaritySearchResponse =
       status: "error";
       message: string;
     };
+
+function catalogYearOptions(
+  emptyLabel: string,
+  bound: "from" | "to",
+  otherValue: string,
+) {
+  const currentYear = philippineYear();
+  const other = Number(otherValue);
+  const hasOther = otherValue !== "" && Number.isInteger(other);
+  return [
+    { value: "", label: emptyLabel },
+    ...Array.from({ length: 9 }, (_, index) => currentYear - index)
+      .filter(
+        (year) =>
+          !hasOther || (bound === "from" ? year <= other : year >= other),
+      )
+      .map((year) => ({ value: String(year), label: String(year) })),
+  ];
+}
 
 export default function CatalogPage({
   onSignIn,
@@ -89,7 +109,6 @@ export default function CatalogPage({
   const exactYear = searchParams.get("year") ?? "";
   const yearFrom = searchParams.get("year_from") ?? exactYear;
   const yearTo = searchParams.get("year_to") ?? exactYear;
-  const category = searchParams.get("category") ?? "all";
   const institute = searchParams.get("institute") ?? "all";
   const sdgFilter = searchParams.get("sdgs") ?? "";
   const sdgIds = useMemo(
@@ -101,13 +120,10 @@ export default function CatalogPage({
     [sdgFilter],
   );
   const hasServerFilters =
-    Boolean(yearFrom || yearTo || sdgIds.length) ||
-    category !== "all" ||
-    institute !== "all";
+    Boolean(yearFrom || yearTo || sdgIds.length) || institute !== "all";
   const serverFilterKey = JSON.stringify({
     yearFrom,
     yearTo,
-    category,
     institute,
     sdgIds,
   });
@@ -142,7 +158,6 @@ export default function CatalogPage({
 
     searchPublicResearch(
       {
-        category: category === "all" ? undefined : category,
         institute: institute === "all" ? undefined : institute,
         sdgIds,
         yearFrom: yearFrom || undefined,
@@ -173,7 +188,6 @@ export default function CatalogPage({
       controller.abort();
     };
   }, [
-    category,
     hasActiveSimilarityQuery,
     hasServerFilters,
     institute,
@@ -195,7 +209,6 @@ export default function CatalogPage({
     page,
     yearFrom,
     yearTo,
-    category,
     institute,
     sdgIds,
     sort: searchParams.get("sort") ?? "relevance",
@@ -234,7 +247,6 @@ export default function CatalogPage({
         page,
         yearFrom: yearFrom || undefined,
         yearTo: yearTo || undefined,
-        category: category === "all" ? undefined : category,
         institute: institute === "all" ? undefined : institute,
         sdgIds,
         sort: (searchParams.get("sort") ?? "relevance") as
@@ -278,7 +290,6 @@ export default function CatalogPage({
     };
   }, [
     activeQuery,
-    category,
     hasActiveSimilarityQuery,
     institute,
     page,
@@ -322,8 +333,8 @@ export default function CatalogPage({
     ]?.title ?? "Preparing ranked results";
 
   const results = useMemo(() => {
-    // Server-side matching decides which records qualify whenever category or
-    // year filters are active. Similarity search includes those filters in its
+    // Server-side matching decides which records qualify whenever server filters
+    // are active. Similarity search includes those filters in its
     // own page request, so no client-side intersection is needed there.
     const allowedIds = hasServerFilters
       ? hasActiveSimilarityQuery
@@ -379,7 +390,6 @@ export default function CatalogPage({
         query: submittedQuery,
         yearFrom: yearFrom || null,
         yearTo: yearTo || null,
-        category: category === "all" ? null : category,
         institute: institute === "all" ? null : institute,
       });
     }
@@ -427,29 +437,32 @@ export default function CatalogPage({
             <FileText /> Open metadata
           </span>
         </div>
-        <SearchBox value={query} onChange={setQuery} onSubmit={submitSearch} />
+        <SearchBox
+          value={query}
+          onChange={setQuery}
+          onSubmit={submitSearch}
+          submitIcon="search"
+        />
         <div className="catalog-toolbar">
           <div className="filter-label">
             <Filter /> Refine results
           </div>
           <label className="catalog-year-filter">
             From year
-            <YearRangeSelect
-              aria-label="Filter from publication year"
-              bound="from"
-              otherValue={yearTo}
+            <SelectMenu
+              label="Filter from publication year"
               value={yearFrom}
-              onChange={(event) => updateParam("year_from", event.target.value)}
+              onChange={(value) => updateParam("year_from", value)}
+              options={catalogYearOptions("Any year", "from", yearTo)}
             />
           </label>
           <label className="catalog-year-filter">
             To year
-            <YearRangeSelect
-              aria-label="Filter to publication year"
-              bound="to"
-              otherValue={yearFrom}
+            <SelectMenu
+              label="Filter to publication year"
               value={yearTo}
-              onChange={(event) => updateParam("year_to", event.target.value)}
+              onChange={(value) => updateParam("year_to", value)}
+              options={catalogYearOptions("Any year", "to", yearFrom)}
             />
           </label>
           <div className="catalog-sdg-filter-trigger">
@@ -463,15 +476,15 @@ export default function CatalogPage({
           </div>
           <label>
             Institute<span className="sr-only">Filter by institute</span>
-            <select
+            <SelectMenu
+              label="Filter by institute"
               value={institute}
-              onChange={(event) => updateParam("institute", event.target.value)}
-            >
-              <option value="all">All institutes</option>
-              {instituteNames.map((value) => (
-                <option key={value}>{value}</option>
-              ))}
-            </select>
+              onChange={(value) => updateParam("institute", value)}
+              options={[
+                { value: "all", label: "All institutes" },
+                ...instituteNames.map((value) => ({ value, label: value })),
+              ]}
+            />
           </label>
         </div>
         <aside className="aside-note catalog-search-tip">
@@ -552,7 +565,7 @@ export default function CatalogPage({
             ) : serverFiltersLoading ? (
               <EmptyState
                 title="Applying filters"
-                message="Matching authors, keywords, categories, and years in the repository…"
+                message="Matching authors, keywords, and years in the repository…"
               />
             ) : serverFiltersFailed ? (
               <div role="alert">
@@ -590,7 +603,6 @@ export default function CatalogPage({
                 <article className="result-card" key={record.id}>
                   <div className="result-accession">
                     <span>{index + 1}</span>
-                    <span>{record.category}</span>
                   </div>
                   <h2>{record.title}</h2>
                   <p className="result-authors">

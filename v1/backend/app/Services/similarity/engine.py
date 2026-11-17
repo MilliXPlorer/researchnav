@@ -14,29 +14,31 @@ _TWELVE_PLACES = Decimal("0.000000000001")
 _ORDINAL_NUMBER_RE = re.compile(r"\A\d+(?:st|nd|rd|th)\Z", re.IGNORECASE)
 _CONTENT_TOKEN_RE = re.compile(r"(?u)\b[\w\d]{2,}\b")
 _CHAPTER_HEADING = re.compile(
-    r"(?im)^[ \t]*(?:chapter|chpter|kabanata|tsapter)[ \t]+"
-    r"(?P<number>10|[1-9]|one|two|three|four|five|six|seven|eight|nine|ten|"
+    r"(?im)^[ \t]*(?:chapter|chpter|kabanata|tsapter)[\s\u00a0]+"
+    r"(?P<number>10|[1-9]|one|uno|two|three|four|five|six|seven|eight|nine|ten|"
     r"viii|vii|vi|iv|iii|ii|ix|x|v|i)"
     r"(?!\w)[ \t]*(?:[:.\-–—][ \t]*)?[^\r\n]*\r?$"
 )
 _BACK_MATTER_HEADING = re.compile(
     r"(?im)^[ \t]*(?:references(?:[ \t]+and[ \t]+bibliography)?|bibliography|"
-    r"appendix|appendices|annex(?:es)?)(?:[ \t]+[A-Z0-9]+)?"
+    r"appendix|appendices|annex(?:es)?|curriculum[ \t]+vitae|questionnaires?|"
+    r"research[ \t]+instrument)(?:[ \t]+[A-Z0-9]+)?"
     r"(?:[ \t]*[:.\-–—][^\r\n]*)?[ \t]*\r?$"
 )
 _INLINE_CHAPTER_HEADING = re.compile(
-    r"\b(?:chapter|chpter|kabanata|tsapter)[ \t]+(?:10|[1-9]|one|two|three|four|five|six|"
+    r"\b(?:chapter|chpter|kabanata|tsapter)[\s\u00a0]+(?:10|[1-9]|one|uno|two|three|four|five|six|"
     r"seven|eight|nine|ten|viii|vii|vi|iv|iii|ii|ix|x|v|i)(?!\w)",
     re.IGNORECASE,
 )
 _FLAT_CHAPTER_HEADING = re.compile(
-    r"(?<!\w)(?:CHAPTER|Chapter|CHPTER|Chpter|KABANATA|Kabanata|TSAPTER|Tsapter)[ \t]+"
-    r"(?P<number>10|[1-9]|ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|"
+    r"(?<!\w)(?:CHAPTER|Chapter|CHPTER|Chpter|KABANATA|Kabanata|TSAPTER|Tsapter)[\s\u00a0]+"
+    r"(?P<number>10|[1-9]|ONE|UNO|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|"
     r"VIII|VII|VI|IV|III|II|IX|X|V|I)"
     r"(?!\w)(?=[ \t]*(?:[:.\-–—]|[A-Z]))",
 )
 _FLAT_BACK_MATTER_HEADING = re.compile(
-    r"(?<!\w)(?:REFERENCES|BIBLIOGRAPHY|APPENDICES|APPENDIX|ANNEXES)(?!\w)"
+    r"(?<!\w)(?:REFERENCES|BIBLIOGRAPHY|APPENDICES|APPENDIX|ANNEXES|"
+    r"CURRICULUM[ \t]+VITAE|QUESTIONNAIRES?|RESEARCH[ \t]+INSTRUMENT)(?!\w)"
 )
 _FLAT_NUMBERED_CHAPTER_HEADING = re.compile(
     r"(?<!\w)(?P<number>[2-5])[ \t]+"
@@ -175,6 +177,10 @@ class InvalidWorkerInput(ValueError):
 class InvalidUploadedContentScope(InvalidWorkerInput):
     """Raised when an uploaded manuscript cannot be chapter-scoped."""
 
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
 
 class SimilarityCapacityExceeded(RuntimeError):
     """Raised before a bounded similarity workload becomes expensive."""
@@ -240,6 +246,8 @@ def record_text(record: dict[str, Any]) -> str:
 
 def _chapter_number(value: str) -> int:
     normalized = value.upper()
+    if normalized == "UNO":
+        return 1
     if normalized.isdigit():
         return int(normalized)
     if normalized in _NUMBER_WORDS:
@@ -253,7 +261,11 @@ def _structural_chapter_matches(text: str) -> list[re.Match[str]]:
         heading = match.group(0).strip()
         title_start = match.start("number") - match.start() + len(match.group("number"))
         title = heading[title_start:].lstrip(" \t:.-–—")
-        if title and (len(title) > 120 or (title[0].islower() and len(title.split()) > 3)):
+        if title and (
+            len(title) > 120
+            or title.endswith((".", "?", "!"))
+            or (title[0].islower() and len(title.split()) > 3)
+        ):
             continue
         matches.append(match)
     return matches
@@ -313,21 +325,34 @@ def _complete_scope_from_matches(text: str, matches: list[re.Match[str]]) -> _Ch
     starts = [(match, number) for match, number in headings if number == 1]
     if not starts:
         raise InvalidWorkerInput("Chapter 1 was not detected.")
-    start, _ = starts[-1]
-    boundary_match = _BACK_MATTER_HEADING.search(text, start.end())
-    boundary = boundary_match.start() if boundary_match else len(text)
-    headings = [(match, number) for match, number in headings if match.start() < boundary]
-    following = []
-    previous = 1
-    for match, number in headings:
-        if match.start() <= start.start():
-            continue
-        if number == previous:
-            continue
-        if number < previous:
+    candidates = []
+    for start, _ in starts:
+        boundary_match = _BACK_MATTER_HEADING.search(text, start.end())
+        boundary = boundary_match.start() if boundary_match else len(text)
+        following = []
+        previous = 1
+        invalid = False
+        for match, number in headings:
+            if match.start() <= start.start() or match.start() >= boundary:
+                continue
+            if number == previous:
+                continue
+            if number < previous:
+                invalid = True
+                break
+            following.append((match, number))
+            previous = number
+        content = text[start.end() : boundary].strip(" \t\r\n:.-–—")
+        if not invalid and content:
+            candidates.append((start, boundary, following, previous))
+    if not candidates:
+        if any(text[start.end() :].strip(" \t\r\n:.-–—") for start, _ in starts):
             raise InvalidWorkerInput("Chapter headings are out of order.")
-        following.append((match, number))
-        previous = number
+        raise InvalidWorkerInput("No chapter content was detected.")
+    start, boundary, following, previous = max(
+        candidates,
+        key=lambda candidate: (candidate[3], len(candidate[2]), candidate[0].start()),
+    )
     parts: list[str] = []
     position = start.start()
     for match, number in [(start, 1), *following]:
@@ -341,7 +366,8 @@ def _complete_scope_from_matches(text: str, matches: list[re.Match[str]]) -> _Ch
         position = match.end()
     parts.append(text[position:])
     scoped = "".join(parts).strip()
-    if not scoped:
+    content_after_heading = text[start.end() : boundary].strip(" \t\r\n:.-–—")
+    if not scoped or not content_after_heading:
         raise InvalidWorkerInput("No chapter content was detected.")
     return _ChapterScope(scoped, previous)
 
@@ -427,6 +453,20 @@ def _uploaded_content_scope(text: str) -> _ChapterScope:
     """Keep complete content from Chapter 1 using line or flattened headings."""
     line_matches = _structural_chapter_matches(text)
     flat_matches = list(_FLAT_CHAPTER_HEADING.finditer(text))
+    line_numbers = [_chapter_number(match.group("number")) for match in line_matches]
+    upper_text = text.upper()
+    has_toc = "TABLE OF CONTENTS" in upper_text or "TALAAN NG NILALAMAN" in upper_text
+    if 1 in line_numbers and any(number > 1 for number in line_numbers[: line_numbers.index(1)]) and not has_toc:
+        raise InvalidUploadedContentScope("chapter_order_invalid")
+    if has_toc:
+        chapter_one_matches = [match for match in line_matches if _chapter_number(match.group("number")) == 1]
+        if len(chapter_one_matches) == 1:
+            only = chapter_one_matches[0]
+            heading = only.group(0).strip()
+            title_start = only.start("number") - only.start() + len(only.group("number"))
+            trailing = heading[title_start:].strip(" \t:.-–—")
+            if trailing and re.search(r"\s\d+$", trailing):
+                raise InvalidUploadedContentScope("chapter_one_not_found")
     prefer_flattened = "\n" not in text and len(flat_matches) > 1
     try:
         return _complete_scope_from_matches(
@@ -437,13 +477,67 @@ def _uploaded_content_scope(text: str) -> _ChapterScope:
             return _complete_scope_from_matches(
                 text, line_matches if prefer_flattened else flat_matches
             )
-        except InvalidWorkerInput:
+        except InvalidWorkerInput as fallback_exception:
             try:
                 return _scope_from_first_section_title(text, line_matches)
             except InvalidWorkerInput:
-                raise InvalidUploadedContentScope(
-                    "The uploaded manuscript has no valid chapter scope."
-                ) from exception
+                message = f"{exception} {fallback_exception}".lower()
+                if "out of order" in message or "duplicated" in message:
+                    reason = "chapter_order_invalid"
+                elif "no chapter content" in message:
+                    reason = "chapter_scope_empty"
+                else:
+                    reason = "chapter_one_not_found"
+                raise InvalidUploadedContentScope(reason) from exception
+
+
+def uploaded_content_scope_diagnostic(
+    text: str, require_chapter_one: bool = True
+) -> dict[str, Any]:
+    """Return bounded structural metadata without returning manuscript content."""
+    if require_chapter_one:
+        scope = _uploaded_content_scope(text)
+        scoped_text = scope.text
+    else:
+        matches = _structural_chapter_matches(text)
+        if not matches:
+            matches = list(_FLAT_CHAPTER_HEADING.finditer(text))
+        if not matches:
+            raise InvalidUploadedContentScope("chapter_one_not_found")
+        ordered = [_chapter_number(match.group("number")) for match in matches]
+        if 1 in ordered:
+            scope = _uploaded_content_scope(text)
+        else:
+            first = matches[0]
+            boundary_match = _BACK_MATTER_HEADING.search(text, first.end())
+            boundary = boundary_match.start() if boundary_match else len(text)
+            bounded = [
+                (match, _chapter_number(match.group("number")))
+                for match in matches
+                if match.start() < boundary
+            ]
+            if any(current <= previous for (_, previous), (_, current) in zip(bounded, bounded[1:])):
+                raise InvalidUploadedContentScope("chapter_order_invalid")
+            if not text[first.end() : boundary].strip(" \t\r\n:.-–—"):
+                raise InvalidUploadedContentScope("chapter_scope_empty")
+            scope = _ChapterScope(text[first.start() : boundary].strip(), bounded[-1][1])
+        scoped_text = scope.text
+    chapters = []
+    chapter_text = scope.text
+    for match in [
+        *_structural_chapter_matches(chapter_text),
+        *_FLAT_CHAPTER_HEADING.finditer(chapter_text),
+    ]:
+        chapter = _chapter_number(match.group("number"))
+        if chapter not in chapters:
+            chapters.append(chapter)
+    if require_chapter_one and 1 not in chapters:
+        chapters.insert(0, 1)
+    return {
+        "status": "valid",
+        "chapters": chapters,
+        "scope_characters": len(scope.text),
+    }
 
 
 def _normalize_content(text: str) -> str:

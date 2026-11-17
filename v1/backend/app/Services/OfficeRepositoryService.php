@@ -112,7 +112,7 @@ class OfficeRepositoryService
     private function metadata(array $data): array
     {
         $metadata = array_intersect_key($data, array_flip([
-            'category_id', 'title', 'abstract', 'keywords', 'publication_year', 'institute',
+            'title', 'abstract', 'keywords', 'publication_year', 'institute',
             'degree_program', 'manuscript_date_label', 'research_stage',
         ]));
         if (array_key_exists('title', $metadata)) {

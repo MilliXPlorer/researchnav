@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Models\Category;
 use App\Models\ClassSection;
 use App\Models\ResearchDocument;
 use App\Models\ResearchProjectTeamMember;
@@ -267,11 +266,7 @@ class SupportAssignmentSecurityTest extends TestCase
 
     private function research(User $owner): ResearchDocument
     {
-        $category = Category::query()->create([
-            'name' => 'Support '.fake()->unique()->word(),
-            'slug' => 'support-'.fake()->unique()->numberBetween(1, 999999),
-        ]);
-        $research = ResearchDocument::factory()->create(['submitted_by' => $owner->id, 'category_id' => $category->id]);
+        $research = ResearchDocument::factory()->create(['submitted_by' => $owner->id]);
         $this->assignResearcherToDocument($owner, $research);
 
         return $research;

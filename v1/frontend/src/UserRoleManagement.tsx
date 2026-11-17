@@ -19,6 +19,7 @@ import { Button, Pagination, SortableHeader } from "./components";
 import { formatPhilippineDate } from "./dateTime";
 import { useDebouncedValue } from "./useDebouncedValue";
 import { useDialogFocus } from "./useDialogFocus";
+import SelectMenu from "./SelectMenu";
 
 export interface ManagedUser {
   id: string;
@@ -156,6 +157,13 @@ export default function UserRoleManagement({
     }));
   }
 
+  function refreshUsers() {
+    setLoading(true);
+    setError("");
+    setMessage("");
+    setAttempt((current) => current + 1);
+  }
+
   async function update(user: ManagedUser, draft: UserEditDraft) {
     await saveUser(user, draft);
     setMessage(`Updated ${user.email}.`);
@@ -216,43 +224,40 @@ export default function UserRoleManagement({
           </label>
           <label>
             <span className="sr-only">Role</span>
-            <select
+            <SelectMenu
+              label="Role"
               value={query.role}
-              onChange={(event) =>
-                changeFilter("role", event.target.value as AdminRole | "")
+              onChange={(value) =>
+                changeFilter("role", value as AdminRole | "")
               }
-            >
-              <option value="">All roles</option>
-              {roles.map((role) => (
-                <option key={role} value={role}>
-                  {title(role)}
-                </option>
-              ))}
-            </select>
+              options={[
+                { value: "", label: "All roles" },
+                ...roles.map((role) => ({ value: role, label: title(role) })),
+              ]}
+            />
           </label>
           <label>
             <span className="sr-only">Access status</span>
-            <select
+            <SelectMenu
+              label="Access status"
               value={query.access_status}
-              onChange={(event) =>
-                changeFilter(
-                  "access_status",
-                  event.target.value as AccessStatus | "",
-                )
+              onChange={(value) =>
+                changeFilter("access_status", value as AccessStatus | "")
               }
-            >
-              <option value="">All statuses</option>
-              {accessStatuses.map((status) => (
-                <option key={status} value={status}>
-                  {title(status)}
-                </option>
-              ))}
-            </select>
+              options={[
+                { value: "", label: "All statuses" },
+                ...accessStatuses.map((status) => ({
+                  value: status,
+                  label: title(status),
+                })),
+              ]}
+            />
           </label>
           <Button
             variant="secondary"
-            className="icon-button"
-            onClick={() => setAttempt((current) => current + 1)}
+            className={`icon-button user-management-refresh${loading ? " is-loading" : ""}`}
+            onClick={refreshUsers}
+            disabled={loading}
             aria-label="Refresh users"
             title="Refresh users"
           >
