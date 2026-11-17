@@ -95,8 +95,8 @@ describe("LandingPage", () => {
       screen.getByRole("dialog", { name: "Contact Research Office" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("link", { name: "researchnavph@gmail.com" }),
-    ).toHaveAttribute("href", "mailto:researchnavph@gmail.com");
+      screen.getByRole("link", { name: "researchnavtech@gmail.com" }),
+    ).toHaveAttribute("href", "mailto:researchnavtech@gmail.com");
   });
 
   it("closes the About modal with Escape and restores its trigger", async () => {

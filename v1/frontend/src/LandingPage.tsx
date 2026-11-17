@@ -529,9 +529,9 @@ export default function LandingPage({
             <div className="public-contact-action">
               <a
                 className="button button-primary"
-                href="mailto:researchnavph@gmail.com"
+                href="mailto:researchnavtech@gmail.com"
               >
-                researchnavph@gmail.com
+                researchnavtech@gmail.com
               </a>
             </div>
           </div>
