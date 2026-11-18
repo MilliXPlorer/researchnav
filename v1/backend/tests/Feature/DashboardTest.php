@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Evaluation;
 use App\Models\MetadataReview;
 use App\Models\MethodologyReview;
 use App\Models\ResearchDocument;
@@ -180,11 +181,11 @@ class DashboardTest extends TestCase
             $foreign = $this->document(['title' => 'Foreign study']);
             $revoked = $this->document(['title' => 'Revoked study']);
 
-            $this->assign($pending, $statistician, 'statistician');
-            $this->assign($inReview, $statistician, 'statistician');
-            $this->assign($completed, $statistician, 'statistician');
-            $this->assign($foreign, $other, 'statistician');
-            $this->assign($revoked, $statistician, 'statistician', false);
+            $this->assign($pending, $statistician, 'statistician', true, 'proposal');
+            $this->assign($inReview, $statistician, 'statistician', true, 'proposal');
+            $this->assign($completed, $statistician, 'statistician', true, 'proposal');
+            $this->assign($foreign, $other, 'statistician', true, 'proposal');
+            $this->assign($revoked, $statistician, 'statistician', false, 'proposal');
 
             $inProgressReview = MethodologyReview::query()->create([
                 'research_document_id' => $inReview->id,
@@ -255,12 +256,12 @@ class DashboardTest extends TestCase
         $inactive = $this->document(['submission_status' => 'submitted']);
         $assignedToOtherAdviser = $this->document(['submission_status' => 'under_review']);
 
-        $this->assign($assigned, $adviser, 'adviser');
-        $this->assign($revision, $adviser, 'adviser');
-        $this->assign($proposal, $instructor, 'instructor');
-        $this->assign($inactive, $adviser, 'adviser', false);
-        $this->assign($assigned, $other, 'adviser');
-        $this->assign($assignedToOtherAdviser, $other, 'adviser');
+        $this->assign($assigned, $adviser, 'adviser', true, 'proposal');
+        $this->assign($revision, $adviser, 'adviser', true, 'proposal');
+        $this->assign($proposal, $instructor, 'instructor', true, 'proposal');
+        $this->assign($inactive, $adviser, 'adviser', false, 'proposal');
+        $this->assign($assigned, $other, 'adviser', true, 'proposal');
+        $this->assign($assignedToOtherAdviser, $other, 'adviser', true, 'proposal');
 
         $adviserSections = $this->sections($this->dashboard($adviser)->assertOk());
         $this->assertSame(1, $adviserSections['assigned_reviews']['total']);
@@ -271,6 +272,67 @@ class DashboardTest extends TestCase
         $this->assertSame(1, $instructorSections['title_proposals']['total']);
         $this->assertSame([$proposal->id], array_column($instructorSections['title_proposals']['items'], 'research_document_id'));
         $this->assertSame(0, $instructorSections['pending_reviews']['total']);
+    }
+
+    public function test_panel_dashboard_is_scoped_to_active_assignments_and_submitted_evaluations(): void
+    {
+        Carbon::setTestNow('2026-08-25 12:00:00');
+        try {
+            $panelist = $this->user('panel');
+            $otherPanelist = $this->user('panel');
+            $pending = $this->document(['title' => 'Pending assigned study']);
+            $completed = $this->document(['title' => 'Completed assigned study']);
+            $foreign = $this->document(['title' => 'Foreign panel study']);
+            $revoked = $this->document(['title' => 'Revoked panel study']);
+
+            $this->assign($pending, $panelist, 'panel', true, 'proposal');
+            $this->assign($completed, $panelist, 'panel', true, 'final');
+            $this->assign($foreign, $otherPanelist, 'panel', true, 'proposal');
+            $this->assign($revoked, $panelist, 'panel', false, 'proposal');
+
+            Evaluation::query()->create([
+                'research_document_id' => $completed->id,
+                'panelist_id' => $panelist->id,
+                'originality' => 4,
+                'methodology' => 4,
+                'clarity' => 4,
+                'submitted_at' => '2026-08-21 08:00:00',
+            ]);
+            Evaluation::query()->create([
+                'research_document_id' => $foreign->id,
+                'panelist_id' => $otherPanelist->id,
+                'originality' => 4,
+                'methodology' => 4,
+                'clarity' => 4,
+                'submitted_at' => '2026-08-25 08:00:00',
+            ]);
+            $this->document([
+                'submission_status' => 'archived',
+                'archive_status' => 'archived',
+                'visibility' => 'public',
+            ]);
+
+            $response = $this->dashboard($panelist)->assertOk();
+            $projection = $response->json('data.panel');
+
+            $this->assertSame(1, $projection['schema_version']);
+            $this->assertSame([
+                'assigned' => 2,
+                'pending' => 1,
+                'completed' => 1,
+                'repository_references' => 1,
+            ], $projection['counts']);
+            $this->assertSame([$pending->id, $completed->id], array_column($projection['assignments'], 'research_document_id'));
+            $this->assertSame(['pending', 'completed'], array_column($projection['assignments'], 'review_status'));
+            $this->assertSame(['proposal', 'final'], array_column($projection['assignments'], 'defense_stage'));
+            $this->assertNotContains($foreign->id, array_column($projection['recent_activity'], 'research_document_id'));
+            $this->assertNotContains($revoked->id, array_column($projection['recent_activity'], 'research_document_id'));
+            $this->assertContains('evaluation_submitted', array_column($projection['recent_activity'], 'type'));
+            $this->assertContains('study_assigned', array_column($projection['recent_activity'], 'type'));
+            $this->assertNull($this->dashboard($this->user('adviser'))->assertOk()->json('data.panel'));
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_repository_preview_applies_archived_visibility_rules_and_omits_forbidden_fields(): void
@@ -567,7 +629,7 @@ class DashboardTest extends TestCase
         return ResearchDocument::factory()->create($attributes);
     }
 
-    private function assign(ResearchDocument $document, User $reviewer, string $role, bool $active = true): void
+    private function assign(ResearchDocument $document, User $reviewer, string $role, bool $active = true, ?string $defenseType = null): void
     {
         ReviewAssignment::query()->create([
             'research_document_id' => $document->id,
@@ -575,6 +637,7 @@ class DashboardTest extends TestCase
             'assigned_by' => $this->user('research-office')->id,
             'review_role' => $role,
             'is_active' => $active,
+            'defense_type' => $defenseType,
         ]);
     }
 

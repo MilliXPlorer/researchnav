@@ -39,6 +39,7 @@ import {
   listOfficeInstituteStudies,
   officeInstituteStudyOpenUrl,
   type OfficeInstituteStudy,
+  type PanelDashboardProjection,
   type LibrarianDashboardProjection,
   type RoleDashboard,
   type RoleDashboardAnalytics,
@@ -106,6 +107,19 @@ type OfficeInstituteStudies = Record<
   string,
   OfficeInstituteStudy[] | null | undefined
 >;
+
+function defenseStageLabel(value: string | null) {
+  if (!value) return "Not specified";
+  const normalized = value.toLowerCase();
+  if (normalized.includes("proposal")) return "Proposal Defense";
+  if (normalized.includes("pre") && normalized.includes("oral")) {
+    return "Pre-Oral Defense";
+  }
+  if (normalized.includes("final")) return "Final Defense";
+  return value
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
 
 export default function RoleWorkspace({
   role,
@@ -717,6 +731,15 @@ function DashboardSections({
       <StatisticianDashboard
         projection={dashboardState.dashboard.statistician}
         navigate={navigate}
+      />
+    );
+  }
+
+  if (role === "panel" && dashboardState.dashboard.panel) {
+    return (
+      <PanelDashboard
+        projection={dashboardState.dashboard.panel}
+        selectNav={selectNav}
       />
     );
   }
@@ -1500,6 +1523,79 @@ function PanelDashboardOperations({
           ))}
         </div>
       </section>
+    </div>
+  );
+}
+
+function PanelDashboard({
+  projection,
+  selectNav,
+}: {
+  projection: PanelDashboardProjection;
+  selectNav: (item: string) => void;
+}) {
+  const totalReviews = projection.counts.pending + projection.counts.completed;
+  const completedShare = totalReviews
+    ? (projection.counts.completed / totalReviews) * 100
+    : 0;
+
+  return (
+    <div className="panel-dashboard" data-testid="panel-dashboard">
+      <div className="panel-dashboard-kpi-grid">
+        <DashboardKpiCard icon={SquareStack} label="Assigned studies" value={projection.counts.assigned} description="Active studies assigned to you." />
+        <DashboardKpiCard icon={Clock3} label="Pending reviews" value={projection.counts.pending} description="Studies awaiting your review." />
+        <DashboardKpiCard icon={CheckCircle2} label="Completed reviews" value={projection.counts.completed} description="Studies with finalized reviews." />
+      </div>
+
+      <div className="panel-dashboard-main-grid">
+        <section className="dashboard-section-card panel-dashboard-assignments">
+          <header>
+            <h2>Current assignments</h2>
+            <button type="button" onClick={() => selectNav("Assigned Research")}>View all assignments <ArrowUpRight aria-hidden="true" /></button>
+          </header>
+          {projection.assignments.length === 0 ? (
+            <DashboardEmptyState><strong>No assigned studies</strong><span>New panel assignments will appear here.</span></DashboardEmptyState>
+          ) : (
+            <div className="panel-dashboard-assignment-table" role="table" aria-label="Current assignments">
+              <div className="panel-dashboard-assignment-head" role="row">
+                <span role="columnheader">Study</span><span role="columnheader">Defense stage</span><span role="columnheader">Status</span><span role="columnheader">Action</span>
+              </div>
+              {projection.assignments.map((assignment) => (
+                <div className="panel-dashboard-assignment-row" role="row" key={assignment.research_document_id}>
+                  <span role="cell" className="panel-dashboard-assignment-copy"><strong title={assignment.title}>{assignment.title}</strong>{assignment.submission_reference && <small>{assignment.submission_reference}</small>}</span>
+                  <span role="cell">{defenseStageLabel(assignment.defense_stage)}</span>
+                  <span role="cell"><span className={`panel-review-status is-${assignment.review_status}`}>{assignment.review_status === "pending" ? "Pending review" : "Completed"}</span></span>
+                  <span role="cell"><button type="button" onClick={() => selectNav("Assigned Research")}>{assignment.review_status === "pending" ? "Open review" : "View review"}</button></span>
+                </div>
+              ))}
+              <p className="panel-dashboard-assignment-summary">Showing {projection.assignments.length} assigned {projection.assignments.length === 1 ? "study" : "studies"}</p>
+            </div>
+          )}
+        </section>
+
+        <aside className="dashboard-section-card panel-dashboard-status" aria-labelledby="panel-review-status-title">
+          <h2 id="panel-review-status-title">Review status</h2>
+          {totalReviews === 0 ? <DashboardEmptyState>No review status is available.</DashboardEmptyState> : (
+            <div className="panel-dashboard-status-summary">
+              <div className="panel-dashboard-donut" role="img" aria-label={`${projection.counts.pending} pending reviews and ${projection.counts.completed} completed reviews`} style={{ "--completed-share": `${completedShare}%` } as CSSProperties}><span><strong>{totalReviews}</strong><small>Total reviews</small></span></div>
+              <dl><div><dt>Pending reviews</dt><dd>{projection.counts.pending}</dd></div><div><dt>Completed</dt><dd>{projection.counts.completed}</dd></div></dl>
+            </div>
+          )}
+        </aside>
+      </div>
+
+      <div className="panel-dashboard-lower-grid">
+        <section className="dashboard-section-card panel-dashboard-activity">
+          <header><h2>Recent activity</h2></header>
+          {projection.recent_activity.length === 0 ? <DashboardEmptyState>No recent panel activity.</DashboardEmptyState> : (
+            <ol>{projection.recent_activity.map((activity) => <li key={activity.id}><span aria-hidden="true" /><div><strong>{activity.type === "study_assigned" ? "Study assigned" : "Evaluation submitted"}</strong><span title={activity.title}>{activity.title}</span></div><time dateTime={activity.occurred_at}>{formatDate(activity.occurred_at)}</time></li>)}</ol>
+          )}
+        </section>
+        <section className="dashboard-section-card panel-dashboard-repository" aria-label="Repository access">
+          <LibraryBig aria-hidden="true" /><div><h2>Repository access</h2><p>{projection.counts.repository_references} archived studies available for reference.</p></div>
+          <button type="button" onClick={() => selectNav("Repository")}>Browse repository <ArrowUpRight aria-hidden="true" /></button>
+        </section>
+      </div>
     </div>
   );
 }

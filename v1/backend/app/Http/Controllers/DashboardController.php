@@ -68,6 +68,9 @@ class DashboardController extends DomainController
             'statistician' => $effectiveRole === 'statistician'
                 ? $this->statisticianDashboard($actor)
                 : null,
+            'panel' => $effectiveRole === 'panel'
+                ? $this->panelDashboard($actor)
+                : null,
             'librarian' => $effectiveRole === 'librarian'
                 ? $this->librarianDashboard()
                 : null,
@@ -202,6 +205,109 @@ class DashboardController extends DomainController
         return [
             $this->researchSection('assigned_manuscripts', $this->assignedDocuments($actor, 'panel')),
             $this->researchSection('repository_references', $this->repositoryDocuments()),
+        ];
+    }
+
+    /**
+     * Evaluation records do not identify a defense stage, so the dashboard
+     * reports the stage authorized by the active panel assignment only.
+     */
+    private function panelDashboard(User $actor): array
+    {
+        $evaluations = fn ($query) => $query
+            ->where(Evaluation::column('panelist_id'), $actor->id)
+            ->whereNotNull(Evaluation::column('submitted_at'));
+        $assignments = fn ($query) => $query
+            ->where(ReviewAssignment::column('reviewer_id'), $actor->id)
+            ->where(ReviewAssignment::column('review_role'), 'panel')
+            ->whereIn(
+                ReviewAssignment::column('is_active'),
+                ReviewAssignment::column('is_active') === 'status'
+                    ? ['accepted', 'confirmed', 'active']
+                    : [true],
+            );
+        $documents = $this->assignedDocuments($actor, 'panel')
+            ->withExists(['evaluations as panel_evaluation_submitted' => $evaluations])
+            ->with(['reviewAssignments' => fn ($query) => $assignments($query)
+                ->latest('created_at')->latest('id')])
+            ->orderBy('panel_evaluation_submitted')
+            ->orderByDesc('updated_at')
+            ->orderByDesc('id')
+            ->get([
+                'id',
+                'title',
+                'submission_reference',
+                'research_stage',
+                'submission_status',
+                'updated_at',
+            ]);
+        $assignedIds = $documents->pluck('id');
+        $assignmentEvents = $documents
+            ->map(function (ResearchDocument $document): ?array {
+                $assignment = $document->reviewAssignments->first();
+
+                return $assignment?->created_at === null ? null : [
+                    'id' => 'assignment-'.$assignment->id,
+                    'research_document_id' => $document->id,
+                    'title' => $document->title,
+                    'type' => 'study_assigned',
+                    'occurred_at' => $assignment->created_at->toISOString(),
+                ];
+            })
+            ->filter();
+        $evaluationEvents = Evaluation::query()
+            ->whereIn(Evaluation::column('research_document_id'), $assignedIds)
+            ->where(Evaluation::column('panelist_id'), $actor->id)
+            ->whereNotNull(Evaluation::column('submitted_at'))
+            ->latest(Evaluation::column('submitted_at'))
+            ->latest('id')
+            ->limit(5)
+            ->get(['id', 'research_document_id', Evaluation::column('submitted_at')])
+            ->map(function (Evaluation $evaluation) use ($documents): ?array {
+                $document = $documents->firstWhere('id', $evaluation->research_document_id);
+
+                return $document === null || $evaluation->submitted_at === null ? null : [
+                    'id' => 'evaluation-'.$evaluation->id,
+                    'research_document_id' => $document->id,
+                    'title' => $document->title,
+                    'type' => 'evaluation_submitted',
+                    'occurred_at' => $evaluation->submitted_at->toISOString(),
+                ];
+            })
+            ->filter();
+        $recentActivity = $assignmentEvents
+            ->concat($evaluationEvents)
+            ->sort(function (array $left, array $right): int {
+                $dateOrder = strcmp($right['occurred_at'], $left['occurred_at']);
+
+                return $dateOrder !== 0 ? $dateOrder : strcmp($right['id'], $left['id']);
+            })
+            ->take(5)
+            ->values()
+            ->all();
+        $items = $documents->map(function (ResearchDocument $document): array {
+            $assignment = $document->reviewAssignments->first();
+
+            return [
+                'research_document_id' => $document->id,
+                'title' => $document->title,
+                'submission_reference' => $document->submission_reference,
+                'defense_stage' => $assignment?->defense_type,
+                'review_status' => $document->panel_evaluation_submitted ? 'completed' : 'pending',
+                'updated_at' => $document->updated_at?->toISOString(),
+            ];
+        })->values();
+
+        return [
+            'schema_version' => 1,
+            'counts' => [
+                'assigned' => $items->count(),
+                'pending' => $items->where('review_status', 'pending')->count(),
+                'completed' => $items->where('review_status', 'completed')->count(),
+                'repository_references' => $this->repositoryDocuments()->count(),
+            ],
+            'assignments' => $items->take(5)->all(),
+            'recent_activity' => $recentActivity,
         ];
     }
 

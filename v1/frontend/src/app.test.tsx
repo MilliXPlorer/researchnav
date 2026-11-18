@@ -357,6 +357,7 @@ describe("role workspaces", () => {
     expect(navFor("panel")).toEqual([
       "Dashboard",
       "Assigned Research",
+      "Repository",
       "User Logs",
     ]);
 
@@ -1478,7 +1479,7 @@ describe("role workspaces", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders the compact panel dashboard with authorized tools", () => {
+  it("renders the scoped panel dashboard projection", () => {
     const selectNav = vi.fn();
     const props = readyProps("panel", "assigned_manuscripts");
     const { container } = render(
@@ -1489,16 +1490,20 @@ describe("role workspaces", () => {
           ...props.dashboardState,
           dashboard: {
             ...props.dashboardState.dashboard,
-            analytics: {
-              title: "Research activity",
-              period: "Last 6 months",
-              series: [
+            panel: {
+              schema_version: 1,
+              counts: { assigned: 7, pending: 3, completed: 4, repository_references: 12 },
+              assignments: [
                 {
-                  key: "created",
-                  label: "Created",
-                  points: [{ key: "2026-10", label: "Oct", value: 7 }],
+                  research_document_id: 71,
+                  title: "Pending panel study",
+                  submission_reference: "RN-2026-PANEL01",
+                  defense_stage: "proposal",
+                  review_status: "pending",
+                  updated_at: "2026-08-18T12:00:00.000000Z",
                 },
               ],
+              recent_activity: [{ id: "evaluation-1", research_document_id: 71, title: "Pending panel study", type: "evaluation_submitted", occurred_at: "2026-08-18T12:00:00.000000Z" }],
             },
           },
         }}
@@ -1509,26 +1514,23 @@ describe("role workspaces", () => {
       container.querySelector(".panel-dashboard-workspace"),
     ).not.toBeNull();
     expect(
-      screen.getByRole("heading", { name: "Current workload" }),
+      screen.getByRole("heading", { name: "Current assignments" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByLabelText("Assigned manuscripts: 7 total"),
-    ).toHaveTextContent("7");
-    expect(
-      screen.queryByRole("meter", { name: "Assigned manuscripts" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: "Panel tools" }),
+      screen.getByTestId("panel-dashboard"),
     ).toBeInTheDocument();
+    expect(screen.getByText("RN-2026-PANEL01")).toBeInTheDocument();
+    expect(screen.getByText("Proposal Defense")).toBeInTheDocument();
+    expect(screen.getByText("Evaluation submitted")).toBeInTheDocument();
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Open Assigned Research" }),
+      screen.getByRole("button", { name: "Open review" }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "User Logs" }));
+    fireEvent.click(screen.getByRole("button", { name: "Browse repository" }));
 
     expect(selectNav).toHaveBeenNthCalledWith(1, "Assigned Research");
-    expect(selectNav).toHaveBeenNthCalledWith(2, "User Logs");
-    expect(container.querySelector(".analytics-bar")).not.toBeNull();
+    expect(selectNav).toHaveBeenNthCalledWith(2, "Repository");
+    expect(container.querySelector(".dashboard-analytics")).toBeNull();
   });
 
   it("hides legacy schedules and duplicate flags on the coordinator overview", () => {

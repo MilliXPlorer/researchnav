@@ -93,7 +93,7 @@ export const roleConfigs: RoleConfig[] = [
     label: "Research Panel",
     shortLabel: "Panel member",
     description: "Read manuscripts and submit evaluations.",
-    nav: ["Dashboard", "Assigned Research", "User Logs"],
+    nav: ["Dashboard", "Assigned Research", "Repository", "User Logs"],
   },
   {
     id: "statistician",

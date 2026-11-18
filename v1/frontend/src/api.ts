@@ -87,8 +87,34 @@ export interface RoleDashboard {
   sections: RoleDashboardSection[];
   analytics?: RoleDashboardAnalytics;
   institutional_overview?: Array<{ institute: string; total: number }> | null;
+  panel?: PanelDashboardProjection | null;
   statistician?: StatisticianDashboardProjection | null;
   librarian?: LibrarianDashboardProjection | null;
+}
+
+export interface PanelDashboardProjection {
+  schema_version: 1;
+  counts: {
+    assigned: number;
+    pending: number;
+    completed: number;
+    repository_references: number;
+  };
+  assignments: Array<{
+    research_document_id: number;
+    title: string;
+    submission_reference: string | null;
+    defense_stage: string | null;
+    review_status: "pending" | "completed";
+    updated_at: string | null;
+  }>;
+  recent_activity: Array<{
+    id: string;
+    research_document_id: number;
+    title: string;
+    type: "study_assigned" | "evaluation_submitted";
+    occurred_at: string;
+  }>;
 }
 
 export interface LibrarianDashboardProjection {
