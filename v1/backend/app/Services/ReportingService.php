@@ -55,6 +55,8 @@ class ReportingService
                 'methodology_signed_off' => MethodologyReview::query()->whereIn(MethodologyReview::column('research_document_id'), (clone $documents)->select('id'))->where(MethodologyReview::column('review_status'), 'signed_off')->count(),
             ],
             'by_section' => ClassSection::query()
+                ->where('is_active', true)
+                ->when($institute !== null, fn ($query) => $query->where('institute', $institute))
                 ->whereIn('id', (clone $documents)->whereNotNull('section_id')->select('section_id'))
                 ->withCount(['researchDocuments' => function ($query) use ($institute, $program): void {
                     if ($institute !== null && trim($institute) !== '') {
@@ -231,6 +233,8 @@ class ReportingService
             ->groupBy('section_id');
 
         return ClassSection::query()
+            ->where('is_active', true)
+            ->whereIn('institute', (clone $documents)->select('institute'))
             ->whereIn('id', $scopedDocuments->keys()->all())
             ->with('instructor:id,first_name,middle_name,last_name,email')
             ->get()

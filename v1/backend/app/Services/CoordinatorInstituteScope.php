@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Exceptions\CoordinatorInstituteRequiredException;
+use App\Models\ClassSection;
 use App\Models\ResearchDocument;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
@@ -38,6 +39,14 @@ class CoordinatorInstituteScope
     public function documents(User $actor): Builder
     {
         $query = ResearchDocument::query();
+        $institute = $this->institute($actor);
+
+        return $institute === null ? $query : $query->where('institute', $institute);
+    }
+
+    public function sections(User $actor): Builder
+    {
+        $query = ClassSection::query()->where('is_active', true);
         $institute = $this->institute($actor);
 
         return $institute === null ? $query : $query->where('institute', $institute);

@@ -8,8 +8,10 @@ use App\Models\MethodologyReview;
 use App\Models\ResearchDocument;
 use App\Models\SimilarityResult;
 use App\Models\User;
+use App\Services\ResearchService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 class RoleWorkspaceApiTest extends TestCase
@@ -250,7 +252,7 @@ class RoleWorkspaceApiTest extends TestCase
 
     public function test_instructor_sections_title_proposals_and_class_reports(): void
     {
-        $instructor = $this->user(['role' => 'instructor']);
+        $instructor = $this->user(['role' => 'instructor', 'institute' => ' Institute of Computer Studies ']);
         $office = $this->user(['role' => 'research-office']);
         $student = $this->user(['role' => 'researcher']);
         $proposal = $this->document('submitted', $student);
@@ -265,11 +267,29 @@ class RoleWorkspaceApiTest extends TestCase
             ->assertJsonPath('data.name', 'Thesis 2')
             ->assertJsonPath('data.section_code', 'BSCS-4A');
         $section = ClassSection::query()->firstOrFail();
+        $this->assertSame('Institute of Computer Studies', $section->institute);
         $this->assertDatabaseHas('audit_logs', ['action' => 'CLASS_SECTION_CREATED']);
 
         $project = $this->as($instructor)->postJson('/api/instructor/sections/'.$section->id.'/documents', ['title' => 'Instructor Project'], $this->origin())
             ->assertCreated();
-        $this->assertDatabaseHas('research_documents', ['id' => $project->json('data.research_document_id'), 'section_id' => $section->id]);
+        $this->assertDatabaseHas('research_documents', [
+            'id' => $project->json('data.research_document_id'),
+            'section_id' => $section->id,
+            'institute' => 'Institute of Computer Studies',
+        ]);
+        try {
+            app(ResearchService::class)->update(
+                $instructor,
+                ResearchDocument::query()->findOrFail($project->json('data.research_document_id')),
+                ['institute' => 'Institute of Health Sciences'],
+            );
+            $this->fail('A section-bound document accepted a different institute.');
+        } catch (ValidationException) {
+            $this->assertDatabaseHas('research_documents', [
+                'id' => $project->json('data.research_document_id'),
+                'institute' => 'Institute of Computer Studies',
+            ]);
+        }
 
         $this->as($instructor)->getJson('/api/instructor/sections')
             ->assertOk()

@@ -53,11 +53,78 @@ class CoordinatorInstituteScopeTest extends TestCase
     {
         $coordinator = $this->user('coordinator', null);
 
-        foreach (['/api/dashboard', '/api/coordinator/instructors', '/api/coordinator/schedules', '/api/coordinator/adviser-load', '/api/coordinator/duplicate-flags', '/api/coordinator/reports'] as $url) {
+        foreach (['/api/dashboard', '/api/coordinator/instructors', '/api/coordinator/sections', '/api/coordinator/schedules', '/api/coordinator/adviser-load', '/api/coordinator/duplicate-flags', '/api/coordinator/reports'] as $url) {
             $this->as($coordinator)->getJson($url)
                 ->assertForbidden()
                 ->assertExactJson(['error' => 'COORDINATOR_INSTITUTE_REQUIRED']);
         }
+    }
+
+    public function test_coordinator_section_list_and_direct_access_are_institute_scoped(): void
+    {
+        $ics = 'Institute of Computer Studies';
+        $ihs = 'Institute of Health Sciences';
+        $coordinator = $this->user('coordinator', " {$ics} ");
+        $visible = ClassSection::query()->create(['instructor_id' => $this->user('instructor', null)->id, 'institute' => $ics, 'name' => 'ICS 4A']);
+        $foreign = ClassSection::query()->create(['instructor_id' => $this->user('instructor', null)->id, 'institute' => $ihs, 'name' => 'IHS 4A']);
+        ClassSection::query()->create(['instructor_id' => $this->user('instructor', null)->id, 'institute' => null, 'name' => 'Legacy 4A']);
+        ClassSection::query()->create(['instructor_id' => $this->user('instructor', null)->id, 'institute' => $ics, 'name' => 'Inactive 4A', 'is_active' => false]);
+        ResearchDocument::factory()->create(['section_id' => $visible->id, 'institute' => $ics]);
+        ResearchDocument::factory()->create(['section_id' => $visible->id, 'institute' => $ihs]);
+
+        $this->as($coordinator)->getJson('/api/coordinator/sections?institute='.urlencode($ihs))
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $visible->id)
+            ->assertJsonPath('data.0.documents_count', 1)
+            ->assertJsonMissing(['name' => 'IHS 4A'])
+            ->assertJsonMissing(['name' => 'Legacy 4A'])
+            ->assertJsonMissing(['name' => 'Inactive 4A']);
+
+        $this->as($coordinator)->getJson('/api/coordinator/sections/'.$visible->id)
+            ->assertOk()
+            ->assertJsonPath('data.institute', $ics);
+        $this->as($coordinator)->getJson('/api/coordinator/sections/'.$foreign->id)->assertNotFound();
+    }
+
+    public function test_mismatched_document_institute_does_not_expose_a_foreign_section_or_instructor(): void
+    {
+        $ics = 'Institute of Computer Studies';
+        $ihs = 'Institute of Health Sciences';
+        $coordinator = $this->user('coordinator', $ihs);
+        $section = ClassSection::query()->create([
+            'instructor_id' => $this->user('instructor', $ics)->id,
+            'institute' => $ics,
+            'name' => 'ICS 4A',
+        ]);
+        ResearchDocument::factory()->create(['section_id' => $section->id, 'institute' => $ihs]);
+
+        $this->as($coordinator)->getJson('/api/coordinator/reports')
+            ->assertOk()
+            ->assertJsonMissing(['name' => 'ICS 4A']);
+    }
+
+    public function test_blank_coordinator_institute_cannot_list_or_directly_access_sections(): void
+    {
+        $section = ClassSection::query()->create(['instructor_id' => $this->user('instructor', null)->id, 'institute' => 'Institute of Computer Studies', 'name' => 'ICS 4A']);
+
+        foreach ([null, '   '] as $institute) {
+            $coordinator = $this->user('coordinator', $institute);
+            $this->as($coordinator)->getJson('/api/coordinator/sections')->assertForbidden();
+            $this->as($coordinator)->getJson('/api/coordinator/sections/'.$section->id)->assertForbidden();
+        }
+    }
+
+    public function test_authoritative_admin_keeps_global_active_section_access(): void
+    {
+        $admin = $this->user('admin', null);
+        $admin->forceFill(['is_admin' => true])->save();
+        $first = ClassSection::query()->create(['instructor_id' => $this->user('instructor', null)->id, 'institute' => 'Institute A', 'name' => 'A']);
+        $second = ClassSection::query()->create(['instructor_id' => $this->user('instructor', null)->id, 'institute' => null, 'name' => 'B']);
+
+        $this->as($admin)->getJson('/api/coordinator/sections')->assertOk()->assertJsonCount(2, 'data');
+        $this->as($admin)->getJson('/api/coordinator/sections/'.$first->id)->assertOk();
+        $this->as($admin)->getJson('/api/coordinator/sections/'.$second->id)->assertOk();
     }
 
     public function test_coordinator_pdf_uses_the_selected_section_and_includes_all_instructor_studies(): void
@@ -106,8 +173,8 @@ class CoordinatorInstituteScopeTest extends TestCase
     {
         $institute = 'Institute of Computer Studies';
         $coordinator = $this->user('coordinator', $institute);
-        $visibleSection = ClassSection::query()->create(['instructor_id' => $this->user('instructor', $institute)->id, 'name' => 'ICS 4A']);
-        $foreignSection = ClassSection::query()->create(['instructor_id' => $this->user('instructor', 'Institute of Health Sciences')->id, 'name' => 'IHS 4A']);
+        $visibleSection = ClassSection::query()->create(['instructor_id' => $this->user('instructor', $institute)->id, 'institute' => $institute, 'name' => 'ICS 4A']);
+        $foreignSection = ClassSection::query()->create(['instructor_id' => $this->user('instructor', 'Institute of Health Sciences')->id, 'institute' => 'Institute of Health Sciences', 'name' => 'IHS 4A']);
         ResearchDocument::factory()->create(['institute' => $institute, 'section_id' => $visibleSection->id]);
         ResearchDocument::factory()->create(['institute' => 'Institute of Health Sciences', 'section_id' => $foreignSection->id]);
 

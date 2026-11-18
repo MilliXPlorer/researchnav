@@ -69,7 +69,7 @@ class CanonicalResearchSchemaTest extends TestCase
         ]));
         $this->assertTrue(Schema::hasColumn('research_documents', 'section_id'));
         $this->assertFalse(Schema::hasColumn('research_documents', 'category_id'));
-        $this->assertTrue(Schema::hasColumns('class_sections', ['instructor_id', 'name', 'section_code', 'academic_year', 'is_active']));
+        $this->assertTrue(Schema::hasColumns('class_sections', ['instructor_id', 'institute', 'name', 'section_code', 'academic_year', 'is_active']));
         $this->assertTrue(Schema::hasColumns('class_section_members', ['class_section_id', 'research_document_id', 'user_id']));
         $this->assertTrue(Schema::hasColumns('defense_schedules', ['research_document_id', 'created_by', 'scheduled_at', 'status']));
         $this->assertTrue(Schema::hasColumns('evaluations', ['research_document_id', 'panelist_id', 'originality', 'methodology', 'clarity', 'submitted_at']));
@@ -100,6 +100,9 @@ class CanonicalResearchSchemaTest extends TestCase
             $this->assertTrue($indexes->has($index), $index.' was not migrated on '.$table.'.');
             $this->assertTrue((bool) $indexes->get($index)['unique'], $index.' on '.$table.' is not unique.');
         }
+        $sectionIndexes = collect(Schema::getIndexes('class_sections'))->keyBy('name');
+        $this->assertSame(['institute', 'is_active'], $sectionIndexes->get('class_sections_institute_active_idx')['columns']);
+        $this->assertFalse((bool) $sectionIndexes->get('class_sections_institute_active_idx')['unique']);
     }
 
     public function test_section_memberships_reference_research_documents_with_the_required_index(): void

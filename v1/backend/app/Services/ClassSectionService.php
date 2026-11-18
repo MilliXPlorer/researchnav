@@ -45,8 +45,10 @@ class ClassSectionService
     public function create(User $actor, array $data, ?Request $request = null): ClassSection
     {
         return DB::transaction(function () use ($actor, $data, $request): ClassSection {
+            $institute = trim((string) $actor->institute);
             $section = ClassSection::query()->create([
                 'instructor_id' => $actor->id,
+                'institute' => $institute !== '' ? $institute : null,
                 'name' => $data['name'],
                 'section_code' => $data['section_code'],
                 'academic_year' => $data['academic_year'] ?? null,
@@ -293,6 +295,7 @@ class ClassSectionService
             $document = ResearchDocument::query()->create([
                 'submitted_by' => $actor->id,
                 'section_id' => $locked->id,
+                'institute' => $locked->institute,
                 'title' => $trimmed,
                 'normalized_title' => $normalized,
                 'research_stage' => 'title_proposal',

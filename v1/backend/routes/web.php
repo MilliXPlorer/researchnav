@@ -176,6 +176,8 @@ Route::prefix('api')
         });
 
         Route::prefix('coordinator')->middleware(['current.user', 'account.active', 'coordinator.authority'])->group(function (): void {
+            Route::get('sections', [CoordinatorWorkspaceController::class, 'sections']);
+            Route::get('sections/{classSection}', [CoordinatorWorkspaceController::class, 'section'])->whereNumber('classSection');
             Route::get('schedules', [CoordinatorWorkspaceController::class, 'schedules']);
             Route::post('schedules', [CoordinatorWorkspaceController::class, 'storeSchedule'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::patch('schedules/{defenseSchedule}', [CoordinatorWorkspaceController::class, 'updateSchedule'])->middleware(['origin.allowed', 'throttle:domain-mutations']);

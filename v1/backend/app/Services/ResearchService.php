@@ -63,6 +63,15 @@ class ResearchService
                 $this->ensureMetadataEditable($locked);
             }
             $metadata = $this->metadata($data);
+            if ($locked->section_id !== null && array_key_exists('institute', $metadata)) {
+                $sectionInstitute = trim((string) $locked->section()->value('institute'));
+                $requestedInstitute = trim((string) $metadata['institute']);
+                if ($sectionInstitute !== '' && $requestedInstitute !== $sectionInstitute) {
+                    throw ValidationException::withMessages([
+                        'institute' => ['The research institute must match its class section.'],
+                    ]);
+                }
+            }
             if ($importedArchive && array_key_exists('abstract', $metadata) && (string) $metadata['abstract'] !== (string) $locked->abstract) {
                 $metadata['abstract_provenance'] = 'Manually corrected by authorized Research Office personnel.';
             }

@@ -12,7 +12,7 @@ class ClassSection extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['instructor_id', 'name', 'section_code', 'academic_year', 'is_active'];
+    protected $fillable = ['instructor_id', 'institute', 'name', 'section_code', 'academic_year', 'is_active'];
 
     protected function casts(): array
     {

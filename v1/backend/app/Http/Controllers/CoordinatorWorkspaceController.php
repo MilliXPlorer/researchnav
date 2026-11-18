@@ -3,7 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Exceptions\ApiValidationException;
+use App\Models\ClassSection;
 use App\Models\DefenseSchedule;
+use App\Services\CoordinatorInstituteScope;
 use App\Services\DefenseScheduleService;
 use App\Services\InstitutionalPdfService;
 use App\Services\ReportingService;
@@ -13,6 +15,30 @@ use Illuminate\Support\Facades\Validator;
 
 class CoordinatorWorkspaceController extends DomainController
 {
+    public function sections(Request $request, CoordinatorInstituteScope $scope): JsonResponse
+    {
+        $sections = $scope->sections($this->actor($request))
+            ->withCount(['researchDocuments' => fn ($query) => $query->whereColumn('research_documents.institute', 'class_sections.institute')])
+            ->orderBy('name')
+            ->get()
+            ->map(fn (ClassSection $section) => $this->sectionPayload($section));
+
+        return response()
+            ->json(['data' => $sections->all(), 'schema_version' => 1])
+            ->header('Cache-Control', 'private, no-store');
+    }
+
+    public function section(Request $request, int $classSection, CoordinatorInstituteScope $scope): JsonResponse
+    {
+        $section = $scope->sections($this->actor($request))
+            ->withCount(['researchDocuments' => fn ($query) => $query->whereColumn('research_documents.institute', 'class_sections.institute')])
+            ->findOrFail($classSection);
+
+        return response()
+            ->json(['data' => $this->sectionPayload($section), 'schema_version' => 1])
+            ->header('Cache-Control', 'private, no-store');
+    }
+
     public function schedules(Request $request, DefenseScheduleService $schedules): JsonResponse
     {
         return response()
@@ -121,6 +147,18 @@ class CoordinatorWorkspaceController extends DomainController
             'room' => $schedule->room,
             'notes' => $schedule->notes,
             'status' => $schedule->status,
+        ];
+    }
+
+    private function sectionPayload(ClassSection $section): array
+    {
+        return [
+            'id' => $section->id,
+            'name' => $section->name,
+            'section_code' => $section->section_code,
+            'academic_year' => $section->academic_year,
+            'institute' => $section->institute,
+            'documents_count' => $section->research_documents_count,
         ];
     }
 
