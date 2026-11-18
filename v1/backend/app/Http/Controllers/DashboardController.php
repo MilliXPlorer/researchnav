@@ -214,9 +214,12 @@ class DashboardController extends DomainController
      */
     private function panelDashboard(User $actor): array
     {
+        $finalEvaluationStorage = (new Evaluation)->usesFinalStorage();
+        $evaluationReviewerColumn = $finalEvaluationStorage ? 'reviewer_id' : Evaluation::column('panelist_id');
+        $evaluationSubmittedColumn = $finalEvaluationStorage ? 'reviewed_at' : Evaluation::column('submitted_at');
         $evaluations = fn ($query) => $query
-            ->where(Evaluation::column('panelist_id'), $actor->id)
-            ->whereNotNull(Evaluation::column('submitted_at'));
+            ->where($evaluationReviewerColumn, $actor->id)
+            ->whereNotNull($evaluationSubmittedColumn);
         $assignments = fn ($query) => $query
             ->where(ReviewAssignment::column('reviewer_id'), $actor->id)
             ->where(ReviewAssignment::column('review_role'), 'panel')
@@ -257,21 +260,22 @@ class DashboardController extends DomainController
             ->filter();
         $evaluationEvents = Evaluation::query()
             ->whereIn(Evaluation::column('research_document_id'), $assignedIds)
-            ->where(Evaluation::column('panelist_id'), $actor->id)
-            ->whereNotNull(Evaluation::column('submitted_at'))
-            ->latest(Evaluation::column('submitted_at'))
+            ->where($evaluationReviewerColumn, $actor->id)
+            ->whereNotNull($evaluationSubmittedColumn)
+            ->latest($evaluationSubmittedColumn)
             ->latest('id')
             ->limit(5)
-            ->get(['id', 'research_document_id', Evaluation::column('submitted_at')])
-            ->map(function (Evaluation $evaluation) use ($documents): ?array {
+            ->get(['id', 'research_document_id', $evaluationSubmittedColumn])
+            ->map(function (Evaluation $evaluation) use ($documents, $evaluationSubmittedColumn): ?array {
                 $document = $documents->firstWhere('id', $evaluation->research_document_id);
+                $submittedAt = $evaluation->getAttribute($evaluationSubmittedColumn);
 
-                return $document === null || $evaluation->submitted_at === null ? null : [
+                return $document === null || $submittedAt === null ? null : [
                     'id' => 'evaluation-'.$evaluation->id,
                     'research_document_id' => $document->id,
                     'title' => $document->title,
                     'type' => 'evaluation_submitted',
-                    'occurred_at' => $evaluation->submitted_at->toISOString(),
+                    'occurred_at' => $submittedAt->toISOString(),
                 ];
             })
             ->filter();
