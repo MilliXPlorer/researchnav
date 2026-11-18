@@ -176,6 +176,7 @@ Route::prefix('api')
         });
 
         Route::prefix('coordinator')->middleware(['current.user', 'account.active', 'coordinator.authority'])->group(function (): void {
+            Route::get('program-overview', [CoordinatorWorkspaceController::class, 'programOverview']);
             Route::get('sections', [CoordinatorWorkspaceController::class, 'sections']);
             Route::get('sections/{classSection}', [CoordinatorWorkspaceController::class, 'section'])->whereNumber('classSection');
             Route::get('schedules', [CoordinatorWorkspaceController::class, 'schedules']);
@@ -184,6 +185,7 @@ Route::prefix('api')
             Route::get('duplicate-flags', [CoordinatorWorkspaceController::class, 'duplicateFlags']);
             Route::get('adviser-load', [CoordinatorWorkspaceController::class, 'adviserLoad']);
             Route::get('reports', [CoordinatorWorkspaceController::class, 'reports']);
+            Route::get('reports/studies', [CoordinatorWorkspaceController::class, 'reportStudies']);
             Route::get('reports/{section}/pdf', [CoordinatorWorkspaceController::class, 'reportPdf']);
         });
 

@@ -11,6 +11,9 @@ import {
   History,
   LibraryBig,
   LineChart,
+  UserRound,
+  UserRoundCheck,
+  UsersRound,
   Search,
   ShieldCheck,
   SquareStack,
@@ -22,7 +25,7 @@ import {
   DashboardEmptyState,
   DashboardKpiCard,
 } from "./DashboardPrimitives";
-import { formatPhilippineDate } from "./dateTime";
+import { formatPhilippineDate, formatPhilippineDateTime } from "./dateTime";
 import { Modal } from "./Modal";
 import AdminResearchWorkspace from "./AdminResearchWorkspace";
 import AssignedResearchFolders from "./AssignedResearchFolders";
@@ -36,10 +39,12 @@ import ihsLogo from "./institute_logo/ihs.webp";
 import iteLogo from "./institute_logo/ite.webp";
 import {
   ApiError,
+  getCoordinatorProgramOverview,
   listOfficeInstituteStudies,
   officeInstituteStudyOpenUrl,
   type OfficeInstituteStudy,
   type PanelDashboardProjection,
+  type CoordinatorProgramOverview,
   type LibrarianDashboardProjection,
   type RoleDashboard,
   type RoleDashboardAnalytics,
@@ -487,24 +492,8 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
   },
   coordinator: {
     title: "Program Overview",
-    description: "Live instructor access and program information.",
-    sections: {
-      active_instructors: {
-        title: "Active instructors",
-        description: "Instructors with active access.",
-        destination: "Account Roles",
-      },
-      invited_instructors: {
-        title: "Invited instructors",
-        description: "Instructors awaiting activation.",
-        destination: "Account Roles",
-      },
-      blocked_instructors: {
-        title: "Blocked instructors",
-        description: "Instructors without active access.",
-        destination: "Account Roles",
-      },
-    },
+    description: "Institute research activity, assignments, and repository status.",
+    sections: {},
   },
   librarian: {
     eyebrow: "Librarian / Dashboard",
@@ -605,6 +594,8 @@ function RoleDashboardWorkspace({
                 ? "workspace-content statistician-dashboard-workspace"
                 : role === "librarian"
                   ? "workspace-content librarian-dashboard-workspace"
+                  : role === "coordinator"
+                    ? "workspace-content coordinator-dashboard-workspace"
                 : "workspace-content"
       }
     >
@@ -753,12 +744,11 @@ function DashboardSections({
     );
   }
 
-  const visibleSections =
-    role === "coordinator"
-      ? dashboardState.dashboard.sections.filter((section) =>
-          Object.prototype.hasOwnProperty.call(config.sections, section.key),
-        )
-      : dashboardState.dashboard.sections;
+  if (role === "coordinator") {
+    return <CoordinatorDashboard selectNav={selectNav} />;
+  }
+
+  const visibleSections = dashboardState.dashboard.sections;
   const adminAttentionKeys = new Set([
     "pending_accounts",
     "submission_queue",
@@ -922,6 +912,114 @@ function DashboardSections({
         </Modal>
       )}
     </>
+  );
+}
+
+function CoordinatorDashboard({
+  selectNav,
+}: {
+  selectNav: (item: string) => void;
+}) {
+  const [overview, setOverview] = useState<CoordinatorProgramOverview | null>(null);
+  const [selectedStatistic, setSelectedStatistic] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    void getCoordinatorProgramOverview()
+      .then((data) => active && setOverview(data))
+      .catch(() => active && setError("Program overview is unavailable."));
+    return () => {
+      active = false;
+    };
+  }, [attempt]);
+
+  if (error && !overview) {
+    return (
+      <section className="coordinator-overview-state panel-card" role="alert">
+        <p>{error}</p>
+        <Button variant="secondary" onClick={() => { setError(""); setAttempt((value) => value + 1); }}>
+          Retry
+        </Button>
+      </section>
+    );
+  }
+  if (!overview) {
+    return (
+      <section className="coordinator-overview-state panel-card" aria-busy="true" aria-live="polite">
+        Loading program overview…
+      </section>
+    );
+  }
+
+  const workload = overview.adviser_workload.slice(0, 5);
+  const maximum = Math.max(1, ...workload.map((item) => item.active_assignments));
+  const ongoingPercent = overview.repository_status.total
+    ? (overview.repository_status.ongoing / overview.repository_status.total) * 100
+    : 0;
+  const statistics = [
+    ["Total users", overview.counts.total_users, UserRound],
+    ["Active instructors", overview.counts.total_instructors, UserRoundCheck],
+    ["Total advisers", overview.counts.total_advisers, UsersRound],
+    ["Total studies", overview.counts.total_studies, SquareStack],
+  ] as const;
+
+  return (
+    <div className="coordinator-dashboard">
+      <p className="coordinator-institute-label">{overview.institute.name || "Assigned institute"}</p>
+      <section className="coordinator-kpi-grid" aria-label="Program statistics">
+        {statistics.map(([label, value, icon]) => (
+          <DashboardKpiCard key={label} icon={icon} label={label} value={value} description="" onClick={() => setSelectedStatistic(label)} />
+        ))}
+      </section>
+      <div className="coordinator-dashboard-grid">
+        <section className="panel-card coordinator-workload-card">
+          <header><div><h2>Adviser workload</h2><p>Active institute research assignments</p></div></header>
+          {workload.length === 0 ? (
+            <DashboardEmptyState>No active adviser assignments.</DashboardEmptyState>
+          ) : (
+            <div className="coordinator-workload-list">
+              {workload.map((item) => (
+                <div className="coordinator-workload-row" key={item.user_id}>
+                  <div><strong>{item.name || item.email || "Unnamed adviser"}</strong><span>{item.email}</span></div>
+                  <div className="coordinator-workload-meter" role="meter" aria-label={`${item.name || "Adviser"} active assignments`} aria-valuemin={0} aria-valuemax={maximum} aria-valuenow={item.active_assignments}>
+                    <span style={{ width: `${(item.active_assignments / maximum) * 100}%` }} />
+                  </div>
+                  <strong>{item.active_assignments}</strong>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+        <section className="panel-card coordinator-status-card">
+          <header><h2>Research status</h2></header>
+          <div className="coordinator-status-content">
+            <div className="coordinator-status-donut" role="img" aria-label={`${overview.repository_status.total} studies: ${overview.repository_status.ongoing} ongoing and ${overview.repository_status.archived} archived`} style={{ background: `conic-gradient(#1f7a5a ${ongoingPercent}%, #d7a840 0)` }}>
+              <span><strong>{overview.repository_status.total}</strong><small>Total studies</small></span>
+            </div>
+            <dl><div><dt>Ongoing</dt><dd>{overview.repository_status.ongoing}</dd></div><div><dt>Archived</dt><dd>{overview.repository_status.archived}</dd></div></dl>
+          </div>
+        </section>
+        <section className="panel-card coordinator-activity-card">
+          <header><h2>Recent research activities</h2></header>
+          {overview.recent_activity.length === 0 ? <DashboardEmptyState>No recent research activities.</DashboardEmptyState> : (
+            <div className="coordinator-activity-list">{overview.recent_activity.map((item) => <article key={item.id}><div><strong>{item.label}</strong><p>{item.title}</p></div><time dateTime={item.occurred_at || undefined}>{formatPhilippineDateTime(item.occurred_at)}</time></article>)}</div>
+          )}
+        </section>
+        <nav className="panel-card coordinator-quick-actions" aria-label="Quick actions">
+          <h2>Quick actions</h2>
+          {(["Research Assignments", "Repository", "Reports"] as const).map((item) => <button key={item} type="button" onClick={() => selectNav(item)}>{item}<ArrowUpRight aria-hidden="true" /></button>)}
+        </nav>
+      </div>
+      {selectedStatistic && (
+        <Modal label={selectedStatistic} onClose={() => setSelectedStatistic(null)}>
+          <section className="panel-card admin-data-card">
+            <p>Live institute total: {statistics.find(([label]) => label === selectedStatistic)?.[1] ?? 0}</p>
+          </section>
+        </Modal>
+      )}
+    </div>
   );
 }
 

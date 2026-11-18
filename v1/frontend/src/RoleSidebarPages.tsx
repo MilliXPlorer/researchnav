@@ -5,6 +5,7 @@ import UserRoleManagementWorkspace, {
   type UserDirectoryQuery,
 } from "./UserRoleManagement";
 import SelectMenu from "./SelectMenu";
+import { DashboardKpiCard } from "./DashboardPrimitives";
 
 const loadOfficeManagedUsers = (query: UserDirectoryQuery) =>
   listOfficeUsers({
@@ -35,8 +36,10 @@ const saveOfficeManagedUser = async (
   await updateOfficeUserAccess(user.id, draft.accessStatus);
 };
 import {
+  Archive,
   ArrowLeft,
   Building2,
+  ChevronRight,
   ClipboardList,
   Download,
   ExternalLink,
@@ -46,6 +49,7 @@ import {
   FolderOpen,
   GraduationCap,
   Globe2,
+  Layers3,
   MessageSquareText,
   Pencil,
   Plus,
@@ -57,7 +61,9 @@ import {
   User,
   UserCog,
   UserPlus,
+  UserRound,
   Users,
+  UsersRound,
 } from "lucide-react";
 import {
   ApiError,
@@ -75,6 +81,7 @@ import {
   listAdviserFeedbackHistory,
   listAdviserSimilarityAlerts,
   listAdviserLoad,
+  listCoordinatorReportStudies,
   listInstructorClassReports,
   listInstructorMonitoring,
   listInstructorPanelists,
@@ -411,10 +418,13 @@ export default function RoleSidebarPage({
       }
     case "coordinator":
       switch (selectedNav) {
+        case "Research Assignments":
         case "Adviser Load":
           return <CoordinatorAdviserLoad role={role} />;
         case "Account Roles":
           return <CoordinatorAccountRoles role={role} />;
+        case "Repository":
+          return <ArchivedRoleRepository role={role} />;
         case "Reports":
           return <CoordinatorReports role={role} />;
         default:
@@ -847,37 +857,6 @@ function InlineError({
         Retry
       </Button>
     </section>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  onSelect,
-}: {
-  label: string;
-  value: number | null;
-  onSelect?: () => void;
-}) {
-  if (!onSelect) {
-    return (
-      <section className="panel-card admin-stat">
-        <strong>{value === null ? "—" : value.toLocaleString()}</strong>
-        <span>{label}</span>
-      </section>
-    );
-  }
-  return (
-    <button
-      type="button"
-      className="panel-card admin-stat admin-stat-button"
-      onClick={onSelect}
-      aria-label={`View ${label}`}
-      title={`View ${label}`}
-    >
-      <strong>{value === null ? "—" : value.toLocaleString()}</strong>
-      <span>{label}</span>
-    </button>
   );
 }
 
@@ -5648,7 +5627,6 @@ function CoordinatorReports({ role }: { role: Role }) {
   const [reportSection, setReportSection] = useState<
     "overview" | "instructors" | "sections" | "advisers"
   >("overview");
-  const [spotlight, setSpotlight] = useState<ReportSpotlight | null>(null);
   const state = useLoad(
     () => getCoordinatorProgramReport(programFilter),
     attempt,
@@ -5692,7 +5670,6 @@ function CoordinatorReports({ role }: { role: Role }) {
               variant="secondary"
               disabled={!reportIsCurrent}
               onClick={() => {
-                setSpotlight(null);
                 const params = new URLSearchParams();
                 if (programFilter) params.set("program", programFilter);
                 const query = params.toString();
@@ -5708,7 +5685,6 @@ function CoordinatorReports({ role }: { role: Role }) {
             <Button
               variant="secondary"
               onClick={() => {
-                setSpotlight(null);
                 reload();
               }}
             >
@@ -5741,7 +5717,6 @@ function CoordinatorReports({ role }: { role: Role }) {
               value={programFilter}
               disabled={programOptions.length === 0}
               onChange={(event) => {
-                setSpotlight(null);
                 setProgramFilter(event.target.value);
               }}
             >
@@ -5780,7 +5755,6 @@ function CoordinatorReports({ role }: { role: Role }) {
                 aria-pressed={reportSection === section}
                 onClick={() => {
                   setReportSection(section);
-                  setSpotlight(null);
                 }}
               >
                 <Icon aria-hidden="true" />
@@ -5788,183 +5762,11 @@ function CoordinatorReports({ role }: { role: Role }) {
               </button>
             ))}
           </nav>
-          {reportSection === "overview" && (
-            <ProgramCounts report={state.data} onSelect={setSpotlight} />
-          )}
-          {reportSection === "instructors" && (
-            <section className="panel-card admin-data-card">
-              <div className="admin-card-heading">
-                <div>
-                  <h2>Research instructors</h2>
-                  <p>
-                    {state.data.filters?.institute ||
-                    state.data.filters?.program
-                      ? "Instructors handling sections with research in the selected scope."
-                      : "Instructors handling sections with research documents."}
-                  </p>
-                </div>
-              </div>
-              {state.data.instructors.length === 0 ? (
-                <p className="admin-empty">
-                  No instructors handle sections in this scope.
-                </p>
-              ) : (
-                <div className="admin-table-wrap">
-                  <table>
-                    <caption className="sr-only">Research instructors</caption>
-                    <thead>
-                      <tr>
-                        <th>Instructor</th>
-                        <th>Email</th>
-                        <th>Sections</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {state.data.instructors.map((instructor) => (
-                        <tr key={instructor.user_id}>
-                          <td>
-                            <button
-                              type="button"
-                              className="coordinator-report-link"
-                              onClick={() =>
-                                setSpotlight({
-                                  title:
-                                    instructor.name || "Research instructor",
-                                  description:
-                                    "Sections handled in the selected scope.",
-                                  columns: ["Section"],
-                                  rows: instructor.sections.map((name) => [
-                                    name,
-                                  ]),
-                                })
-                              }
-                            >
-                              {instructor.name || "—"}
-                            </button>
-                          </td>
-                          <td>{instructor.email || "—"}</td>
-                          <td>{instructor.sections.join(", ")}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </section>
-          )}
-          {reportSection === "sections" && (
-            <section className="panel-card admin-data-card">
-              <div className="admin-card-heading">
-                <div>
-                  <h2>Class sections</h2>
-                  <p>Document count per class section.</p>
-                </div>
-              </div>
-              {state.data.by_section.length === 0 ? (
-                <p className="admin-empty">No class sections exist.</p>
-              ) : (
-                <div className="admin-table-wrap">
-                  <table>
-                    <caption className="sr-only">Class sections</caption>
-                    <thead>
-                      <tr>
-                        <th>Section</th>
-                        <th>Documents</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {state.data.by_section.map((section) => (
-                        <tr key={section.id}>
-                          <td>
-                            <button
-                              type="button"
-                              className="coordinator-report-link"
-                              onClick={() =>
-                                setSpotlight({
-                                  title: section.name,
-                                  description:
-                                    "Recent studies in this section within the selected scope.",
-                                  columns: ["Study", "Status", "Last updated"],
-                                  rows: (state.data.studies ?? [])
-                                    .filter(
-                                      (study) => study.section === section.name,
-                                    )
-                                    .map((study) => [
-                                      study.title || "—",
-                                      label(
-                                        study.submission_status || "Unknown",
-                                      ),
-                                      displayDate(study.updated_at),
-                                    ]),
-                                })
-                              }
-                            >
-                              {section.name}
-                            </button>
-                          </td>
-                          <td>{section.documents_count}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </section>
-          )}
-          {reportSection === "advisers" && (
-            <section className="panel-card admin-data-card">
-              <div className="admin-card-heading">
-                <div>
-                  <h2>Adviser load</h2>
-                  <p>Active research assignments per adviser.</p>
-                </div>
-              </div>
-              {state.data.adviser_load.length === 0 ? (
-                <p className="admin-empty">
-                  No advisers have active assignments.
-                </p>
-              ) : (
-                <div className="admin-table-wrap">
-                  <table>
-                    <caption className="sr-only">Adviser load</caption>
-                    <thead>
-                      <tr>
-                        <th>Adviser</th>
-                        <th>Email</th>
-                        <th>Active assignments</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {state.data.adviser_load.map((item) => (
-                        <tr key={item.user_id}>
-                          <td>
-                            <button
-                              type="button"
-                              className="coordinator-report-link"
-                              onClick={() =>
-                                setSpotlight(adviserSpotlight(item))
-                              }
-                            >
-                              {item.name ?? "—"}
-                            </button>
-                          </td>
-                          <td>{item.email ?? "—"}</td>
-                          <td>{item.active_assignments}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </section>
-          )}
+          {reportSection === "overview" && <ProgramCounts report={state.data} />}
+          {reportSection === "instructors" && <CoordinatorReportTable title="Research instructors" empty="No instructors handle sections in this scope." headers={["Instructor", "Email", "Sections"]} rows={state.data.instructors.map((item) => [item.name || "—", item.email || "—", item.sections.join(", ") || "—"])} />}
+          {reportSection === "sections" && <CoordinatorReportTable title="Class sections" empty="No class sections are available for the selected scope." headers={["Section", "Documents"]} rows={state.data.by_section.map((item) => [item.name, String(item.documents_count)])} />}
+          {reportSection === "advisers" && <CoordinatorReportTable title="Adviser load" empty="No advisers have active assignments." headers={["Adviser", "Email", "Active assignments"]} rows={state.data.adviser_load.map((item) => [item.name || "—", item.email || "—", String(item.active_assignments)])} />}
         </>
-      )}
-      {spotlight && (
-        <SpotlightModal
-          spotlight={spotlight}
-          onClose={() => setSpotlight(null)}
-        />
       )}
     </div>
   );
@@ -5972,83 +5774,57 @@ function CoordinatorReports({ role }: { role: Role }) {
 
 function ProgramCounts({
   report,
-  onSelect,
 }: {
   report: CoordinatorProgramReport;
-  onSelect: (spotlight: ReportSpotlight) => void;
 }) {
   const counts = report.counts;
-  const open = (name: string) => onSelect(countSpotlight(report, name));
+  const [selected, setSelected] = useState<{ value: string; label: string } | null>(null);
+  const trigger = useRef<HTMLButtonElement | null>(null);
+  const workflow = [
+    ["draft", "Drafts", counts.draft],
+    ["submitted", "Submitted", counts.submitted],
+    ["under_review", "Under review", counts.under_review],
+    ["revision_required", "Revision required", counts.revision_required],
+    ["approved", "Approved", counts.approved],
+  ] as const;
   return (
-    <section className="admin-stat-grid" aria-label="Program counts">
-      <Stat
-        label="Active instructors"
-        value={counts.active_instructors}
-        onSelect={() => open("Active instructors")}
-      />
-      <Stat
-        label="Active advisers"
-        value={counts.active_advisers}
-        onSelect={() => open("Active advisers")}
-      />
-      <Stat
-        label="Active researchers"
-        value={counts.active_researchers}
-        onSelect={() => open("Active researchers")}
-      />
-      <Stat
-        label="Drafts"
-        value={counts.draft}
-        onSelect={() => open("Drafts")}
-      />
-      <Stat
-        label="Submitted"
-        value={counts.submitted}
-        onSelect={() => open("Submitted")}
-      />
-      <Stat
-        label="Under review"
-        value={counts.under_review}
-        onSelect={() => open("Under review")}
-      />
-      <Stat
-        label="Revision required"
-        value={counts.revision_required}
-        onSelect={() => open("Revision required")}
-      />
-      <Stat
-        label="Approved"
-        value={counts.approved}
-        onSelect={() => open("Approved")}
-      />
-      <Stat
-        label="Archived"
-        value={counts.archived}
-        onSelect={() => open("Archived")}
-      />
-      <Stat label="Flagged similarity" value={counts.flagged_similarity} />
-      <Stat
-        label="Defenses scheduled"
-        value={counts.defenses_scheduled}
-        onSelect={() => open("Defenses scheduled")}
-      />
-      <Stat
-        label="Defenses completed"
-        value={counts.defenses_completed}
-        onSelect={() => open("Defenses completed")}
-      />
-      <Stat
-        label="Evaluations submitted"
-        value={counts.evaluations_submitted}
-        onSelect={() => open("Evaluations submitted")}
-      />
-      <Stat
-        label="Methodology signed off"
-        value={counts.methodology_signed_off}
-        onSelect={() => open("Methodology signed off")}
-      />
-    </section>
+    <div className="coordinator-report-overview">
+      <section className="coordinator-report-kpis" aria-label="Program counts">
+        <DashboardKpiCard icon={UserRound} label="Active instructors" value={counts.active_instructors} description="" />
+        <DashboardKpiCard icon={UsersRound} label="Active advisers" value={counts.active_advisers} description="" />
+        <DashboardKpiCard icon={Layers3} label="Active studies" value={counts.draft + counts.submitted + counts.under_review + counts.revision_required + counts.approved} description="" />
+        <DashboardKpiCard icon={Archive} label="Archived" value={counts.archived} description="" />
+      </section>
+      <section className="panel-card coordinator-workflow-card" aria-labelledby="coordinator-workflow-title">
+        <header><div><h2 id="coordinator-workflow-title">Research workflow</h2><p>Reporting only (read-only). Select a status to view its studies.</p></div><strong>Active researchers: {counts.active_researchers}</strong></header>
+        <div className="coordinator-workflow-rows">
+          {workflow.map(([value, text, count]) => <button key={value} type="button" aria-label={`View ${text}`} onClick={(event) => { trigger.current = event.currentTarget; setSelected({ value, label: text }); }}><span>{text}</span><strong>{count}</strong><ChevronRight aria-hidden="true" /></button>)}
+        </div>
+      </section>
+      {selected && <CoordinatorWorkflowStudiesModal key={`${selected.value}:${report.filters.program ?? ""}`} status={selected} report={report} onClose={() => { setSelected(null); requestAnimationFrame(() => trigger.current?.focus()); }} />}
+    </div>
   );
+}
+
+function CoordinatorReportTable({ title, empty, headers, rows }: { title: string; empty: string; headers: string[]; rows: string[][] }) {
+  return <section className="panel-card coordinator-report-table"><header><h2>{title}</h2><span>{rows.length} records</span></header>{rows.length === 0 ? <p className="admin-empty">{empty}</p> : <div className="admin-table-wrap"><table><caption className="sr-only">{title}</caption><thead><tr>{headers.map((header) => <th key={header}>{header}</th>)}</tr></thead><tbody>{rows.map((row, rowIndex) => <tr key={`${title}-${rowIndex}`}>{row.map((cell, index) => <td key={headers[index]} data-label={headers[index]}>{cell}</td>)}</tr>)}</tbody></table></div>}</section>;
+}
+
+function CoordinatorWorkflowStudiesModal({ status, report, onClose }: { status: { value: string; label: string }; report: CoordinatorProgramReport; onClose: () => void }) {
+  const [page, setPage] = useState(1);
+  const [attempt, retry] = useAttempt();
+  const [state, setState] = useState<{ status: "loading" | "error" | "ready"; message?: string; response?: Awaited<ReturnType<typeof listCoordinatorReportStudies>> }>({ status: "loading" });
+  useEffect(() => {
+    const controller = new AbortController();
+    void listCoordinatorReportStudies({ status: status.value, program: report.filters.program || undefined, page, per_page: 10 }, globalThis.fetch, controller.signal)
+      .then((response) => setState({ status: "ready", response }))
+      .catch((error) => { if (!controller.signal.aborted) setState({ status: "error", message: friendlyError(error, "Filtered studies are unavailable") }); });
+    return () => controller.abort();
+  }, [attempt, page, report.filters.program, status.value]);
+  const response = state.response;
+  const reload = () => { setState({ status: "loading" }); retry(); };
+  const changePage = (nextPage: number) => { setState({ status: "loading" }); setPage(nextPage); };
+  return <Modal label={`${status.label} studies`} size="large" className="coordinator-workflow-modal" onClose={onClose}><header><p className="eyebrow">Filtered studies</p><h2>{status.label} studies</h2><p>{report.filters.institute || "Assigned institute"} · {report.filters.program || "All programs"}</p></header><div className="coordinator-workflow-modal-body">{state.status === "loading" ? <Loading label={`Loading ${status.label.toLowerCase()} studies`} /> : state.status === "error" ? <InlineError message={state.message || "Filtered studies are unavailable"} retry={reload} /> : response && response.meta.total === 0 ? <p className="admin-empty">No {status.label.toLowerCase()} studies found.</p> : <div className="admin-table-wrap"><table><caption className="sr-only">{status.label} studies</caption><thead><tr><th>Study</th><th>Section</th><th>Program</th><th>Updated</th></tr></thead><tbody>{response?.data.map((study) => <tr key={study.id}><td>{study.title || "Untitled study"}</td><td>{study.section || "—"}</td><td>{study.degree_program || "—"}</td><td>{displayDate(study.updated_at)}</td></tr>)}</tbody></table></div>}</div>{state.status === "ready" && response && response.meta.last_page > 1 && <Pagination meta={response.meta} noun="studies" onPage={changePage} />}</Modal>;
 }
 
 function adviserSpotlight(adviser: AdviserLoadItem): ReportSpotlight {
@@ -6060,115 +5836,6 @@ function adviserSpotlight(adviser: AdviserLoadItem): ReportSpotlight {
       study.title || "—",
       label(study.research_stage || "Unknown"),
       label(study.submission_status || "Unknown"),
-    ]),
-  };
-}
-
-function countSpotlight(
-  report: CoordinatorProgramReport,
-  name: string,
-): ReportSpotlight {
-  const description =
-    "Most recently updated studies in this status (up to 300 shown). The count includes all matching studies.";
-  const studies = report.studies ?? [];
-  const status = (
-    {
-      Drafts: "draft",
-      Submitted: "submitted",
-      "Under review": "under_review",
-      "Revision required": "revision_required",
-      Approved: "approved",
-      Archived: "archived",
-    } as Record<string, string>
-  )[name];
-  if (status) {
-    return {
-      title: name,
-      description,
-      columns: ["Study", "Section", "Program", "Last updated"],
-      rows: studies
-        .filter((study) => study.submission_status === status)
-        .map((study) => [
-          study.title || "—",
-          study.section || "—",
-          study.degree_program || "—",
-          displayDate(study.updated_at),
-        ]),
-    };
-  }
-  if (name === "Active instructors" || name === "Active advisers") {
-    const people =
-      name === "Active instructors"
-        ? (report.active_instructors_list ?? [])
-        : (report.active_advisers_list ?? []);
-    return {
-      title: name,
-      description: "Active accounts across the institution (up to 300 shown).",
-      columns: ["Name", "Email"],
-      rows: people.map((person) => [person.name, person.email]),
-    };
-  }
-  if (name === "Active researchers") {
-    return {
-      title: name,
-      description:
-        "Researchers authoring studies in the selected scope (up to 300 shown). The unfiltered count includes all active researcher accounts.",
-      columns: ["Researcher", "Email", "Studies"],
-      rows: (report.researchers ?? []).map((person) => [
-        person.name || "—",
-        person.email || "—",
-        String(person.documents_count),
-      ]),
-    };
-  }
-  if (name === "Defenses scheduled" || name === "Defenses completed") {
-    const status = name === "Defenses scheduled" ? "scheduled" : "completed";
-    return {
-      title: name,
-      description:
-        "Recent defense schedules across the institution (up to 200 shown).",
-      columns: ["Study", "Date", "Room"],
-      rows: (report.defense_schedules ?? [])
-        .filter((schedule) => schedule.status === status)
-        .map((schedule) => [
-          schedule.title || "—",
-          displayDate(schedule.scheduled_at),
-          schedule.room || "—",
-        ]),
-    };
-  }
-  if (name === "Evaluations submitted") {
-    return {
-      title: name,
-      description:
-        "Recent panel evaluations across the institution (up to 200 shown).",
-      columns: [
-        "Study",
-        "Panelist",
-        "Originality",
-        "Methodology",
-        "Clarity",
-        "Submitted",
-      ],
-      rows: (report.evaluations ?? []).map((evaluation) => [
-        evaluation.title || "—",
-        evaluation.panelist || "—",
-        String(evaluation.originality ?? "—"),
-        String(evaluation.methodology ?? "—"),
-        String(evaluation.clarity ?? "—"),
-        displayDate(evaluation.submitted_at),
-      ]),
-    };
-  }
-  return {
-    title: name,
-    description:
-      "Recent methodology sign-offs across the institution (up to 200 shown).",
-    columns: ["Study", "Statistician", "Signed off"],
-    rows: (report.methodology_reviews ?? []).map((review) => [
-      review.title || "—",
-      review.statistician || "—",
-      displayDate(review.signed_off_at),
     ]),
   };
 }

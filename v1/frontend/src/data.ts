@@ -115,7 +115,7 @@ export const roleConfigs: RoleConfig[] = [
     label: "Research Coordinator",
     shortLabel: "Coordinator",
     description: "Monitor the program.",
-    nav: ["Program Overview", "Adviser Load", "Account Roles", "Reports"],
+    nav: ["Program Overview", "Research Assignments", "Repository", "Reports"],
   },
   {
     id: "librarian",

@@ -6,14 +6,16 @@ export function DashboardKpiCard({
   label,
   value,
   description,
+  onClick,
 }: {
   icon: LucideIcon;
   label: string;
   value: number;
   description: string;
+  onClick?: () => void;
 }) {
-  return (
-    <article className="dashboard-kpi-card">
+  const content = (
+    <>
       <span className="dashboard-kpi-icon" aria-hidden="true">
         <Icon />
       </span>
@@ -22,6 +24,25 @@ export function DashboardKpiCard({
         <strong>{value}</strong>
         <p>{description}</p>
       </div>
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        className="dashboard-kpi-card"
+        aria-label={`View ${label}`}
+        onClick={onClick}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <article className="dashboard-kpi-card">
+      {content}
     </article>
   );
 }

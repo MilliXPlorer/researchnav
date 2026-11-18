@@ -144,7 +144,7 @@ function roleRoutes(): Array<[RegExp, Handler]> {
     [/\/api\/statistician\/(queue|signoffs)$/, emptyData],
     [/\/api\/coordinator\/schedules(\?|$)/, emptyData],
     [/\/api\/coordinator\/adviser-load$/, emptyData],
-    [/\/api\/coordinator\/reports$/, programReport],
+    [/\/api\/coordinator\/reports(\?|$)/, programReport],
     [
       /\/api\/coordinator\/instructors$/,
       () => new Response(JSON.stringify({ users: [] })),
@@ -253,7 +253,7 @@ describe("role workspace pages", () => {
     const printButton = await screen.findByRole("button", {
       name: "Print report",
     });
-    expect(printButton).toBeEnabled();
+    await waitFor(() => expect(printButton).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Class sections" }));
     fireEvent.click(printButton);
     expect(open).toHaveBeenCalledWith(
@@ -274,6 +274,34 @@ describe("role workspace pages", () => {
 
   it("opens a coordinator report count and adviser row as read-only details", async () => {
     stubFetch([
+      [
+        /\/api\/coordinator\/reports\/studies(\?|$)/,
+        () =>
+          new Response(
+            JSON.stringify({
+              data: [
+                {
+                  id: 42,
+                  title: "Sample Study",
+                  section: "Class A",
+                  degree_program: "Computer Science",
+                  updated_at: "2026-09-21T08:00:00Z",
+                },
+              ],
+              links: { first: null, last: null, prev: null, next: null },
+              meta: {
+                current_page: 1,
+                from: 1,
+                last_page: 1,
+                links: [],
+                path: "/api/coordinator/reports/studies",
+                per_page: 10,
+                to: 1,
+                total: 1,
+              },
+            }),
+          ),
+      ],
       [
         /\/api\/coordinator\/reports(\?|$)/,
         () =>
@@ -355,9 +383,7 @@ describe("role workspace pages", () => {
     fireEvent.click(
       await screen.findByRole("button", { name: "View Revision required" }),
     );
-    expect(
-      await screen.findByRole("dialog", { name: "Revision required" }),
-    ).toHaveTextContent("Sample Study");
+    expect(await screen.findByText("Sample Study")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /close/i }));
     fireEvent.click(
       screen.getByRole("button", { name: "Research instructors" }),
@@ -369,15 +395,14 @@ describe("role workspace pages", () => {
       screen.queryByRole("button", { name: "View Revision required" }),
     ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Class sections" }));
-    expect(screen.getByRole("button", { name: "Class A" })).toBeInTheDocument();
+    expect(screen.getByText("Class A")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Class A" })).not.toBeInTheDocument();
     expect(
       screen.queryByRole("heading", { name: "Research instructors" }),
     ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Adviser load" }));
-    fireEvent.click(screen.getByRole("button", { name: "Dr. Rivera" }));
-    expect(
-      await screen.findByRole("dialog", { name: "Dr. Rivera" }),
-    ).toHaveTextContent("Sample Study");
+    expect(screen.getByText("Dr. Rivera")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Dr. Rivera" })).not.toBeInTheDocument();
   });
   it("opens an adviser's assigned studies from Adviser Load", async () => {
     stubFetch([

@@ -6,6 +6,7 @@ use App\Exceptions\ApiValidationException;
 use App\Models\ClassSection;
 use App\Models\DefenseSchedule;
 use App\Services\CoordinatorInstituteScope;
+use App\Services\CoordinatorProgramOverviewService;
 use App\Services\DefenseScheduleService;
 use App\Services\InstitutionalPdfService;
 use App\Services\ReportingService;
@@ -15,6 +16,13 @@ use Illuminate\Support\Facades\Validator;
 
 class CoordinatorWorkspaceController extends DomainController
 {
+    public function programOverview(Request $request, CoordinatorProgramOverviewService $overview): JsonResponse
+    {
+        return response()
+            ->json(['data' => $overview->get($this->actor($request))])
+            ->header('Cache-Control', 'private, no-store');
+    }
+
     public function sections(Request $request, CoordinatorInstituteScope $scope): JsonResponse
     {
         $sections = $scope->sections($this->actor($request))
@@ -105,6 +113,28 @@ class CoordinatorWorkspaceController extends DomainController
                 $this->actor($request),
                 $validated['program'] ?? null,
             )])
+            ->header('Cache-Control', 'private, no-store');
+    }
+
+    public function reportStudies(Request $request, ReportingService $reports): JsonResponse
+    {
+        $validator = Validator::make($request->query(), [
+            'status' => ['required', 'string', 'in:draft,submitted,under_review,revision_required,approved'],
+            'program' => ['nullable', 'string', 'max:255'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:50'],
+        ]);
+        if ($validator->fails()) {
+            throw new ApiValidationException($validator->errors()->toArray());
+        }
+        $validated = $validator->validated();
+
+        return response()
+            ->json($reports->coordinatorStudies(
+                $this->actor($request),
+                $validated['status'],
+                $validated['program'] ?? null,
+                (int) ($validated['per_page'] ?? 10),
+            ))
             ->header('Cache-Control', 'private, no-store');
     }
 

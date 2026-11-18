@@ -6,6 +6,7 @@ import {
   getRoleDashboard,
   getNotificationUnreadCount,
   getInternalResearch,
+  getCoordinatorProgramOverview,
   archiveInternalResearch,
   checkContentUploadSimilarity,
   checkTitleQuerySimilarity,
@@ -23,6 +24,7 @@ import {
   listFeedback,
   listPdfAnnotations,
   listMonitoringLogs,
+  listCoordinatorReportStudies,
   listAdviserPendingReviews,
   listInstructorAssignedSubmissions,
   listResearchProgressUpdates,
@@ -92,6 +94,30 @@ const profileSession = {
   displayName: "Ada Lovelace",
   profilePhotoUrl: "/api/profile/photo/version",
 };
+
+describe("coordinator reporting contracts", () => {
+  it("loads the authenticated coordinator overview without institute input", async () => {
+    const data = { schema_version: 1, institute: { name: "Institute of Computer Studies" } };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data }))) as unknown as typeof fetch;
+
+    await expect(getCoordinatorProgramOverview(fetchMock)).resolves.toEqual(data);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/coordinator/program-overview",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
+  it("requests only workflow status, program, and pagination for coordinator studies", async () => {
+    const response = { data: [], links: {}, meta: { current_page: 1, from: null, last_page: 1, path: "", per_page: 10, to: null, total: 0 } };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(response))) as unknown as typeof fetch;
+
+    await listCoordinatorReportStudies({ status: "approved", program: "Computer Science", page: 2, per_page: 10 }, fetchMock);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/coordinator/reports/studies?status=approved&program=Computer+Science&page=2&per_page=10",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+});
 
 const resource = (id: number, authorName: string, authorOrder = 1) => ({
   id,

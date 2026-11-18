@@ -3756,6 +3756,18 @@ export interface CoordinatorReportStudy {
   updated_at: string | null;
 }
 
+export async function listCoordinatorReportStudies(
+  input: { status: string; program?: string; page?: number; per_page?: number },
+  fetcher: ApiFetch = globalThis.fetch,
+  signal?: AbortSignal,
+): Promise<LaravelPaginatedResponse<CoordinatorReportStudy>> {
+  return apiRequest(
+    adminQuery("/api/coordinator/reports/studies", input),
+    { signal },
+    fetcher,
+  );
+}
+
 export interface CoordinatorReportResearcher {
   user_id: string;
   name: string | null;
@@ -3843,6 +3855,39 @@ export async function listAdviserLoad(
   return (
     await apiRequest<{ data: AdviserLoadItem[] }>(
       "/api/coordinator/adviser-load",
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export interface CoordinatorProgramOverview {
+  schema_version: 1;
+  institute: { name: string | null };
+  counts: {
+    total_users: number;
+    total_instructors: number;
+    total_advisers: number;
+    total_studies: number;
+  };
+  adviser_workload: AdviserLoadItem[];
+  repository_status: { total: number; ongoing: number; archived: number };
+  recent_activity: Array<{
+    id: string;
+    type: string;
+    label: string;
+    research_document_id: number;
+    title: string;
+    occurred_at: string | null;
+  }>;
+}
+
+export async function getCoordinatorProgramOverview(
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<CoordinatorProgramOverview> {
+  return (
+    await apiRequest<{ data: CoordinatorProgramOverview }>(
+      "/api/coordinator/program-overview",
       undefined,
       fetcher,
     )

@@ -53,11 +53,43 @@ class CoordinatorInstituteScopeTest extends TestCase
     {
         $coordinator = $this->user('coordinator', null);
 
-        foreach (['/api/dashboard', '/api/coordinator/instructors', '/api/coordinator/sections', '/api/coordinator/schedules', '/api/coordinator/adviser-load', '/api/coordinator/duplicate-flags', '/api/coordinator/reports'] as $url) {
+        foreach (['/api/dashboard', '/api/coordinator/instructors', '/api/coordinator/sections', '/api/coordinator/program-overview', '/api/coordinator/schedules', '/api/coordinator/adviser-load', '/api/coordinator/duplicate-flags', '/api/coordinator/reports', '/api/coordinator/reports/studies?status=submitted'] as $url) {
             $this->as($coordinator)->getJson($url)
                 ->assertForbidden()
                 ->assertExactJson(['error' => 'COORDINATOR_INSTITUTE_REQUIRED']);
         }
+    }
+
+    public function test_program_overview_and_workflow_studies_use_only_the_coordinator_institute(): void
+    {
+        $institute = 'Institute of Computer Studies';
+        $coordinator = $this->user('coordinator', $institute);
+        $this->user('instructor', $institute);
+        $this->user('instructor', 'Institute of Health Sciences');
+        $visible = ResearchDocument::factory()->create(['institute' => $institute, 'submission_status' => 'submitted', 'title' => 'Visible Study']);
+        ResearchDocument::factory()->create(['institute' => 'Institute of Health Sciences', 'submission_status' => 'submitted', 'title' => 'Foreign Study']);
+        ResearchDocument::factory()->create(['institute' => null, 'submission_status' => 'submitted', 'title' => 'Legacy Study']);
+
+        $this->as($coordinator)->getJson('/api/coordinator/program-overview')
+            ->assertOk()
+            ->assertJsonPath('data.institute.name', $institute)
+            ->assertJsonPath('data.counts.total_instructors', 1)
+            ->assertJsonPath('data.counts.total_studies', 1);
+
+        $this->as($coordinator)->getJson('/api/coordinator/reports/studies?status=submitted&institute='.urlencode('Institute of Health Sciences'))
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $visible->id)
+            ->assertJsonMissing(['title' => 'Foreign Study'])
+            ->assertJsonMissing(['title' => 'Legacy Study']);
+    }
+
+    public function test_workflow_studies_reject_missing_or_unsupported_statuses(): void
+    {
+        $coordinator = $this->user('coordinator', 'Institute of Computer Studies');
+
+        $this->as($coordinator)->getJson('/api/coordinator/reports/studies')->assertBadRequest();
+        $this->as($coordinator)->getJson('/api/coordinator/reports/studies?status=archived')->assertBadRequest();
     }
 
     public function test_coordinator_section_list_and_direct_access_are_institute_scoped(): void

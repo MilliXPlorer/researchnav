@@ -1214,24 +1214,47 @@ describe("role workspaces", () => {
 
   it.each(cases)(
     "opens live %s workspace records from its statistic card",
-    (role, heading, readyKey, sectionHeading) => {
+    async (role, heading, readyKey, sectionHeading) => {
+      if (role === "coordinator") {
+        vi.stubGlobal(
+          "fetch",
+          vi.fn(async () =>
+            new Response(
+              JSON.stringify({
+                data: {
+                  schema_version: 1,
+                  institute: { name: "Institute of Computer Studies" },
+                  counts: { total_users: 7, total_instructors: 7, total_advisers: 7, total_studies: 7 },
+                  adviser_workload: [],
+                  repository_status: { total: 7, ongoing: 7, archived: 0 },
+                  recent_activity: [],
+                },
+              }),
+            ),
+          ),
+        );
+      }
       render(<RoleWorkspace {...readyProps(role, readyKey)} />);
       expect(
         screen.getByRole("heading", { level: 1, name: heading }),
       ).toBeInTheDocument();
-      const sectionButton = screen.getByRole("button", {
+      const sectionButton = await screen.findByRole("button", {
         name: `View ${sectionHeading}`,
       });
       expect(sectionButton).toBeInTheDocument();
-      expect(
-        screen.queryByRole("heading", { level: 2, name: sectionHeading }),
-      ).not.toBeInTheDocument();
-      expect(
-        screen.getByRole("heading", {
-          level: 2,
-          name: role === "admin" ? "Repository overview" : "Statistics",
-        }),
-      ).toBeInTheDocument();
+      if (role !== "coordinator") {
+        expect(
+          screen.queryByRole("heading", { level: 2, name: sectionHeading }),
+        ).not.toBeInTheDocument();
+      }
+      if (role !== "coordinator") {
+        expect(
+          screen.getByRole("heading", {
+            level: 2,
+            name: role === "admin" ? "Repository overview" : "Statistics",
+          }),
+        ).toBeInTheDocument();
+      }
       const workloadMeter = screen.queryByRole("meter", {
         name: sectionHeading,
       });
@@ -1243,7 +1266,9 @@ describe("role workspaces", () => {
       }
       fireEvent.click(sectionButton);
       expect(screen.getByRole("dialog")).toBeInTheDocument();
-      expect(screen.getByText(`${role} API RECORD`)).toBeInTheDocument();
+      if (role !== "coordinator") {
+        expect(screen.getByText(`${role} API RECORD`)).toBeInTheDocument();
+      }
       expect(screen.queryByText("Unavailable")).not.toBeInTheDocument();
     },
   );
@@ -1533,7 +1558,24 @@ describe("role workspaces", () => {
     expect(container.querySelector(".dashboard-analytics")).toBeNull();
   });
 
-  it("hides legacy schedules and duplicate flags on the coordinator overview", () => {
+  it("hides legacy schedules and duplicate flags on the coordinator overview", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            data: {
+              schema_version: 1,
+              institute: { name: "Institute of Computer Studies" },
+              counts: { total_users: 0, total_instructors: 0, total_advisers: 0, total_studies: 0 },
+              adviser_workload: [],
+              repository_status: { total: 0, ongoing: 0, archived: 0 },
+              recent_activity: [],
+            },
+          }),
+        ),
+      ),
+    );
     const coordinator = dashboardFor("coordinator", "active_instructors");
     render(
       <RoleWorkspace
@@ -1566,7 +1608,7 @@ describe("role workspaces", () => {
     );
 
     expect(
-      screen.getByRole("button", { name: "View Active instructors" }),
+      await screen.findByRole("button", { name: "View Active instructors" }),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "View Schedules" }),

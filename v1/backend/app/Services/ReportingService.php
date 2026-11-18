@@ -86,6 +86,26 @@ class ReportingService
         ];
     }
 
+    public function coordinatorStudies(User $actor, string $status, ?string $program = null, int $perPage = 10)
+    {
+        return $this->coordinatorScope->documents($actor)
+            ->where('submission_status', $status)
+            ->when($program !== null && trim($program) !== '', fn ($query) => $query->where('degree_program', trim($program)))
+            ->with('section:id,name')
+            ->latest('updated_at')
+            ->latest('id')
+            ->paginate($perPage)
+            ->through(fn (ResearchDocument $document) => [
+                'id' => $document->id,
+                'title' => $document->title,
+                'submission_status' => $document->submission_status,
+                'institute' => $document->institute,
+                'degree_program' => $document->degree_program,
+                'section' => $document->section?->name,
+                'updated_at' => $document->updated_at?->toISOString(),
+            ]);
+    }
+
     private function activePeople(string $role, $users): array
     {
         return (clone $users)
@@ -236,7 +256,10 @@ class ReportingService
             ->where('is_active', true)
             ->whereIn('institute', (clone $documents)->select('institute'))
             ->whereIn('id', $scopedDocuments->keys()->all())
-            ->with('instructor:id,first_name,middle_name,last_name,email')
+            ->with(['instructor' => fn ($query) => $query
+                ->where('role', 'instructor')
+                ->where('access_status', 'active')
+                ->select('id', 'first_name', 'middle_name', 'last_name', 'email')])
             ->get()
             ->filter(fn (ClassSection $section) => $section->instructor !== null)
             ->groupBy(fn (ClassSection $section) => $section->instructor->id)

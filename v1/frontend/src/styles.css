@@ -19330,6 +19330,144 @@ body::-webkit-scrollbar {
   flex-basis: 0;
 }
 
+.coordinator-dashboard-workspace .workspace-header,
+.coordinator-dashboard,
+.coordinator-report-page {
+  max-width: 1180px;
+}
+
+.coordinator-institute-label {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.coordinator-kpi-grid,
+.coordinator-report-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.coordinator-dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.75fr);
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.coordinator-dashboard-grid .panel-card,
+.coordinator-report-page .panel-card {
+  border-radius: 12px;
+}
+
+.coordinator-workload-card header,
+.coordinator-status-card header,
+.coordinator-activity-card header,
+.coordinator-workflow-card header,
+.coordinator-report-table header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.coordinator-workload-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(100px, 1.2fr) 32px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+
+.coordinator-workload-row span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.coordinator-workload-meter {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e8eee9;
+}
+
+.coordinator-workload-meter span {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.coordinator-status-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  gap: 18px;
+}
+
+.coordinator-status-donut {
+  width: 132px;
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+}
+
+.coordinator-status-donut span {
+  width: 92px;
+  aspect-ratio: 1;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  border-radius: 50%;
+  background: var(--surface);
+}
+
+.coordinator-status-donut strong,
+.coordinator-status-donut small { display: block; }
+.coordinator-status-content dl div { display: flex; gap: 24px; justify-content: space-between; }
+.coordinator-activity-list article { display: flex; justify-content: space-between; gap: 16px; padding: 11px 0; border-top: 1px solid var(--border); }
+.coordinator-activity-list p { margin: 3px 0 0; color: var(--muted); }
+.coordinator-activity-list time { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.coordinator-quick-actions { display: grid; align-content: start; gap: 8px; }
+.coordinator-quick-actions button { display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 11px 0; border: 0; border-top: 1px solid var(--border); background: none; color: inherit; font: inherit; font-weight: 700; cursor: pointer; }
+.coordinator-overview-state { min-height: 180px; display: grid; place-content: center; justify-items: center; gap: 12px; }
+.coordinator-report-overview { display: grid; gap: 16px; }
+.coordinator-workflow-rows { display: grid; gap: 7px; }
+.coordinator-workflow-rows button { display: grid; grid-template-columns: 1fr auto 18px; align-items: center; gap: 12px; width: 100%; padding: 11px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); color: inherit; text-align: left; cursor: pointer; }
+.coordinator-workflow-rows button:hover, .coordinator-workflow-rows button:focus-visible { border-color: var(--accent); }
+.coordinator-report-table { margin-top: 0; }
+.coordinator-report-table table { font-size: 13px; }
+.coordinator-report-table th, .coordinator-report-table td { padding: 10px 12px; }
+.coordinator-workflow-modal .modal-card { max-width: 900px; }
+.coordinator-workflow-modal-body { margin: 16px 0; }
+
+@media (max-width: 900px) {
+  .coordinator-kpi-grid,
+  .coordinator-report-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .coordinator-dashboard-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 620px) {
+  .coordinator-kpi-grid,
+  .coordinator-report-kpis { grid-template-columns: 1fr; }
+  .coordinator-report-filters { grid-template-columns: 1fr; }
+  .project-workspace-tabs.coordinator-report-switcher { grid-template-columns: 1fr 1fr; }
+  .coordinator-workload-row { grid-template-columns: 1fr 32px; }
+  .coordinator-workload-meter { grid-column: 1 / -1; }
+  .coordinator-report-table table, .coordinator-report-table thead, .coordinator-report-table tbody, .coordinator-report-table tr, .coordinator-report-table th, .coordinator-report-table td { display: block; }
+  .coordinator-report-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; }
+  .coordinator-report-table tr { padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .coordinator-report-table td { display: grid; grid-template-columns: minmax(105px, .45fr) 1fr; gap: 10px; border: 0; }
+  .coordinator-report-table td::before { content: attr(data-label); color: var(--muted); font-weight: 700; }
+  .coordinator-status-content { align-items: flex-start; }
+  .coordinator-activity-list article { display: block; }
+}
+
 @media (max-width: 640px) {
   .coordinator-report-filters > * {
     flex-basis: 100%;

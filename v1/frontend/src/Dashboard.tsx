@@ -92,6 +92,7 @@ const navIcons: Record<string, LucideIcon> = {
   "Statistical Review": ChartNoAxesCombined,
   "Editorial Review": FileText,
   "Program Overview": LayoutDashboard,
+  "Research Assignments": Users,
   "Adviser Load": Users,
   "Account Roles": UserCog,
   Reports: ChartNoAxesCombined,
