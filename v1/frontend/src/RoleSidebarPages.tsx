@@ -62,8 +62,11 @@ import {
   UserCog,
   UserPlus,
   UserRound,
+  UserRoundCheck,
+  UserRoundX,
   Users,
   UsersRound,
+  Search,
 } from "lucide-react";
 import {
   ApiError,
@@ -71,6 +74,10 @@ import {
   checkTitleQuerySimilarity,
   createInstructorSection,
   getCoordinatorProgramReport,
+  getCoordinatorAssignmentStudies,
+  getCoordinatorResearchDetails,
+  getCoordinatorRepositoryDetail,
+  coordinatorRepositoryDownloadUrl,
   getInstructorProjectTeam,
   getInternalResearch,
   getResearchPeople,
@@ -81,6 +88,8 @@ import {
   listAdviserFeedbackHistory,
   listAdviserSimilarityAlerts,
   listAdviserLoad,
+  listCoordinatorResearchAssignments,
+  listCoordinatorRepository,
   listCoordinatorReportStudies,
   listInstructorClassReports,
   listInstructorMonitoring,
@@ -148,6 +157,8 @@ import {
   type AccessStatus,
   type AdminRole,
   type CoordinatorProgramReport,
+  type CoordinatorAssignmentStudy,
+  type CoordinatorAssignmentUser,
   type AdviserLoadItem,
   type DocumentFileResource,
   type InstructorSectionDocumentItem,
@@ -419,12 +430,13 @@ export default function RoleSidebarPage({
     case "coordinator":
       switch (selectedNav) {
         case "Research Assignments":
+          return <CoordinatorResearchAssignments />;
         case "Adviser Load":
           return <CoordinatorAdviserLoad role={role} />;
         case "Account Roles":
           return <CoordinatorAccountRoles role={role} />;
         case "Repository":
-          return <ArchivedRoleRepository role={role} />;
+          return <CoordinatorRepository role={role} navigate={navigate} />;
         case "Reports":
           return <CoordinatorReports role={role} />;
         default:
@@ -5347,7 +5359,7 @@ function StatisticianSignoffs({ role }: { role: Role }) {
 
 /* ---------------------------------- Coordinator ---------------------------------- */
 
-function CoordinatorAdviserLoad({ role }: { role: Role }) {
+export function CoordinatorAdviserLoad({ role }: { role: Role }) {
   const [attempt, reload] = useAttempt();
   const [spotlight, setSpotlight] = useState<ReportSpotlight | null>(null);
   const state = useLoad(() => listAdviserLoad(), attempt);
@@ -5447,7 +5459,7 @@ function CoordinatorAdviserLoad({ role }: { role: Role }) {
   );
 }
 
-function CoordinatorAccountRoles({ role }: { role: Role }) {
+export function CoordinatorAccountRoles({ role }: { role: Role }) {
   const [users, setUsers] = useState<Awaited<
     ReturnType<typeof listProvisionedAccounts>
   > | null>(null);
@@ -5621,6 +5633,944 @@ function CoordinatorAccountRoles({ role }: { role: Role }) {
   );
 }
 
+function CoordinatorResearchAssignments() {
+  const [search, setSearch] = useState("");
+  const [roleFilter, setRoleFilter] = useState<"" | "instructor" | "adviser">(
+    "",
+  );
+  const [statusFilter, setStatusFilter] = useState<"" | AccessStatus>("");
+  const [sort, setSort] = useState<
+    "name" | "email" | "role" | "access_status" | "created_at"
+  >("name");
+  const [direction, setDirection] = useState<"asc" | "desc">("asc");
+  const [pageNumber, setPageNumber] = useState(1);
+  const [attempt, reload] = useAttempt();
+  const [page, setPage] = useState<Awaited<
+    ReturnType<typeof listCoordinatorResearchAssignments>
+  > | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [email, setEmail] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [addInstructorOpen, setAddInstructorOpen] = useState(false);
+  const [selectedUser, setSelectedUser] =
+    useState<CoordinatorAssignmentUser | null>(null);
+  const [studies, setStudies] = useState<CoordinatorAssignmentStudy[] | null>(
+    null,
+  );
+  const [studiesError, setStudiesError] = useState("");
+  const [selectedStudy, setSelectedStudy] =
+    useState<CoordinatorAssignmentStudy | null>(null);
+  const [studyLoading, setStudyLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void listCoordinatorResearchAssignments({
+      search: search.trim() || undefined,
+      role: roleFilter,
+      access_status: statusFilter,
+      sort,
+      direction,
+      page: pageNumber,
+      per_page: 10,
+    })
+      .then((result) => {
+        if (!cancelled) {
+          setPage(result);
+          setError("");
+        }
+      })
+      .catch((requestError) => {
+        if (!cancelled)
+          setError(
+            friendlyError(requestError, "Research assignments are unavailable"),
+          );
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [attempt, direction, pageNumber, roleFilter, search, sort, statusFilter]);
+
+  const summary = page?.summary ?? {
+    total_users: 0,
+    total_instructors: 0,
+    total_advisers: 0,
+    inactive_users: 0,
+  };
+  const changeSort = (nextSort: typeof sort) => {
+    setLoading(true);
+    setPageNumber(1);
+    if (sort === nextSort)
+      setDirection((current) => (current === "asc" ? "desc" : "asc"));
+    else {
+      setSort(nextSort);
+      setDirection("asc");
+    }
+  };
+  const openAssignments = async (user: CoordinatorAssignmentUser) => {
+    setSelectedUser(user);
+    setStudies(null);
+    setStudiesError("");
+    try {
+      setStudies((await getCoordinatorAssignmentStudies(user.id)).studies);
+    } catch (requestError) {
+      setStudiesError(
+        friendlyError(requestError, "Assigned studies are unavailable"),
+      );
+    }
+  };
+  const addInstructor = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setAdding(true);
+    setNotice("");
+    try {
+      await provisionAccount("/api/coordinator/instructors", email.trim());
+      setEmail("");
+      setNotice("Instructor account added.");
+      reload();
+    } catch (requestError) {
+      setNotice(
+        friendlyError(
+          requestError,
+          "The instructor account could not be added",
+        ),
+      );
+    } finally {
+      setAdding(false);
+    }
+  };
+  const name = selectedUser?.name || selectedUser?.email || "Instructor";
+  const initials = name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  return (
+    <div className="workspace-content admin-sidebar-page coordinator-assignments">
+      <header className="workspace-header coordinator-assignment-header">
+        <div>
+          <p className="eyebrow">Research Coordinator</p>
+          <div className="user-management-title">
+            <span aria-hidden="true">
+              <UsersRound />
+            </span>
+            <h1>Research Assignment</h1>
+          </div>
+          <p>
+            Manage research instructors and advisers assigned to your institute.
+          </p>
+        </div>
+        <Button
+          onClick={() => {
+            setNotice("");
+            setAddInstructorOpen(true);
+          }}
+        >
+          <Plus aria-hidden="true" /> Add Instructor
+        </Button>
+      </header>
+      <section
+        className="user-management-stats"
+        aria-label="Assignment statistics"
+      >
+        {[
+          ["Total Users", summary.total_users, <UsersRound key="users" />],
+          [
+            "Total Instructors",
+            summary.total_instructors,
+            <GraduationCap key="instructors" />,
+          ],
+          [
+            "Total Advisers",
+            summary.total_advisers,
+            <UserRoundCheck key="advisers" />,
+          ],
+          [
+            "Inactive Users",
+            summary.inactive_users,
+            <UserRoundX key="inactive" />,
+          ],
+        ].map(([text, value, icon]) => (
+          <article className="coordinator-assignment-stat" key={String(text)}>
+            <span aria-hidden="true">{icon}</span>
+            <div>
+              <p>{text}</p>
+              <strong>{value}</strong>
+            </div>
+          </article>
+        ))}
+      </section>
+      <section className="panel-card user-management-directory">
+        <div className="user-management-toolbar">
+          <label className="user-management-search">
+            <span className="sr-only">Search assignments</span>
+            <Search aria-hidden="true" />
+            <input
+              type="search"
+              placeholder="Search by name or email"
+              value={search}
+              onChange={(event) => {
+                setLoading(true);
+                setSearch(event.target.value);
+                setPageNumber(1);
+              }}
+            />
+          </label>
+          <SelectMenu
+            label="Role"
+            value={roleFilter}
+            onChange={(value) => {
+              setLoading(true);
+              setRoleFilter(value as typeof roleFilter);
+              setPageNumber(1);
+            }}
+            options={[
+              { value: "", label: "All roles" },
+              { value: "instructor", label: "Instructor" },
+              { value: "adviser", label: "Adviser" },
+            ]}
+          />
+          <SelectMenu
+            label="Access status"
+            value={statusFilter}
+            onChange={(value) => {
+              setLoading(true);
+              setStatusFilter(value as typeof statusFilter);
+              setPageNumber(1);
+            }}
+            options={[
+              { value: "", label: "All statuses" },
+              ...accessStatuses.map((status) => ({
+                value: status,
+                label: label(status),
+              })),
+            ]}
+          />
+          <Button
+            variant="secondary"
+            className={`icon-button user-management-refresh${loading ? " is-loading" : ""}`}
+            aria-label="Refresh assignments"
+            title="Refresh assignments"
+            onClick={() => {
+              setLoading(true);
+              reload();
+            }}
+            disabled={loading}
+          >
+            <RefreshCw aria-hidden="true" />
+          </Button>
+        </div>
+        {error ? (
+          <InlineError message={error} retry={reload} />
+        ) : loading && page === null ? (
+          <Loading label="Loading research assignments" />
+        ) : page?.data.length === 0 ? (
+          <p className="admin-empty">
+            No instructors or advisers match these filters.
+          </p>
+        ) : (
+          <>
+            <div
+              className={
+                loading
+                  ? "user-management-table is-loading"
+                  : "user-management-table"
+              }
+            >
+              <table>
+                <caption className="sr-only">Research assignments</caption>
+                <thead>
+                  <tr>
+                    <SortableHeader
+                      sortKey="name"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={() => changeSort("name")}
+                    >
+                      User
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="role"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={() => changeSort("role")}
+                    >
+                      Role
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="access_status"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={() => changeSort("access_status")}
+                    >
+                      Access Status
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="created_at"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={() => changeSort("created_at")}
+                    >
+                      Date Created
+                    </SortableHeader>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {page?.data.map((user) => (
+                    <tr key={user.id}>
+                      <td data-label="User">
+                        <div className="user-management-identity">
+                          <strong>{user.name}</strong>
+                          <span>{user.email}</span>
+                        </div>
+                      </td>
+                      <td data-label="Role">{label(user.role)}</td>
+                      <td data-label="Access Status">
+                        <span
+                          className={`user-status user-status--${user.access_status}`}
+                        >
+                          {label(user.access_status)}
+                        </span>
+                      </td>
+                      <td data-label="Date Created">
+                        {user.created_at
+                          ? formatPhilippineDateTime(user.created_at)
+                          : "Not available"}
+                      </td>
+                      <td data-label="Actions">
+                        <button
+                          type="button"
+                          className="icon-button coordinator-view-assignment"
+                          aria-label={`View studies for ${user.name}`}
+                          title={`View studies for ${user.name}`}
+                          onClick={() => void openAssignments(user)}
+                        >
+                          <Eye aria-hidden="true" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {page && (
+              <Pagination
+                meta={page.meta}
+                noun="users"
+                onPage={(next) => {
+                  setLoading(true);
+                  setPageNumber(next);
+                }}
+              />
+            )}
+          </>
+        )}
+      </section>
+      {addInstructorOpen && (
+        <Modal
+          label="Add instructor"
+          onClose={() => setAddInstructorOpen(false)}
+          busy={adding}
+        >
+          <form
+            className="coordinator-add-instructor-form"
+            onSubmit={addInstructor}
+          >
+            <div>
+              <p className="eyebrow">Institute access</p>
+              <h2>Add Instructor</h2>
+              <p>
+                Invite an instructor to the coordinator's assigned institute.
+              </p>
+            </div>
+            <label>
+              Instructor email
+              <input
+                type="email"
+                required
+                autoComplete="email"
+                placeholder="name@example.edu"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+              />
+            </label>
+            {notice && (
+              <p
+                role="status"
+                className={
+                  notice === "Instructor account added."
+                    ? "admin-success"
+                    : "admin-error"
+                }
+              >
+                {notice}
+              </p>
+            )}
+            <footer>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setAddInstructorOpen(false)}
+                disabled={adding}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={adding}>
+                {adding ? "Adding…" : "Add Instructor"}
+              </Button>
+            </footer>
+          </form>
+        </Modal>
+      )}
+      {selectedUser && (
+        <Modal
+          label={`${name}'s assigned studies`}
+          onClose={() => {
+            setSelectedUser(null);
+            setStudies(null);
+            setSelectedStudy(null);
+          }}
+          size="large"
+          className="coordinator-assignment-modal"
+        >
+          <header className="coordinator-assignment-modal__header">
+            <span
+              className="coordinator-assignment-modal__avatar"
+              aria-hidden="true"
+            >
+              {initials}
+            </span>
+            <div>
+              <p>
+                {selectedUser.role === "adviser" ? "Adviser" : "Instructor"}
+              </p>
+              <h2>{name}</h2>
+              <span>
+                {studies === null
+                  ? "Loading assigned studies"
+                  : `${studies.length} assigned ${studies.length === 1 ? "study" : "studies"}`}
+              </span>
+            </div>
+          </header>
+          <div className="coordinator-study-list">
+            {studiesError && (
+              <p
+                className="admin-error coordinator-assignment-modal__state"
+                role="alert"
+              >
+                {studiesError}
+              </p>
+            )}
+            {studies === null && !studiesError ? (
+              <div className="coordinator-assignment-modal__state">
+                <Loading label="Loading assigned studies" />
+              </div>
+            ) : studies?.length === 0 ? (
+              <div className="coordinator-assignment-modal__state">
+                <strong>No assigned studies</strong>
+                <p>
+                  This {selectedUser.role} does not have an assigned study yet.
+                </p>
+              </div>
+            ) : (
+              studies?.map((study) => (
+                <article className="coordinator-study-card" key={study.id}>
+                  <div className="coordinator-study-card__content">
+                    <h3>{study.title || "Untitled research"}</h3>
+                    <div className="coordinator-study-card__meta">
+                      <span
+                        className={`coordinator-study-status coordinator-study-status--${study.status ?? "unknown"}`}
+                      >
+                        {label(study.status ?? "unknown")}
+                      </span>
+                      <span>
+                        {study.academic_year
+                          ? `Academic Year ${study.academic_year.replace("-", "–")}`
+                          : "Academic year unavailable"}
+                      </span>
+                    </div>
+                    <div className="coordinator-study-team">
+                      <span className="coordinator-study-team__label">
+                        Research team
+                      </span>
+                      <span>
+                        {study.researchers.length}{" "}
+                        {study.researchers.length === 1
+                          ? "researcher"
+                          : "researchers"}
+                      </span>
+                    </div>
+                  </div>
+                  <Button
+                    className="coordinator-study-card__action"
+                    disabled={studyLoading}
+                    onClick={() => {
+                      setStudyLoading(true);
+                      void getCoordinatorResearchDetails(study.id)
+                        .then(setSelectedStudy)
+                        .catch((requestError) =>
+                          setStudiesError(
+                            friendlyError(
+                              requestError,
+                              "Research details are unavailable",
+                            ),
+                          ),
+                        )
+                        .finally(() => setStudyLoading(false));
+                    }}
+                  >
+                    View details <span aria-hidden="true">→</span>
+                  </Button>
+                </article>
+              ))
+            )}
+          </div>
+          {selectedStudy && (
+            <section className="panel-card coordinator-study-detail">
+              <h2>{selectedStudy.title || "Untitled research"}</h2>
+              <dl>
+                <dt>Institute</dt>
+                <dd>{selectedStudy.institute || "—"}</dd>
+                <dt>Program</dt>
+                <dd>{selectedStudy.degree_program || "—"}</dd>
+                <dt>Instructor</dt>
+                <dd>{selectedStudy.instructor?.name || "—"}</dd>
+                <dt>Adviser</dt>
+                <dd>{selectedStudy.adviser?.name || "—"}</dd>
+                <dt>Status</dt>
+                <dd>{label(selectedStudy.status ?? "unknown")}</dd>
+                <dt>Abstract</dt>
+                <dd>{selectedStudy.abstract || "No abstract available."}</dd>
+                <dt>Keywords</dt>
+                <dd>{selectedStudy.keywords || "—"}</dd>
+              </dl>
+            </section>
+          )}
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function CoordinatorRepository({
+  role,
+  navigate,
+}: {
+  role: Role;
+  navigate: (path: string) => void;
+}) {
+  type RepositoryView = "all" | "ongoing" | "archived" | "recycle";
+  const tabs: Array<{ value: RepositoryView; label: string }> = [
+    { value: "all", label: "All Studies" },
+    { value: "ongoing", label: "Ongoing" },
+    { value: "archived", label: "Archived" },
+    { value: "recycle", label: "Recycle Bin" },
+  ];
+  const [view, setView] = useState<RepositoryView>("all");
+  const [filters, setFilters] = useState({
+    search: "",
+    visibility: "",
+    year: "",
+  });
+  const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<
+    | "title"
+    | "submission_status"
+    | "visibility"
+    | "publication_year"
+    | "updated_at"
+  >("updated_at");
+  const [direction, setDirection] = useState<"asc" | "desc">("desc");
+  const [attempt, reload] = useAttempt();
+  const [result, setResult] = useState<Awaited<
+    ReturnType<typeof listCoordinatorRepository>
+  > | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<Awaited<
+    ReturnType<typeof getCoordinatorRepositoryDetail>
+  > | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
+  useEffect(() => {
+    const controller = new AbortController();
+    void listCoordinatorRepository(
+      {
+        bucket: view,
+        search: filters.search,
+        visibility: filters.visibility,
+        publication_year: filters.year ? Number(filters.year) : undefined,
+        sort,
+        direction,
+        page,
+        per_page: 10,
+      },
+      globalThis.fetch,
+      controller.signal,
+    )
+      .then((response) => {
+        setResult(response);
+        setError("");
+      })
+      .catch((requestError) => {
+        if (!controller.signal.aborted)
+          setError(
+            friendlyError(requestError, "Repository records are unavailable"),
+          );
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [attempt, direction, filters, page, sort, view]);
+  const summary = result?.summary ?? {
+    all: 0,
+    ongoing: 0,
+    archived: 0,
+    recycle: 0,
+  };
+  const institute = result?.institute;
+  const status = (row: NonNullable<typeof result>["data"][number]) =>
+    row.archive_status === "archived"
+      ? "Archived"
+      : label(row.submission_status ?? "ongoing");
+  const changeView = (next: RepositoryView) => {
+    setLoading(true);
+    setView(next);
+    setPage(1);
+  };
+  const changeSort = (next: typeof sort) => {
+    setLoading(true);
+    setPage(1);
+    if (sort === next)
+      setDirection((current) => (current === "asc" ? "desc" : "asc"));
+    else {
+      setSort(next);
+      setDirection("asc");
+    }
+  };
+  const closeDetail = () => {
+    setSelected(null);
+    setDetailError("");
+    setDetailLoading(false);
+  };
+  const metadataRecord: ResearchRecord | null = selected
+    ? {
+        id: String(selected.id),
+        title: selected.title,
+        authors:
+          selected.authors.map((author) => author.author_name).join(", ") ||
+          "No researchers listed",
+        authorNames: selected.authors.map((author) => author.author_name),
+        year: selected.publication_year ?? 0,
+        institutionName: selected.institute ?? "",
+        institute: selected.institute ?? "—",
+        degreeProgram: selected.degree_program ?? "",
+        program: selected.degree_program ?? "",
+        sdgs: selected.sdgs,
+        abstract: selected.abstract || "No abstract available.",
+        keywords:
+          selected.keywords
+            ?.split(/[,;]/)
+            .map((keyword) => keyword.trim())
+            .filter(Boolean) ?? [],
+        researchStage: selected.research_stage ?? "",
+        manuscriptDate: selected.manuscript_date_label ?? undefined,
+        hasDownloadableManuscript:
+          selected.archive_status === "archived" &&
+          selected.files.some(
+            (file) =>
+              file.is_current && file.document_type === "final_manuscript",
+          ),
+      }
+    : null;
+  return (
+    <div className="workspace-content admin-sidebar-page coordinator-repository-page">
+      <RolePageHeader
+        role={role}
+        title="Repository"
+        description={
+          institute
+            ? `Search and browse research records for the ${institute.name} (${institute.acronym}).`
+            : "Search and browse research records for your assigned institute."
+        }
+        action={
+          <Button variant="secondary" onClick={() => navigate("/catalog")}>
+            Open Public Catalog
+          </Button>
+        }
+      />
+      <div
+        className="coordinator-repository-tabs"
+        role="tablist"
+        aria-label="Repository views"
+      >
+        {tabs.map((tab) => (
+          <button
+            key={tab.value}
+            type="button"
+            role="tab"
+            aria-selected={view === tab.value}
+            className={view === tab.value ? "is-active" : ""}
+            onClick={() => changeView(tab.value)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      <section
+        className="coordinator-repository-summary"
+        aria-label="Repository statistics"
+      >
+        {[
+          ["all", "All Studies", <FileText key="all" />],
+          ["ongoing", "Ongoing", <FolderOpen key="ongoing" />],
+          ["archived", "Archived", <Archive key="archived" />],
+          ["recycle", "Recycle Bin", <Trash2 key="recycle" />],
+        ].map(([key, text, icon]) => (
+          <button
+            type="button"
+            key={String(key)}
+            className={view === key ? "is-active" : ""}
+            aria-pressed={view === key}
+            onClick={() => changeView(key as RepositoryView)}
+          >
+            <span aria-hidden="true">{icon}</span>
+            <div>
+              <p>{text}</p>
+              <strong>{summary[key as keyof typeof summary]}</strong>
+            </div>
+          </button>
+        ))}
+      </section>
+      <section
+        className="panel-card coordinator-repository-content"
+        aria-busy={loading}
+      >
+        <div className="coordinator-repository-filters">
+          <label>
+            Search
+            <input
+              value={filters.search}
+              placeholder="Search by title or author"
+              onChange={(event) => {
+                setLoading(true);
+                setPage(1);
+                setFilters((current) => ({
+                  ...current,
+                  search: event.target.value,
+                }));
+              }}
+            />
+          </label>
+          <label>
+            Visibility
+            <SelectMenu
+              label="Visibility"
+              value={filters.visibility}
+              onChange={(value) => {
+                setLoading(true);
+                setPage(1);
+                setFilters((current) => ({ ...current, visibility: value }));
+              }}
+              options={[
+                { value: "", label: "All visibility" },
+                { value: "public", label: "Public" },
+                { value: "private", label: "Private" },
+              ]}
+            />
+          </label>
+          <label>
+            Publication Year
+            <SelectMenu
+              label="Publication Year"
+              value={filters.year}
+              onChange={(value) => {
+                setLoading(true);
+                setPage(1);
+                setFilters((current) => ({ ...current, year: value }));
+              }}
+              options={[
+                { value: "", label: "All years" },
+                ...(result?.filters.years ?? []).map((year) => ({
+                  value: String(year),
+                  label: String(year),
+                })),
+              ]}
+            />
+          </label>
+        </div>
+        {error ? (
+          <InlineError
+            message={error}
+            retry={() => {
+              setLoading(true);
+              reload();
+            }}
+          />
+        ) : result === null ? (
+          <Loading label="Loading coordinator repository" />
+        ) : result.data.length === 0 ? (
+          <p className="admin-empty">
+            No repository records match these filters.
+          </p>
+        ) : (
+          <>
+            <div
+              className={
+                loading
+                  ? "admin-table-wrap coordinator-repository-table is-loading"
+                  : "admin-table-wrap coordinator-repository-table"
+              }
+            >
+              <table>
+                <caption className="sr-only">
+                  Institute repository records
+                </caption>
+                <thead>
+                  <tr>
+                    <SortableHeader
+                      sortKey="title"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={() => changeSort("title")}
+                    >
+                      Title
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="submission_status"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={() => changeSort("submission_status")}
+                    >
+                      Status
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="visibility"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={() => changeSort("visibility")}
+                    >
+                      Visibility
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="publication_year"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={() => changeSort("publication_year")}
+                    >
+                      Year
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="updated_at"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={() => changeSort("updated_at")}
+                    >
+                      Updated
+                    </SortableHeader>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.data.map((row) => (
+                    <tr key={row.id}>
+                      <td data-label="Title">
+                        <strong>{row.title}</strong>
+                      </td>
+                      <td data-label="Status">{status(row)}</td>
+                      <td data-label="Visibility">
+                        {row.visibility ? label(row.visibility) : "—"}
+                      </td>
+                      <td data-label="Year">{row.publication_year ?? "—"}</td>
+                      <td data-label="Updated">
+                        {displayDate(row.updated_at)}
+                      </td>
+                      <td data-label="Actions">
+                        <button
+                          type="button"
+                          className="icon-button coordinator-repository-view"
+                          aria-label={`View ${row.title}`}
+                          title="View details"
+                          onClick={() => {
+                            setDetailLoading(true);
+                            setDetailError("");
+                            void getCoordinatorRepositoryDetail(row.id)
+                              .then(setSelected)
+                              .catch((requestError) =>
+                                setDetailError(
+                                  friendlyError(
+                                    requestError,
+                                    "Repository details are unavailable",
+                                  ),
+                                ),
+                              )
+                              .finally(() => setDetailLoading(false));
+                          }}
+                        >
+                          <Eye aria-hidden="true" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="coordinator-repository-pagination">
+              <p>
+                {result.meta.from === null
+                  ? "Showing 0 records"
+                  : `Showing ${result.meta.from} to ${result.meta.to} of ${result.meta.total} records${institute ? ` (${institute.acronym})` : ""}`}
+              </p>
+              <Pagination
+                meta={result.meta}
+                noun="records"
+                onPage={(next) => {
+                  setLoading(true);
+                  setPage(next);
+                }}
+              />
+            </div>
+          </>
+        )}
+      </section>
+      {(detailLoading || detailError) && (
+        <Modal
+          label="Repository record details"
+          size="large"
+          onClose={closeDetail}
+        >
+          {detailLoading ? (
+            <Loading label="Loading repository details" />
+          ) : (
+            <InlineError
+              message={detailError}
+              retry={() => setDetailError("")}
+            />
+          )}
+        </Modal>
+      )}
+      {metadataRecord && !detailLoading && !detailError && (
+        <PublicResearchMetadataDialog
+          researchDocumentId={metadataRecord.id}
+          initialRecord={metadataRecord}
+          showFileAccess={selected?.archive_status === "archived"}
+          downloadUrl={coordinatorRepositoryDownloadUrl}
+          onClose={closeDetail}
+        />
+      )}
+    </div>
+  );
+}
+
 function CoordinatorReports({ role }: { role: Role }) {
   const [attempt, reload] = useAttempt();
   const [programFilter, setProgramFilter] = useState("");
@@ -5762,23 +6712,56 @@ function CoordinatorReports({ role }: { role: Role }) {
               </button>
             ))}
           </nav>
-          {reportSection === "overview" && <ProgramCounts report={state.data} />}
-          {reportSection === "instructors" && <CoordinatorReportTable title="Research instructors" empty="No instructors handle sections in this scope." headers={["Instructor", "Email", "Sections"]} rows={state.data.instructors.map((item) => [item.name || "—", item.email || "—", item.sections.join(", ") || "—"])} />}
-          {reportSection === "sections" && <CoordinatorReportTable title="Class sections" empty="No class sections are available for the selected scope." headers={["Section", "Documents"]} rows={state.data.by_section.map((item) => [item.name, String(item.documents_count)])} />}
-          {reportSection === "advisers" && <CoordinatorReportTable title="Adviser load" empty="No advisers have active assignments." headers={["Adviser", "Email", "Active assignments"]} rows={state.data.adviser_load.map((item) => [item.name || "—", item.email || "—", String(item.active_assignments)])} />}
+          {reportSection === "overview" && (
+            <ProgramCounts report={state.data} />
+          )}
+          {reportSection === "instructors" && (
+            <CoordinatorReportTable
+              title="Research instructors"
+              empty="No instructors handle sections in this scope."
+              headers={["Instructor", "Email", "Sections"]}
+              rows={state.data.instructors.map((item) => [
+                item.name || "—",
+                item.email || "—",
+                item.sections.join(", ") || "—",
+              ])}
+            />
+          )}
+          {reportSection === "sections" && (
+            <CoordinatorReportTable
+              title="Class sections"
+              empty="No class sections are available for the selected scope."
+              headers={["Section", "Documents"]}
+              rows={state.data.by_section.map((item) => [
+                item.name,
+                String(item.documents_count),
+              ])}
+            />
+          )}
+          {reportSection === "advisers" && (
+            <CoordinatorReportTable
+              title="Adviser load"
+              empty="No advisers have active assignments."
+              headers={["Adviser", "Email", "Active assignments"]}
+              rows={state.data.adviser_load.map((item) => [
+                item.name || "—",
+                item.email || "—",
+                String(item.active_assignments),
+              ])}
+            />
+          )}
         </>
       )}
     </div>
   );
 }
 
-function ProgramCounts({
-  report,
-}: {
-  report: CoordinatorProgramReport;
-}) {
+function ProgramCounts({ report }: { report: CoordinatorProgramReport }) {
   const counts = report.counts;
-  const [selected, setSelected] = useState<{ value: string; label: string } | null>(null);
+  const [selected, setSelected] = useState<{
+    value: string;
+    label: string;
+  } | null>(null);
   const trigger = useRef<HTMLButtonElement | null>(null);
   const workflow = [
     ["draft", "Drafts", counts.draft],
@@ -5790,41 +6773,236 @@ function ProgramCounts({
   return (
     <div className="coordinator-report-overview">
       <section className="coordinator-report-kpis" aria-label="Program counts">
-        <DashboardKpiCard icon={UserRound} label="Active instructors" value={counts.active_instructors} description="" />
-        <DashboardKpiCard icon={UsersRound} label="Active advisers" value={counts.active_advisers} description="" />
-        <DashboardKpiCard icon={Layers3} label="Active studies" value={counts.draft + counts.submitted + counts.under_review + counts.revision_required + counts.approved} description="" />
-        <DashboardKpiCard icon={Archive} label="Archived" value={counts.archived} description="" />
+        <DashboardKpiCard
+          icon={UserRound}
+          label="Active instructors"
+          value={counts.active_instructors}
+          description=""
+        />
+        <DashboardKpiCard
+          icon={UsersRound}
+          label="Active advisers"
+          value={counts.active_advisers}
+          description=""
+        />
+        <DashboardKpiCard
+          icon={Layers3}
+          label="Active studies"
+          value={
+            counts.draft +
+            counts.submitted +
+            counts.under_review +
+            counts.revision_required +
+            counts.approved
+          }
+          description=""
+        />
+        <DashboardKpiCard
+          icon={Archive}
+          label="Archived"
+          value={counts.archived}
+          description=""
+        />
       </section>
-      <section className="panel-card coordinator-workflow-card" aria-labelledby="coordinator-workflow-title">
-        <header><div><h2 id="coordinator-workflow-title">Research workflow</h2><p>Reporting only (read-only). Select a status to view its studies.</p></div><strong>Active researchers: {counts.active_researchers}</strong></header>
+      <section
+        className="panel-card coordinator-workflow-card"
+        aria-labelledby="coordinator-workflow-title"
+      >
+        <header>
+          <div>
+            <h2 id="coordinator-workflow-title">Research workflow</h2>
+            <p>
+              Reporting only (read-only). Select a status to view its studies.
+            </p>
+          </div>
+          <strong>Active researchers: {counts.active_researchers}</strong>
+        </header>
         <div className="coordinator-workflow-rows">
-          {workflow.map(([value, text, count]) => <button key={value} type="button" aria-label={`View ${text}`} onClick={(event) => { trigger.current = event.currentTarget; setSelected({ value, label: text }); }}><span>{text}</span><strong>{count}</strong><ChevronRight aria-hidden="true" /></button>)}
+          {workflow.map(([value, text, count]) => (
+            <button
+              key={value}
+              type="button"
+              aria-label={`View ${text}`}
+              onClick={(event) => {
+                trigger.current = event.currentTarget;
+                setSelected({ value, label: text });
+              }}
+            >
+              <span>{text}</span>
+              <strong>{count}</strong>
+              <ChevronRight aria-hidden="true" />
+            </button>
+          ))}
         </div>
       </section>
-      {selected && <CoordinatorWorkflowStudiesModal key={`${selected.value}:${report.filters.program ?? ""}`} status={selected} report={report} onClose={() => { setSelected(null); requestAnimationFrame(() => trigger.current?.focus()); }} />}
+      {selected && (
+        <CoordinatorWorkflowStudiesModal
+          key={`${selected.value}:${report.filters.program ?? ""}`}
+          status={selected}
+          report={report}
+          onClose={() => {
+            setSelected(null);
+            requestAnimationFrame(() => trigger.current?.focus());
+          }}
+        />
+      )}
     </div>
   );
 }
 
-function CoordinatorReportTable({ title, empty, headers, rows }: { title: string; empty: string; headers: string[]; rows: string[][] }) {
-  return <section className="panel-card coordinator-report-table"><header><h2>{title}</h2><span>{rows.length} records</span></header>{rows.length === 0 ? <p className="admin-empty">{empty}</p> : <div className="admin-table-wrap"><table><caption className="sr-only">{title}</caption><thead><tr>{headers.map((header) => <th key={header}>{header}</th>)}</tr></thead><tbody>{rows.map((row, rowIndex) => <tr key={`${title}-${rowIndex}`}>{row.map((cell, index) => <td key={headers[index]} data-label={headers[index]}>{cell}</td>)}</tr>)}</tbody></table></div>}</section>;
+function CoordinatorReportTable({
+  title,
+  empty,
+  headers,
+  rows,
+}: {
+  title: string;
+  empty: string;
+  headers: string[];
+  rows: string[][];
+}) {
+  return (
+    <section className="panel-card coordinator-report-table">
+      <header>
+        <h2>{title}</h2>
+        <span>{rows.length} records</span>
+      </header>
+      {rows.length === 0 ? (
+        <p className="admin-empty">{empty}</p>
+      ) : (
+        <div className="admin-table-wrap">
+          <table>
+            <caption className="sr-only">{title}</caption>
+            <thead>
+              <tr>
+                {headers.map((header) => (
+                  <th key={header}>{header}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, rowIndex) => (
+                <tr key={`${title}-${rowIndex}`}>
+                  {row.map((cell, index) => (
+                    <td key={headers[index]} data-label={headers[index]}>
+                      {cell}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
 }
 
-function CoordinatorWorkflowStudiesModal({ status, report, onClose }: { status: { value: string; label: string }; report: CoordinatorProgramReport; onClose: () => void }) {
+function CoordinatorWorkflowStudiesModal({
+  status,
+  report,
+  onClose,
+}: {
+  status: { value: string; label: string };
+  report: CoordinatorProgramReport;
+  onClose: () => void;
+}) {
   const [page, setPage] = useState(1);
   const [attempt, retry] = useAttempt();
-  const [state, setState] = useState<{ status: "loading" | "error" | "ready"; message?: string; response?: Awaited<ReturnType<typeof listCoordinatorReportStudies>> }>({ status: "loading" });
+  const [state, setState] = useState<{
+    status: "loading" | "error" | "ready";
+    message?: string;
+    response?: Awaited<ReturnType<typeof listCoordinatorReportStudies>>;
+  }>({ status: "loading" });
   useEffect(() => {
     const controller = new AbortController();
-    void listCoordinatorReportStudies({ status: status.value, program: report.filters.program || undefined, page, per_page: 10 }, globalThis.fetch, controller.signal)
+    void listCoordinatorReportStudies(
+      {
+        status: status.value,
+        program: report.filters.program || undefined,
+        page,
+        per_page: 10,
+      },
+      globalThis.fetch,
+      controller.signal,
+    )
       .then((response) => setState({ status: "ready", response }))
-      .catch((error) => { if (!controller.signal.aborted) setState({ status: "error", message: friendlyError(error, "Filtered studies are unavailable") }); });
+      .catch((error) => {
+        if (!controller.signal.aborted)
+          setState({
+            status: "error",
+            message: friendlyError(error, "Filtered studies are unavailable"),
+          });
+      });
     return () => controller.abort();
   }, [attempt, page, report.filters.program, status.value]);
   const response = state.response;
-  const reload = () => { setState({ status: "loading" }); retry(); };
-  const changePage = (nextPage: number) => { setState({ status: "loading" }); setPage(nextPage); };
-  return <Modal label={`${status.label} studies`} size="large" className="coordinator-workflow-modal" onClose={onClose}><header><p className="eyebrow">Filtered studies</p><h2>{status.label} studies</h2><p>{report.filters.institute || "Assigned institute"} · {report.filters.program || "All programs"}</p></header><div className="coordinator-workflow-modal-body">{state.status === "loading" ? <Loading label={`Loading ${status.label.toLowerCase()} studies`} /> : state.status === "error" ? <InlineError message={state.message || "Filtered studies are unavailable"} retry={reload} /> : response && response.meta.total === 0 ? <p className="admin-empty">No {status.label.toLowerCase()} studies found.</p> : <div className="admin-table-wrap"><table><caption className="sr-only">{status.label} studies</caption><thead><tr><th>Study</th><th>Section</th><th>Program</th><th>Updated</th></tr></thead><tbody>{response?.data.map((study) => <tr key={study.id}><td>{study.title || "Untitled study"}</td><td>{study.section || "—"}</td><td>{study.degree_program || "—"}</td><td>{displayDate(study.updated_at)}</td></tr>)}</tbody></table></div>}</div>{state.status === "ready" && response && response.meta.last_page > 1 && <Pagination meta={response.meta} noun="studies" onPage={changePage} />}</Modal>;
+  const reload = () => {
+    setState({ status: "loading" });
+    retry();
+  };
+  const changePage = (nextPage: number) => {
+    setState({ status: "loading" });
+    setPage(nextPage);
+  };
+  return (
+    <Modal
+      label={`${status.label} studies`}
+      size="large"
+      className="coordinator-workflow-modal"
+      onClose={onClose}
+    >
+      <header>
+        <p className="eyebrow">Filtered studies</p>
+        <h2>{status.label} studies</h2>
+        <p>
+          {report.filters.institute || "Assigned institute"} ·{" "}
+          {report.filters.program || "All programs"}
+        </p>
+      </header>
+      <div className="coordinator-workflow-modal-body">
+        {state.status === "loading" ? (
+          <Loading label={`Loading ${status.label.toLowerCase()} studies`} />
+        ) : state.status === "error" ? (
+          <InlineError
+            message={state.message || "Filtered studies are unavailable"}
+            retry={reload}
+          />
+        ) : response && response.meta.total === 0 ? (
+          <p className="admin-empty">
+            No {status.label.toLowerCase()} studies found.
+          </p>
+        ) : (
+          <div className="admin-table-wrap">
+            <table>
+              <caption className="sr-only">{status.label} studies</caption>
+              <thead>
+                <tr>
+                  <th>Study</th>
+                  <th>Section</th>
+                  <th>Program</th>
+                  <th>Updated</th>
+                </tr>
+              </thead>
+              <tbody>
+                {response?.data.map((study) => (
+                  <tr key={study.id}>
+                    <td>{study.title || "Untitled study"}</td>
+                    <td>{study.section || "—"}</td>
+                    <td>{study.degree_program || "—"}</td>
+                    <td>{displayDate(study.updated_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      {state.status === "ready" && response && response.meta.last_page > 1 && (
+        <Pagination meta={response.meta} noun="studies" onPage={changePage} />
+      )}
+    </Modal>
+  );
 }
 
 function adviserSpotlight(adviser: AdviserLoadItem): ReportSpotlight {

@@ -12,21 +12,31 @@ export default function PublicResearchMetadataDialog({
   onClose,
   authenticated = true,
   onSignIn = () => {},
+  initialRecord = null,
+  loadRecord = getPublicResearch,
+  showFileAccess = true,
+  downloadUrl,
 }: {
   researchDocumentId: string | number;
   onClose: () => void;
   authenticated?: boolean;
   onSignIn?: () => void;
+  initialRecord?: ResearchRecord | null;
+  loadRecord?: (researchDocumentId: string | number) => Promise<ResearchRecord>;
+  showFileAccess?: boolean;
+  downloadUrl?: (researchDocumentId: string | number) => string;
 }) {
-  const [record, setRecord] = useState<ResearchRecord | null>(null);
+  const [loadedRecord, setLoadedRecord] = useState<ResearchRecord | null>(null);
   const [failed, setFailed] = useState(false);
   const [dialogRef, handleDialogKeyDown] = useDialogFocus<HTMLElement>(onClose);
+  const record = initialRecord ?? loadedRecord;
 
   useEffect(() => {
     let active = true;
-    getPublicResearch(researchDocumentId)
+    if (initialRecord) return;
+    loadRecord(researchDocumentId)
       .then((nextRecord) => {
-        if (active) setRecord(nextRecord);
+        if (active) setLoadedRecord(nextRecord);
       })
       .catch(() => {
         if (active) setFailed(true);
@@ -34,7 +44,7 @@ export default function PublicResearchMetadataDialog({
     return () => {
       active = false;
     };
-  }, [researchDocumentId]);
+  }, [initialRecord, loadRecord, researchDocumentId]);
 
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
@@ -97,11 +107,12 @@ export default function PublicResearchMetadataDialog({
               <Button variant="secondary" onClick={onClose}>
                 Return to results
               </Button>
-              {record.hasDownloadableManuscript ? (
+              {!showFileAccess ? null : record.hasDownloadableManuscript ? (
                 <ProtectedFileAccess
                   researchDocumentId={record.id}
                   authenticated={authenticated}
                   onSignIn={onSignIn}
+                  downloadUrl={downloadUrl}
                 >
                   {authenticated ? <Download /> : <LockKeyhole />} View files
                 </ProtectedFileAccess>

@@ -291,6 +291,11 @@ export interface OfficeRepositoryListResponse extends LaravelPaginatedResponse<O
   summary: OfficeRepositorySummary;
 }
 
+export interface CoordinatorRepositoryResponse extends OfficeRepositoryListResponse {
+  filters: { years: number[] };
+  institute: { name: string; acronym: string };
+}
+
 /** Safe, office-only representation used by the Manage Repository workspace. */
 export interface OfficeRepositoryItemResource {
   id: number;
@@ -2038,7 +2043,14 @@ export async function searchArchivedRoleRepository(
   return {
     data,
     links: links ?? { first: null, last: null, prev: null, next: null },
-    meta: meta ? { ...meta, from: data.length ? 1 : null, to: data.length || null, total: data.length } : fallbackMeta,
+    meta: meta
+      ? {
+          ...meta,
+          from: data.length ? 1 : null,
+          to: data.length || null,
+          total: data.length,
+        }
+      : fallbackMeta,
     years,
   };
 }
@@ -3668,6 +3680,158 @@ export interface AdviserLoadItem {
   }>;
 }
 
+export interface CoordinatorAssignmentUser {
+  id: string;
+  name: string;
+  email: string;
+  role: "instructor" | "adviser";
+  access_status: "active" | "invited" | "blocked";
+  created_at: string | null;
+}
+
+export interface CoordinatorAssignmentStudy {
+  id: number;
+  title: string | null;
+  researchers: string[];
+  instructor: Pick<CoordinatorAssignmentUser, "id" | "name"> | null;
+  adviser: Pick<CoordinatorAssignmentUser, "id" | "name"> | null;
+  status: string | null;
+  research_stage: string | null;
+  academic_year: string | null;
+  updated_at: string | null;
+  detail_url: string;
+  abstract?: string | null;
+  keywords?: string | null;
+  degree_program?: string | null;
+  institute?: string | null;
+}
+
+export interface CoordinatorAssignmentsPage {
+  data: CoordinatorAssignmentUser[];
+  summary: {
+    total_users: number;
+    total_instructors: number;
+    total_advisers: number;
+    inactive_users: number;
+  };
+  meta: LaravelPaginationMeta;
+}
+
+export async function listCoordinatorResearchAssignments(
+  query: {
+    search?: string;
+    role?: "instructor" | "adviser" | "";
+    access_status?: "active" | "invited" | "blocked" | "";
+    sort?: "name" | "email" | "role" | "access_status" | "created_at";
+    direction?: "asc" | "desc";
+    page?: number;
+    per_page?: number;
+  } = {},
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<CoordinatorAssignmentsPage> {
+  const params = new URLSearchParams();
+  Object.entries(query).forEach(([key, value]) => {
+    if (value !== undefined && value !== "") params.set(key, String(value));
+  });
+  const suffix = params.toString();
+  return apiRequest<CoordinatorAssignmentsPage>(
+    `/api/coordinator/research-assignments${suffix ? `?${suffix}` : ""}`,
+    undefined,
+    fetcher,
+  );
+}
+
+export async function getCoordinatorAssignmentStudies(
+  userId: string,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<{
+  user: CoordinatorAssignmentUser;
+  studies: CoordinatorAssignmentStudy[];
+}> {
+  return (
+    await apiRequest<{
+      data: {
+        user: CoordinatorAssignmentUser;
+        studies: CoordinatorAssignmentStudy[];
+      };
+    }>(
+      `/api/coordinator/research-assignments/${encodeURIComponent(userId)}`,
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export async function getCoordinatorResearchDetails(
+  researchDocumentId: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<CoordinatorAssignmentStudy> {
+  return (
+    await apiRequest<{ data: CoordinatorAssignmentStudy }>(
+      `/api/coordinator/research-details/${encodeURIComponent(String(researchDocumentId))}`,
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export interface CoordinatorRepositoryListInput {
+  bucket?: OfficeRepositoryBucket;
+  search?: string;
+  visibility?: string;
+  publication_year?: number;
+  sort?:
+    | "title"
+    | "submission_status"
+    | "visibility"
+    | "publication_year"
+    | "updated_at";
+  direction?: "asc" | "desc";
+  page?: number;
+  per_page?: 10 | 25 | 50 | 100;
+}
+
+export function listCoordinatorRepository(
+  input: CoordinatorRepositoryListInput = {},
+  fetcher: ApiFetch = globalThis.fetch,
+  signal?: AbortSignal,
+): Promise<CoordinatorRepositoryResponse> {
+  return apiRequest(
+    adminQuery("/api/coordinator/repository", {
+      bucket: input.bucket ?? "all",
+      search: input.search?.trim(),
+      visibility: input.visibility,
+      publication_year: input.publication_year,
+      sort: input.bucket === "recycle" ? undefined : input.sort,
+      direction: input.bucket === "recycle" ? undefined : input.direction,
+      page: input.page,
+      per_page: input.per_page,
+    }),
+    { signal },
+    fetcher,
+  );
+}
+
+export async function getCoordinatorRepositoryDetail(
+  researchDocumentId: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+  signal?: AbortSignal,
+): Promise<OfficeRepositoryDetailResource> {
+  return (
+    await apiRequest<{ data: OfficeRepositoryDetailResource }>(
+      `/api/coordinator/repository/${encodeURIComponent(String(researchDocumentId))}`,
+      { signal },
+      fetcher,
+    )
+  ).data;
+}
+
+export function coordinatorRepositoryDownloadUrl(
+  researchDocumentId: string | number,
+): string {
+  return `/api/coordinator/repository/${encodeURIComponent(String(researchDocumentId))}/download`;
+}
+
 export interface CoordinatorProgramReport {
   schema_version: 1;
   filters: { institute: string | null; program: string | null };
@@ -3863,7 +4027,7 @@ export async function listAdviserLoad(
 
 export interface CoordinatorProgramOverview {
   schema_version: 1;
-  institute: { name: string | null };
+  institute: { name: string };
   counts: {
     total_users: number;
     total_instructors: number;

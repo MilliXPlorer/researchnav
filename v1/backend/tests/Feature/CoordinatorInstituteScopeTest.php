@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\ClassSection;
 use App\Models\DefenseSchedule;
 use App\Models\ResearchDocument;
+use App\Models\ReviewAssignment;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
@@ -215,6 +216,88 @@ class CoordinatorInstituteScopeTest extends TestCase
             ->assertJsonFragment(['id' => $visibleSection->id, 'name' => 'ICS 4A'])
             ->assertJsonMissing(['id' => $foreignSection->id])
             ->assertJsonMissing(['name' => 'IHS 4A']);
+    }
+
+    public function test_coordinator_repository_is_read_only_and_institute_scoped(): void
+    {
+        $ics = 'Institute of Computer Studies';
+        $ihs = 'Institute of Health Sciences';
+        $coordinator = $this->user('coordinator', $ics);
+        $ongoing = ResearchDocument::factory()->create(['institute' => $ics, 'title' => 'Scoped Current Study', 'archive_status' => 'not_archived', 'visibility' => 'private', 'publication_year' => 2026]);
+        $ongoing->authors()->create(['author_name' => 'Scoped Author', 'author_order' => 1, 'is_corresponding_author' => true]);
+        $archived = ResearchDocument::factory()->create(['institute' => $ics, 'title' => 'Scoped Archive', 'archive_status' => 'archived', 'visibility' => 'public']);
+        $recycled = ResearchDocument::factory()->create(['institute' => $ics, 'title' => 'Scoped Recycled']);
+        $recycled->delete();
+        $foreign = ResearchDocument::factory()->create(['institute' => $ihs, 'title' => 'Foreign Current Study', 'archive_status' => 'not_archived']);
+
+        $this->as($coordinator)->getJson('/api/coordinator/repository?bucket=all')
+            ->assertOk()->assertJsonCount(2, 'data')
+            ->assertJsonPath('summary.all', 2)->assertJsonPath('summary.recycle', 1)
+            ->assertJsonPath('institute.acronym', 'ICS')
+            ->assertJsonPath('data.0.can_edit', false)->assertJsonPath('data.0.can_delete', false)->assertJsonPath('data.0.can_restore', false)
+            ->assertJsonMissing(['id' => $foreign->id]);
+        $this->as($coordinator)->getJson('/api/coordinator/repository?bucket=ongoing&search=Scoped%20Author&visibility=private&publication_year=2026')
+            ->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $ongoing->id);
+        $this->as($coordinator)->getJson('/api/coordinator/repository?bucket=recycle')
+            ->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $recycled->id);
+        $this->as($coordinator)->getJson('/api/coordinator/repository/'.$archived->id)
+            ->assertOk()->assertJsonPath('data.id', $archived->id)->assertJsonPath('data.can_edit', false);
+        $this->as($coordinator)->getJson('/api/coordinator/repository/'.$foreign->id)->assertNotFound();
+    }
+
+    public function test_authoritative_admin_repository_query_is_not_limited_to_null_institute(): void
+    {
+        $admin = $this->user('admin', null);
+        $admin->forceFill(['is_admin' => true])->save();
+        $first = ResearchDocument::factory()->create(['institute' => 'Institute of Computer Studies']);
+        $second = ResearchDocument::factory()->create(['institute' => 'Institute of Health Sciences']);
+
+        $this->as($admin)->getJson('/api/coordinator/repository')
+            ->assertOk()->assertJsonCount(2, 'data')
+            ->assertJsonPath('summary.all', 2)
+            ->assertJsonPath('institute.name', null)
+            ->assertJsonFragment(['id' => $first->id])
+            ->assertJsonFragment(['id' => $second->id]);
+    }
+
+    public function test_research_assignments_are_scoped_and_selected_studies_cannot_cross_institutes(): void
+    {
+        $institute = 'Institute of Computer Studies';
+        $coordinator = $this->user('coordinator', $institute);
+        $adviser = $this->user('adviser', $institute);
+        $adviser->forceFill(['first_name' => 'Ada', 'last_name' => 'Lovelace'])->save();
+        $foreign = $this->user('adviser', 'Institute of Health Sciences');
+        $visible = ResearchDocument::factory()->create(['institute' => $institute, 'title' => 'Scoped Study']);
+        $hidden = ResearchDocument::factory()->create(['institute' => 'Institute of Health Sciences', 'title' => 'Foreign Study']);
+        foreach ([$visible, $hidden] as $document) {
+            ReviewAssignment::query()->create([
+                'research_document_id' => $document->id,
+                'reviewer_id' => $adviser->id,
+                'assigned_by' => $coordinator->id,
+                'review_role' => 'adviser',
+                'is_active' => true,
+            ]);
+        }
+
+        $this->as($coordinator)->getJson('/api/coordinator/research-assignments?search=Ada&role=adviser')
+            ->assertOk()->assertJsonPath('summary.total_users', 1)
+            ->assertJsonPath('data.0.id', $adviser->id)
+            ->assertJsonMissing(['id' => $foreign->id]);
+        $this->as($coordinator)->getJson('/api/coordinator/research-assignments/'.$adviser->id)
+            ->assertOk()->assertJsonCount(1, 'data.studies')
+            ->assertJsonPath('data.studies.0.id', $visible->id)
+            ->assertJsonMissing(['id' => $hidden->id]);
+    }
+
+    public function test_research_assignment_and_repository_reads_fail_closed_without_an_institute(): void
+    {
+        $coordinator = $this->user('coordinator', null);
+
+        foreach (['/api/coordinator/research-assignments', '/api/coordinator/repository'] as $url) {
+            $this->as($coordinator)->getJson($url)
+                ->assertForbidden()
+                ->assertExactJson(['error' => 'COORDINATOR_INSTITUTE_REQUIRED']);
+        }
     }
 
     private function user(string $role, ?string $institute): User

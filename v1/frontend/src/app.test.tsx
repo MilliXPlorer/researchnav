@@ -1238,23 +1238,24 @@ describe("role workspaces", () => {
       expect(
         screen.getByRole("heading", { level: 1, name: heading }),
       ).toBeInTheDocument();
+      if (role === "coordinator") {
+        expect(await screen.findByText("Total Instructors")).toBeInTheDocument();
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+        return;
+      }
       const sectionButton = await screen.findByRole("button", {
         name: `View ${sectionHeading}`,
       });
       expect(sectionButton).toBeInTheDocument();
-      if (role !== "coordinator") {
-        expect(
-          screen.queryByRole("heading", { level: 2, name: sectionHeading }),
-        ).not.toBeInTheDocument();
-      }
-      if (role !== "coordinator") {
-        expect(
-          screen.getByRole("heading", {
-            level: 2,
-            name: role === "admin" ? "Repository overview" : "Statistics",
-          }),
-        ).toBeInTheDocument();
-      }
+      expect(
+        screen.queryByRole("heading", { level: 2, name: sectionHeading }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", {
+          level: 2,
+          name: role === "admin" ? "Repository overview" : "Statistics",
+        }),
+      ).toBeInTheDocument();
       const workloadMeter = screen.queryByRole("meter", {
         name: sectionHeading,
       });
@@ -1266,9 +1267,7 @@ describe("role workspaces", () => {
       }
       fireEvent.click(sectionButton);
       expect(screen.getByRole("dialog")).toBeInTheDocument();
-      if (role !== "coordinator") {
-        expect(screen.getByText(`${role} API RECORD`)).toBeInTheDocument();
-      }
+      expect(screen.getByText(`${role} API RECORD`)).toBeInTheDocument();
       expect(screen.queryByText("Unavailable")).not.toBeInTheDocument();
     },
   );
@@ -1607,9 +1606,7 @@ describe("role workspaces", () => {
       />,
     );
 
-    expect(
-      await screen.findByRole("button", { name: "View Active instructors" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("Total Instructors")).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "View Schedules" }),
     ).not.toBeInTheDocument();

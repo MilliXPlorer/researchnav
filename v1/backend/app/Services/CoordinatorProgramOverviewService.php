@@ -2,7 +2,9 @@
 
 namespace App\Services;
 
+use App\Models\ClassSection;
 use App\Models\MonitoringLog;
+use App\Models\ReviewAssignment;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -18,6 +20,7 @@ class CoordinatorProgramOverviewService
 
     public function __construct(
         private readonly CoordinatorInstituteScope $scope,
+        private readonly RepositoryReadService $repository,
         private readonly ReportingService $reports,
     ) {}
 
@@ -25,27 +28,56 @@ class CoordinatorProgramOverviewService
     {
         $institute = $this->scope->institute($actor);
         $documents = $this->scope->documents($actor);
-        $users = $this->scope->users($actor);
-        $ongoing = (clone $documents)->where('submission_status', '!=', 'archived')->count();
-        $archived = (clone $documents)->where('submission_status', 'archived')->count();
+        $directory = $this->assignmentDirectory($actor);
+        $repository = $this->repository->summary($institute);
 
         return [
             'schema_version' => 1,
             'institute' => ['name' => $institute],
             'counts' => [
-                'total_users' => (clone $users)->whereIn('role', ['instructor', 'adviser'])->where('access_status', 'active')->count(),
-                'total_instructors' => (clone $users)->where('role', 'instructor')->where('access_status', 'active')->count(),
-                'total_advisers' => (clone $users)->where('role', 'adviser')->where('access_status', 'active')->count(),
-                'total_studies' => $ongoing + $archived,
+                'total_users' => (clone $directory)->distinct()->count('id'),
+                'total_instructors' => (clone $directory)->where('role', 'instructor')->count(),
+                'total_advisers' => (clone $directory)->where('role', 'adviser')->count(),
+                'total_studies' => $repository['all'],
             ],
             'adviser_workload' => $this->reports->adviserLoad($actor, clone $documents),
             'repository_status' => [
-                'total' => $ongoing + $archived,
-                'ongoing' => $ongoing,
-                'archived' => $archived,
+                'total' => $repository['all'],
+                'ongoing' => $repository['ongoing'],
+                'archived' => $repository['archived'],
             ],
             'recent_activity' => $this->recentActivity($documents),
         ];
+    }
+
+    private function assignmentDirectory(User $actor): Builder
+    {
+        $institute = $this->scope->institute($actor);
+        $documents = $this->scope->documents($actor);
+        $relatedInstructorIds = ClassSection::query()
+            ->whereIn('id', (clone $documents)->whereNotNull('section_id')->select('section_id'))
+            ->whereNotNull('instructor_id')
+            ->pluck('instructor_id');
+        $relatedReviewerIds = ReviewAssignment::query()
+            ->whereIn(ReviewAssignment::column('review_role'), ['instructor', 'adviser'])
+            ->whereIn(ReviewAssignment::column('research_document_id'), (clone $documents)->select('id'))
+            ->pluck(ReviewAssignment::column('reviewer_id'));
+
+        return User::query()
+            ->whereIn('role', ['instructor', 'adviser'])
+            ->where(function ($query) use ($institute, $relatedInstructorIds, $relatedReviewerIds): void {
+                if ($institute === null) {
+                    return;
+                }
+                $query->where('institute', $institute)
+                    ->orWhere(function ($related) use ($relatedInstructorIds, $relatedReviewerIds): void {
+                        $related->whereNull('institute')
+                            ->where(function ($membership) use ($relatedInstructorIds, $relatedReviewerIds): void {
+                                $membership->whereIn('id', $relatedInstructorIds)
+                                    ->orWhereIn('id', $relatedReviewerIds);
+                            });
+                    });
+            });
     }
 
     private function recentActivity(Builder $documents): array

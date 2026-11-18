@@ -179,6 +179,9 @@ Route::prefix('api')
             Route::get('program-overview', [CoordinatorWorkspaceController::class, 'programOverview']);
             Route::get('sections', [CoordinatorWorkspaceController::class, 'sections']);
             Route::get('sections/{classSection}', [CoordinatorWorkspaceController::class, 'section'])->whereNumber('classSection');
+            Route::get('research-assignments', [CoordinatorWorkspaceController::class, 'researchAssignments']);
+            Route::get('research-assignments/{user}', [CoordinatorWorkspaceController::class, 'researchAssignmentStudies']);
+            Route::get('research-details/{researchDocument}', [CoordinatorWorkspaceController::class, 'researchDetails'])->whereNumber('researchDocument');
             Route::get('schedules', [CoordinatorWorkspaceController::class, 'schedules']);
             Route::post('schedules', [CoordinatorWorkspaceController::class, 'storeSchedule'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::patch('schedules/{defenseSchedule}', [CoordinatorWorkspaceController::class, 'updateSchedule'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
@@ -186,6 +189,9 @@ Route::prefix('api')
             Route::get('adviser-load', [CoordinatorWorkspaceController::class, 'adviserLoad']);
             Route::get('reports', [CoordinatorWorkspaceController::class, 'reports']);
             Route::get('reports/studies', [CoordinatorWorkspaceController::class, 'reportStudies']);
+            Route::get('repository', [CoordinatorWorkspaceController::class, 'repository']);
+            Route::get('repository/{researchDocument}/download', [CoordinatorWorkspaceController::class, 'repositoryDownload'])->whereNumber('researchDocument')->middleware('throttle:catalog-download')->name('coordinator.repository.download');
+            Route::get('repository/{researchDocument}', [CoordinatorWorkspaceController::class, 'repositoryDetail'])->whereNumber('researchDocument');
             Route::get('reports/{section}/pdf', [CoordinatorWorkspaceController::class, 'reportPdf']);
         });
 

@@ -21,10 +21,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { AnimatedStat, Button } from "./components";
-import {
-  DashboardEmptyState,
-  DashboardKpiCard,
-} from "./DashboardPrimitives";
+import { DashboardEmptyState, DashboardKpiCard } from "./DashboardPrimitives";
 import { formatPhilippineDate, formatPhilippineDateTime } from "./dateTime";
 import { Modal } from "./Modal";
 import AdminResearchWorkspace from "./AdminResearchWorkspace";
@@ -492,8 +489,41 @@ const workspaceConfigs: Record<Role, WorkspaceConfig> = {
   },
   coordinator: {
     title: "Program Overview",
-    description: "Institute research activity, assignments, and repository status.",
-    sections: {},
+    description:
+      "Monitor program statistics, research activities, and adviser workload for your assigned institute.",
+    sections: {
+      total_users: {
+        title: "Total Users",
+        description: "Users visible in the assigned program.",
+      },
+      total_instructors: {
+        title: "Total Instructors",
+        description: "Instructors visible in the assigned program.",
+      },
+      total_advisers: {
+        title: "Total Advisers",
+        description: "Advisers visible in the assigned program.",
+      },
+      total_studies: {
+        title: "Total Studies",
+        description: "Research records visible in the assigned program.",
+      },
+      active_instructors: {
+        title: "Active instructors",
+        description: "Instructors with active access.",
+        destination: "Account Roles",
+      },
+      invited_instructors: {
+        title: "Invited instructors",
+        description: "Instructors awaiting activation.",
+        destination: "Account Roles",
+      },
+      blocked_instructors: {
+        title: "Blocked instructors",
+        description: "Instructors without active access.",
+        destination: "Account Roles",
+      },
+    },
   },
   librarian: {
     eyebrow: "Librarian / Dashboard",
@@ -596,7 +626,7 @@ function RoleDashboardWorkspace({
                   ? "workspace-content librarian-dashboard-workspace"
                   : role === "coordinator"
                     ? "workspace-content coordinator-dashboard-workspace"
-                : "workspace-content"
+                    : "workspace-content"
       }
     >
       <WorkspaceHeader {...config} action={action} />
@@ -745,7 +775,43 @@ function DashboardSections({
   }
 
   if (role === "coordinator") {
-    return <CoordinatorDashboard selectNav={selectNav} />;
+    return (
+      <>
+        <CoordinatorDashboard
+          sections={dashboardState.dashboard.sections}
+          selectNav={selectNav}
+          onSelect={setSelectedSectionKey}
+        />
+        {selectedSectionKey !== null && (
+          <Modal
+            label={config.sections[selectedSectionKey]?.title ?? "Research"}
+            onClose={() => setSelectedSectionKey(null)}
+            size="large"
+          >
+            {(() => {
+              const section = dashboardState.dashboard.sections.find(
+                (item) => item.key === selectedSectionKey,
+              );
+              if (!section) return null;
+              return (
+                <DashboardSection
+                  section={section}
+                  config={
+                    config.sections[section.key] ?? {
+                      title: section.key,
+                      description: "Research records.",
+                    }
+                  }
+                  navigate={navigate}
+                  selectNav={selectNav}
+                  role={role}
+                />
+              );
+            })()}
+          </Modal>
+        )}
+      </>
+    );
   }
 
   const visibleSections = dashboardState.dashboard.sections;
@@ -843,7 +909,9 @@ function DashboardSections({
           />
           {dashboardState.dashboard.analytics && (
             <div className="dashboard-visualizations">
-              <DashboardAnalytics analytics={dashboardState.dashboard.analytics} />
+              <DashboardAnalytics
+                analytics={dashboardState.dashboard.analytics}
+              />
             </div>
           )}
         </>
@@ -916,109 +984,335 @@ function DashboardSections({
 }
 
 function CoordinatorDashboard({
+  sections,
   selectNav,
+  onSelect,
 }: {
+  sections: RoleDashboardSection[];
   selectNav: (item: string) => void;
+  onSelect: (key: string) => void;
 }) {
-  const [overview, setOverview] = useState<CoordinatorProgramOverview | null>(null);
-  const [selectedStatistic, setSelectedStatistic] = useState<string | null>(null);
-  const [error, setError] = useState("");
-  const [attempt, setAttempt] = useState(0);
+  const [overview, setOverview] = useState<CoordinatorProgramOverview | null>(
+    null,
+  );
+  const [overviewError, setOverviewError] = useState("");
+  const [overviewAttempt, setOverviewAttempt] = useState(0);
 
   useEffect(() => {
-    let active = true;
-    void getCoordinatorProgramOverview()
-      .then((data) => active && setOverview(data))
-      .catch(() => active && setError("Program overview is unavailable."));
-    return () => {
-      active = false;
-    };
-  }, [attempt]);
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, []);
 
-  if (error && !overview) {
+  useEffect(() => {
+    const controller = new AbortController();
+    void getCoordinatorProgramOverview(globalThis.fetch)
+      .then((data) => {
+        if (!controller.signal.aborted) {
+          setOverview(data);
+          setOverviewError("");
+        }
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted)
+          setOverviewError(
+            error instanceof Error
+              ? error.message
+              : "Program overview is unavailable.",
+          );
+      });
+    return () => controller.abort();
+  }, [overviewAttempt]);
+
+  const statistics = [
+    { key: "total_users", label: "Total Users", icon: UserRound },
+    {
+      key: "total_instructors",
+      label: "Total Instructors",
+      icon: UserRoundCheck,
+    },
+    { key: "total_advisers", label: "Total Advisers", icon: UsersRound },
+    { key: "total_studies", label: "Total Studies", icon: SquareStack },
+  ] as const;
+  const availableSections = availableDashboardSections(sections);
+  const actions = [
+    {
+      label: "Research Assignments",
+      description: "Manage instructors and advisers",
+      icon: UsersRound,
+    },
+    {
+      label: "Repository",
+      description: "Browse institute research records",
+      icon: UserRoundCheck,
+    },
+    {
+      label: "Reports",
+      description: "View and print program reports",
+      icon: BarChart3,
+    },
+  ] as const;
+
+  if (overviewError && overview === null) {
     return (
-      <section className="coordinator-overview-state panel-card" role="alert">
-        <p>{error}</p>
-        <Button variant="secondary" onClick={() => { setError(""); setAttempt((value) => value + 1); }}>
+      <div className="coordinator-overview-state" role="alert">
+        <p>{overviewError}</p>
+        <Button onClick={() => setOverviewAttempt((current) => current + 1)}>
           Retry
         </Button>
-      </section>
+      </div>
     );
   }
-  if (!overview) {
+  if (overview === null) {
     return (
-      <section className="coordinator-overview-state panel-card" aria-busy="true" aria-live="polite">
-        Loading program overview…
-      </section>
+      <>
+        <DashboardStatistics
+          sections={sections}
+          config={workspaceConfigs.coordinator}
+          eyebrow="Program statistics"
+          title="Program statistics"
+          onSelect={(section) => onSelect(section.key)}
+        />
+        <p className="coordinator-overview-state" aria-live="polite">
+          Loading program overview…
+        </p>
+      </>
     );
   }
 
-  const workload = overview.adviser_workload.slice(0, 5);
-  const maximum = Math.max(1, ...workload.map((item) => item.active_assignments));
-  const ongoingPercent = overview.repository_status.total
-    ? (overview.repository_status.ongoing / overview.repository_status.total) * 100
-    : 0;
-  const statistics = [
-    ["Total users", overview.counts.total_users, UserRound],
-    ["Active instructors", overview.counts.total_instructors, UserRoundCheck],
-    ["Total advisers", overview.counts.total_advisers, UsersRound],
-    ["Total studies", overview.counts.total_studies, SquareStack],
-  ] as const;
+  const totalAssignments = overview.adviser_workload.reduce(
+    (total, item) => total + item.active_assignments,
+    0,
+  );
+  const activeAdvisers = overview.adviser_workload.length;
+  const workloadPreview = overview.adviser_workload.slice(0, 5);
+  const highestAssignmentCount = Math.max(
+    ...workloadPreview.map((item) => item.active_assignments),
+    1,
+  );
+  const statusTotal = overview.repository_status.total;
+  const statuses = [
+    {
+      label: "Ongoing",
+      count: overview.repository_status.ongoing,
+      className: "ongoing",
+    },
+    {
+      label: "Archived",
+      count: overview.repository_status.archived,
+      className: "archived",
+    },
+  ];
+  const ongoingPercent =
+    statusTotal === 0
+      ? 0
+      : (overview.repository_status.ongoing / statusTotal) * 100;
 
   return (
     <div className="coordinator-dashboard">
-      <p className="coordinator-institute-label">{overview.institute.name || "Assigned institute"}</p>
       <section className="coordinator-kpi-grid" aria-label="Program statistics">
-        {statistics.map(([label, value, icon]) => (
-          <DashboardKpiCard key={label} icon={icon} label={label} value={value} description="" onClick={() => setSelectedStatistic(label)} />
-        ))}
-      </section>
-      <div className="coordinator-dashboard-grid">
-        <section className="panel-card coordinator-workload-card">
-          <header><div><h2>Adviser workload</h2><p>Active institute research assignments</p></div></header>
-          {workload.length === 0 ? (
-            <DashboardEmptyState>No active adviser assignments.</DashboardEmptyState>
+        {statistics.map(({ key, label, icon }) => {
+          const section = availableSections.find((item) => item.key === key);
+          return section ? (
+            <button
+              key={key}
+              type="button"
+              className="instructor-kpi-button"
+              aria-label={`View ${label}`}
+              onClick={() => onSelect(key)}
+            >
+              <DashboardKpiCard
+                icon={icon}
+                label={label}
+                value={overview.counts[key]}
+                description=""
+              />
+            </button>
           ) : (
-            <div className="coordinator-workload-list">
-              {workload.map((item) => (
-                <div className="coordinator-workload-row" key={item.user_id}>
-                  <div><strong>{item.name || item.email || "Unnamed adviser"}</strong><span>{item.email}</span></div>
-                  <div className="coordinator-workload-meter" role="meter" aria-label={`${item.name || "Adviser"} active assignments`} aria-valuemin={0} aria-valuemax={maximum} aria-valuenow={item.active_assignments}>
-                    <span style={{ width: `${(item.active_assignments / maximum) * 100}%` }} />
-                  </div>
-                  <strong>{item.active_assignments}</strong>
+            <DashboardKpiCard
+              key={key}
+              icon={icon}
+              label={label}
+              value={overview.counts[key]}
+              description=""
+            />
+          );
+        })}
+      </section>
+      <div className="coordinator-dashboard-grid coordinator-dashboard-grid--overview">
+        <section className="coordinator-workload-card">
+          <header>
+            <div className="coordinator-workload-heading">
+              <h2>Adviser workload</h2>
+              <p>
+                {activeAdvisers} active adviser{activeAdvisers === 1 ? "" : "s"}{" "}
+                · {totalAssignments} active research assignment
+                {totalAssignments === 1 ? "" : "s"}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => selectNav("Research Assignments")}
+            >
+              View all advisers <ArrowUpRight aria-hidden="true" />
+            </button>
+          </header>
+          {overview.adviser_workload.length === 0 ? (
+            <DashboardEmptyState className="coordinator-workload-empty">
+              <strong>No active adviser workload</strong>
+              <span>
+                Active research assignments will appear here when advisers are
+                assigned.
+              </span>
+            </DashboardEmptyState>
+          ) : (
+            <div className="coordinator-workload-visual">
+              <div className="coordinator-workload-list">
+                {workloadPreview.map((item) => {
+                  const name = item.name || item.email || "Unnamed adviser";
+                  return (
+                    <div
+                      key={item.user_id}
+                      className="coordinator-workload-row"
+                    >
+                      <span
+                        className="coordinator-workload-swatch"
+                        aria-hidden="true"
+                      />
+                      <div className="coordinator-workload-identity">
+                        <strong title={name}>{name}</strong>
+                        {item.email && item.name && (
+                          <span title={item.email}>{item.email}</span>
+                        )}
+                      </div>
+                      <div
+                        className="coordinator-workload-meter"
+                        role="meter"
+                        aria-label={`${name} active assignments`}
+                        aria-valuemin={0}
+                        aria-valuemax={highestAssignmentCount}
+                        aria-valuenow={item.active_assignments}
+                        aria-valuetext={`${item.active_assignments} active assignment${item.active_assignments === 1 ? "" : "s"}`}
+                      >
+                        <span
+                          aria-hidden="true"
+                          style={{
+                            width: `${(item.active_assignments / highestAssignmentCount) * 100}%`,
+                          }}
+                        />
+                      </div>
+                      <strong
+                        className="coordinator-workload-count"
+                        aria-label={`${item.active_assignments} active assignment${item.active_assignments === 1 ? "" : "s"}`}
+                      >
+                        {item.active_assignments}
+                      </strong>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </section>
+        <section className="coordinator-status-card">
+          <header>
+            <h2>Research Status</h2>
+          </header>
+          <div className="coordinator-status-content">
+            <div
+              className="coordinator-status-donut"
+              role="img"
+              aria-label={`${statusTotal} total studies: ${overview.repository_status.ongoing} ongoing and ${overview.repository_status.archived} archived`}
+            >
+              <svg viewBox="0 0 120 120" aria-hidden="true">
+                <circle
+                  className="coordinator-status-ring-base"
+                  cx="60"
+                  cy="60"
+                  r="48"
+                />
+                <circle
+                  className="coordinator-status-ring-ongoing"
+                  cx="60"
+                  cy="60"
+                  r="48"
+                  pathLength="100"
+                  strokeDasharray={`${ongoingPercent} ${100 - ongoingPercent}`}
+                />
+              </svg>
+              <span>
+                <strong>{statusTotal}</strong>
+                <small>Total Studies</small>
+              </span>
+            </div>
+            <div className="coordinator-status-legend">
+              {statuses.map((status) => (
+                <div key={status.label}>
+                  <span
+                    className={`coordinator-status-dot coordinator-status-dot--${status.className}`}
+                    aria-hidden="true"
+                  />
+                  <strong>
+                    {status.label} ({status.count})
+                  </strong>
+                  <span>
+                    {statusTotal === 0
+                      ? "0.0"
+                      : ((status.count / statusTotal) * 100).toFixed(1)}
+                    %
+                  </span>
                 </div>
+              ))}
+            </div>
+          </div>
+        </section>
+        <section className="coordinator-activity-card">
+          <header>
+            <h2>Recent Research Activities</h2>
+          </header>
+          {overview.recent_activity.length === 0 ? (
+            <DashboardEmptyState>
+              No recent research activities.
+            </DashboardEmptyState>
+          ) : (
+            <div className="coordinator-activity-list">
+              {overview.recent_activity.map((activity) => (
+                <article key={activity.id}>
+                  <span aria-hidden="true" />
+                  <div>
+                    <strong>{activity.label}</strong>
+                    <p>{activity.title}</p>
+                  </div>
+                  <time dateTime={activity.occurred_at ?? undefined}>
+                    {formatPhilippineDateTime(activity.occurred_at)}
+                  </time>
+                </article>
               ))}
             </div>
           )}
         </section>
-        <section className="panel-card coordinator-status-card">
-          <header><h2>Research status</h2></header>
-          <div className="coordinator-status-content">
-            <div className="coordinator-status-donut" role="img" aria-label={`${overview.repository_status.total} studies: ${overview.repository_status.ongoing} ongoing and ${overview.repository_status.archived} archived`} style={{ background: `conic-gradient(#1f7a5a ${ongoingPercent}%, #d7a840 0)` }}>
-              <span><strong>{overview.repository_status.total}</strong><small>Total studies</small></span>
-            </div>
-            <dl><div><dt>Ongoing</dt><dd>{overview.repository_status.ongoing}</dd></div><div><dt>Archived</dt><dd>{overview.repository_status.archived}</dd></div></dl>
+        <nav className="coordinator-quick-actions" aria-label="Quick actions">
+          <header>
+            <h2>Quick actions</h2>
+          </header>
+          <div>
+            {actions.map(({ label, description, icon: Icon }) => (
+              <button
+                key={label}
+                type="button"
+                onClick={() => selectNav(label)}
+              >
+                <span aria-hidden="true">
+                  <Icon />
+                </span>
+                <span>
+                  <strong>{label}</strong>
+                  <small>{description}</small>
+                </span>
+                <ArrowUpRight aria-hidden="true" />
+              </button>
+            ))}
           </div>
-        </section>
-        <section className="panel-card coordinator-activity-card">
-          <header><h2>Recent research activities</h2></header>
-          {overview.recent_activity.length === 0 ? <DashboardEmptyState>No recent research activities.</DashboardEmptyState> : (
-            <div className="coordinator-activity-list">{overview.recent_activity.map((item) => <article key={item.id}><div><strong>{item.label}</strong><p>{item.title}</p></div><time dateTime={item.occurred_at || undefined}>{formatPhilippineDateTime(item.occurred_at)}</time></article>)}</div>
-          )}
-        </section>
-        <nav className="panel-card coordinator-quick-actions" aria-label="Quick actions">
-          <h2>Quick actions</h2>
-          {(["Research Assignments", "Repository", "Reports"] as const).map((item) => <button key={item} type="button" onClick={() => selectNav(item)}>{item}<ArrowUpRight aria-hidden="true" /></button>)}
         </nav>
       </div>
-      {selectedStatistic && (
-        <Modal label={selectedStatistic} onClose={() => setSelectedStatistic(null)}>
-          <section className="panel-card admin-data-card">
-            <p>Live institute total: {statistics.find(([label]) => label === selectedStatistic)?.[1] ?? 0}</p>
-          </section>
-        </Modal>
-      )}
     </div>
   );
 }
@@ -1152,7 +1446,8 @@ function StatisticianDashboard({
               </div>
               <p className="statistician-workload-summary">
                 Showing {workload.length} of {projection.workload.length}{" "}
-                assigned {projection.workload.length === 1 ? "study" : "studies"}
+                assigned{" "}
+                {projection.workload.length === 1 ? "study" : "studies"}
               </p>
             </>
           )}
@@ -1210,7 +1505,10 @@ function StatisticianDashboard({
       >
         <header className="statistician-activity-heading">
           <h2>Activity</h2>
-          <div className="statistician-activity-tabs" aria-label="Activity view">
+          <div
+            className="statistician-activity-tabs"
+            aria-label="Activity view"
+          >
             <button
               type="button"
               aria-pressed={activityView === "review"}
@@ -1303,7 +1601,9 @@ function StatisticianDashboard({
                   <li key={activity.id}>
                     <span aria-hidden="true" />
                     <div>
-                      <strong>{statisticianActivityLabel(activity.type)}</strong>
+                      <strong>
+                        {statisticianActivityLabel(activity.type)}
+                      </strong>
                       <p title={activity.title}>{activity.title}</p>
                     </div>
                     <time dateTime={activity.occurred_at}>
@@ -1371,9 +1671,9 @@ function LibrarianDashboard({
   projection: LibrarianDashboardProjection;
   navigate: (path: string) => void;
 }) {
-  const [queueFilter, setQueueFilter] = useState<
-    "all" | "pending" | "ready"
-  >("all");
+  const [queueFilter, setQueueFilter] = useState<"all" | "pending" | "ready">(
+    "all",
+  );
   const queue = projection.queue.filter((item) => {
     if (queueFilter === "pending") {
       return ["pending", "validating"].includes(item.status);
@@ -1421,7 +1721,10 @@ function LibrarianDashboard({
         />
       </div>
 
-      <section className="librarian-queue-card" data-testid="librarian-queue-card">
+      <section
+        className="librarian-queue-card"
+        data-testid="librarian-queue-card"
+      >
         <div className="librarian-queue-main">
           <header className="librarian-section-heading">
             <h2>Archiving queue</h2>
@@ -1469,7 +1772,9 @@ function LibrarianDashboard({
                   </span>
                   <span role="cell">{item.submitted_by}</span>
                   <span role="cell">
-                    <span className={`librarian-status-badge is-${item.status}`}>
+                    <span
+                      className={`librarian-status-badge is-${item.status}`}
+                    >
                       {item.status === "validating"
                         ? "Validating"
                         : item.status === "ready"
@@ -1495,7 +1800,9 @@ function LibrarianDashboard({
         <aside className="librarian-queue-summary">
           <h2>Queue status</h2>
           {queueTotal === 0 ? (
-            <DashboardEmptyState>No active archiving requests.</DashboardEmptyState>
+            <DashboardEmptyState>
+              No active archiving requests.
+            </DashboardEmptyState>
           ) : (
             <div className="librarian-status-visual">
               <div
@@ -1537,23 +1844,27 @@ function LibrarianDashboard({
         className="librarian-recent-activity librarian-recent-activity-card"
         data-testid="librarian-recent-activity-card"
       >
-          <h2>Recent activity</h2>
-          {projection.recent_activity.length === 0 ? (
-            <DashboardEmptyState>No recent librarian activity.</DashboardEmptyState>
-          ) : (
-            <ol className="librarian-recent-list">
-              {projection.recent_activity.map((item) => (
-                <li key={item.id}>
-                  <span aria-hidden="true" />
-                  <div>
-                    <strong>{librarianActivityLabel(item.type)}</strong>
-                    <p title={item.title}>{item.title}</p>
-                  </div>
-                  <time dateTime={item.occurred_at}>{formatDate(item.occurred_at)}</time>
-                </li>
-              ))}
-            </ol>
-          )}
+        <h2>Recent activity</h2>
+        {projection.recent_activity.length === 0 ? (
+          <DashboardEmptyState>
+            No recent librarian activity.
+          </DashboardEmptyState>
+        ) : (
+          <ol className="librarian-recent-list">
+            {projection.recent_activity.map((item) => (
+              <li key={item.id}>
+                <span aria-hidden="true" />
+                <div>
+                  <strong>{librarianActivityLabel(item.type)}</strong>
+                  <p title={item.title}>{item.title}</p>
+                </div>
+                <time dateTime={item.occurred_at}>
+                  {formatDate(item.occurred_at)}
+                </time>
+              </li>
+            ))}
+          </ol>
+        )}
       </section>
     </div>
   );
@@ -1598,7 +1909,9 @@ function PanelDashboardOperations({
         </header>
         <div>
           <span>{assignedTitle}</span>
-          <strong aria-label={`${assignedTitle}: ${assigned?.total ?? 0} total`}>
+          <strong
+            aria-label={`${assignedTitle}: ${assigned?.total ?? 0} total`}
+          >
             {assigned?.total ?? 0}
           </strong>
         </div>
@@ -1640,43 +1953,132 @@ function PanelDashboard({
   return (
     <div className="panel-dashboard" data-testid="panel-dashboard">
       <div className="panel-dashboard-kpi-grid">
-        <DashboardKpiCard icon={SquareStack} label="Assigned studies" value={projection.counts.assigned} description="Active studies assigned to you." />
-        <DashboardKpiCard icon={Clock3} label="Pending reviews" value={projection.counts.pending} description="Studies awaiting your review." />
-        <DashboardKpiCard icon={CheckCircle2} label="Completed reviews" value={projection.counts.completed} description="Studies with finalized reviews." />
+        <DashboardKpiCard
+          icon={SquareStack}
+          label="Assigned studies"
+          value={projection.counts.assigned}
+          description="Active studies assigned to you."
+        />
+        <DashboardKpiCard
+          icon={Clock3}
+          label="Pending reviews"
+          value={projection.counts.pending}
+          description="Studies awaiting your review."
+        />
+        <DashboardKpiCard
+          icon={CheckCircle2}
+          label="Completed reviews"
+          value={projection.counts.completed}
+          description="Studies with finalized reviews."
+        />
       </div>
 
       <div className="panel-dashboard-main-grid">
         <section className="dashboard-section-card panel-dashboard-assignments">
           <header>
             <h2>Current assignments</h2>
-            <button type="button" onClick={() => selectNav("Assigned Research")}>View all assignments <ArrowUpRight aria-hidden="true" /></button>
+            <button
+              type="button"
+              onClick={() => selectNav("Assigned Research")}
+            >
+              View all assignments <ArrowUpRight aria-hidden="true" />
+            </button>
           </header>
           {projection.assignments.length === 0 ? (
-            <DashboardEmptyState><strong>No assigned studies</strong><span>New panel assignments will appear here.</span></DashboardEmptyState>
+            <DashboardEmptyState>
+              <strong>No assigned studies</strong>
+              <span>New panel assignments will appear here.</span>
+            </DashboardEmptyState>
           ) : (
-            <div className="panel-dashboard-assignment-table" role="table" aria-label="Current assignments">
+            <div
+              className="panel-dashboard-assignment-table"
+              role="table"
+              aria-label="Current assignments"
+            >
               <div className="panel-dashboard-assignment-head" role="row">
-                <span role="columnheader">Study</span><span role="columnheader">Defense stage</span><span role="columnheader">Status</span><span role="columnheader">Action</span>
+                <span role="columnheader">Study</span>
+                <span role="columnheader">Defense stage</span>
+                <span role="columnheader">Status</span>
+                <span role="columnheader">Action</span>
               </div>
               {projection.assignments.map((assignment) => (
-                <div className="panel-dashboard-assignment-row" role="row" key={assignment.research_document_id}>
-                  <span role="cell" className="panel-dashboard-assignment-copy"><strong title={assignment.title}>{assignment.title}</strong>{assignment.submission_reference && <small>{assignment.submission_reference}</small>}</span>
-                  <span role="cell">{defenseStageLabel(assignment.defense_stage)}</span>
-                  <span role="cell"><span className={`panel-review-status is-${assignment.review_status}`}>{assignment.review_status === "pending" ? "Pending review" : "Completed"}</span></span>
-                  <span role="cell"><button type="button" onClick={() => selectNav("Assigned Research")}>{assignment.review_status === "pending" ? "Open review" : "View review"}</button></span>
+                <div
+                  className="panel-dashboard-assignment-row"
+                  role="row"
+                  key={assignment.research_document_id}
+                >
+                  <span role="cell" className="panel-dashboard-assignment-copy">
+                    <strong title={assignment.title}>{assignment.title}</strong>
+                    {assignment.submission_reference && (
+                      <small>{assignment.submission_reference}</small>
+                    )}
+                  </span>
+                  <span role="cell">
+                    {defenseStageLabel(assignment.defense_stage)}
+                  </span>
+                  <span role="cell">
+                    <span
+                      className={`panel-review-status is-${assignment.review_status}`}
+                    >
+                      {assignment.review_status === "pending"
+                        ? "Pending review"
+                        : "Completed"}
+                    </span>
+                  </span>
+                  <span role="cell">
+                    <button
+                      type="button"
+                      onClick={() => selectNav("Assigned Research")}
+                    >
+                      {assignment.review_status === "pending"
+                        ? "Open review"
+                        : "View review"}
+                    </button>
+                  </span>
                 </div>
               ))}
-              <p className="panel-dashboard-assignment-summary">Showing {projection.assignments.length} assigned {projection.assignments.length === 1 ? "study" : "studies"}</p>
+              <p className="panel-dashboard-assignment-summary">
+                Showing {projection.assignments.length} assigned{" "}
+                {projection.assignments.length === 1 ? "study" : "studies"}
+              </p>
             </div>
           )}
         </section>
 
-        <aside className="dashboard-section-card panel-dashboard-status" aria-labelledby="panel-review-status-title">
+        <aside
+          className="dashboard-section-card panel-dashboard-status"
+          aria-labelledby="panel-review-status-title"
+        >
           <h2 id="panel-review-status-title">Review status</h2>
-          {totalReviews === 0 ? <DashboardEmptyState>No review status is available.</DashboardEmptyState> : (
+          {totalReviews === 0 ? (
+            <DashboardEmptyState>
+              No review status is available.
+            </DashboardEmptyState>
+          ) : (
             <div className="panel-dashboard-status-summary">
-              <div className="panel-dashboard-donut" role="img" aria-label={`${projection.counts.pending} pending reviews and ${projection.counts.completed} completed reviews`} style={{ "--completed-share": `${completedShare}%` } as CSSProperties}><span><strong>{totalReviews}</strong><small>Total reviews</small></span></div>
-              <dl><div><dt>Pending reviews</dt><dd>{projection.counts.pending}</dd></div><div><dt>Completed</dt><dd>{projection.counts.completed}</dd></div></dl>
+              <div
+                className="panel-dashboard-donut"
+                role="img"
+                aria-label={`${projection.counts.pending} pending reviews and ${projection.counts.completed} completed reviews`}
+                style={
+                  { "--completed-share": `${completedShare}%` } as CSSProperties
+                }
+              >
+                <span>
+                  <strong>{totalReviews}</strong>
+                  <small>Total reviews</small>
+                </span>
+              </div>
+              <dl>
+                <div>
+                  <dt>Pending reviews</dt>
+                  <dd>{projection.counts.pending}</dd>
+                </div>
+                <div>
+                  <dt>Completed</dt>
+                  <dd>{projection.counts.completed}</dd>
+                </div>
+              </dl>
             </div>
           )}
         </aside>
@@ -1684,14 +2086,47 @@ function PanelDashboard({
 
       <div className="panel-dashboard-lower-grid">
         <section className="dashboard-section-card panel-dashboard-activity">
-          <header><h2>Recent activity</h2></header>
-          {projection.recent_activity.length === 0 ? <DashboardEmptyState>No recent panel activity.</DashboardEmptyState> : (
-            <ol>{projection.recent_activity.map((activity) => <li key={activity.id}><span aria-hidden="true" /><div><strong>{activity.type === "study_assigned" ? "Study assigned" : "Evaluation submitted"}</strong><span title={activity.title}>{activity.title}</span></div><time dateTime={activity.occurred_at}>{formatDate(activity.occurred_at)}</time></li>)}</ol>
+          <header>
+            <h2>Recent activity</h2>
+          </header>
+          {projection.recent_activity.length === 0 ? (
+            <DashboardEmptyState>No recent panel activity.</DashboardEmptyState>
+          ) : (
+            <ol>
+              {projection.recent_activity.map((activity) => (
+                <li key={activity.id}>
+                  <span aria-hidden="true" />
+                  <div>
+                    <strong>
+                      {activity.type === "study_assigned"
+                        ? "Study assigned"
+                        : "Evaluation submitted"}
+                    </strong>
+                    <span title={activity.title}>{activity.title}</span>
+                  </div>
+                  <time dateTime={activity.occurred_at}>
+                    {formatDate(activity.occurred_at)}
+                  </time>
+                </li>
+              ))}
+            </ol>
           )}
         </section>
-        <section className="dashboard-section-card panel-dashboard-repository" aria-label="Repository access">
-          <LibraryBig aria-hidden="true" /><div><h2>Repository access</h2><p>{projection.counts.repository_references} archived studies available for reference.</p></div>
-          <button type="button" onClick={() => selectNav("Repository")}>Browse repository <ArrowUpRight aria-hidden="true" /></button>
+        <section
+          className="dashboard-section-card panel-dashboard-repository"
+          aria-label="Repository access"
+        >
+          <LibraryBig aria-hidden="true" />
+          <div>
+            <h2>Repository access</h2>
+            <p>
+              {projection.counts.repository_references} archived studies
+              available for reference.
+            </p>
+          </div>
+          <button type="button" onClick={() => selectNav("Repository")}>
+            Browse repository <ArrowUpRight aria-hidden="true" />
+          </button>
         </section>
       </div>
     </div>

@@ -12,12 +12,14 @@ export default function ProtectedFileAccess({
   onSignIn,
   children,
   className = "button button-primary",
+  downloadUrl = repositoryDownloadUrl,
 }: {
   researchDocumentId: string | number;
   authenticated: boolean;
   onSignIn: () => void;
   children: React.ReactNode;
   className?: string;
+  downloadUrl?: (researchDocumentId: string | number) => string;
 }) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [state, setState] = useState<AccessState | null>(null);
@@ -36,7 +38,7 @@ export default function ProtectedFileAccess({
 
     setChecking(true);
     try {
-      const response = await fetch(repositoryDownloadUrl(researchDocumentId), {
+      const response = await fetch(downloadUrl(researchDocumentId), {
         credentials: "include",
       });
       if (!response.ok) {

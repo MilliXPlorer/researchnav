@@ -103,6 +103,7 @@ class ReportingService
                 'degree_program' => $document->degree_program,
                 'section' => $document->section?->name,
                 'updated_at' => $document->updated_at?->toISOString(),
+                'detail_url' => '/api/coordinator/research-details/'.$document->id,
             ]);
     }
 
