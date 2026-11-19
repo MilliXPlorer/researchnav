@@ -43,6 +43,12 @@ return [
     'bootstrap_admin_email' => env('BOOTSTRAP_ADMIN_EMAIL'),
     'frontend_url' => $canonicalOrigin((string) env('FRONTEND_URL', env('APP_URL', 'http://localhost'))),
     'research_study_import_source' => storage_path('app/private/research_studies/ics'),
+    'grouped_downloads' => [
+        // Source files are individually constrained by PrivateDocumentFileResolver.
+        // These caps also bound the aggregate work requested by a ZIP download.
+        'maximum_files' => (int) env('GROUPED_DOWNLOAD_MAXIMUM_FILES', 100),
+        'maximum_source_bytes' => (int) env('GROUPED_DOWNLOAD_MAXIMUM_SOURCE_BYTES', 104_857_600),
+    ],
     'similarity' => [
         // Policy names and values are versioned application configuration, not
         // deploy-time environment tuning. A version therefore always names its

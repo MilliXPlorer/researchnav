@@ -20559,6 +20559,122 @@ body::-webkit-scrollbar {
   background: #678372;
   opacity: 1;
 }
+
+/* Canonical research-team presentation and editor dashboard. */
+.canonical-research-team {
+  grid-template-columns: none;
+  gap: 18px;
+}
+.research-team-primary-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(260px, 2fr);
+  align-items: start;
+  gap: 18px;
+}
+.research-team-primary-grid > .defense-team-card,
+.research-team-primary-grid > .support-specialists-card {
+  grid-column: auto;
+  grid-row: auto;
+}
+.research-team-heading-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 18px;
+}
+.research-team-heading-row .research-team-intro {
+  padding-bottom: 0;
+}
+.canonical-researcher-list li > .button {
+  flex: 0 0 auto;
+}
+.canonical-researcher-details {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 12px;
+}
+.canonical-researcher-details strong { grid-column: 1; }
+.canonical-researcher-details small:first-of-type {
+  grid-column: 2;
+  grid-row: 1;
+  max-width: min(360px, 35vw);
+  text-align: right;
+}
+.canonical-researcher-details small:last-child { grid-column: 1 / -1; }
+.defense-roster > div > span,
+.researcher-support-card strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.researcher-support-card strong.is-unassigned { color: #a96800; }
+
+.editor-dashboard-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+.editor-dashboard { --dashboard-card-padding: 22px; display: grid; gap: 20px; }
+.editor-dashboard-workspace { padding-top: 36px; }
+.editor-dashboard-workspace > .workspace-header { margin-bottom: 28px; }
+.editor-dashboard .dashboard-kpi-card {
+  min-height: 108px;
+  padding: 16px 18px;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 14px;
+}
+.editor-dashboard .dashboard-kpi-icon { width: 42px; height: 42px; }
+.editor-dashboard-overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+  gap: 20px;
+}
+.editor-dashboard-workload dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 0; }
+.editor-dashboard-workload dl > div { padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--mist); }
+.editor-dashboard-workload dt { color: var(--slate); font-size: 11px; }
+.editor-dashboard-workload dd { margin: 5px 0 0; color: var(--canopy); font-family: var(--serif); font-size: 28px; }
+.editor-dashboard-actions nav { display: grid; gap: 8px; }
+.editor-dashboard-actions button,
+.editor-dashboard-assignments > header button,
+.editor-dashboard-assignment-row button {
+  display: flex; align-items: center; gap: 9px; min-height: 36px; padding: 0 12px;
+  border: 1px solid var(--mist-deep); border-radius: 8px; color: var(--canopy);
+  background: var(--paper); font-size: 11px; font-weight: 700;
+}
+.editor-dashboard-actions button span { flex: 1; text-align: left; }
+.editor-dashboard-actions button svg, .editor-dashboard-assignments button svg { width: 15px; height: 15px; }
+.editor-dashboard-assignment-table { min-width: 0; overflow-x: auto; }
+.editor-dashboard-assignment-head, .editor-dashboard-assignment-row {
+  display: grid; grid-template-columns: minmax(220px, 1.7fr) minmax(110px, .7fr) minmax(120px, .8fr) 105px;
+  align-items: center; gap: 16px; min-width: 640px;
+}
+.editor-dashboard-assignment-head { min-height: 36px; padding: 0 12px; border-bottom: 1px solid var(--line); color: var(--slate); background: var(--mist); font-size: 9px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.editor-dashboard-assignment-row { min-height: 64px; padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: 11px; }
+.editor-dashboard-assignment-copy strong, .editor-dashboard-assignment-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.editor-dashboard-assignment-copy strong { color: var(--canopy); }
+.editor-dashboard-assignment-copy small, .editor-dashboard-activity time { margin-top: 3px; color: var(--slate); font-size: 10px; }
+.editor-review-status { width: fit-content; padding: 5px 8px; border-radius: 999px; color: #956b1c; background: #fff7e6; font-size: 10px; font-weight: 700; }
+.editor-review-status.is-completed { color: var(--moss); background: var(--mint-pale); }
+.editor-dashboard-activity ol { margin: 0; padding: 0; list-style: none; }
+.editor-dashboard-activity li { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 56px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.editor-dashboard-activity li > span { width: 8px; height: 8px; border-radius: 50%; background: var(--fern); }
+.editor-dashboard-activity li strong, .editor-dashboard-activity li div > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.editor-dashboard-activity li div > span { margin-top: 3px; color: var(--slate); font-size: 10px; }
+@media (max-width: 980px) {
+  .editor-dashboard-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .editor-dashboard-overview-grid, .research-team-primary-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .editor-dashboard { --dashboard-card-padding: 18px; gap: 16px; }
+  .editor-dashboard-kpi-grid,
+  .editor-dashboard-workload dl { grid-template-columns: minmax(0, 1fr); }
+  .research-team-heading-row { grid-template-columns: 1fr; align-items: stretch; }
+  .canonical-researcher-details { grid-template-columns: 1fr; }
+  .canonical-researcher-details small:first-of-type { grid-column: 1; grid-row: auto; max-width: none; text-align: left; }
+}
 @media (max-width: 900px) {
   .support-assignment-cards {
     grid-template-columns: repeat(2, minmax(0, 1fr));

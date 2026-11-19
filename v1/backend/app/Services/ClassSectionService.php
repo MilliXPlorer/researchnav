@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\ClassSection;
+use App\Models\Institute;
 use App\Models\ResearchAuthor;
 use App\Models\ResearchDocument;
 use App\Models\ReviewAssignment;
@@ -10,6 +11,7 @@ use App\Models\User;
 use App\Notifications\ResearchActivityNotification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 
 class ClassSectionService
@@ -32,6 +34,7 @@ class ClassSectionService
             ->map(fn (ClassSection $section) => [
                 'id' => $section->id,
                 'name' => $section->name,
+                'institute' => $section->institute,
                 'section_code' => $section->section_code,
                 'academic_year' => $section->academic_year,
                 'is_active' => $section->is_active,
@@ -45,10 +48,10 @@ class ClassSectionService
     public function create(User $actor, array $data, ?Request $request = null): ClassSection
     {
         return DB::transaction(function () use ($actor, $data, $request): ClassSection {
-            $institute = trim((string) $actor->institute);
+            $institute = $this->canonicalInstitute($data['institute']);
             $section = ClassSection::query()->create([
                 'instructor_id' => $actor->id,
-                'institute' => $institute !== '' ? $institute : null,
+                'institute' => $institute,
                 'name' => $data['name'],
                 'section_code' => $data['section_code'],
                 'academic_year' => $data['academic_year'] ?? null,
@@ -67,16 +70,60 @@ class ClassSectionService
             if ($locked->instructor_id !== $actor->id && ! DomainAuthorization::isActiveAdministrator($actor)) {
                 throw $this->notAuthorized();
             }
+            $originalInstitute = $locked->institute;
+            $institute = array_key_exists('institute', $data)
+                ? $this->canonicalInstitute($data['institute'])
+                : $originalInstitute;
+            if ($institute !== $originalInstitute) {
+                $documents = ResearchDocument::withTrashed()
+                    ->where('section_id', $locked->id)
+                    ->orderBy('id')
+                    ->lockForUpdate()
+                    ->get(['id', 'title', 'degree_program']);
+                $allowedPrograms = ResearchDocument::PROGRAMS_BY_INSTITUTE[$institute] ?? [];
+                $incompatible = $documents->filter(function (ResearchDocument $document) use ($allowedPrograms): bool {
+                    $program = trim((string) $document->degree_program);
+
+                    return $program !== '' && ! in_array($program, $allowedPrograms, true);
+                });
+                if ($incompatible->isNotEmpty()) {
+                    $studies = $incompatible
+                        ->map(fn (ResearchDocument $document) => trim((string) $document->title) ?: 'Study #'.$document->id)
+                        ->implode(', ');
+                    throw ValidationException::withMessages([
+                        'institute' => ["The institute cannot be changed because these studies have incompatible degree programs: {$studies}."],
+                    ]);
+                }
+            }
             $locked->update([
+                'institute' => $institute,
                 'name' => $data['name'] ?? $locked->name,
                 'section_code' => $data['section_code'] ?? $locked->section_code,
                 'academic_year' => array_key_exists('academic_year', $data) ? $data['academic_year'] : $locked->academic_year,
                 'is_active' => $data['is_active'] ?? $locked->is_active,
             ]);
+            if ($institute !== $originalInstitute) {
+                ResearchDocument::withTrashed()
+                    ->where('section_id', $locked->id)
+                    ->update(['institute' => $institute]);
+            }
             $this->audit->log($actor, 'CLASS_SECTION_UPDATED', $locked, "Updated class section [{$locked->name}].", $request);
 
             return $locked;
         });
+    }
+
+    private function canonicalInstitute(mixed $value): string
+    {
+        $institute = trim((string) $value);
+        $catalog = collect(ResearchDocument::INSTITUTES)
+            ->merge(Schema::hasTable('institutes') ? Institute::query()->pluck('name') : []);
+        $canonical = $catalog->first(fn (string $name): bool => strcasecmp($name, $institute) === 0);
+        if ($canonical === null) {
+            throw ValidationException::withMessages(['institute' => ['Select an institute from the available options.']]);
+        }
+
+        return $canonical;
     }
 
     /** @return list<array<string, mixed>> */

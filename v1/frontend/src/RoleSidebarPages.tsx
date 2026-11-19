@@ -96,6 +96,7 @@ import {
   listInstructorPanelists,
   listInstructorAssignedSubmissions,
   listInstructorSections,
+  listInstitutes,
   listInstructorSimilarityOverview,
   listInstructorStudents,
   listInstructorProjectTeamCandidates,
@@ -1685,8 +1686,16 @@ function CreateSectionDialog({
   const [name, setName] = useState("");
   const [sectionCode, setSectionCode] = useState("");
   const [academicYear, setAcademicYear] = useState("");
+  const [institute, setInstitute] = useState("");
+  const [institutes, setInstitutes] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    void listInstitutes()
+      .then(setInstitutes)
+      .catch(() => setNotice("Institute options could not be loaded."));
+  }, []);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1697,6 +1706,7 @@ function CreateSectionDialog({
         name: name.trim(),
         section_code: sectionCode.trim(),
         academic_year: academicYear.trim() || null,
+        institute,
       });
       onCreated();
     } catch (error) {
@@ -1741,6 +1751,21 @@ function CreateSectionDialog({
               value={academicYear}
               onChange={(event) => setAcademicYear(event.target.value)}
             />
+          </label>
+          <label className="section-dialog-institute">
+            Institute
+            <select
+              value={institute}
+              onChange={(event) => setInstitute(event.target.value)}
+              required
+            >
+              <option value="">Select institute</option>
+              {institutes.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
           </label>
           <div className="modal-actions">
             <Button
@@ -2413,6 +2438,9 @@ function InstructorSections({
   const [detailsNotice, setDetailsNotice] = useState("");
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState("");
+  const [editInstitute, setEditInstitute] = useState("");
+  const [institutes, setInstitutes] = useState<string[]>([]);
+  const [editError, setEditError] = useState("");
   const [editSectionCode, setEditSectionCode] = useState("");
   const [editYear, setEditYear] = useState("");
   const [editBusy, setEditBusy] = useState(false);
@@ -2517,6 +2545,10 @@ function InstructorSections({
   const [confirmProjectDelete, setConfirmProjectDelete] = useState(false);
   const [deleteProjectBusy, setDeleteProjectBusy] = useState(false);
   const studentSearchRef = useRef<Record<number, number>>({});
+
+  useEffect(() => {
+    void listInstitutes().then(setInstitutes).catch(() => setInstitutes([]));
+  }, []);
   const showingProjectPage =
     openSection !== null &&
     selectedDocument !== null &&
@@ -3176,19 +3208,23 @@ function InstructorSections({
     event.preventDefault();
     if (!openSection) return;
     setEditBusy(true);
-    setDetailsNotice("");
+    setEditError("");
     try {
       await updateInstructorSection(openSection.id, {
         name: editName.trim(),
         section_code: editSectionCode.trim(),
         academic_year: editYear.trim() || null,
+        institute: editInstitute,
       });
+      setEditError("");
       setEditing(false);
       setDetailsNotice(`Section "${editName.trim()}" updated.`);
       reload();
     } catch (error) {
-      setDetailsNotice(
-        friendlyError(error, "The section could not be updated"),
+      setEditError(
+        error instanceof ApiError && error.fields?.institute?.[0]
+          ? error.fields.institute[0]
+          : friendlyError(error, "The section could not be updated"),
       );
     } finally {
       setEditBusy(false);
@@ -3449,6 +3485,8 @@ function InstructorSections({
                       setEditName(openSection.name);
                       setEditSectionCode(openSection.section_code ?? "");
                       setEditYear(openSection.academic_year ?? "");
+                      setEditInstitute(openSection.institute ?? "");
+                      setEditError("");
                       setEditing(true);
                     }}
                   >
@@ -3556,6 +3594,26 @@ function InstructorSections({
                       onChange={(event) => setEditYear(event.target.value)}
                     />
                   </label>
+                  <label className="section-dialog-institute">
+                    Institute
+                    <select
+                      value={editInstitute}
+                      onChange={(event) => setEditInstitute(event.target.value)}
+                      required
+                    >
+                      <option value="">Select institute</option>
+                      {institutes.map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {editError && (
+                    <p role="alert" className="admin-error">
+                      {editError}
+                    </p>
+                  )}
                   <div className="modal-actions">
                     <Button
                       type="button"

@@ -37,7 +37,17 @@ import type {
 import type { Role } from "./types";
 import { SdgBadges } from "./SdgMetadata";
 import DefenseTeamRoster from "./DefenseTeamRoster";
-import ResearchTeamView from "./ResearchTeamView";
+import ResearchTeamView, {
+  DefenseTeamCard,
+  ResearchersCard,
+  ResearchTeamHeader,
+  ResearchTeamLayout,
+  SupportSpecialistsCard,
+} from "./ResearchTeamView";
+import {
+  researchTeamPresentation,
+  type ResearchTeamPhase,
+} from "./researchTeamPresentation";
 
 type WorkspaceTab = ResearchWorkspaceTab;
 
@@ -235,6 +245,8 @@ export default function StudyWorkspace({
   const [defenseTeamStage, setDefenseTeamStage] = useState<
     "proposal" | "final"
   >("proposal");
+  const [defenseTeamPhase, setDefenseTeamPhase] =
+    useState<ResearchTeamPhase>("before");
   const currentTeam = projectTeam;
   // Review-assignment contacts describe the proposal-stage setup. Once a
   // stage-specific team is loaded, the final defense view must reflect only
@@ -304,10 +316,22 @@ export default function StudyWorkspace({
   const usesCanonicalReadOnlyTeam = [
     "adviser",
     "panel",
+    "research-office",
     "research_editor",
     "statistician",
     "librarian",
   ].includes(role);
+  const sharedTeamPresentation = researchTeamPresentation(
+    currentTeam ?? null,
+    people ?? { section: null, reviewers: [] },
+    defenseTeamStage,
+  );
+  const sharedTeamComplete =
+    currentTeam !== null && currentTeam !== undefined
+      ? defenseTeamPhase === "before"
+        ? currentTeam.pre_defense_ready
+        : currentTeam.post_defense_ready
+      : false;
 
   return (
     <div
@@ -580,12 +604,73 @@ export default function StudyWorkspace({
       {tab === "team" && (
         <div className="project-workspace-section project-team-layout">
           {usesCanonicalReadOnlyTeam ? (
-            <ResearchTeamView
-              researchDocumentId={researchDocumentId}
-              researchers={researchers}
-              people={people ?? { section: null, reviewers: [] }}
-              initialTeam={projectTeam}
-            />
+            <>
+              <ResearchTeamView
+                researchDocumentId={researchDocumentId}
+                researchers={researchers}
+                people={people ?? { section: null, reviewers: [] }}
+                initialTeam={projectTeam}
+              />
+              {actorExtension}
+            </>
+          ) : role === "instructor" ? (
+            <div className="canonical-research-team instructor-research-team">
+              <div className="research-team-heading-row">
+                <ResearchTeamHeader
+                  defenseType={defenseTeamStage}
+                  onDefenseTypeChange={(stage) => {
+                    setDefenseTeamStage(stage);
+                    controls?.onDefenseTeamStageChange?.(stage);
+                  }}
+                  description="View the researchers and assigned study team. Assignment changes are managed by authorized roles."
+                />
+                {controls?.onManageAssignments && (
+                  <Button
+                    variant="secondary"
+                    onClick={() =>
+                      controls.onManageAssignments?.(defenseTeamStage)
+                    }
+                  >
+                    <UsersRound /> Manage assignments
+                  </Button>
+                )}
+              </div>
+              <ResearchTeamLayout>
+                <DefenseTeamCard
+                  phase={defenseTeamPhase}
+                  onPhaseChange={setDefenseTeamPhase}
+                  rows={sharedTeamPresentation[defenseTeamPhase]}
+                  complete={sharedTeamComplete}
+                  loading={teamLoading}
+                  error=""
+                  onRetry={() => undefined}
+                />
+                <SupportSpecialistsCard
+                  support={sharedTeamPresentation.support}
+                />
+              </ResearchTeamLayout>
+              <ResearchersCard
+                researchers={researchers}
+                actions={
+                  controls?.onRemoveResearcher
+                    ? (researcher) => (
+                        <Button
+                          variant="quiet"
+                          className="icon-button"
+                          aria-label={`Remove ${researcher.name}`}
+                          title="Remove student from this study"
+                          disabled={controls.researcherActionsDisabled}
+                          onClick={() =>
+                            controls.onRemoveResearcher?.(researcher)
+                          }
+                        >
+                          <Trash2 />
+                        </Button>
+                      )
+                    : undefined
+                }
+              />
+            </div>
           ) : (
             <>
               {role !== "research-office" && (

@@ -91,18 +91,34 @@ class RoleWorkspaceApiSecondTest extends TestCase
 
     public function test_office_report_logos_are_served_from_private_storage(): void
     {
-        $office = $this->user(['role' => 'research-office']);
+        Storage::fake('local');
 
-        foreach (['college', 'research-publications'] as $logo) {
+        try {
+            $office = $this->user(['role' => 'research-office']);
+            $jpeg = base64_decode('/9j/2Q==', true);
+            $this->assertNotFalse($jpeg);
+
+            Storage::disk('local')->put('logo/tcgc_logo.jpg', $jpeg);
+            Storage::disk('local')->put('logo/research_publications_logo.jpg', $jpeg);
+
+            foreach (['college', 'research-publications'] as $logo) {
+                $this->as($office)
+                    ->get('/api/office/reports/logos/'.$logo)
+                    ->assertOk()
+                    ->assertHeader('Content-Type', 'image/jpeg');
+            }
+
             $this->as($office)
-                ->get('/api/office/reports/logos/'.$logo)
-                ->assertOk()
-                ->assertHeader('Content-Type', 'image/jpeg');
-        }
+                ->get('/api/office/reports/logos/unknown')
+                ->assertNotFound();
 
-        $this->as($office)
-            ->get('/api/office/reports/logos/unknown')
-            ->assertNotFound();
+            Storage::disk('local')->delete('logo/tcgc_logo.jpg');
+            $this->as($office)
+                ->get('/api/office/reports/logos/college')
+                ->assertNotFound();
+        } finally {
+            Storage::forgetDisk('local');
+        }
     }
 
     public function test_office_report_sections_are_rendered_as_pdfs(): void

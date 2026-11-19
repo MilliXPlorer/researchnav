@@ -301,7 +301,7 @@ describe("StudyWorkspace", () => {
     expect(await screen.findAllByText("Genevieve Hilot")).not.toHaveLength(0);
 
     // Final view must not mirror the proposal contacts.
-    fireEvent.change(screen.getByLabelText("Defense team"), {
+    fireEvent.change(screen.getByLabelText("Defense stage"), {
       target: { value: "final" },
     });
     expect(screen.queryByText("Genevieve Hilot")).not.toBeInTheDocument();
@@ -383,13 +383,14 @@ describe("StudyWorkspace", () => {
     for (const name of [
       "Instructor One",
       "Adviser One",
-      "Representative One",
-      "Chair One",
-      "Panelist One",
       "Editor One",
       "Statistician One",
       "Librarian One",
     ]) {
+      expect(screen.getAllByText(name).length).toBeGreaterThan(0);
+    }
+    fireEvent.click(screen.getByRole("tab", { name: "After defense" }));
+    for (const name of ["Representative One", "Chair One", "Panelist One"]) {
       expect(screen.getAllByText(name).length).toBeGreaterThan(0);
     }
   });

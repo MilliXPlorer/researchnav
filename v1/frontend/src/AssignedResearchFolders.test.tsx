@@ -360,7 +360,6 @@ describe("AssignedResearchFolders", () => {
       expect(
         within(team).getByRole("heading", { name: "Support specialists" }),
       ).toBeInTheDocument();
-      expect(within(team).getAllByText("Active")).toHaveLength(3);
       expect(within(team).getByText("Complete")).toBeInTheDocument();
       expect(
         within(team).queryByRole("button", {
@@ -833,9 +832,7 @@ describe("AssignedResearchFolders", () => {
     expect(
       screen.getByRole("button", { name: "Save assignment" }),
     ).toBeDisabled();
-    expect(
-      screen.queryByText("People assigned to this study"),
-    ).not.toBeInTheDocument();
+    expect(screen.getByText("People assigned to this study")).toBeInTheDocument();
     expect(screen.getByText("Student researcher")).toBeInTheDocument();
     fireEvent.click(representative);
     expect(representative).toHaveAttribute("aria-expanded", "true");

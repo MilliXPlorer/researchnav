@@ -2204,6 +2204,7 @@ describe("role workspace pages", () => {
   it("renders section folder cards and navigates to the route-backed section page", async () => {
     const navigate = vi.fn();
     stubFetch([
+      [/\/api\/institutes$/, () => listData(["Institute of Computer Studies"])],
       [
         /\/api\/instructor\/sections$/,
         () =>
@@ -2211,6 +2212,7 @@ describe("role workspace pages", () => {
             {
               id: 7,
               name: "CS-101",
+              institute: "Institute of Computer Studies",
               section_code: "BSCS-4A",
               academic_year: "2025-2026",
               is_active: true,
@@ -2241,6 +2243,86 @@ describe("role workspace pages", () => {
     expect(within(dialog).getByLabelText("Section name")).toBeInTheDocument();
     expect(within(dialog).getByLabelText("Section code")).toBeRequired();
     expect(within(dialog).getByLabelText("Academic year")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Institute")).toBeRequired();
+  });
+
+  it("keeps edit section values open when institute reassignment is rejected", async () => {
+    stubFetch([
+      [
+        /\/api\/institutes$/,
+        () =>
+          listData([
+            "Institute of Computer Studies",
+            "Institute of Health Sciences",
+          ]),
+      ],
+      [/\/api\/instructor\/sections\/7\/documents$/, emptyData],
+      [/\/api\/instructor\/sections\/7\/members$/, emptyData],
+      [/\/api\/instructor\/students/, emptyData],
+      [
+        /\/api\/instructor\/sections\/7$/,
+        (_path, init) =>
+          init?.method === "PATCH"
+            ? new Response(
+                JSON.stringify({
+                  error: "VALIDATION_FAILED",
+                  errors: {
+                    institute: [
+                      "The institute cannot be changed because these studies have incompatible degree programs: Computer Science Study.",
+                    ],
+                  },
+                }),
+                { status: 422 },
+              )
+            : listData([]),
+      ],
+      [
+        /\/api\/instructor\/sections$/,
+        () =>
+          listData([
+            {
+              id: 7,
+              name: "CS-101",
+              institute: "Institute of Computer Studies",
+              section_code: "BSCS-4A",
+              academic_year: "2025-2026",
+              is_active: true,
+              documents_count: 1,
+              members_count: 0,
+              created_at: null,
+            },
+          ]),
+      ],
+    ]);
+
+    render(
+      <RoleSidebarPage
+        role="instructor"
+        selectedNav="My Sections"
+        navigate={vi.fn()}
+        instructorSectionId="7"
+      />,
+    );
+    await screen.findByText("CS-101");
+    fireEvent.click(screen.getByRole("button", { name: "Edit section" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit section" });
+    fireEvent.change(within(dialog).getByLabelText("Section name"), {
+      target: { value: "CS-101 Revised" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Institute"), {
+      target: { value: "Institute of Health Sciences" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "Computer Science Study",
+    );
+    expect(within(dialog).getByLabelText("Section name")).toHaveValue(
+      "CS-101 Revised",
+    );
+    expect(within(dialog).getByLabelText("Institute")).toHaveValue(
+      "Institute of Health Sciences",
+    );
   });
 
   it("searches and filters section cards using the loaded section metadata", async () => {
@@ -2624,7 +2706,7 @@ describe("role workspace pages", () => {
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     fireEvent.click(screen.getByRole("button", { name: "Research Team" }));
-    await screen.findByLabelText("Defense team");
+    await screen.findByLabelText("Defense stage");
     fireEvent.click(
       await screen.findByRole("button", { name: "Remove Student One" }),
     );

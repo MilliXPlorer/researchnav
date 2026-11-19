@@ -100,7 +100,7 @@ export const roleConfigs: RoleConfig[] = [
     label: "Statistician",
     shortLabel: "Statistician",
     description: "Review methodology and issue sign-offs.",
-    nav: ["Dashboard", "Assigned Research", "User Logs"],
+    nav: ["Dashboard", "Assigned Research", "Repository", "User Logs"],
   },
   {
     id: "research_editor",
@@ -108,7 +108,7 @@ export const roleConfigs: RoleConfig[] = [
     shortLabel: "Editor",
     description:
       "Review manuscript language, clarity, organization, and formatting.",
-    nav: ["Dashboard", "Assigned Research", "User Logs"],
+    nav: ["Dashboard", "Assigned Research", "Repository", "User Logs"],
   },
   {
     id: "coordinator",

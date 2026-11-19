@@ -1,27 +1,166 @@
-import { BookOpen, ChartNoAxesColumn, PenLine } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   getResearchProjectTeam,
   type InstructorProjectTeam,
-  type ProjectSupportActor,
   type ResearchPeopleResource,
 } from "./api";
 import type { StudyWorkspaceResearcher } from "./StudyWorkspace";
+import {
+  researchTeamPresentation,
+  type ResearchTeamDefenseType,
+  type ResearchTeamPhase,
+  type ResearchTeamRow,
+} from "./researchTeamPresentation";
 
-type DefenseType = "proposal" | "final";
-type DefensePhase = "before" | "after";
-
-function reviewerName(people: ResearchPeopleResource, role: string) {
-  return people.reviewers.find((reviewer) => reviewer.review_role === role)
-    ?.name;
+export function ResearchTeamHeader({
+  defenseType,
+  onDefenseTypeChange,
+  description,
+}: {
+  defenseType: ResearchTeamDefenseType;
+  onDefenseTypeChange: (defenseType: ResearchTeamDefenseType) => void;
+  description: string;
+}) {
+  return (
+    <header className="research-team-intro">
+      <div>
+        <p className="eyebrow">Research Team</p>
+        <h2>People assigned to this study</h2>
+        <p>{description}</p>
+      </div>
+      <label className="research-team-stage">
+        <span>Defense stage</span>
+        <select
+          value={defenseType}
+          onChange={(event) =>
+            onDefenseTypeChange(event.target.value as ResearchTeamDefenseType)
+          }
+        >
+          <option value="proposal">Proposal Defense</option>
+          <option value="final">Final Defense</option>
+        </select>
+      </label>
+    </header>
+  );
 }
 
-function supportStatus(assignment: ProjectSupportActor | null) {
-  if (!assignment) return "Unassigned";
-  if (["accepted", "confirmed", "active"].includes(assignment.status)) {
-    return "Active";
-  }
-  return assignment.status.replace(/^./, (letter) => letter.toUpperCase());
+export function DefenseTeamCard({
+  phase,
+  onPhaseChange,
+  rows,
+  complete,
+  loading,
+  error,
+  onRetry,
+}: {
+  phase: ResearchTeamPhase;
+  onPhaseChange: (phase: ResearchTeamPhase) => void;
+  rows: ResearchTeamRow[];
+  complete: boolean;
+  loading: boolean;
+  error: string;
+  onRetry: () => void;
+}) {
+  return (
+    <section className="research-team-card defense-team-card">
+      <header className="defense-team-header">
+        <h3>Defense team</h3>
+        <div className="defense-phase-tabs" role="tablist" aria-label="Defense team phase">
+          {(["before", "after"] as const).map((value) => (
+            <button
+              key={value}
+              type="button"
+              role="tab"
+              aria-selected={phase === value}
+              className={phase === value ? "is-active" : ""}
+              onClick={() => onPhaseChange(value)}
+            >
+              {value === "before" ? "Before defense" : "After defense"}
+            </button>
+          ))}
+        </div>
+        {!loading && !error && (
+          <span className={`defense-completion ${complete ? "is-complete" : ""}`}>
+            <i aria-hidden="true" /> {complete ? "Complete" : "Incomplete"}
+          </span>
+        )}
+      </header>
+      {loading && <p className="research-team-state">Loading current team assignments…</p>}
+      {error && (
+        <p className="research-team-state" role="alert">
+          {error} <button type="button" className="text-action" onClick={onRetry}>Retry</button>
+        </p>
+      )}
+      {!loading && !error && (
+        <div className="defense-roster" role="tabpanel">
+          {rows.map(([role, name]) => (
+            <div key={role}>
+              <strong>{role}</strong>
+              <span className={name ? "" : "is-unassigned"} title={name ?? ""}>
+                {name || "Unassigned"}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+export function SupportSpecialistsCard({
+  support,
+}: {
+  support: ReturnType<typeof researchTeamPresentation>["support"];
+}) {
+  return (
+    <section className="research-team-card support-specialists-card">
+      <h3>Support specialists</h3>
+      <div className="researcher-support-grid">
+        {support.map(([role, Icon, name]) => (
+          <article className="researcher-support-card" key={role}>
+            <span className="researcher-support-icon" aria-hidden="true"><Icon /></span>
+            <div>
+              <span>{role}</span>
+              <strong className={name ? "" : "is-unassigned"} title={name ?? ""}>
+                {name ?? "Unassigned"}
+              </strong>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+export function ResearchersCard({
+  researchers,
+  actions,
+}: {
+  researchers: StudyWorkspaceResearcher[];
+  actions?: (researcher: StudyWorkspaceResearcher) => ReactNode;
+}) {
+  return (
+    <section className="research-team-card researchers-roster-card">
+      <header><h3>Researchers</h3><span>{researchers.length} assigned</span></header>
+      {researchers.length === 0 ? (
+        <p className="research-team-state">No researchers are assigned to this study.</p>
+      ) : (
+        <ul className="canonical-researcher-list">
+          {researchers.map((researcher) => (
+            <li key={researcher.id}>
+              <span className="project-person-avatar" aria-hidden="true">{researcher.name.slice(0, 1).toUpperCase()}</span>
+              <span className="canonical-researcher-details">
+                <strong title={researcher.name}>{researcher.name}</strong>
+                {researcher.email && <small title={researcher.email}>{researcher.email}</small>}
+                <small>Student researcher</small>
+              </span>
+              {actions?.(researcher)}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
 }
 
 export default function ResearchTeamView({
@@ -37,10 +176,10 @@ export default function ResearchTeamView({
   initialTeam?: InstructorProjectTeam | null;
   description?: string;
 }) {
-  const [defenseType, setDefenseType] = useState<DefenseType>(
+  const [defenseType, setDefenseType] = useState<ResearchTeamDefenseType>(
     initialTeam?.defense_type ?? "proposal",
   );
-  const [phase, setPhase] = useState<DefensePhase>("before");
+  const [phase, setPhase] = useState<ResearchTeamPhase>("before");
   const [loadedTeam, setLoadedTeam] = useState<InstructorProjectTeam | null>(
     null,
   );
@@ -72,208 +211,31 @@ export default function ResearchTeamView({
     };
   }, [defenseType, initialTeamMatches, researchDocumentId, retry]);
 
-  const fallback = (role: string) =>
-    defenseType === "proposal" ? reviewerName(people, role) : undefined;
-  const instructor =
-    team?.instructor?.name ??
-    (defenseType === "proposal" ? people.section?.instructor_name : undefined);
-  const adviser = team?.adviser?.name ?? fallback("adviser");
-  const editor =
-    team?.support_assignments.editor?.name ??
-    fallback("research_editor") ??
-    fallback("editor");
-  const statistician =
-    team?.support_assignments.statistician?.name ?? fallback("statistician");
-  const librarian =
-    team?.support_assignments.librarian?.name ?? fallback("librarian");
-  const panels = team?.panel_members?.length
-    ? team.panel_members.map((member) => member.name)
-    : defenseType === "proposal"
-      ? people.reviewers
-          .filter(
-            (reviewer) =>
-              reviewer.review_role === "panel" &&
-              reviewer.designation !== "panel_chair",
-          )
-          .map((reviewer) => reviewer.name)
-      : [];
-  const representative =
-    team?.research_office_representative?.name ??
-    fallback("research-office") ??
-    fallback("research_office_representative");
-  const chair =
-    team?.chair?.name ??
-    (defenseType === "proposal"
-      ? people.reviewers.find(
-          (reviewer) => reviewer.designation === "panel_chair",
-        )?.name
-      : undefined);
-  const rows: Array<[string, string | null | undefined]> =
-    phase === "before"
-      ? [
-          ["Research Instructor", instructor],
-          ["Research Adviser", adviser],
-          ["Editor", editor],
-          ["Statistician", statistician],
-          ["Librarian", librarian],
-        ]
-      : [
-          ["Research Instructor", instructor],
-          ["Research Adviser", adviser],
-          ["Editor", editor],
-          ["Librarian", librarian],
-          ["Panel 1", panels[0]],
-          ["Panel 2", panels[1]],
-          ["Panel 3", panels[2]],
-          ["Research Representative", representative],
-          ["Chair", chair],
-        ];
+  const presentation = researchTeamPresentation(team, people, defenseType);
   const complete =
     team !== null &&
     (phase === "before" ? team.pre_defense_ready : team.post_defense_ready);
-  const support = [
-    ["Editor", PenLine, team?.support_assignments.editor ?? null],
-    [
-      "Statistician",
-      ChartNoAxesColumn,
-      team?.support_assignments.statistician ?? null,
-    ],
-    ["Librarian", BookOpen, team?.support_assignments.librarian ?? null],
-  ] as const;
+  function changeDefenseType(next: ResearchTeamDefenseType) {
+    setLoadedTeam(null);
+    setError("");
+    setDefenseType(next);
+  }
 
   return (
     <div
       className="canonical-research-team"
       data-testid="canonical-research-team"
     >
-      <header className="research-team-intro">
-        <div>
-          <p className="eyebrow">Research Team</p>
-          <h2>People assigned to this study</h2>
-          <p>{description}</p>
-        </div>
-        <label className="research-team-stage">
-          <span>Defense stage</span>
-          <select
-            value={defenseType}
-            onChange={(event) => {
-              setLoadedTeam(null);
-              setError("");
-              setDefenseType(event.target.value as DefenseType);
-            }}
-          >
-            <option value="proposal">Proposal Defense</option>
-            <option value="final">Final Defense</option>
-          </select>
-        </label>
-      </header>
-
-      <section className="research-team-card researchers-roster-card">
-        <header>
-          <h3>Researchers</h3>
-          <span>{researchers.length} assigned</span>
-        </header>
-        {researchers.length === 0 ? (
-          <p className="research-team-state">
-            No researchers are assigned to this study.
-          </p>
-        ) : (
-          <ul className="canonical-researcher-list">
-            {researchers.map((researcher) => (
-              <li key={researcher.id}>
-                <span className="project-person-avatar" aria-hidden="true">
-                  {researcher.name.slice(0, 1).toUpperCase()}
-                </span>
-                <span>
-                  <strong>{researcher.name}</strong>
-                  <small>Student researcher</small>
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="research-team-card defense-team-card">
-        <header className="defense-team-header">
-          <h3>Defense team</h3>
-          <div
-            className="defense-phase-tabs"
-            role="tablist"
-            aria-label="Defense team phase"
-          >
-            {(["before", "after"] as const).map((value) => (
-              <button
-                key={value}
-                type="button"
-                role="tab"
-                aria-selected={phase === value}
-                className={phase === value ? "is-active" : ""}
-                onClick={() => setPhase(value)}
-              >
-                {value === "before" ? "Before defense" : "After defense"}
-              </button>
-            ))}
-          </div>
-          {!loading && !error && (
-            <span
-              className={`defense-completion ${complete ? "is-complete" : ""}`}
-            >
-              <i aria-hidden="true" /> {complete ? "Complete" : "Incomplete"}
-            </span>
-          )}
-        </header>
-        {loading && (
-          <p className="research-team-state">
-            Loading current team assignments…
-          </p>
-        )}
-        {error && (
-          <p className="research-team-state" role="alert">
-            {error}{" "}
-            <button
-              type="button"
-              className="text-action"
-              onClick={() => {
-                setError("");
-                setRetry((value) => value + 1);
-              }}
-            >
-              Retry
-            </button>
-          </p>
-        )}
-        {!loading && !error && (
-          <div className="defense-roster" role="tabpanel">
-            {rows.map(([role, name]) => (
-              <div key={role}>
-                <strong>{role}</strong>
-                <span className={name ? "" : "is-unassigned"}>
-                  {name || "Unassigned"}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="research-team-card support-specialists-card">
-        <h3>Support specialists</h3>
-        <div className="researcher-support-grid">
-          {support.map(([role, Icon, assignment]) => (
-            <article className="researcher-support-card" key={role}>
-              <span className="researcher-support-icon" aria-hidden="true">
-                <Icon />
-              </span>
-              <div>
-                <span>{role}</span>
-                <strong>{assignment?.name ?? "Unassigned"}</strong>
-                <small>{supportStatus(assignment)}</small>
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
+      <ResearchTeamHeader defenseType={defenseType} onDefenseTypeChange={changeDefenseType} description={description} />
+      <div className="research-team-primary-grid">
+        <DefenseTeamCard phase={phase} onPhaseChange={setPhase} rows={presentation[phase]} complete={complete} loading={loading} error={error} onRetry={() => { setError(""); setRetry((value) => value + 1); }} />
+        <SupportSpecialistsCard support={presentation.support} />
+      </div>
+      <ResearchersCard researchers={researchers} />
     </div>
   );
+}
+
+export function ResearchTeamLayout({ children }: { children: ReactNode }) {
+  return <div className="research-team-primary-grid">{children}</div>;
 }

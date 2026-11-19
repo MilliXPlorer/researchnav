@@ -80,6 +80,109 @@ class SupabaseManuscriptAccessTest extends TestCase
             ->assertHeader('content-type', 'application/zip');
     }
 
+    public function test_grouped_catalog_archive_sanitizes_entries_suffixes_duplicates_and_cleans_up(): void
+    {
+        [$document, $file] = $this->localManuscript(['import_group_name' => '../Study/..']);
+        $file->update(['original_filename' => '../../Report.pdf']);
+        $secondStoredFilename = Str::uuid()->toString().'.pdf';
+        DocumentFile::query()->create([
+            'research_document_id' => $document->id,
+            'uploaded_by' => $file->uploaded_by,
+            'document_type' => 'final_manuscript',
+            'version_number' => 2,
+            'file_order' => 2,
+            'original_filename' => 'report.pdf',
+            'stored_filename' => $secondStoredFilename,
+            'file_path' => 'research/'.$document->id.'/'.$secondStoredFilename,
+            'file_extension' => 'pdf',
+            'mime_type' => 'application/pdf',
+            'file_size' => 12,
+            'is_current' => true,
+            'uploaded_at' => now(),
+        ]);
+        Storage::disk('researchnav_private')->put('research/'.$document->id.'/'.$secondStoredFilename, '%PDF-1.4 second');
+        $viewer = User::factory()->create(['access_status' => 'active']);
+
+        $response = $this->withSession(['user_id' => $viewer->id])
+            ->get('/api/repository/'.$document->id.'/download?all=1')
+            ->assertOk()
+            ->assertDownload('Study.zip');
+        $path = $response->baseResponse->getFile()->getPathname();
+        $archive = new \ZipArchive;
+        $this->assertTrue($archive->open($path) === true);
+        $entries = [];
+        for ($index = 0; $index < $archive->numFiles; $index++) {
+            $entries[] = $archive->getNameIndex($index);
+        }
+        $this->assertTrue($archive->close());
+        $this->assertSame(['Study/Report.pdf', 'Study/report (2).pdf'], $entries);
+        foreach ($entries as $entry) {
+            $this->assertStringNotContainsString('..', $entry);
+            $this->assertStringNotContainsString('\\', $entry);
+            $this->assertFalse((bool) preg_match('/^(?:\/|[A-Za-z]:)/', $entry));
+        }
+
+        ob_start();
+        $response->baseResponse->sendContent();
+        ob_end_clean();
+        $this->assertFileDoesNotExist($path);
+    }
+
+    public function test_grouped_catalog_download_rejects_foreign_selected_files_and_coordinator_foreign_documents(): void
+    {
+        [$document] = $this->localManuscript(['institute' => 'Institute of Computer Studies']);
+        [$foreignDocument, $foreignFile] = $this->localManuscript(['institute' => 'Institute of Health Sciences']);
+        $viewer = User::factory()->create(['access_status' => 'active']);
+        $coordinator = User::factory()->create([
+            'access_status' => 'active',
+            'role' => 'coordinator',
+            'institute' => 'Institute of Computer Studies',
+        ]);
+
+        $this->withSession(['user_id' => $viewer->id])
+            ->get('/api/repository/'.$document->id.'/download?file='.$foreignFile->id)
+            ->assertNotFound();
+        $this->withSession(['user_id' => $coordinator->id])
+            ->get('/api/coordinator/repository/'.$foreignDocument->id.'/download?all=1')
+            ->assertNotFound();
+    }
+
+    public function test_grouped_catalog_download_enforces_file_count_and_aggregate_source_size_limits(): void
+    {
+        [$document, $file] = $this->localManuscript();
+        $secondStoredFilename = Str::uuid()->toString().'.pdf';
+        DocumentFile::query()->create([
+            'research_document_id' => $document->id,
+            'uploaded_by' => $file->uploaded_by,
+            'document_type' => 'final_manuscript',
+            'version_number' => 2,
+            'file_order' => 2,
+            'original_filename' => 'second.pdf',
+            'stored_filename' => $secondStoredFilename,
+            'file_path' => 'research/'.$document->id.'/'.$secondStoredFilename,
+            'file_extension' => 'pdf',
+            'mime_type' => 'application/pdf',
+            'file_size' => 12,
+            'is_current' => true,
+            'uploaded_at' => now(),
+        ]);
+        Storage::disk('researchnav_private')->put('research/'.$document->id.'/'.$secondStoredFilename, '%PDF-1.4 second');
+        $viewer = User::factory()->create(['access_status' => 'active']);
+
+        config()->set('researchnav.grouped_downloads.maximum_files', 1);
+        $this->withSession(['user_id' => $viewer->id])
+            ->get('/api/repository/'.$document->id.'/download?all=1')
+            ->assertStatus(503)
+            ->assertExactJson(['error' => 'MANUSCRIPT_ARCHIVE_UNAVAILABLE']);
+
+        config()->set('researchnav.grouped_downloads.maximum_files', 100);
+        config()->set('researchnav.grouped_downloads.maximum_source_bytes', 1);
+        $this->withSession(['user_id' => $viewer->id])
+            ->get('/api/repository/'.$document->id.'/download?all=1')
+            ->assertStatus(503)
+            ->assertExactJson(['error' => 'MANUSCRIPT_ARCHIVE_UNAVAILABLE']);
+    }
+
     /** @return array{ResearchDocument, DocumentFile} */
     private function localManuscript(array $overrides = []): array
     {
@@ -89,7 +192,7 @@ class SupabaseManuscriptAccessTest extends TestCase
             'submission_status' => 'archived',
             'archive_status' => 'archived',
             'visibility' => 'public',
-            'import_source_sha256' => str_repeat('a', 64),
+            'import_source_sha256' => hash('sha256', (string) Str::uuid()),
         ], $overrides));
         $storedFilename = Str::uuid()->toString().'.pdf';
         $file = DocumentFile::query()->create([

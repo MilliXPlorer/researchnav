@@ -10,6 +10,8 @@ use App\Models\ResearchDocument;
 use App\Policies\DocumentFilePolicy;
 use App\Services\AuditService;
 use App\Services\DomainAuthorization;
+use App\Services\GroupedManuscriptArchiveBuilder;
+use App\Services\GroupedManuscriptArchiveException;
 use App\Services\PrivateDocumentFileResolver;
 use App\Services\PublicManuscriptAvailability;
 use App\Services\PublicRepositoryService;
@@ -20,7 +22,6 @@ use App\Services\SimilarityProcessException;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
-use ZipArchive;
 
 class PublicRepositoryController extends Controller
 {
@@ -83,12 +84,17 @@ class PublicRepositoryController extends Controller
         }
     }
 
-    public function download(Request $request, ResearchDocument $researchDocument, PublicRepositoryService $service, PrivateDocumentFileResolver $files, PublicManuscriptAvailability $manuscripts)
+    public function download(Request $request, ResearchDocument $researchDocument, PublicRepositoryService $service, PrivateDocumentFileResolver $files, PublicManuscriptAvailability $manuscripts, GroupedManuscriptArchiveBuilder $archives)
     {
         $actor = $request->attributes->get('current_user');
         abort_unless($actor !== null && DomainAuthorization::isActiveAccount($actor), 403);
         $research = $service->find($researchDocument->id);
         $groupedFiles = $manuscripts->availableFiles($research)
+            ->filter(function (DocumentFile $file) use ($actor, $research): bool {
+                $file->setRelation('researchDocument', $research);
+
+                return (new DocumentFilePolicy)->view($actor, $file);
+            })
             ->sortBy(fn ($file): string => sprintf('%010d:%s', $file->file_order ?? PHP_INT_MAX, $file->original_filename))
             ->values();
         abort_if($groupedFiles->isEmpty(), 404);
@@ -101,18 +107,23 @@ class PublicRepositoryController extends Controller
         }
 
         if ($request->boolean('all')) {
-            app(AuditService::class)->log($actor, 'CATALOG_DOCUMENT_DOWNLOADED', $file, 'Downloaded an archived catalog manuscript.', $request);
-            $zipPath = tempnam(sys_get_temp_dir(), 'researchnav-zip-');
-            $zip = new ZipArchive;
-            abort_unless($zipPath !== false && $zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) === true, 500);
-            $folder = preg_replace('/[^A-Za-z0-9._ -]+/', ' ', $research->import_group_name ?: $research->title) ?: 'Manuscript';
-            foreach ($groupedFiles as $groupedFile) {
-                $contents = file_get_contents($files->resolve($research, $groupedFile)['absolute_path']);
-                $zip->addFromString($folder.'/'.$groupedFile->original_filename, $contents);
+            try {
+                $archive = $archives->build($research, $groupedFiles);
+            } catch (GroupedManuscriptArchiveException) {
+                return response()->json(['error' => 'MANUSCRIPT_ARCHIVE_UNAVAILABLE'], 503);
             }
-            $zip->close();
+            app(AuditService::class)->log($actor, 'CATALOG_DOCUMENT_DOWNLOADED', $file, 'Downloaded an archived catalog manuscript.', $request);
+            try {
+                return response()->download($archive->path, $archive->downloadName, [
+                    'Cache-Control' => 'private, no-store',
+                    'Content-Type' => 'application/zip',
+                    'X-Content-Type-Options' => 'nosniff',
+                ])->deleteFileAfterSend(true);
+            } catch (\Throwable $exception) {
+                $archive->cleanup();
 
-            return response()->download($zipPath, $folder.'.zip', ['Content-Type' => 'application/zip'])->deleteFileAfterSend(true);
+                throw $exception;
+            }
         }
 
         $selectedId = filter_var($request->query('file'), FILTER_VALIDATE_INT);

@@ -6,7 +6,15 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { within } from "@testing-library/react";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import App from "./App";
 import CatalogPage from "./CatalogPage";
 import Dashboard from "./Dashboard";
@@ -66,6 +74,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   window.history.replaceState({}, "", "/");
+  vi.clearAllMocks();
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string | URL | Request) => {
@@ -86,6 +95,12 @@ beforeEach(() => {
       });
     }),
   );
+});
+
+afterEach(() => {
+  window.history.replaceState({}, "", "/");
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("public catalog", () => {
@@ -148,6 +163,7 @@ describe("public catalog", () => {
   });
 
   it("opens profile editing from the workspace sidebar", async () => {
+    window.history.replaceState({}, "", "/app");
     const user = {
       email: "ada@example.test",
       role: "researcher" as const,
@@ -364,6 +380,7 @@ describe("role workspaces", () => {
     expect(navFor("statistician")).toEqual([
       "Dashboard",
       "Assigned Research",
+      "Repository",
       "User Logs",
     ]);
 
@@ -377,6 +394,7 @@ describe("role workspaces", () => {
     expect(navFor("research_editor")).toEqual([
       "Dashboard",
       "Assigned Research",
+      "Repository",
       "User Logs",
     ]);
   });
@@ -659,6 +677,7 @@ describe("role workspaces", () => {
   });
 
   it("opens a researcher record from My Submissions without a refresh", async () => {
+    window.history.replaceState({}, "", "/app");
     const session = {
       email: "researcher@example.test",
       role: "researcher" as const,
@@ -724,7 +743,7 @@ describe("role workspaces", () => {
       }),
     );
 
-    render(
+    const { unmount } = render(
       <App
         initialState={{
           version: 1,
@@ -742,6 +761,7 @@ describe("role workspaces", () => {
     );
 
     expect(await screen.findByText("Open without refresh")).toBeInTheDocument();
+    unmount();
   });
 
   const readyProps = (role: Exclude<Role, "researcher">, key: string) => ({

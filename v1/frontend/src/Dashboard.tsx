@@ -530,13 +530,6 @@ export default function Dashboard({
             instructorSectionId={instructorSectionId}
             instructorProjectDocumentId={instructorProjectDocumentId}
           />
-        ) : role === "research_editor" && selectedNav === "Dashboard" ? (
-          <RoleSidebarPage
-            role={role}
-            selectedNav="Dashboard"
-            navigate={navigate}
-            actorKey={session.email.trim().toLowerCase()}
-          />
         ) : showingRecordWorkspace || selectedNav === primaryNav[role] ? (
           <RoleWorkspace
             role={role}

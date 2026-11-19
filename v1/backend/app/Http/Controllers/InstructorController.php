@@ -74,6 +74,7 @@ class InstructorController extends DomainController
             'name' => ['required', 'string', 'max:150'],
             'section_code' => ['required', 'string', 'max:100'],
             'academic_year' => ['nullable', 'string', 'max:50'],
+            'institute' => ['required', 'string', 'max:180'],
         ]);
         $section = $sections->create($this->actor($request), $input, $request);
 
@@ -87,6 +88,7 @@ class InstructorController extends DomainController
             'section_code' => ['sometimes', 'required', 'string', 'max:100'],
             'academic_year' => ['nullable', 'string', 'max:50'],
             'is_active' => ['sometimes', 'boolean'],
+            'institute' => ['sometimes', 'required', 'string', 'max:180'],
         ]);
 
         return response()->json(['data' => $this->sectionPayload($sections->update($this->actor($request), $classSection, $input, $request))]);
@@ -591,6 +593,7 @@ class InstructorController extends DomainController
         return [
             'id' => $section->id,
             'name' => $section->name,
+            'institute' => $section->institute,
             'section_code' => $section->section_code,
             'academic_year' => $section->academic_year,
             'is_active' => $section->is_active,

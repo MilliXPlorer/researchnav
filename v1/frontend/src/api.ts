@@ -90,6 +90,34 @@ export interface RoleDashboard {
   panel?: PanelDashboardProjection | null;
   statistician?: StatisticianDashboardProjection | null;
   librarian?: LibrarianDashboardProjection | null;
+  editor?: EditorDashboardProjection | null;
+}
+
+export interface EditorDashboardProjection {
+  schema_version: 1;
+  counts: {
+    pending_requests: number;
+    assigned_research: number;
+    for_review: number;
+    completed_reviews: number;
+  };
+  workload: { for_review: number; completed: number };
+  assignments: Array<{
+    research_document_id: number;
+    title: string;
+    submission_reference: string | null;
+    research_stage: string;
+    submission_status: string;
+    review_status: "for_review" | "completed";
+    updated_at: string | null;
+  }>;
+  recent_activity: Array<{
+    id: string;
+    research_document_id: number;
+    title: string;
+    type: "study_assigned" | "review_recorded" | "review_completed";
+    occurred_at: string;
+  }>;
 }
 
 export interface PanelDashboardProjection {
@@ -2422,6 +2450,7 @@ export async function saveAdviserMonitoring(
 export interface InstructorSectionResource {
   id: number;
   name: string;
+  institute: string | null;
   section_code: string | null;
   academic_year: string | null;
   is_active: boolean;
@@ -2432,6 +2461,7 @@ export interface InstructorSectionResource {
 
 export interface InstructorSectionInput {
   name: string;
+  institute: string;
   section_code: string;
   academic_year?: string | null;
 }

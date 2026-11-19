@@ -11,6 +11,7 @@ import {
   History,
   LibraryBig,
   LineChart,
+  PenLine,
   UserRound,
   UserRoundCheck,
   UsersRound,
@@ -21,7 +22,11 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { AnimatedStat, Button } from "./components";
-import { DashboardEmptyState, DashboardKpiCard } from "./DashboardPrimitives";
+import {
+  DashboardEmptyState,
+  DashboardKpiCard,
+  DashboardSectionCard,
+} from "./DashboardPrimitives";
 import { formatPhilippineDate, formatPhilippineDateTime } from "./dateTime";
 import { Modal } from "./Modal";
 import AdminResearchWorkspace from "./AdminResearchWorkspace";
@@ -39,6 +44,7 @@ import {
   getCoordinatorProgramOverview,
   listOfficeInstituteStudies,
   officeInstituteStudyOpenUrl,
+  type EditorDashboardProjection,
   type OfficeInstituteStudy,
   type PanelDashboardProjection,
   type CoordinatorProgramOverview,
@@ -620,6 +626,8 @@ function RoleDashboardWorkspace({
             ? "workspace-content admin-dashboard-workspace"
             : role === "panel"
               ? "workspace-content panel-dashboard-workspace"
+              : role === "research_editor"
+                ? "workspace-content editor-dashboard-workspace"
               : role === "statistician"
                 ? "workspace-content statistician-dashboard-workspace"
                 : role === "librarian"
@@ -752,6 +760,15 @@ function DashboardSections({
       <StatisticianDashboard
         projection={dashboardState.dashboard.statistician}
         navigate={navigate}
+      />
+    );
+  }
+
+  if (role === "research_editor" && dashboardState.dashboard.editor) {
+    return (
+      <EditorDashboard
+        projection={dashboardState.dashboard.editor}
+        selectNav={selectNav}
       />
     );
   }
@@ -1315,6 +1332,85 @@ function CoordinatorDashboard({
       </div>
     </div>
   );
+}
+
+function EditorDashboard({
+  projection,
+  selectNav,
+}: {
+  projection: EditorDashboardProjection;
+  selectNav: (item: string) => void;
+}) {
+  const totalWorkload = projection.workload.for_review + projection.workload.completed;
+  const quickActions = [
+    { item: "Assigned Research", Icon: FolderKanban },
+    { item: "Repository", Icon: LibraryBig },
+    { item: "User Logs", Icon: History },
+  ];
+
+  return (
+    <div className="editor-dashboard" data-testid="editor-dashboard">
+      <div className="editor-dashboard-kpi-grid">
+        <DashboardKpiCard icon={PenLine} label="Pending Requests" value={projection.counts.pending_requests} description="Editorial requests awaiting your response." />
+        <DashboardKpiCard icon={FolderKanban} label="Assigned Research" value={projection.counts.assigned_research} description="Active studies assigned to you." />
+        <DashboardKpiCard icon={Clock3} label="For Review" value={projection.counts.for_review} description="Studies awaiting editorial clearance." />
+        <DashboardKpiCard icon={CheckCircle2} label="Completed Reviews" value={projection.counts.completed_reviews} description="Studies cleared by your latest review." />
+      </div>
+      <div className="editor-dashboard-overview-grid">
+        <DashboardSectionCard title="Editorial Workload" subtitle="Your active assignments by latest editorial review." className="editor-dashboard-workload">
+          {totalWorkload === 0 ? <DashboardEmptyState>No editorial workload is currently assigned.</DashboardEmptyState> : (
+            <dl>
+              <div><dt>For review</dt><dd>{projection.workload.for_review}</dd></div>
+              <div><dt>Completed</dt><dd>{projection.workload.completed}</dd></div>
+            </dl>
+          )}
+        </DashboardSectionCard>
+        <DashboardSectionCard title="Quick Actions" subtitle="Open an existing Editor workspace." className="editor-dashboard-actions">
+          <nav aria-label="Editor quick actions">
+            {quickActions.map(({ item, Icon }) => (
+              <button key={item} type="button" onClick={() => selectNav(item)}>
+                <Icon aria-hidden="true" /><span>{item}</span><ArrowUpRight aria-hidden="true" />
+              </button>
+            ))}
+          </nav>
+        </DashboardSectionCard>
+      </div>
+      <DashboardSectionCard title="Current Assignments" subtitle="A compact view of your active editorial assignments." className="editor-dashboard-assignments" actions={<button type="button" onClick={() => selectNav("Assigned Research")}>View all assignments <ArrowUpRight aria-hidden="true" /></button>}>
+        {projection.assignments.length === 0 ? <DashboardEmptyState>No active editorial assignments.</DashboardEmptyState> : (
+          <div className="editor-dashboard-assignment-table" role="table" aria-label="Current editorial assignments">
+            <div className="editor-dashboard-assignment-head" role="row"><span role="columnheader">Study</span><span role="columnheader">Stage</span><span role="columnheader">Editorial status</span><span role="columnheader">Action</span></div>
+            {projection.assignments.map((assignment) => (
+              <div className="editor-dashboard-assignment-row" role="row" key={assignment.research_document_id}>
+                <span role="cell" className="editor-dashboard-assignment-copy"><strong title={assignment.title}>{assignment.title}</strong>{assignment.submission_reference && <small>{assignment.submission_reference}</small>}</span>
+                <span role="cell">{humanize(assignment.research_stage)}</span>
+                <span role="cell"><span className={`editor-review-status is-${assignment.review_status}`}>{assignment.review_status === "completed" ? "Completed" : "For review"}</span></span>
+                <span role="cell"><button type="button" onClick={() => selectNav("Assigned Research")}>{assignment.review_status === "completed" ? "View review" : "Open review"}</button></span>
+              </div>
+            ))}
+          </div>
+        )}
+      </DashboardSectionCard>
+      <DashboardSectionCard title="Recent Editorial Activity" subtitle="Your latest assignment and editorial review records." className="editor-dashboard-activity">
+        {projection.recent_activity.length === 0 ? <DashboardEmptyState>No recent editorial activity.</DashboardEmptyState> : (
+          <ol>
+            {projection.recent_activity.map((activity) => (
+              <li key={activity.id}><span aria-hidden="true" /><div><strong>{editorActivityLabel(activity.type)}</strong><span title={activity.title}>{activity.title}</span></div><time dateTime={activity.occurred_at}>{formatDate(activity.occurred_at)}</time></li>
+            ))}
+          </ol>
+        )}
+      </DashboardSectionCard>
+    </div>
+  );
+}
+
+function editorActivityLabel(
+  type: EditorDashboardProjection["recent_activity"][number]["type"],
+) {
+  return {
+    study_assigned: "Study assigned",
+    review_recorded: "Editorial review recorded",
+    review_completed: "Editorial review completed",
+  }[type];
 }
 
 function StatisticianDashboard({

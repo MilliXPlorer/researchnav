@@ -63,12 +63,20 @@ class ResearchService
                 $this->ensureMetadataEditable($locked);
             }
             $metadata = $this->metadata($data);
-            if ($locked->section_id !== null && array_key_exists('institute', $metadata)) {
+            if ($locked->section_id !== null) {
                 $sectionInstitute = trim((string) $locked->section()->value('institute'));
-                $requestedInstitute = trim((string) $metadata['institute']);
-                if ($sectionInstitute !== '' && $requestedInstitute !== $sectionInstitute) {
+                $requestedInstitute = trim((string) ($metadata['institute'] ?? $sectionInstitute));
+                if ($sectionInstitute !== '' && array_key_exists('institute', $metadata) && $requestedInstitute !== $sectionInstitute) {
                     throw ValidationException::withMessages([
                         'institute' => ['The research institute must match its class section.'],
+                    ]);
+                }
+                if ($sectionInstitute !== ''
+                    && array_key_exists('degree_program', $metadata)
+                    && $metadata['degree_program'] !== null
+                    && ! in_array($metadata['degree_program'], ResearchDocument::PROGRAMS_BY_INSTITUTE[$sectionInstitute] ?? [], true)) {
+                    throw ValidationException::withMessages([
+                        'degree_program' => ['Select a program offered by the chosen institute.'],
                     ]);
                 }
             }

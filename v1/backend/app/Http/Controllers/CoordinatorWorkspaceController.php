@@ -14,6 +14,8 @@ use App\Services\AuditService;
 use App\Services\CoordinatorInstituteScope;
 use App\Services\CoordinatorProgramOverviewService;
 use App\Services\DefenseScheduleService;
+use App\Services\GroupedManuscriptArchiveBuilder;
+use App\Services\GroupedManuscriptArchiveException;
 use App\Services\InstitutionalPdfService;
 use App\Services\PrivateDocumentFileResolver;
 use App\Services\PublicManuscriptAvailability;
@@ -26,7 +28,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
-use ZipArchive;
 
 class CoordinatorWorkspaceController extends DomainController
 {
@@ -96,7 +97,7 @@ class CoordinatorWorkspaceController extends DomainController
             ->additional(['schema_version' => 1])->response()->header('Cache-Control', 'private, no-store');
     }
 
-    public function repositoryDownload(string $researchDocument, Request $request, CoordinatorInstituteScope $scope, PrivateDocumentFileResolver $files, PublicManuscriptAvailability $manuscripts, RepositoryFileChooser $chooser)
+    public function repositoryDownload(string $researchDocument, Request $request, CoordinatorInstituteScope $scope, PrivateDocumentFileResolver $files, PublicManuscriptAvailability $manuscripts, RepositoryFileChooser $chooser, GroupedManuscriptArchiveBuilder $archives)
     {
         $document = $scope->documents($this->actor($request))
             ->where('archive_status', 'archived')
@@ -111,18 +112,23 @@ class CoordinatorWorkspaceController extends DomainController
         }
         $file = $availableFiles->first();
         if ($request->boolean('all')) {
-            app(AuditService::class)->log($this->actor($request), 'DOCUMENT_DOWNLOADED', $file, 'Coordinator downloaded archived institute manuscripts.', $request);
-            $zipPath = tempnam(sys_get_temp_dir(), 'researchnav-zip-');
-            $zip = new ZipArchive;
-            abort_unless($zipPath !== false && $zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) === true, 500);
-            $folder = preg_replace('/[^A-Za-z0-9._ -]+/', ' ', $document->import_group_name ?: $document->title) ?: 'Manuscript';
-            foreach ($availableFiles as $availableFile) {
-                $contents = file_get_contents($files->resolve($document, $availableFile)['absolute_path']);
-                $zip->addFromString($folder.'/'.$availableFile->original_filename, $contents);
+            try {
+                $archive = $archives->build($document, $availableFiles);
+            } catch (GroupedManuscriptArchiveException) {
+                return response()->json(['error' => 'MANUSCRIPT_ARCHIVE_UNAVAILABLE'], 503);
             }
-            $zip->close();
+            app(AuditService::class)->log($this->actor($request), 'DOCUMENT_DOWNLOADED', $file, 'Coordinator downloaded archived institute manuscripts.', $request);
+            try {
+                return response()->download($archive->path, $archive->downloadName, [
+                    'Cache-Control' => 'private, no-store',
+                    'Content-Type' => 'application/zip',
+                    'X-Content-Type-Options' => 'nosniff',
+                ])->deleteFileAfterSend(true);
+            } catch (\Throwable $exception) {
+                $archive->cleanup();
 
-            return response()->download($zipPath, $folder.'.zip', ['Content-Type' => 'application/zip'])->deleteFileAfterSend(true);
+                throw $exception;
+            }
         }
         $selectedId = filter_var($request->query('file'), FILTER_VALIDATE_INT);
         $file = $selectedId === false ? null : $availableFiles->firstWhere('id', $selectedId);

@@ -49,6 +49,11 @@ export default function App({ initialState }: { initialState?: InitialState }) {
     /^\/app\/instructor\/sections\/(\d+)(?:\/projects\/(\d+))?$/,
   );
   const isDashboardRoute = isProtectedRoute(path);
+  const hasConfiguredDashboardSlug =
+    researcherSection !== undefined ||
+    similarityRoute ||
+    instructorSectionRoute !== null ||
+    isConfiguredDashboardSlug(session, dashboardNavSlug);
 
   /** Auth middleware: any sign-out or expired session lands on the landing page. */
   const clearSessionToLanding = useCallback(() => {
@@ -147,7 +152,7 @@ export default function App({ initialState }: { initialState?: InitialState }) {
           error={repositoryError}
           initialSearch={location.search}
         />
-      ) : isDashboardRoute && session ? (
+      ) : isDashboardRoute && session && hasConfiguredDashboardSlug ? (
         <Dashboard
           session={session}
           onSessionChange={setSession}
@@ -198,6 +203,13 @@ export default function App({ initialState }: { initialState?: InitialState }) {
       )}
     </>
   );
+}
+
+function isConfiguredDashboardSlug(
+  session: UserSession | null | undefined,
+  slug: string | undefined,
+) {
+  return !slug || (session !== null && session !== undefined && Boolean(roleNavFromSlug(session, slug)));
 }
 
 function roleNavFromSlug(

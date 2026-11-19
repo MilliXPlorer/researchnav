@@ -258,11 +258,11 @@ class RoleWorkspaceApiTest extends TestCase
         $proposal = $this->document('submitted', $student);
         $this->assign($office, $proposal, $instructor, 'instructor');
 
-        $this->as($instructor)->postJson('/api/instructor/sections', ['name' => 'Thesis 2', 'academic_year' => '2025-2026'], $this->origin())
+        $this->as($instructor)->postJson('/api/instructor/sections', ['name' => 'Thesis 2', 'academic_year' => '2025-2026', 'institute' => 'Institute of Computer Studies'], $this->origin())
             ->assertBadRequest();
         $this->assertDatabaseCount('class_sections', 0);
 
-        $this->as($instructor)->postJson('/api/instructor/sections', ['name' => 'Thesis 2', 'section_code' => 'BSCS-4A', 'academic_year' => '2025-2026'], $this->origin())
+        $this->as($instructor)->postJson('/api/instructor/sections', ['name' => 'Thesis 2', 'section_code' => 'BSCS-4A', 'academic_year' => '2025-2026', 'institute' => 'Institute of Computer Studies'], $this->origin())
             ->assertCreated()
             ->assertJsonPath('data.name', 'Thesis 2')
             ->assertJsonPath('data.section_code', 'BSCS-4A');
