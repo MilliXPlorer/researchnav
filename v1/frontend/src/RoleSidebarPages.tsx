@@ -50,6 +50,7 @@ import {
   GraduationCap,
   Globe2,
   Layers3,
+  Mail,
   MessageSquareText,
   Pencil,
   Plus,
@@ -3389,6 +3390,7 @@ function InstructorSections({
                       {section.section_code ?? "Section code not set"} ·{" "}
                       {section.academic_year ?? "Academic year not set"}
                     </small>
+                    <small>{section.institute || "Institute not set"}</small>
                     <span>
                       {section.documents_count} project
                       {section.documents_count === 1 ? "" : "s"} ·{" "}
@@ -3447,6 +3449,7 @@ function InstructorSections({
                     {openSection.is_active ? "Active" : "Inactive"}
                   </span>
                   <span>{openSection.academic_year ?? "No academic year"}</span>
+                  <span>{openSection.institute || "No institute"}</span>
                   <span>
                     {openSection.documents_count} project
                     {openSection.documents_count === 1 ? "" : "s"}
@@ -6165,6 +6168,20 @@ function CoordinatorResearchAssignments() {
                           ? "researcher"
                           : "researchers"}
                       </span>
+                      <span
+                        className="coordinator-study-team__avatars"
+                        aria-label={`${study.researchers.length} ${study.researchers.length === 1 ? "researcher" : "researchers"}`}
+                      >
+                        {study.researchers.slice(0, 5).map((researcher, index) => (
+                          <span
+                            key={`${researcher}-${index}`}
+                            title={researcher}
+                            aria-label={researcher}
+                          >
+                            {researcher.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("")}
+                          </span>
+                        ))}
+                      </span>
                     </div>
                   </div>
                   <Button
@@ -6774,39 +6791,13 @@ function CoordinatorReports({ role }: { role: Role }) {
             <ProgramCounts report={state.data} />
           )}
           {reportSection === "instructors" && (
-            <CoordinatorReportTable
-              title="Research instructors"
-              empty="No instructors handle sections in this scope."
-              headers={["Instructor", "Email", "Sections"]}
-              rows={state.data.instructors.map((item) => [
-                item.name || "—",
-                item.email || "—",
-                item.sections.join(", ") || "—",
-              ])}
-            />
+            <CoordinatorInstructorDirectory instructors={state.data.instructors} />
           )}
           {reportSection === "sections" && (
-            <CoordinatorReportTable
-              title="Class sections"
-              empty="No class sections are available for the selected scope."
-              headers={["Section", "Documents"]}
-              rows={state.data.by_section.map((item) => [
-                item.name,
-                String(item.documents_count),
-              ])}
-            />
+            <CoordinatorClassSections sections={state.data.by_section} />
           )}
           {reportSection === "advisers" && (
-            <CoordinatorReportTable
-              title="Adviser load"
-              empty="No advisers have active assignments."
-              headers={["Adviser", "Email", "Active assignments"]}
-              rows={state.data.adviser_load.map((item) => [
-                item.name || "—",
-                item.email || "—",
-                String(item.active_assignments),
-              ])}
-            />
+            <CoordinatorAdviserDirectory advisers={state.data.adviser_load} />
           )}
         </>
       )}
@@ -6880,12 +6871,15 @@ function ProgramCounts({ report }: { report: CoordinatorProgramReport }) {
             <button
               key={value}
               type="button"
+              className={selected?.value === value ? `status-${value} is-active` : `status-${value}`}
+              aria-pressed={selected?.value === value}
               aria-label={`View ${text}`}
               onClick={(event) => {
                 trigger.current = event.currentTarget;
                 setSelected({ value, label: text });
               }}
             >
+              <span className="coordinator-workflow-dot" aria-hidden="true" />
               <span>{text}</span>
               <strong>{count}</strong>
               <ChevronRight aria-hidden="true" />
@@ -6908,52 +6902,21 @@ function ProgramCounts({ report }: { report: CoordinatorProgramReport }) {
   );
 }
 
-function CoordinatorReportTable({
-  title,
-  empty,
-  headers,
-  rows,
-}: {
-  title: string;
-  empty: string;
-  headers: string[];
-  rows: string[][];
-}) {
-  return (
-    <section className="panel-card coordinator-report-table">
-      <header>
-        <h2>{title}</h2>
-        <span>{rows.length} records</span>
-      </header>
-      {rows.length === 0 ? (
-        <p className="admin-empty">{empty}</p>
-      ) : (
-        <div className="admin-table-wrap">
-          <table>
-            <caption className="sr-only">{title}</caption>
-            <thead>
-              <tr>
-                {headers.map((header) => (
-                  <th key={header}>{header}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row, rowIndex) => (
-                <tr key={`${title}-${rowIndex}`}>
-                  {row.map((cell, index) => (
-                    <td key={headers[index]} data-label={headers[index]}>
-                      {cell}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </section>
-  );
+function reportInitials(name: string | null, fallback: string) {
+  return (name || fallback).split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("");
+}
+
+function CoordinatorInstructorDirectory({ instructors }: { instructors: CoordinatorProgramReport["instructors"] }) {
+  return <section className="panel-card coordinator-instructor-directory"><header><div><h2>Research instructors</h2><p>Instructors handling sections with research in the selected scope.</p></div><strong className="coordinator-instructor-count">{instructors.length} instructor{instructors.length === 1 ? "" : "s"}</strong></header>{instructors.length === 0 ? <p className="admin-empty">No instructors handle sections in this scope.</p> : <div className="coordinator-instructor-table"><table><caption className="sr-only">Research instructors</caption><thead><tr><th>Instructor</th><th>Contact</th><th>Assigned sections</th></tr></thead><tbody>{instructors.map((instructor) => <tr key={instructor.user_id}><td data-label="Instructor"><div className="coordinator-instructor-person"><span className="coordinator-instructor-avatar" aria-label={`${instructor.name || "Research instructor"} initials`}>{reportInitials(instructor.name, "Research Instructor")}</span><div><strong>{instructor.name || "—"}</strong><small>Research instructor</small></div></div></td><td data-label="Contact"><div className="coordinator-instructor-contact"><Mail aria-hidden="true" /><span>{instructor.email || "—"}</span></div></td><td data-label="Assigned sections"><div className="coordinator-instructor-sections">{instructor.sections.map((section) => <span key={section}>{section}</span>)}</div></td></tr>)}</tbody></table></div>}</section>;
+}
+
+function CoordinatorAdviserDirectory({ advisers }: { advisers: CoordinatorProgramReport["adviser_load"] }) {
+  return <section className="panel-card coordinator-instructor-directory"><header><div><h2>Research advisers</h2><p>Advisers with active research assignments in the selected scope.</p></div><strong className="coordinator-instructor-count">{advisers.length} adviser{advisers.length === 1 ? "" : "s"}</strong></header>{advisers.length === 0 ? <p className="admin-empty">No advisers have active assignments.</p> : <div className="coordinator-instructor-table"><table><caption className="sr-only">Research advisers</caption><thead><tr><th>Adviser</th><th>Contact</th><th>Active assignments</th></tr></thead><tbody>{advisers.map((adviser) => <tr key={adviser.user_id}><td data-label="Adviser"><div className="coordinator-instructor-person"><span className="coordinator-instructor-avatar" aria-label={`${adviser.name || "Research adviser"} initials`}>{reportInitials(adviser.name, "Research Adviser")}</span><div><strong>{adviser.name || "—"}</strong><small>Research adviser</small></div></div></td><td data-label="Contact"><div className="coordinator-instructor-contact"><Mail aria-hidden="true" /><span>{adviser.email || "—"}</span></div></td><td data-label="Active assignments"><span className="coordinator-assignment-count">{adviser.active_assignments}</span></td></tr>)}</tbody></table></div>}</section>;
+}
+
+function CoordinatorClassSections({ sections }: { sections: CoordinatorProgramReport["by_section"] }) {
+  const documents = sections.reduce((total, section) => total + section.documents_count, 0);
+  return <section className="panel-card coordinator-section-report"><header><div><h2>Class sections</h2><p>Document count per class section.</p></div><strong className="coordinator-section-summary">{sections.length} {sections.length === 1 ? "section" : "sections"} · {documents} {documents === 1 ? "document" : "documents"}</strong></header>{sections.length === 0 ? <p className="coordinator-section-empty">No class sections are available for the selected scope.</p> : <div className="coordinator-section-table"><table><caption className="sr-only">Class sections</caption><thead><tr><th>Section</th><th>Documents</th></tr></thead><tbody>{sections.map((section) => <tr key={section.id}><td data-label="Section"><div className="coordinator-section-name"><span aria-hidden="true"><Folder /></span><strong>{section.name}</strong></div></td><td data-label="Documents"><span className="coordinator-section-documents"><FileText aria-hidden="true" />{section.documents_count}</span></td></tr>)}</tbody></table></div>}</section>;
 }
 
 function CoordinatorWorkflowStudiesModal({

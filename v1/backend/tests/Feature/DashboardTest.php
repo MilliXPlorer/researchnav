@@ -245,6 +245,158 @@ class DashboardTest extends TestCase
         }
     }
 
+    public function test_research_editor_dashboard_is_scoped_deduplicated_and_consistent(): void
+    {
+        Carbon::setTestNow('2026-08-22 12:00:00');
+        try {
+            $editor = $this->user('research_editor');
+            $otherEditor = $this->user('research_editor');
+            $forReview = $this->document(['title' => 'Current editorial review']);
+            $completed = $this->document(['title' => 'Completed editorial review']);
+            $foreign = $this->document(['title' => 'Foreign editorial review']);
+            $revoked = $this->document(['title' => 'Revoked editorial review']);
+            $deleted = $this->document(['title' => 'Deleted editorial review']);
+
+            $old = $this->assignAt($forReview, $editor, 'research_editor', true, '2026-07-01 08:00:00', 'proposal');
+            $old->forceFill(['status' => 'replaced', 'is_active' => false])->saveQuietly();
+            $this->assignAt($forReview, $editor, 'research_editor', true, '2026-08-10 08:00:00', 'final');
+            $this->assignAt($completed, $editor, 'research_editor', true, '2026-08-11 08:00:00');
+            $this->assignAt($foreign, $otherEditor, 'research_editor', true, '2026-08-12 08:00:00');
+            $revokedAssignment = $this->assignAt($revoked, $editor, 'research_editor', true, '2026-08-13 08:00:00');
+            $revokedAssignment->forceFill(['status' => 'replaced', 'is_active' => true])->saveQuietly();
+            $this->assignAt($deleted, $editor, 'research_editor', true, '2026-08-14 08:00:00');
+            $deleted->delete();
+
+            $this->editorReview($forReview, $editor, 'editorial_clearance', 'completed', '2026-08-01 08:00:00');
+            $this->editorReview($completed, $editor, 'editorial_clearance', 'completed', '2026-08-20 08:00:00');
+            $this->editorReview($completed, $otherEditor, 'editorial_correction', 'open', '2026-08-21 08:00:00');
+            $this->editorReview($foreign, $otherEditor, 'editorial_clearance', 'completed', '2026-08-21 09:00:00');
+
+            $projection = $this->dashboard($editor)->assertOk()->json('data.editor');
+
+            $this->assertSame([
+                'pending_requests' => 0,
+                'assigned_research' => 2,
+                'for_review' => 1,
+                'completed_reviews' => 1,
+            ], $projection['counts']);
+            $this->assertSame(['for_review' => 1, 'completed' => 1], $projection['workload']);
+            $this->assertSame([$forReview->id, $completed->id], array_column($projection['assignments'], 'research_document_id'));
+            $this->assertSame(['for_review', 'completed'], array_column($projection['assignments'], 'review_status'));
+            $this->assertNotContains($foreign->id, array_column($projection['recent_activity'], 'research_document_id'));
+            $this->assertNotContains($revoked->id, array_column($projection['recent_activity'], 'research_document_id'));
+            $this->assertNotContains($deleted->id, array_column($projection['recent_activity'], 'research_document_id'));
+            $this->assertSame(
+                collect($projection['recent_activity'])->pluck('occurred_at')->sortDesc()->values()->all(),
+                array_column($projection['recent_activity'], 'occurred_at'),
+            );
+            $this->assertArrayNotHasKey('remarks', $projection['recent_activity'][0]);
+            $this->assertNull($this->dashboard($this->user('adviser'))->assertOk()->json('data.editor'));
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_research_editor_dashboard_counts_pending_and_bounds_rows_and_activity(): void
+    {
+        $editor = $this->user('research_editor');
+        $office = $this->user('research-office');
+        $pending = $this->document(['title' => 'Pending editor invitation']);
+        ReviewAssignment::query()->create([
+            'research_document_id' => $pending->id,
+            'reviewer_id' => $editor->id,
+            'assigned_by' => $office->id,
+            'review_role' => 'research_editor',
+            'is_active' => false,
+            'status' => 'requested',
+        ]);
+
+        foreach (range(1, 8) as $index) {
+            $document = $this->document([
+                'title' => 'Editor study '.$index,
+                'updated_at' => now()->subMinutes($index),
+            ]);
+            $this->assignAt($document, $editor, 'research_editor', true, now()->subDays($index)->toDateTimeString());
+            $this->editorReview($document, $editor, 'editorial_comment', 'open', now()->subHours($index)->toDateTimeString());
+        }
+
+        $projection = $this->dashboard($editor)->assertOk()->json('data.editor');
+
+        $this->assertSame(1, $projection['counts']['pending_requests']);
+        $this->assertSame(8, $projection['counts']['assigned_research']);
+        $this->assertSame(8, $projection['counts']['for_review']);
+        $this->assertSame(0, $projection['counts']['completed_reviews']);
+        $this->assertCount(5, $projection['assignments']);
+        $this->assertCount(6, $projection['recent_activity']);
+    }
+
+    public function test_research_editor_dashboard_empty_state_uses_real_empty_values(): void
+    {
+        $projection = $this->dashboard($this->user('research_editor'))->assertOk()->json('data.editor');
+
+        $this->assertSame([
+            'pending_requests' => 0,
+            'assigned_research' => 0,
+            'for_review' => 0,
+            'completed_reviews' => 0,
+        ], $projection['counts']);
+        $this->assertSame(['for_review' => 0, 'completed' => 0], $projection['workload']);
+        $this->assertSame([], $projection['assignments']);
+        $this->assertSame([], $projection['recent_activity']);
+    }
+
+    public function test_research_editor_dashboard_uses_final_review_storage_without_activity_starvation(): void
+    {
+        Schema::create('research_reviews', function ($table): void {
+            $table->id();
+            $table->unsignedBigInteger('research_document_id');
+            $table->uuid('reviewer_id');
+            $table->string('reviewer_role');
+            $table->string('review_type');
+            $table->text('remarks')->nullable();
+            $table->string('status');
+            $table->timestamp('reviewed_at')->nullable();
+            $table->timestamps();
+        });
+        $editor = $this->user('research_editor');
+        $noisy = $this->document(['title' => 'Noisy editorial review']);
+        $completed = $this->document(['title' => 'Older completed review']);
+        $this->assignAt($noisy, $editor, 'research_editor', true, '2026-08-01 08:00:00');
+        $this->assignAt($completed, $editor, 'research_editor', true, '2026-08-01 08:00:00');
+
+        foreach (range(1, 8) as $index) {
+            DB::table('research_reviews')->insert([
+                'research_document_id' => $noisy->id,
+                'reviewer_id' => $editor->id,
+                'reviewer_role' => 'research_editor',
+                'review_type' => 'editorial_comment',
+                'remarks' => 'Comment '.$index,
+                'status' => 'open',
+                'reviewed_at' => '2026-08-'.str_pad((string) (10 + $index), 2, '0', STR_PAD_LEFT).' 08:00:00',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+        DB::table('research_reviews')->insert([
+            'research_document_id' => $completed->id,
+            'reviewer_id' => $editor->id,
+            'reviewer_role' => 'research_editor',
+            'review_type' => 'editorial_clearance',
+            'remarks' => 'Completed',
+            'status' => 'completed',
+            'reviewed_at' => '2026-08-02 08:00:00',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $projection = $this->dashboard($editor)->assertOk()->json('data.editor');
+
+        $this->assertSame(1, $projection['counts']['for_review']);
+        $this->assertSame(1, $projection['counts']['completed_reviews']);
+        $this->assertSame('completed', collect($projection['assignments'])->firstWhere('research_document_id', $completed->id)['review_status']);
+        $this->assertCount(6, $projection['recent_activity']);
+    }
+
     public function test_adviser_and_instructor_only_see_their_active_matching_assignments(): void
     {
         $adviser = $this->user('adviser');
@@ -638,6 +790,37 @@ class DashboardTest extends TestCase
             'review_role' => $role,
             'is_active' => $active,
             'defense_type' => $defenseType,
+        ]);
+    }
+
+    private function assignAt(ResearchDocument $document, User $reviewer, string $role, bool $active, string $createdAt, string $defenseType = 'proposal'): ReviewAssignment
+    {
+        $assignment = ReviewAssignment::query()->create([
+            'research_document_id' => $document->id,
+            'reviewer_id' => $reviewer->id,
+            'assigned_by' => $this->user('research-office')->id,
+            'review_role' => $role,
+            'is_active' => $active,
+            'defense_type' => $defenseType,
+        ]);
+        $assignment->forceFill(['created_at' => $createdAt, 'updated_at' => $createdAt])->saveQuietly();
+
+        return $assignment;
+    }
+
+    private function editorReview(ResearchDocument $document, User $editor, string $type, string $status, string $occurredAt): void
+    {
+        DB::table('research_review_records')->insert([
+            'source_type' => 'editor_review',
+            'source_id' => DB::table('research_review_records')->max('source_id') + 1,
+            'review_type' => $type,
+            'research_document_id' => $document->id,
+            'actor_id' => $editor->id,
+            'status' => $status,
+            'submitted_at' => $occurredAt,
+            'resolved_at' => $status === 'completed' ? $occurredAt : null,
+            'created_at' => $occurredAt,
+            'updated_at' => $occurredAt,
         ]);
     }
 

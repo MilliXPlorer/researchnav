@@ -4,10 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\DefenseSchedule;
 use App\Models\Evaluation;
-use App\Models\FeedbackComment;
 use App\Models\MetadataReview;
 use App\Models\MethodologyReview;
-use App\Models\MonitoringLog;
 use App\Models\ResearchDocument;
 use App\Models\ReviewAssignment;
 use App\Models\SimilarityResult;
@@ -19,7 +17,9 @@ use App\Services\ReportingService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Collection;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class DashboardController extends DomainController
 {
@@ -73,6 +73,9 @@ class DashboardController extends DomainController
                 : null,
             'librarian' => $effectiveRole === 'librarian'
                 ? $this->librarianDashboard()
+                : null,
+            'editor' => $effectiveRole === 'research_editor'
+                ? $this->editorDashboard($actor)
                 : null,
         ];
 
@@ -321,6 +324,212 @@ class DashboardController extends DomainController
             $this->researchSection('methodology_reviews', $this->assignedDocuments($actor, 'statistician')),
             $this->countSection('signoffs', MethodologyReview::query()->where(MethodologyReview::column('statistician_id'), $actor->id)->where(MethodologyReview::column('review_status'), 'signed_off')),
             $this->researchSection('completed_references', $this->repositoryDocuments()->where('research_stage', 'completed')),
+        ];
+    }
+
+    private function editorDashboard(User $actor): array
+    {
+        $activeStatuses = ['accepted', 'confirmed', 'active'];
+        $assignmentTable = (new ReviewAssignment)->getTable();
+        $reviewerColumn = ReviewAssignment::column('reviewer_id');
+        $roleColumn = ReviewAssignment::column('review_role');
+        $activeColumn = ReviewAssignment::column('is_active');
+        $applyActiveAssignment = function ($query, string $alias) use ($activeColumn, $activeStatuses): void {
+            if ($activeColumn === 'status') {
+                $query->whereIn($alias.'.status', $activeStatuses);
+
+                return;
+            }
+
+            $query->where($alias.'.'.$activeColumn, true)
+                ->when(ReviewAssignment::supportsStatus(), fn ($statusQuery) => $statusQuery
+                    ->where(fn ($status) => $status
+                        ->whereIn($alias.'.status', $activeStatuses)
+                        ->orWhereNull($alias.'.status')));
+        };
+        $currentAssignments = DB::table($assignmentTable.' as assignments')
+            ->join('research_documents as documents', 'documents.id', '=', 'assignments.research_document_id')
+            ->whereNull('documents.deleted_at')
+            ->where('assignments.'.$reviewerColumn, $actor->id)
+            ->where('assignments.'.$roleColumn, 'research_editor')
+            ->tap(fn ($query) => $applyActiveAssignment($query, 'assignments'))
+            ->whereNotExists(function ($query) use ($assignmentTable, $reviewerColumn, $roleColumn, $applyActiveAssignment): void {
+                $query->selectRaw('1')
+                    ->from($assignmentTable.' as newer')
+                    ->whereColumn('newer.research_document_id', 'assignments.research_document_id')
+                    ->whereColumn('newer.'.$reviewerColumn, 'assignments.'.$reviewerColumn)
+                    ->whereColumn('newer.'.$roleColumn, 'assignments.'.$roleColumn)
+                    ->tap(fn ($active) => $applyActiveAssignment($active, 'newer'))
+                    ->where(function ($newer): void {
+                        $newer->whereColumn('newer.created_at', '>', 'assignments.created_at')
+                            ->orWhere(function ($sameTime): void {
+                                $sameTime->whereColumn('newer.created_at', 'assignments.created_at')
+                                    ->whereColumn('newer.id', '>', 'assignments.id');
+                            });
+                    });
+            })
+            ->select([
+                'assignments.id as assignment_id',
+                'assignments.created_at as assigned_at',
+                'documents.id as research_document_id',
+                'documents.title',
+                'documents.submission_reference',
+                'documents.research_stage',
+                'documents.submission_status',
+                'documents.updated_at',
+            ]);
+
+        $documents = (clone $currentAssignments)->get();
+        $documentIds = $documents->pluck('research_document_id');
+        $reviewTable = Schema::hasTable('research_reviews') ? 'research_reviews' : 'research_review_records';
+        $reviewerReviewColumn = $reviewTable === 'research_reviews' ? 'reviewer_id' : 'actor_id';
+        $reviewTime = $reviewTable === 'research_reviews'
+            ? 'COALESCE(reviews.reviewed_at, reviews.updated_at, reviews.created_at)'
+            : 'COALESCE(reviews.resolved_at, reviews.submitted_at, reviews.updated_at, reviews.created_at)';
+        $newerReviewTime = $reviewTable === 'research_reviews'
+            ? 'COALESCE(newer_reviews.reviewed_at, newer_reviews.updated_at, newer_reviews.created_at)'
+            : 'COALESCE(newer_reviews.resolved_at, newer_reviews.submitted_at, newer_reviews.updated_at, newer_reviews.created_at)';
+        $reviewTypes = ['editorial_comment', 'editorial_correction', 'editorial_clearance'];
+        $reviewQuery = fn () => DB::table($reviewTable.' as reviews')
+            ->joinSub($currentAssignments, 'current_assignments', fn ($join) => $join
+                ->on('current_assignments.research_document_id', '=', 'reviews.research_document_id'))
+            ->where('reviews.'.$reviewerReviewColumn, $actor->id)
+            ->when($reviewTable === 'research_reviews', fn ($query) => $query->where('reviews.reviewer_role', 'research_editor'))
+            ->whereIn('reviews.review_type', $reviewTypes)
+            ->whereRaw($reviewTime.' >= current_assignments.assigned_at');
+        $latestReviews = $documentIds->isEmpty()
+            ? collect()
+            : $reviewQuery()
+                ->whereNotExists(function ($query) use ($reviewTable, $reviewerReviewColumn, $reviewTypes, $reviewTime, $newerReviewTime, $actor): void {
+                    $query->selectRaw('1')
+                        ->from($reviewTable.' as newer_reviews')
+                        ->whereColumn('newer_reviews.research_document_id', 'reviews.research_document_id')
+                        ->where('newer_reviews.'.$reviewerReviewColumn, $actor->id)
+                        ->when($reviewTable === 'research_reviews', fn ($newer) => $newer->where('newer_reviews.reviewer_role', 'research_editor'))
+                        ->whereIn('newer_reviews.review_type', $reviewTypes)
+                        ->whereRaw($newerReviewTime.' >= current_assignments.assigned_at')
+                        ->where(fn ($newer) => $newer
+                            ->whereRaw($newerReviewTime.' > '.$reviewTime)
+                            ->orWhere(fn ($sameTime) => $sameTime
+                                ->whereRaw($newerReviewTime.' = '.$reviewTime)
+                                ->whereColumn('newer_reviews.id', '>', 'reviews.id')));
+                })
+                ->get([
+                    'reviews.id', 'reviews.research_document_id', 'reviews.review_type', 'reviews.status',
+                    DB::raw($reviewTime.' as occurred_at'),
+                ])
+                ->keyBy('research_document_id');
+        $reviews = $documentIds->isEmpty()
+            ? collect()
+            : $reviewQuery()
+                ->orderByDesc(DB::raw($reviewTime))
+                ->orderByDesc('reviews.id')
+                ->limit(6)
+                ->get([
+                    'reviews.id', 'reviews.research_document_id', 'reviews.review_type', 'reviews.status',
+                    DB::raw($reviewTime.' as occurred_at'),
+                ]);
+        $assignments = $documents->map(function (object $document) use ($latestReviews): array {
+            $review = $latestReviews->get($document->research_document_id);
+            $completed = $review !== null
+                && $review->review_type === 'editorial_clearance'
+                && $review->status === 'completed';
+
+            return [
+                'research_document_id' => $document->research_document_id,
+                'title' => $document->title,
+                'submission_reference' => $document->submission_reference,
+                'research_stage' => $document->research_stage,
+                'submission_status' => $document->submission_status,
+                'review_status' => $completed ? 'completed' : 'for_review',
+                'updated_at' => $document->updated_at === null
+                    ? null
+                    : Carbon::parse($document->updated_at)->toISOString(),
+            ];
+        });
+        $forReview = $assignments->where('review_status', 'for_review')->count();
+        $completed = $assignments->where('review_status', 'completed')->count();
+        $orderedAssignments = $assignments
+            ->sort(function (array $left, array $right): int {
+                $statusOrder = ($left['review_status'] === 'for_review' ? 0 : 1)
+                    <=> ($right['review_status'] === 'for_review' ? 0 : 1);
+                if ($statusOrder !== 0) {
+                    return $statusOrder;
+                }
+                $dateOrder = strcmp((string) $right['updated_at'], (string) $left['updated_at']);
+
+                return $dateOrder !== 0
+                    ? $dateOrder
+                    : $right['research_document_id'] <=> $left['research_document_id'];
+            })
+            ->take(5)
+            ->values();
+        $titleByDocument = $documents->keyBy('research_document_id');
+        $assignmentEvents = $documents->map(function (object $document): ?array {
+            if ($document->assigned_at === null) {
+                return null;
+            }
+
+            return [
+                'id' => 'assignment-'.$document->assignment_id,
+                'research_document_id' => $document->research_document_id,
+                'title' => $document->title,
+                'type' => 'study_assigned',
+                'occurred_at' => Carbon::parse($document->assigned_at)->toISOString(),
+            ];
+        })->filter();
+        $reviewEvents = $reviews->take(6)->map(function (object $review) use ($titleByDocument): ?array {
+            $document = $titleByDocument->get($review->research_document_id);
+            if ($document === null || $review->occurred_at === null) {
+                return null;
+            }
+
+            return [
+                'id' => 'review-'.$review->id,
+                'research_document_id' => $review->research_document_id,
+                'title' => $document->title,
+                'type' => $review->review_type === 'editorial_clearance' && $review->status === 'completed'
+                    ? 'review_completed'
+                    : 'review_recorded',
+                'occurred_at' => Carbon::parse($review->occurred_at)->toISOString(),
+            ];
+        })->filter();
+        $pendingRequests = ReviewAssignment::identityCompatible()
+            ? ReviewAssignment::query()
+                ->where($reviewerColumn, $actor->id)
+                ->where($roleColumn, 'research_editor')
+                ->when(
+                    ReviewAssignment::supportsStatus(),
+                    fn ($query) => $query->whereIn('status', ['requested', 'pending']),
+                    fn ($query) => $query->where($activeColumn, false),
+                )
+                ->whereHas('researchDocument')
+                ->count()
+            : 0;
+
+        return [
+            'schema_version' => 1,
+            'counts' => [
+                'pending_requests' => $pendingRequests,
+                'assigned_research' => $assignments->count(),
+                'for_review' => $forReview,
+                'completed_reviews' => $completed,
+            ],
+            'workload' => [
+                'for_review' => $forReview,
+                'completed' => $completed,
+            ],
+            'assignments' => $orderedAssignments->all(),
+            'recent_activity' => $assignmentEvents
+                ->concat($reviewEvents)
+                ->sort(function (array $left, array $right): int {
+                    $dateOrder = strcmp($right['occurred_at'], $left['occurred_at']);
+
+                    return $dateOrder !== 0 ? $dateOrder : strcmp($right['id'], $left['id']);
+                })
+                ->take(6)
+                ->values()
+                ->all(),
         ];
     }
 

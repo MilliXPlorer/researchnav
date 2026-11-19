@@ -760,7 +760,10 @@ describe("role workspaces", () => {
       }),
     );
 
-    expect(await screen.findByText("Open without refresh")).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/research/77");
+    expect(
+      screen.queryByRole("heading", { name: /Find the study/ }),
+    ).not.toBeInTheDocument();
     unmount();
   });
 
@@ -1267,15 +1270,21 @@ describe("role workspaces", () => {
         name: `View ${sectionHeading}`,
       });
       expect(sectionButton).toBeInTheDocument();
-      expect(
-        screen.queryByRole("heading", { level: 2, name: sectionHeading }),
-      ).not.toBeInTheDocument();
-      expect(
-        screen.getByRole("heading", {
-          level: 2,
-          name: role === "admin" ? "Repository overview" : "Statistics",
-        }),
-      ).toBeInTheDocument();
+      if (role === "adviser" || role === "instructor") {
+        expect(
+          screen.getByRole("heading", { level: 2, name: sectionHeading }),
+        ).toBeInTheDocument();
+      } else {
+        expect(
+          screen.queryByRole("heading", { level: 2, name: sectionHeading }),
+        ).not.toBeInTheDocument();
+        expect(
+          screen.getByRole("heading", {
+            level: 2,
+            name: role === "admin" ? "Repository overview" : "Statistics",
+          }),
+        ).toBeInTheDocument();
+      }
       const workloadMeter = screen.queryByRole("meter", {
         name: sectionHeading,
       });
@@ -1934,7 +1943,9 @@ describe("role workspaces", () => {
         }}
       />,
     );
-    expect(screen.getByText("0")).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("button", { name: "View Assigned reviews" })).getByText("0"),
+    ).toBeInTheDocument();
     expect(
       screen.queryByText("No records are currently available."),
     ).not.toBeInTheDocument();
@@ -3447,6 +3458,123 @@ describe("sign out middleware", () => {
     },
     repository: { status: "unresolved", records: [] },
   };
+
+  const instructorAppState: InitialState = {
+    ...authenticatedAppState,
+    session: {
+      status: "authenticated",
+      user: {
+        ...(authenticatedAppState.session.status === "authenticated"
+          ? authenticatedAppState.session.user
+          : defaultUserSession),
+        email: "instructor@example.test",
+        role: "instructor",
+        displayName: "Test Instructor",
+      },
+    },
+  };
+  const appStateAt = (state: InitialState, pathname: string): InitialState => ({
+    ...state,
+    url: { pathname, search: "" },
+  });
+
+  it("opens the canonical Instructor sections workspace from the sidebar", async () => {
+    window.history.replaceState({}, "", "/app");
+    render(<App initialState={instructorAppState} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "My Sections" }));
+
+    await waitFor(() =>
+      expect(window.location.pathname).toBe("/app/instructor/sections"),
+    );
+    expect(screen.getByRole("button", { name: "My Sections" })).toHaveClass(
+      "active",
+    );
+    expect(
+      screen.queryByRole("heading", { name: /Find the study/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it.each([
+    "/app/instructor/sections",
+    "/app/instructor/sections/7",
+    "/app/instructor/sections/7/projects/11",
+  ])("routes an instructor to My Sections at %s", async (path) => {
+    window.history.replaceState({}, "", path);
+    render(<App initialState={appStateAt(instructorAppState, path)} />);
+
+    expect(
+      await screen.findByRole("button", { name: "My Sections" }),
+    ).toHaveClass("active");
+    expect(
+      screen.queryByRole("heading", { name: /Find the study/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it.each([
+    "/app/instructor/sections/not-a-section",
+    "/app/instructor/sections/7/projects/not-a-project",
+    "/app/instructor/not-configured",
+  ])("fails closed for malformed instructor route %s", async (path) => {
+    window.history.replaceState({}, "", path);
+    render(<App initialState={appStateAt(instructorAppState, path)} />);
+
+    expect(
+      await screen.findByRole("heading", { name: /Find the study/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "My Sections" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not expose instructor section routes to another role", async () => {
+    window.history.replaceState({}, "", "/app/instructor/sections");
+    render(
+      <App
+        initialState={appStateAt(
+          authenticatedAppState,
+          "/app/instructor/sections",
+        )}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: /Find the study/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("protects direct Instructor section routes from anonymous users", async () => {
+    const path = "/app/instructor/sections";
+    window.history.replaceState({}, "", path);
+    render(
+      <App
+        initialState={{
+          ...appStateAt(instructorAppState, path),
+          session: { status: "anonymous" },
+        }}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: /Find the study/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "My Sections" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["/app/researcher/submissions", "My Research"],
+    ["/app/researcher/similarity/title", "Similarity Check"],
+  ])("keeps Researcher special route %s protected and working", async (path, nav) => {
+    window.history.replaceState({}, "", path);
+    render(<App initialState={appStateAt(authenticatedAppState, path)} />);
+
+    expect(await screen.findByRole("button", { name: nav })).toHaveClass("active");
+    expect(
+      screen.queryByRole("heading", { name: /Find the study/ }),
+    ).not.toBeInTheDocument();
+  });
   const signOutFetchMock = (logoutStatus: number) =>
     vi.fn(async (input: string | URL | Request) => {
       const path = String(input);

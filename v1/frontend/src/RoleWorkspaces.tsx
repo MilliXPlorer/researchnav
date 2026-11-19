@@ -6,12 +6,14 @@ import {
   ClipboardCheck,
   Clock3,
   Database,
+  FileText,
   ExternalLink,
   FolderKanban,
   History,
   LibraryBig,
   LineChart,
   PenLine,
+  RefreshCw,
   UserRound,
   UserRoundCheck,
   UsersRound,
@@ -628,7 +630,11 @@ function RoleDashboardWorkspace({
               ? "workspace-content panel-dashboard-workspace"
               : role === "research_editor"
                 ? "workspace-content editor-dashboard-workspace"
-              : role === "statistician"
+              : role === "adviser"
+                ? "workspace-content adviser-dashboard-workspace"
+                : role === "instructor"
+                  ? "workspace-content instructor-dashboard-workspace"
+                  : role === "statistician"
                 ? "workspace-content statistician-dashboard-workspace"
                 : role === "librarian"
                   ? "workspace-content librarian-dashboard-workspace"
@@ -827,6 +833,48 @@ function DashboardSections({
             })()}
           </Modal>
         )}
+      </>
+    );
+  }
+
+  if (role === "adviser") {
+    return (
+      <>
+        <AdviserDashboard
+          sections={dashboardState.dashboard.sections}
+          analytics={dashboardState.dashboard.analytics}
+          onSelect={setSelectedSectionKey}
+        />
+        <SelectedDashboardSectionModal
+          sectionKey={selectedSectionKey}
+          sections={dashboardState.dashboard.sections}
+          config={config}
+          navigate={navigate}
+          selectNav={selectNav}
+          role={role}
+          onClose={() => setSelectedSectionKey(null)}
+        />
+      </>
+    );
+  }
+
+  if (role === "instructor") {
+    return (
+      <>
+        <InstructorDashboard
+          sections={dashboardState.dashboard.sections}
+          analytics={dashboardState.dashboard.analytics}
+          onSelect={setSelectedSectionKey}
+        />
+        <SelectedDashboardSectionModal
+          sectionKey={selectedSectionKey}
+          sections={dashboardState.dashboard.sections}
+          config={config}
+          navigate={navigate}
+          selectNav={selectNav}
+          role={role}
+          onClose={() => setSelectedSectionKey(null)}
+        />
       </>
     );
   }
@@ -1401,6 +1449,127 @@ function EditorDashboard({
       </DashboardSectionCard>
     </div>
   );
+}
+
+function SelectedDashboardSectionModal({
+  sectionKey,
+  sections,
+  config,
+  navigate,
+  selectNav,
+  role,
+  onClose,
+}: {
+  sectionKey: string | null;
+  sections: RoleDashboardSection[];
+  config: WorkspaceConfig;
+  navigate: (path: string) => void;
+  selectNav: (item: string) => void;
+  role: Role;
+  onClose: () => void;
+}) {
+  if (sectionKey === null) return null;
+  const section = sections.find((item) => item.key === sectionKey);
+  if (!section) return null;
+
+  return (
+    <Modal label={config.sections[sectionKey]?.title ?? "Research"} onClose={onClose} size="large">
+      <DashboardSection
+        section={section}
+        config={config.sections[section.key] ?? { title: section.key, description: "Research records." }}
+        navigate={navigate}
+        selectNav={selectNav}
+        role={role}
+      />
+    </Modal>
+  );
+}
+
+function InstructorDashboard({ sections, analytics, onSelect }: {
+  sections: RoleDashboardSection[];
+  analytics?: RoleDashboardAnalytics | null;
+  onSelect: (key: string) => void;
+}) {
+  const values = Object.fromEntries(sections.map((section) => [section.key, section.total]));
+  const proposals = values.title_proposals ?? 0;
+  const reviews = values.pending_reviews ?? 0;
+  const references = values.repository_references ?? 0;
+  const maximum = Math.max(proposals, reviews, 1);
+  const activityTotal = analytics?.series.reduce(
+    (total, series) => total + series.points.reduce((sum, point) => sum + point.value, 0), 0,
+  ) ?? 0;
+
+  return (
+    <div className="instructor-dashboard" data-testid="instructor-dashboard">
+      <section className="instructor-dashboard-kpis" aria-label="Instructor statistics">
+        {[
+          ["title_proposals", "Title proposals", proposals, FileText],
+          ["pending_reviews", "Pending reviews", reviews, ClipboardCheck],
+          ["repository_references", "Repository references", references, SquareStack],
+        ].map(([key, label, value, Icon]) => (
+          <DashboardKpiCard
+            key={String(key)}
+            icon={Icon as typeof FileText}
+            label={String(label)}
+            value={Number(value)}
+            description=""
+            onClick={() => onSelect(String(key))}
+          />
+        ))}
+      </section>
+      <section className="instructor-workload-card">
+        <header><p className="eyebrow">Distribution</p><h2>Current Workload</h2></header>
+        <div className="instructor-workload-rows">
+          {[["Title Proposals", proposals], ["Pending Reviews", reviews]].map(([label, value]) => (
+            <div className="instructor-workload-row" key={String(label)}>
+              <span>{label}</span><strong>{value} total</strong>
+              <div className="instructor-workload-meter" role="meter" aria-label={`${label} workload`} aria-valuemin={0} aria-valuemax={maximum} aria-valuenow={Number(value)}>
+                <span aria-hidden="true" style={{ width: `${(Number(value) / maximum) * 100}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+      {analytics && (
+        <section className="instructor-activity-card">
+          <div className="instructor-activity-heading"><div><p className="eyebrow">Analytics</p><h2>Research Activity</h2><p>{analytics.period}, based on records visible to this workspace.</p></div><span>Last 6 Months</span></div>
+          {activityTotal === 0 ? <DashboardEmptyState className="instructor-activity-empty"><strong>No research activity</strong><span>Created and archived research activity will appear here.</span></DashboardEmptyState> : (
+            <div className="instructor-activity-content"><DashboardAnalytics analytics={analytics} fitToContainer showTotal={false} /><ActivitySummary analytics={analytics} label="Instructor activity summary" /></div>
+          )}
+        </section>
+      )}
+    </div>
+  );
+}
+
+function AdviserDashboard({ sections, analytics, onSelect }: {
+  sections: RoleDashboardSection[];
+  analytics?: RoleDashboardAnalytics | null;
+  onSelect: (key: string) => void;
+}) {
+  const values = Object.fromEntries(sections.map((section) => [section.key, section.total]));
+  const assigned = values.assigned_reviews ?? 0;
+  const revisions = values.revision_requests ?? 0;
+  const references = values.repository_references ?? 0;
+  const workloadTotal = assigned + revisions;
+  return (
+    <div className="adviser-dashboard" data-testid="adviser-dashboard">
+      <section className="adviser-dashboard-kpis" aria-label="Adviser statistics">
+        <DashboardKpiCard icon={FileText} label="Assigned reviews" value={assigned} description="" onClick={() => onSelect("assigned_reviews")} />
+        <DashboardKpiCard icon={RefreshCw} label="Revision requests" value={revisions} description="" onClick={() => onSelect("revision_requests")} />
+        <DashboardKpiCard icon={SquareStack} label="Repository references" value={references} description="" onClick={() => onSelect("repository_references")} />
+      </section>
+      <section className="adviser-workload-card"><header><p className="eyebrow">Distribution</p><h2>Current Workload</h2></header><div className="adviser-workload-rows">
+        {[["Assigned Reviews", assigned], ["Revision Requests", revisions]].map(([label, value]) => { const percentage = workloadTotal ? Math.round(Number(value) / workloadTotal * 100) : 0; return <div className="adviser-workload-row" key={String(label)}><span>{label}</span><strong>{value} total</strong><div className="adviser-workload-meter" role="meter" aria-label={`${label} workload`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percentage}><span aria-hidden="true" style={{ width: `${percentage}%` }} /></div><strong>{percentage}%</strong></div>; })}
+      </div></section>
+      {analytics && <section className="adviser-activity-card"><div className="adviser-activity-heading"><div><p className="eyebrow">Analytics</p><h2>Research Activity</h2><p>{analytics.period}, based on records visible to this workspace.</p></div><span>Last 6 Months</span></div><div className="adviser-activity-content"><DashboardAnalytics analytics={analytics} fitToContainer showTotal={false} /><ActivitySummary analytics={analytics} label="Activity summary" /></div></section>}
+    </div>
+  );
+}
+
+function ActivitySummary({ analytics, label }: { analytics: RoleDashboardAnalytics; label: string }) {
+  const total = analytics.series.reduce((sum, series) => sum + series.points.reduce((seriesSum, point) => seriesSum + point.value, 0), 0);
+  return <aside className={label.startsWith("Instructor") ? "instructor-activity-summary" : "adviser-activity-summary"} aria-label={label}><strong>{total} total</strong>{analytics.series.map((series, index) => <div key={series.key} className={`analytics-series-${index + 1}`}><span><i aria-hidden="true" />{series.label}</span><b>{series.points.reduce((sum, point) => sum + point.value, 0)}</b></div>)}</aside>;
 }
 
 function editorActivityLabel(

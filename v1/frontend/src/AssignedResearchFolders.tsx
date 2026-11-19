@@ -1,5 +1,13 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { ArrowLeft, Check, ChevronDown, Folder, RefreshCw } from "lucide-react";
+import {
+  ArrowLeft,
+  Check,
+  ChevronDown,
+  Folder,
+  LoaderCircle,
+  RefreshCw,
+  X,
+} from "lucide-react";
 import {
   assignOfficeRepresentative,
   archiveInternalResearch,
@@ -740,6 +748,8 @@ function AssignedResearchFoldersContent({
                               <Button
                                 className="support-assignment-action support-assignment-accept"
                                 disabled={respondingAssignmentId !== null}
+                                aria-label={`Accept assignment request for ${item.title}`}
+                                title={`Accept assignment request for ${item.title}`}
                                 onClick={() =>
                                   void respondToAssignment(
                                     item.assignment_id!,
@@ -747,14 +757,25 @@ function AssignedResearchFoldersContent({
                                   )
                                 }
                               >
-                                {respondingAssignmentId === item.assignment_id
-                                  ? "Updating..."
-                                  : "Accept"}
+                                {respondingAssignmentId === item.assignment_id ? (
+                                  <LoaderCircle
+                                    className="support-assignment-action-icon support-assignment-action-spinner"
+                                    aria-hidden="true"
+                                  />
+                                ) : (
+                                  <Check
+                                    className="support-assignment-action-icon"
+                                    aria-hidden="true"
+                                  />
+                                )}
+                                <span>Accept</span>
                               </Button>
                               <Button
                                 variant="secondary"
                                 className="support-assignment-action support-assignment-decline"
                                 disabled={respondingAssignmentId !== null}
+                                aria-label={`Decline assignment request for ${item.title}`}
+                                title={`Decline assignment request for ${item.title}`}
                                 onClick={() =>
                                   void respondToAssignment(
                                     item.assignment_id!,
@@ -762,7 +783,11 @@ function AssignedResearchFoldersContent({
                                   )
                                 }
                               >
-                                Decline
+                                <X
+                                  className="support-assignment-action-icon"
+                                  aria-hidden="true"
+                                />
+                                <span>Decline</span>
                               </Button>
                             </div>
                           ) : undefined

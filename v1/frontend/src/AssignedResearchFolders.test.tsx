@@ -466,8 +466,16 @@ describe("AssignedResearchFolders", () => {
       expect(
         await screen.findByText("Assignment request pending · Ari Santos"),
       ).toBeInTheDocument();
-      const accept = screen.getByRole("button", { name: "Accept" });
-      const decline = screen.getByRole("button", { name: "Decline" });
+      const accept = screen.getByRole("button", {
+        name: "Accept assignment request for Coastal Resilience Study",
+      });
+      const decline = screen.getByRole("button", {
+        name: "Decline assignment request for Coastal Resilience Study",
+      });
+      expect(accept).toHaveTextContent("Accept");
+      expect(decline).toHaveTextContent("Decline");
+      expect(accept.querySelector(".lucide-check")).toBeInTheDocument();
+      expect(decline.querySelector(".lucide-x")).toBeInTheDocument();
       expect(accept).toHaveClass(
         "support-assignment-action",
         "support-assignment-accept",
@@ -478,6 +486,11 @@ describe("AssignedResearchFolders", () => {
       );
       expect(accept.parentElement).toHaveClass("support-assignment-actions");
       fireEvent.click(accept);
+
+      expect(accept).toBeDisabled();
+      expect(decline).toBeDisabled();
+      expect(accept).toHaveTextContent("Accept");
+      expect(accept.querySelector(".lucide-loader-circle")).toBeInTheDocument();
 
       await waitFor(() =>
         expect(
@@ -490,6 +503,59 @@ describe("AssignedResearchFolders", () => {
       );
     },
   );
+
+  it("declines a pending shared assignment with the accessible action", async () => {
+    let resolveResponse: (() => void) | undefined;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === "/api/monitoring/research") {
+          return new Response(
+            JSON.stringify({
+              data: [
+                {
+                  ...research,
+                  assignment_id: 82,
+                  assignment_status: "pending",
+                },
+              ],
+            }),
+          );
+        }
+        if (url === "/api/support-assignments/82/respond") {
+          expect(init?.method).toBe("PATCH");
+          expect(JSON.parse(String(init?.body))).toEqual({
+            decision: "decline",
+          });
+          await new Promise<void>((resolve) => {
+            resolveResponse = resolve;
+          });
+          return new Response(
+            JSON.stringify({ data: { id: 82, status: "declined" } }),
+          );
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AssignedResearchFolders role="statistician" />);
+
+    const accept = await screen.findByRole("button", {
+      name: "Accept assignment request for Coastal Resilience Study",
+    });
+    const decline = screen.getByRole("button", {
+      name: "Decline assignment request for Coastal Resilience Study",
+    });
+    fireEvent.click(decline);
+
+    expect(accept).toBeDisabled();
+    expect(decline).toBeDisabled();
+    expect(decline).toHaveTextContent("Decline");
+    resolveResponse?.();
+
+    await waitFor(() => expect(decline).not.toBeDisabled());
+  });
 
   it("moves from the full-width assigned study list to the workspace and back", async () => {
     vi.stubGlobal(
