@@ -6998,6 +6998,12 @@ function CoordinatorWorkflowStudiesModal({
           </div>
         )}
       </div>
+      {state.status === "ready" && response && response.meta.total > 0 && (
+        <footer className="coordinator-workflow-modal-footer">
+          {response.meta.total.toLocaleString()} {status.label.toLowerCase()}{" "}
+          {response.meta.total === 1 ? "study" : "studies"}
+        </footer>
+      )}
       {state.status === "ready" && response && response.meta.last_page > 1 && (
         <Pagination meta={response.meta} noun="studies" onPage={changePage} />
       )}

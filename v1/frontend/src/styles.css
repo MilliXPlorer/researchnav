@@ -19533,9 +19533,38 @@ body::-webkit-scrollbar {
   display: grid;
   gap: 16px;
 }
+.coordinator-workflow-card {
+  padding: 16px 18px;
+}
+.coordinator-workflow-card header {
+  align-items: center;
+  margin-bottom: 10px;
+}
+.coordinator-workflow-card header > div {
+  min-width: 0;
+}
+.coordinator-workflow-card h2,
+.coordinator-workflow-card header p {
+  margin: 0;
+}
+.coordinator-workflow-card header p {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.coordinator-workflow-card header > strong {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border-radius: 999px;
+  color: var(--moss);
+  background: var(--mint-pale);
+  font-size: 12px;
+  white-space: nowrap;
+}
 .coordinator-workflow-rows {
   display: grid;
-  gap: 7px;
+  gap: 5px;
 }
 .coordinator-workflow-rows button {
   display: grid;
@@ -19543,7 +19572,8 @@ body::-webkit-scrollbar {
   align-items: center;
   gap: 12px;
   width: 100%;
-  padding: 11px 12px;
+  min-height: 38px;
+  padding: 7px 10px;
   border: 1px solid var(--border);
   border-radius: 9px;
   background: var(--surface);
@@ -19565,11 +19595,51 @@ body::-webkit-scrollbar {
 .coordinator-report-table td {
   padding: 10px 12px;
 }
-.coordinator-workflow-modal .modal-card {
-  max-width: 900px;
+.modal-panel.coordinator-workflow-modal {
+  width: min(940px, calc(100vw - 48px));
+  max-height: min(760px, calc(100vh - 48px));
+  padding: 28px 30px 24px;
+}
+.coordinator-workflow-modal > header {
+  padding-right: 36px;
+}
+.coordinator-workflow-modal > header .eyebrow,
+.coordinator-workflow-modal > header h2,
+.coordinator-workflow-modal > header p {
+  margin: 0;
+}
+.coordinator-workflow-modal > header h2 {
+  margin-top: 3px;
+}
+.coordinator-workflow-modal > header p:last-child {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
 }
 .coordinator-workflow-modal-body {
-  margin: 16px 0;
+  margin: 14px 0 10px;
+  max-height: min(440px, calc(100vh - 260px));
+  overflow: auto;
+}
+.coordinator-workflow-modal-body .admin-table-wrap {
+  margin: 0;
+}
+.coordinator-workflow-modal-body table {
+  font-size: 13px;
+}
+.coordinator-workflow-modal-body th,
+.coordinator-workflow-modal-body td {
+  padding: 8px 10px;
+}
+.coordinator-workflow-modal-footer {
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.coordinator-workflow-modal-footer + .pagination {
+  margin-top: 10px;
 }
 
 @media (max-width: 900px) {
@@ -19589,6 +19659,15 @@ body::-webkit-scrollbar {
   }
   .coordinator-report-filters {
     grid-template-columns: 1fr;
+  }
+  .coordinator-workflow-card header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .modal-panel.coordinator-workflow-modal {
+    width: 100%;
+    padding: 24px 18px 18px;
   }
   .project-workspace-tabs.coordinator-report-switcher {
     grid-template-columns: 1fr 1fr;

@@ -384,6 +384,7 @@ describe("role workspace pages", () => {
       await screen.findByRole("button", { name: "View Revision required" }),
     );
     expect(await screen.findByText("Sample Study")).toBeInTheDocument();
+    expect(screen.getByText("1 revision required study")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /close/i }));
     fireEvent.click(
       screen.getByRole("button", { name: "Research instructors" }),
