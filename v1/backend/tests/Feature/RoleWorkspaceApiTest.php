@@ -8,8 +8,10 @@ use App\Models\MethodologyReview;
 use App\Models\ResearchDocument;
 use App\Models\SimilarityResult;
 use App\Models\User;
+use App\Services\ResearchService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 class RoleWorkspaceApiTest extends TestCase
@@ -35,7 +37,11 @@ class RoleWorkspaceApiTest extends TestCase
             $this->as($this->user(['role' => 'researcher']))->{$method.'Json'}($path)
                 ->assertForbidden()
                 ->assertExactJson(['error' => 'ROLE_NOT_AUTHORIZED']);
-            $this->as($this->user(['role' => $role]))->{$method.'Json'}($path)->assertOk();
+            $attributes = ['role' => $role];
+            if ($role === 'coordinator') {
+                $attributes['institute'] = 'Institute of Computer Studies';
+            }
+            $this->as($this->user($attributes))->{$method.'Json'}($path)->assertOk();
         }
 
         $this->as($this->user(['role' => 'adviser', 'access_status' => 'invited']))->getJson('/api/adviser/advisees')
@@ -45,8 +51,9 @@ class RoleWorkspaceApiTest extends TestCase
 
     public function test_coordinator_schedules_can_be_created_listed_and_resolved(): void
     {
-        $coordinator = $this->user(['role' => 'coordinator']);
+        $coordinator = $this->user(['role' => 'coordinator', 'institute' => 'Institute of Computer Studies']);
         $research = $this->document('draft');
+        $research->update(['institute' => 'Institute of Computer Studies']);
         $future = now()->addDays(3)->toISOString();
 
         $this->as($coordinator)->getJson('/api/coordinator/schedules')
@@ -69,30 +76,6 @@ class RoleWorkspaceApiTest extends TestCase
         $this->as($coordinator)->postJson('/api/coordinator/schedules', ['research_document_id' => $research->id, 'scheduled_at' => now()->subDay()->toISOString()], $this->origin())
             ->assertStatus(400)
             ->assertJsonPath('error', 'INVALID_REQUEST');
-    }
-
-    public function test_panel_schedule_is_scoped_to_assigned_manuscripts(): void
-    {
-        $panelist = $this->user(['role' => 'panel']);
-        $office = $this->user(['role' => 'research-office']);
-        $assigned = $this->document('submitted');
-        $other = $this->document('submitted');
-        $this->assign($office, $assigned, $panelist, 'panel');
-        DefenseSchedule::query()->create([
-            'research_document_id' => $assigned->id,
-            'created_by' => $office->id,
-            'scheduled_at' => now()->addDays(2),
-            'status' => 'scheduled',
-        ]);
-        DefenseSchedule::query()->create([
-            'research_document_id' => $other->id,
-            'created_by' => $office->id,
-            'scheduled_at' => now()->addDays(2),
-            'status' => 'scheduled',
-        ]);
-
-        $response = $this->as($panelist)->getJson('/api/panel/schedule');
-        $response->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.research_document_id', $assigned->id);
     }
 
     public function test_panel_assignments_include_the_latest_canonical_defense_schedule(): void
@@ -269,26 +252,44 @@ class RoleWorkspaceApiTest extends TestCase
 
     public function test_instructor_sections_title_proposals_and_class_reports(): void
     {
-        $instructor = $this->user(['role' => 'instructor']);
+        $instructor = $this->user(['role' => 'instructor', 'institute' => ' Institute of Computer Studies ']);
         $office = $this->user(['role' => 'research-office']);
         $student = $this->user(['role' => 'researcher']);
         $proposal = $this->document('submitted', $student);
         $this->assign($office, $proposal, $instructor, 'instructor');
 
-        $this->as($instructor)->postJson('/api/instructor/sections', ['name' => 'Thesis 2', 'academic_year' => '2025-2026'], $this->origin())
+        $this->as($instructor)->postJson('/api/instructor/sections', ['name' => 'Thesis 2', 'academic_year' => '2025-2026', 'institute' => 'Institute of Computer Studies'], $this->origin())
             ->assertBadRequest();
         $this->assertDatabaseCount('class_sections', 0);
 
-        $this->as($instructor)->postJson('/api/instructor/sections', ['name' => 'Thesis 2', 'section_code' => 'BSCS-4A', 'academic_year' => '2025-2026'], $this->origin())
+        $this->as($instructor)->postJson('/api/instructor/sections', ['name' => 'Thesis 2', 'section_code' => 'BSCS-4A', 'academic_year' => '2025-2026', 'institute' => 'Institute of Computer Studies'], $this->origin())
             ->assertCreated()
             ->assertJsonPath('data.name', 'Thesis 2')
             ->assertJsonPath('data.section_code', 'BSCS-4A');
         $section = ClassSection::query()->firstOrFail();
+        $this->assertSame('Institute of Computer Studies', $section->institute);
         $this->assertDatabaseHas('audit_logs', ['action' => 'CLASS_SECTION_CREATED']);
 
         $project = $this->as($instructor)->postJson('/api/instructor/sections/'.$section->id.'/documents', ['title' => 'Instructor Project'], $this->origin())
             ->assertCreated();
-        $this->assertDatabaseHas('research_documents', ['id' => $project->json('data.research_document_id'), 'section_id' => $section->id]);
+        $this->assertDatabaseHas('research_documents', [
+            'id' => $project->json('data.research_document_id'),
+            'section_id' => $section->id,
+            'institute' => 'Institute of Computer Studies',
+        ]);
+        try {
+            app(ResearchService::class)->update(
+                $instructor,
+                ResearchDocument::query()->findOrFail($project->json('data.research_document_id')),
+                ['institute' => 'Institute of Health Sciences'],
+            );
+            $this->fail('A section-bound document accepted a different institute.');
+        } catch (ValidationException) {
+            $this->assertDatabaseHas('research_documents', [
+                'id' => $project->json('data.research_document_id'),
+                'institute' => 'Institute of Computer Studies',
+            ]);
+        }
 
         $this->as($instructor)->getJson('/api/instructor/sections')
             ->assertOk()

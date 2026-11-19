@@ -1,5 +1,6 @@
+import { philippineYear } from "./dateTime";
 import { useId } from "react";
-import type { ComponentProps, KeyboardEvent } from "react";
+import type { ComponentProps, FocusEvent, MouseEvent } from "react";
 
 type DatePickerInputProps = Omit<
   ComponentProps<"input">,
@@ -8,29 +9,37 @@ type DatePickerInputProps = Omit<
   type: "date" | "datetime-local";
 };
 
-const currentYear = new Date().getUTCFullYear();
+const currentYear = philippineYear();
 const years = Array.from({ length: currentYear - 1901 + 1 }, (_, index) =>
   String(currentYear - index),
 );
+const rangeYears = years.slice(0, 9);
 
-function preventDateTyping(event: KeyboardEvent<HTMLInputElement>) {
-  if (
-    event.key.length === 1 &&
-    !event.altKey &&
-    !event.ctrlKey &&
-    !event.metaKey
+export function DatePickerInput({ type, ...props }: DatePickerInputProps) {
+  function openPicker(
+    event: MouseEvent<HTMLInputElement> | FocusEvent<HTMLInputElement>,
   ) {
-    event.preventDefault();
+    const input = event.currentTarget;
+    if (typeof input.showPicker !== "function") return;
+    try {
+      input.showPicker();
+    } catch {
+      // Browsers may reject programmatic opening outside a user gesture.
+    }
   }
-}
 
-export function DatePickerInput(props: DatePickerInputProps) {
   return (
     <input
       {...props}
-      onKeyDown={preventDateTyping}
-      onPaste={(event) => event.preventDefault()}
-      onDrop={(event) => event.preventDefault()}
+      type={type}
+      onClick={(event) => {
+        props.onClick?.(event);
+        if (!event.defaultPrevented) openPicker(event);
+      }}
+      onFocus={(event) => {
+        props.onFocus?.(event);
+        if (!event.defaultPrevented) openPicker(event);
+      }}
     />
   );
 }
@@ -57,6 +66,43 @@ export function PublicationYearInput(props: PublicationYearInputProps) {
         ))}
       </datalist>
     </>
+  );
+}
+
+type YearRangeSelectProps = Omit<ComponentProps<"select">, "children"> & {
+  bound: "from" | "to";
+  otherValue?: string;
+  emptyLabel?: string;
+};
+
+export function YearRangeSelect({
+  bound,
+  otherValue,
+  emptyLabel = "Any year",
+  ...props
+}: YearRangeSelectProps) {
+  const selectedValue = String(props.value ?? props.defaultValue ?? "");
+  const other = Number(otherValue);
+  const hasOther =
+    otherValue !== undefined && otherValue !== "" && Number.isInteger(other);
+  const selectable = rangeYears.filter((year) => {
+    const value = Number(year);
+    if (!hasOther) return true;
+    return bound === "from" ? value <= other : value >= other;
+  });
+
+  return (
+    <select {...props}>
+      <option value="">{emptyLabel}</option>
+      {selectedValue && !selectable.includes(selectedValue) && (
+        <option value={selectedValue}>{selectedValue}</option>
+      )}
+      {selectable.map((year) => (
+        <option key={year} value={year}>
+          {year}
+        </option>
+      ))}
+    </select>
   );
 }
 

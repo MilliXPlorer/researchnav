@@ -15,7 +15,6 @@ const mockResearch: ResearchDocumentSummaryResource = {
   id: -1001,
   submission_reference: "DEMO-RN-2026-001",
   submitted_by: "demo.researcher@example.invalid",
-  category_id: 1,
   title:
     "ResearchNAV: A Web-Based Research Repository System with Automated Title Similarity Detection Using TF-IDF and Cosine Similarity (Demo)",
   normalized_title: null,
@@ -34,6 +33,7 @@ const mockResearch: ResearchDocumentSummaryResource = {
   archive_status: "not_archived",
   visibility: "private",
   submitted_at: "2026-08-22T09:30:00.000Z",
+  updated_at: "2026-08-22T09:30:00.000Z",
   approved_at: null,
   archived_at: null,
   authors: [
@@ -45,13 +45,6 @@ const mockResearch: ResearchDocumentSummaryResource = {
       is_corresponding_author: true,
     },
   ],
-  category: {
-    id: 1,
-    name: "Information Technology",
-    slug: "information-technology",
-    description: null,
-    is_active: true,
-  },
 };
 
 const mockSecondResearch: ResearchDocumentSummaryResource = {

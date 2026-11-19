@@ -23,7 +23,6 @@ const archived = (
   institution_name: "Tangub City Global College",
   institute: "Institute of Computer Studies",
   degree_program: "BS Computer Science",
-  category: { name: "Institutional Information Systems" },
   abstract: "Archived abstract.",
   keywords: ["repository"],
   research_stage: "completed",
@@ -76,10 +75,13 @@ function stubQuery(
   );
 }
 
-function renderCheck(mode: "title" | "content" = "title") {
+function renderCheck(
+  mode: "title" | "content" = "title",
+  role: "researcher" | "research-office" = "researcher",
+) {
   render(
     <RoleSidebarPage
-      role="researcher"
+      role={role}
       selectedNav="Similarity Check"
       similarityMode={mode}
       navigate={vi.fn()}
@@ -88,6 +90,16 @@ function renderCheck(mode: "title" | "content" = "title") {
 }
 
 describe("researcher similarity check", () => {
+  it("uses the same mode-specific interface for Research Office", () => {
+    renderCheck("content", "research-office");
+
+    expect(
+      screen.getByRole("heading", { name: "Content checker" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Similarity mode")).not.toBeInTheDocument();
+    expect(screen.getByText("Choose manuscript file")).toBeInTheDocument();
+  });
+
   it("compares the typed keywords rather than an existing submission", async () => {
     let sent: unknown = null;
     stubQuery(
@@ -110,7 +122,7 @@ describe("researcher similarity check", () => {
       screen.queryByText(/no submissions to run a similarity check/i),
     ).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
+    fireEvent.change(screen.getByLabelText("Research title or keywords"), {
       target: { value: "inventory management system" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Check Title" }));
@@ -126,9 +138,9 @@ describe("researcher similarity check", () => {
     expect(screen.getByText("84.21%")).toBeInTheDocument();
     expect(screen.getByText("Title similarity")).toBeInTheDocument();
     expect(screen.queryByText(/Content similarity/)).not.toBeInTheDocument();
-    expect(screen.getByText("inventory")).toBeInTheDocument();
-    expect(screen.getByText("management")).toBeInTheDocument();
-    expect(screen.getByText("system")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("columnheader", { name: "Shared terms" }),
+    ).not.toBeInTheDocument();
   });
 
   it("uses the backend review decision rather than applying a local threshold", async () => {
@@ -144,7 +156,7 @@ describe("researcher similarity check", () => {
     ]);
     renderCheck();
 
-    fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
+    fireEvent.change(screen.getByLabelText("Research title or keywords"), {
       target: { value: "web based research repository system" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Check Title" }));
@@ -161,7 +173,7 @@ describe("researcher similarity check", () => {
     stubQuery([archived(1, "A MOBILE POND WATER QUALITY MONITOR", "0.100000")]);
     renderCheck();
 
-    fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
+    fireEvent.change(screen.getByLabelText("Research title or keywords"), {
       target: { value: "tilapia pond monitoring" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Check Title" }));
@@ -181,7 +193,7 @@ describe("researcher similarity check", () => {
     });
     expect(submit).toBeDisabled();
 
-    fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
+    fireEvent.change(screen.getByLabelText("Research title or keywords"), {
       target: { value: "a" },
     });
     expect(submit).toBeDisabled();
@@ -189,7 +201,7 @@ describe("researcher similarity check", () => {
       screen.getByText("Enter at least two characters to check."),
     ).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
+    fireEvent.change(screen.getByLabelText("Research title or keywords"), {
       target: { value: "ab" },
     });
     expect(submit).toBeEnabled();
@@ -199,7 +211,7 @@ describe("researcher similarity check", () => {
     stubQuery([archived(1, "AN ARCHIVED STUDY WITHOUT A SCORE", null)]);
     renderCheck();
 
-    fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
+    fireEvent.change(screen.getByLabelText("Research title or keywords"), {
       target: { value: "archived study" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Check Title" }));
@@ -217,7 +229,7 @@ describe("researcher similarity check", () => {
     ]);
     renderCheck();
 
-    fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
+    fireEvent.change(screen.getByLabelText("Research title or keywords"), {
       target: { value: "research repository" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Check Title" }));
@@ -231,7 +243,12 @@ describe("researcher similarity check", () => {
     expect(
       screen.queryByText("A GEOGRAPHIC MAPPING TOOL FOR EXTENSION"),
     ).not.toBeInTheDocument();
-    expect(screen.getAllByRole("row")).toHaveLength(2);
+    expect(
+      screen.getByRole("list", {
+        name: "Archived studies ranked by similarity",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
     expect(
       screen.getAllByText(/Low similarity does not prove originality/),
     ).toHaveLength(1);
@@ -244,7 +261,7 @@ describe("researcher similarity check", () => {
     ]);
     renderCheck();
 
-    fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
+    fireEvent.change(screen.getByLabelText("Research title or keywords"), {
       target: { value: "quantum cryptography" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Check Title" }));
@@ -261,7 +278,7 @@ describe("researcher similarity check", () => {
     stubQuery([], undefined, 502);
     renderCheck();
 
-    fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
+    fireEvent.change(screen.getByLabelText("Research title or keywords"), {
       target: { value: "inventory management system" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Check Title" }));
@@ -271,20 +288,38 @@ describe("researcher similarity check", () => {
     );
   });
 
-  it("checks typed keywords only against cached archived manuscript content", async () => {
+  it("uploads a manuscript for comparison with cached archived content", async () => {
     let contentRequest = "";
-    let contentBody: unknown;
+    let contentBody: FormData | null = null;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const path = String(input);
-        if (path === "/api/similarity/content-query") {
+        if (path === "/api/similarity/content-upload") {
           contentRequest = path;
-          contentBody = JSON.parse(String(init?.body));
+          contentBody = init?.body as FormData;
           return new Response(
             JSON.stringify({
               data: [archived(1, "ARCHIVED MANUSCRIPT", "0.120000")],
+              contract_version: "content-upload.v2",
+              extracted_text: "CHAPTER 1\nExtracted manuscript content",
+              file_name: "machine-learning.pdf",
+              file_diagnostics: [
+                {
+                  index: 0,
+                  file_name: "machine-learning.pdf",
+                  status: "included",
+                  reason: "selected_for_comparison",
+                  extraction_success: true,
+                  detected_chapters: [1],
+                  text_length: 39,
+                  kind: "manuscript",
+                  eligible: true,
+                  extracted_text: "CHAPTER 1\nSelected file content",
+                },
+              ],
             }),
+            { headers: { "Content-Type": "application/json" } },
           );
         }
         return new Response("{}", { status: 404 });
@@ -296,18 +331,249 @@ describe("researcher similarity check", () => {
       screen.getByRole("heading", { name: "Content checker" }),
     ).toBeInTheDocument();
     expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Content keywords"), {
-      target: { value: "machine learning" },
+    const file = new File(["manuscript"], "machine-learning.pdf", {
+      type: "application/pdf",
+    });
+    fireEvent.change(screen.getByLabelText("Manuscript file"), {
+      target: { files: [file] },
     });
     fireEvent.click(screen.getByRole("button", { name: "Check content" }));
 
     await waitFor(() =>
-      expect(contentRequest).toBe("/api/similarity/content-query"),
+      expect(contentRequest).toBe("/api/similarity/content-upload"),
     );
-    expect(contentBody).toEqual({ q: "machine learning" });
+    const submittedBody = contentBody as FormData | null;
+    expect(submittedBody).toBeInstanceOf(FormData);
+    expect(submittedBody?.get("file")).toBe(file);
     expect(
-      await screen.findByText("Content results for “machine learning”"),
+      await screen.findByText("Top Repository Matches"),
     ).toBeInTheDocument();
     expect(screen.getByText("Content similarity")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Files processed" }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("machine-learning.pdf")).not.toHaveLength(0);
+    expect(screen.getByText("Included")).toBeInTheDocument();
+    expect(screen.getAllByText("1")).not.toHaveLength(0);
+    expect(
+      screen.getByRole("heading", { name: "Extracted manuscript text" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Extracted manuscript content/),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "machine-learning.pdf" }),
+    );
+    expect(screen.getByText(/Selected file content/)).toBeInTheDocument();
+    expect(
+      screen.getByText("Extracted text from machine-learning.pdf."),
+    ).toBeInTheDocument();
+  });
+
+  it("uploads an ordered PDF folder as files[]", async () => {
+    let contentBody: FormData | null = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        contentBody = init?.body as FormData;
+        return new Response(
+          JSON.stringify({
+            data: [],
+            extracted_text: "CHAPTER 1\nBody",
+            file_name: "2 PDF files",
+          }),
+        );
+      }),
+    );
+    renderCheck("content");
+    const files = [
+      new File(["cover"], "00-cover.pdf", { type: "application/pdf" }),
+      new File(["chapter"], "chapter-1.pdf", { type: "application/pdf" }),
+    ];
+
+    const folderInput = screen.getByLabelText("Manuscript folder");
+    expect(folderInput).toHaveAttribute("webkitdirectory");
+
+    fireEvent.change(folderInput, {
+      target: { files },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Check content" }));
+
+    await waitFor(() => expect(contentBody).toBeInstanceOf(FormData));
+    const submittedBody = contentBody as FormData | null;
+    expect(submittedBody?.get("mode")).toBe("folder");
+    expect(submittedBody?.getAll("files[]")).toEqual(files);
+  });
+
+  it("shows details for only one processed file at a time", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            data: [],
+            extracted_text: "CHAPTER 1\nBody",
+            file_name: "2 PDF files",
+            file_diagnostics: [
+              {
+                index: 0,
+                status: "excluded",
+                reason: "supporting_document",
+                extraction_success: true,
+                text_length: 5,
+                detected_chapters: [],
+                kind: "supporting_document",
+                eligible: false,
+                extracted_text: "Cover",
+              },
+              {
+                index: 1,
+                status: "included",
+                reason: null,
+                extraction_success: true,
+                text_length: 14,
+                detected_chapters: [1],
+                kind: "manuscript",
+                eligible: true,
+                extracted_text: "CHAPTER 1\nBody",
+              },
+            ],
+          }),
+        ),
+      ),
+    );
+    renderCheck("content");
+    const files = [
+      new File(["cover"], "cover.pdf", { type: "application/pdf" }),
+      new File(["chapter"], "chapter-1.pdf", { type: "application/pdf" }),
+    ];
+    fireEvent.change(screen.getByLabelText("Manuscript folder"), {
+      target: { files },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Check content" }));
+
+    const firstSummary = (await screen.findByText("cover.pdf")).closest(
+      "summary",
+    )!;
+    const secondSummary = screen.getByText("chapter-1.pdf").closest("summary")!;
+    fireEvent.click(firstSummary);
+    expect(firstSummary.parentElement).toHaveAttribute("open");
+    fireEvent.click(secondSummary);
+    expect(firstSummary.parentElement).not.toHaveAttribute("open");
+    expect(secondSummary.parentElement).toHaveAttribute("open");
+  });
+
+  it("rejects a dropped folder when any file is not a PDF", () => {
+    renderCheck("content");
+    const pdf = new File(["pdf"], "manuscript", {
+      type: "application/pdf",
+    });
+    const extra = new File(["metadata"], ".drag-metadata", {
+      type: "application/octet-stream",
+    });
+
+    fireEvent.drop(screen.getByText("Choose manuscript file").closest("div")!, {
+      dataTransfer: { files: [pdf, extra] },
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Folder uploads are accepted only when every file is a PDF.",
+    );
+    expect(
+      screen.getByRole("button", { name: "Check content" }),
+    ).toBeDisabled();
+  });
+
+  it("accepts a dropped folder when every file is a PDF", () => {
+    renderCheck("content");
+    const files = [
+      new File(["cover"], "cover.pdf", { type: "application/pdf" }),
+      new File(["chapter"], "chapter.pdf", { type: "application/pdf" }),
+    ];
+
+    fireEvent.drop(screen.getByText("Choose manuscript file").closest("div")!, {
+      dataTransfer: { files },
+    });
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByText("2 PDF files selected")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check content" })).toBeEnabled();
+  });
+
+  it("ignores an empty browser folder placeholder when dropped PDFs are valid", () => {
+    renderCheck("content");
+    const pdf = new File(["chapter"], "chapter.pdf", {
+      type: "application/pdf",
+    });
+    const directoryPlaceholder = new File([], "", { type: "" });
+
+    fireEvent.drop(screen.getByText("Choose manuscript file").closest("div")!, {
+      dataTransfer: { files: [directoryPlaceholder, pdf] },
+    });
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check content" })).toBeEnabled();
+  });
+
+  it("rejects unsupported content files before making a request", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    renderCheck("content");
+
+    fireEvent.change(screen.getByLabelText("Manuscript file"), {
+      target: { files: [new File(["notes"], "notes.txt")] },
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Choose one PDF file.");
+    expect(
+      screen.getByRole("button", { name: "Check content" }),
+    ).toBeDisabled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "CONTENT_UPLOAD_CHAPTER_ONE_NOT_FOUND",
+      "We could not find the beginning of Chapter 1 in the extracted text. Confirm that the PDF contains selectable text and a clearly labeled Chapter 1, Kabanata 1, or supported equivalent.",
+    ],
+    [
+      "CONTENT_UPLOAD_CHAPTER_ORDER_INVALID",
+      "The manuscript chapters were detected in an invalid order. Confirm that the main Chapter 1 appears before the succeeding chapters.",
+    ],
+    [
+      "CONTENT_UPLOAD_CHAPTER_SCOPE_EMPTY",
+      "Chapter 1 was detected, but no readable manuscript content was found within the supported checking scope.",
+    ],
+    [
+      "CONTENT_UPLOAD_PDF_TEXT_UNREADABLE",
+      "We could not extract readable text from this PDF. Scanned or image-only PDFs are not currently supported.",
+    ],
+  ])("renders the safe content error %s", async (code, message) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({ error: code }),
+            {
+              status: 422,
+            },
+          ),
+      ),
+    );
+    renderCheck("content");
+
+    fireEvent.change(screen.getByLabelText("Manuscript file"), {
+      target: {
+        files: [
+          new File(["manuscript"], "chapters.pdf", { type: "application/pdf" }),
+        ],
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Check content" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      message,
+    );
   });
 });

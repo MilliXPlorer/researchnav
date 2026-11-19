@@ -57,7 +57,10 @@ class SimilarityHistoryReportTest extends TestCase
         $this->assertTrue($legacy->adviser_review_required);
         $this->assertSame('overall_high_similarity', $legacy->flag_reason);
         $this->assertNull($legacy->overall_similarity_score);
-        $queue = app(ReportingService::class)->duplicateFlags();
+        ResearchDocument::query()->whereKey([$source->id, $match->id])->update(['institute' => 'Institute of Computer Studies']);
+        $queue = app(ReportingService::class)->duplicateFlags(
+            User::factory()->create(['role' => 'coordinator', 'institute' => 'Institute of Computer Studies'])
+        );
         $this->assertCount(1, $queue);
         $this->assertSame($legacy->id, $queue[0]['id']);
         $this->assertNull($queue[0]['overall_similarity_score']);

@@ -1,26 +1,42 @@
 import { useEffect, useState } from "react";
-import { Download, FileText } from "lucide-react";
-import { getPublicResearch, repositoryDownloadUrl } from "./api";
+import { Download, FileText, LockKeyhole } from "lucide-react";
+import { getPublicResearch } from "./api";
 import { Button } from "./components";
 import type { ResearchRecord } from "./types";
 import { useDialogFocus } from "./useDialogFocus";
+import { SdgBadges } from "./SdgMetadata";
+import ProtectedFileAccess from "./ProtectedFileAccess";
 
 export default function PublicResearchMetadataDialog({
   researchDocumentId,
   onClose,
+  authenticated = true,
+  onSignIn = () => {},
+  initialRecord = null,
+  loadRecord = getPublicResearch,
+  showFileAccess = true,
+  downloadUrl,
 }: {
   researchDocumentId: string | number;
   onClose: () => void;
+  authenticated?: boolean;
+  onSignIn?: () => void;
+  initialRecord?: ResearchRecord | null;
+  loadRecord?: (researchDocumentId: string | number) => Promise<ResearchRecord>;
+  showFileAccess?: boolean;
+  downloadUrl?: (researchDocumentId: string | number) => string;
 }) {
-  const [record, setRecord] = useState<ResearchRecord | null>(null);
+  const [loadedRecord, setLoadedRecord] = useState<ResearchRecord | null>(null);
   const [failed, setFailed] = useState(false);
   const [dialogRef, handleDialogKeyDown] = useDialogFocus<HTMLElement>(onClose);
+  const record = initialRecord ?? loadedRecord;
 
   useEffect(() => {
     let active = true;
-    getPublicResearch(researchDocumentId)
+    if (initialRecord) return;
+    loadRecord(researchDocumentId)
       .then((nextRecord) => {
-        if (active) setRecord(nextRecord);
+        if (active) setLoadedRecord(nextRecord);
       })
       .catch(() => {
         if (active) setFailed(true);
@@ -28,7 +44,7 @@ export default function PublicResearchMetadataDialog({
     return () => {
       active = false;
     };
-  }, [researchDocumentId]);
+  }, [initialRecord, loadRecord, researchDocumentId]);
 
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
@@ -79,6 +95,9 @@ export default function PublicResearchMetadataDialog({
               <h3>Abstract</h3>
               <p>{record.abstract}</p>
             </div>
+            {(record.sdgs?.length ?? 0) > 0 && (
+              <SdgBadges sdgs={record.sdgs ?? []} />
+            )}
             <div className="keyword-list">
               {record.keywords.map((keyword) => (
                 <span key={keyword}>{keyword}</span>
@@ -88,15 +107,15 @@ export default function PublicResearchMetadataDialog({
               <Button variant="secondary" onClick={onClose}>
                 Return to results
               </Button>
-              {record.hasDownloadableManuscript ? (
-                <a
-                  className="button button-primary"
-                  href={repositoryDownloadUrl(record.id)}
-                  target="_blank"
-                  rel="noopener noreferrer"
+              {!showFileAccess ? null : record.hasDownloadableManuscript ? (
+                <ProtectedFileAccess
+                  researchDocumentId={record.id}
+                  authenticated={authenticated}
+                  onSignIn={onSignIn}
+                  downloadUrl={downloadUrl}
                 >
-                  <Download /> View files
-                </a>
+                  {authenticated ? <Download /> : <LockKeyhole />} View files
+                </ProtectedFileAccess>
               ) : (
                 <span className="download-gate is-unavailable">
                   <FileText /> Final manuscript unavailable

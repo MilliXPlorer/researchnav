@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Services\PublicManuscriptAvailability;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -28,10 +29,10 @@ class PublicRepositorySimilarityResource extends JsonResource
             'manuscript_date_label' => $this->resource['research']->manuscript_date_label,
             'abstract_provenance' => $this->resource['research']->abstract_provenance,
             'research_stage' => $this->resource['research']->research_stage,
-            'has_downloadable_manuscript' => $this->resource['research']->files
-                ->contains(fn ($file): bool => $file->is_current && $file->document_type === 'final_manuscript'),
+            'has_downloadable_manuscript' => app(PublicManuscriptAvailability::class)
+                ->hasAvailableFile($this->resource['research']),
             'authors' => PublicResearchAuthorResource::collection($this->resource['research']->authors),
-            'category' => new CategoryResource($this->resource['research']->category),
+            'sdgs' => SdgResource::collection($this->resource['research']->sdgs),
             'title_similarity_score' => $this->resource['title_similarity_score'],
             'title_similarity_percentage' => $this->resource['title_similarity_percentage'],
             'title_weight' => $this->resource['title_weight'],

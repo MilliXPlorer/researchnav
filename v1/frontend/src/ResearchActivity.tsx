@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { formatPhilippineDateTime } from "./dateTime";
 import {
   ApiError,
   listFeedback,
@@ -38,9 +39,7 @@ function humanize(value: string) {
 }
 
 function activityDate(value: string | null) {
-  if (!value) return "—";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  return formatPhilippineDateTime(value);
 }
 
 function activityError(error: unknown) {
@@ -89,6 +88,7 @@ export default function ResearchActivity({
   partialFallback = false,
   fallbackData,
   forceMock = false,
+  hideFeedback = false,
 }: {
   researchDocumentId: string | number;
   title?: string;
@@ -97,9 +97,12 @@ export default function ResearchActivity({
   partialFallback?: boolean;
   fallbackData?: ActivityData;
   forceMock?: boolean;
+  hideFeedback?: boolean;
 }) {
   const [state, setState] = useState<ActivityState>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);
+  const [addressingId, setAddressingId] = useState<number | null>(null);
+  const [addressText, setAddressText] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -108,7 +111,7 @@ export default function ResearchActivity({
 
     if (!partialFallback) {
       void Promise.all([
-        listFeedback(researchDocumentId),
+        hideFeedback ? Promise.resolve([]) : listFeedback(researchDocumentId),
         listResearchRevisions(researchDocumentId),
         listMonitoringLogs(researchDocumentId),
       ])
@@ -133,7 +136,7 @@ export default function ResearchActivity({
     }
 
     void Promise.allSettled([
-      listFeedback(researchDocumentId),
+      hideFeedback ? Promise.resolve([]) : listFeedback(researchDocumentId),
       listResearchRevisions(researchDocumentId),
       listMonitoringLogs(researchDocumentId),
     ])
@@ -184,6 +187,7 @@ export default function ResearchActivity({
     partialFallback,
     fallbackData,
     forceMock,
+    hideFeedback,
   ]);
 
   const displayedState =
@@ -198,9 +202,14 @@ export default function ResearchActivity({
 
   if (displayedState.status === "loading") {
     return (
-      <p className="admin-empty" aria-busy="true">
-        Loading feedback, revisions, and workflow activity…
-      </p>
+      <section
+        className="panel-card dashboard-loading"
+        role="region"
+        aria-label="Loading feedback, revisions, and workflow activity"
+        aria-busy="true"
+      >
+        <p>Loading feedback, revisions, and workflow activity…</p>
+      </section>
     );
   }
 
@@ -224,23 +233,12 @@ export default function ResearchActivity({
   const { feedback, revisions, monitoring, mockSections, unavailableSections } =
     displayedState;
 
-  async function applyFeedbackAction(
-    item: FeedbackResource,
-    action: "acknowledge" | "address",
-  ) {
-    const remarks =
-      action === "address"
-        ? window.prompt("Briefly describe what you addressed:")?.trim()
-        : undefined;
-    if (action === "address" && !remarks) return;
+  async function acknowledgeFeedback(item: FeedbackResource) {
     try {
       const updated = await recordResearcherFeedbackAction(
         researchDocumentId,
         item.id,
-        {
-          action,
-          ...(remarks ? { remarks } : {}),
-        },
+        { action: "acknowledge" },
       );
       setState((current) =>
         current.status === "ready"
@@ -252,6 +250,32 @@ export default function ResearchActivity({
             }
           : current,
       );
+    } catch (error) {
+      setState({ status: "error", message: activityError(error) });
+    }
+  }
+
+  async function submitAddressForm(item: FeedbackResource) {
+    const remarks = addressText.trim();
+    if (!remarks) return;
+    try {
+      const updated = await recordResearcherFeedbackAction(
+        researchDocumentId,
+        item.id,
+        { action: "address", remarks },
+      );
+      setState((current) =>
+        current.status === "ready"
+          ? {
+              ...current,
+              feedback: current.feedback.map((feedbackItem) =>
+                feedbackItem.id === updated.id ? updated : feedbackItem,
+              ),
+            }
+          : current,
+      );
+      setAddressingId(null);
+      setAddressText("");
     } catch (error) {
       setState({ status: "error", message: activityError(error) });
     }
@@ -299,59 +323,107 @@ export default function ResearchActivity({
         </section>
       )}
 
-      <section className="activity-block">
-        <h3>Reviewer feedback and remarks</h3>
-        {feedback.length === 0 ? (
-          <p className="admin-empty">No feedback has been recorded yet.</p>
-        ) : (
-          <ul className="activity-list">
-            {feedback.map((item) => (
-              <li key={item.id}>
-                <div className="activity-row-top">
-                  <span className="activity-tag">
-                    {humanize(item.feedback_type)}
-                  </span>
-                  <span
-                    className={`status-chip status-${item.feedback_status === "resolved" ? "approved" : item.feedback_status === "acknowledged" ? "under-review" : "revision-required"}`}
-                  >
-                    {humanize(item.feedback_status)}
-                  </span>
-                  <time>{activityDate(item.created_at)}</time>
-                </div>
-                <p className="activity-comment">{item.comment}</p>
-                {item.reviewer_name && <p>Reviewer: {item.reviewer_name}</p>}
-                {researcherActions && !mockSections.includes("feedback") && (
-                  <div className="row-actions">
-                    <Button
-                      variant="secondary"
-                      disabled={item.researcher_acknowledged_at != null}
-                      onClick={() =>
-                        void applyFeedbackAction(item, "acknowledge")
-                      }
+      {!hideFeedback && (
+        <section className="activity-block">
+          <h3>Reviewer feedback and remarks</h3>
+          {feedback.length === 0 ? (
+            <p className="admin-empty">No feedback has been recorded yet.</p>
+          ) : (
+            <ul className="activity-list">
+              {feedback.map((item) => (
+                <li key={item.id}>
+                  <div className="activity-row-top">
+                    <span className="activity-tag">
+                      {humanize(item.feedback_type)}
+                    </span>
+                    <span
+                      className={`status-chip status-${item.feedback_status === "resolved" ? "approved" : item.feedback_status === "acknowledged" ? "under-review" : "revision-required"}`}
                     >
-                      {item.researcher_acknowledged_at
-                        ? "Acknowledged"
-                        : "Acknowledge"}
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      disabled={item.researcher_addressed_at != null}
-                      onClick={() => void applyFeedbackAction(item, "address")}
-                    >
-                      {item.researcher_addressed_at
-                        ? "Addressed"
-                        : "Mark addressed"}
-                    </Button>
+                      {humanize(item.feedback_status)}
+                    </span>
+                    <time>{activityDate(item.created_at)}</time>
                   </div>
-                )}
-                {item.researcher_action_remarks && (
-                  <p>Researcher action: {item.researcher_action_remarks}</p>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+                  <p className="activity-comment">{item.comment}</p>
+                  {item.reviewer_name && <p>Reviewer: {item.reviewer_name}</p>}
+                  {researcherActions && !mockSections.includes("feedback") && (
+                    <>
+                      <div className="row-actions">
+                        <Button
+                          variant="secondary"
+                          disabled={item.researcher_acknowledged_at != null}
+                          onClick={() => void acknowledgeFeedback(item)}
+                        >
+                          {item.researcher_acknowledged_at
+                            ? "Acknowledged"
+                            : "Acknowledge"}
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          disabled={item.researcher_addressed_at != null}
+                          onClick={() => {
+                            setAddressingId(
+                              addressingId === item.id ? null : item.id,
+                            );
+                            setAddressText("");
+                          }}
+                        >
+                          {item.researcher_addressed_at
+                            ? "Addressed"
+                            : "Mark addressed"}
+                        </Button>
+                      </div>
+                      {addressingId === item.id &&
+                        item.researcher_addressed_at == null && (
+                          <form
+                            className="document-feedback-address-form"
+                            onSubmit={(event) => {
+                              event.preventDefault();
+                              void submitAddressForm(item);
+                            }}
+                          >
+                            <textarea
+                              autoFocus
+                              required
+                              aria-label="What did you address?"
+                              value={addressText}
+                              onChange={(event) =>
+                                setAddressText(event.target.value)
+                              }
+                              placeholder="Reply to reviewer feedback…"
+                              rows={3}
+                            />
+                            <div className="document-feedback-address-actions">
+                              <span className="document-feedback-address-spacer" />
+                              <Button
+                                type="button"
+                                variant="quiet"
+                                onClick={() => {
+                                  setAddressingId(null);
+                                  setAddressText("");
+                                }}
+                              >
+                                Cancel
+                              </Button>
+                              <Button
+                                type="submit"
+                                disabled={!addressText.trim()}
+                              >
+                                Submit
+                              </Button>
+                            </div>
+                          </form>
+                        )}
+                    </>
+                  )}
+                  {item.researcher_action_remarks && (
+                    <p>Researcher action: {item.researcher_action_remarks}</p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
       <section className="activity-block">
         <h3>Revision requests</h3>

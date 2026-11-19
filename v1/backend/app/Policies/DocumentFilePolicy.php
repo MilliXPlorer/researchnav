@@ -21,6 +21,11 @@ class DocumentFilePolicy
                     || DomainAuthorization::isOffice($user));
         }
 
+        if (in_array($research->submission_status, ['submitted', 'under_review', 'approved'], true)
+            && DomainAuthorization::isResearcherParticipant($user, $research)) {
+            return in_array($documentType, ['chapter', 'attachment'], true);
+        }
+
         return $research->submission_status === 'approved'
             && in_array($documentType, ['final_manuscript', 'attachment'], true)
             && (DomainAuthorization::isOffice($user) || DomainAuthorization::isActiveAdministrator($user));
@@ -59,6 +64,11 @@ class DocumentFilePolicy
         if (in_array($research->submission_status, ['draft', 'revision_required'], true)) {
             return $file->document_type !== 'final_manuscript'
                 && (DomainAuthorization::isResearcherParticipant($user, $research) || DomainAuthorization::isOffice($user));
+        }
+
+        if (in_array($research->submission_status, ['submitted', 'under_review', 'approved'], true)
+            && DomainAuthorization::isResearcherParticipant($user, $research)) {
+            return in_array($file->document_type, ['chapter', 'attachment'], true);
         }
 
         return $research->submission_status === 'approved'

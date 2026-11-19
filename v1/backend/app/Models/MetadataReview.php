@@ -41,7 +41,7 @@ class MetadataReview extends ConsolidatedReviewModel
 
     protected $fillable = [
         'research_document_id', 'reviewed_by', 'title_complete', 'abstract_complete', 'authors_complete',
-        'keywords_complete', 'category_complete', 'notes', 'review_status',
+        'keywords_complete', 'notes', 'review_status',
     ];
 
     protected function casts(): array
@@ -51,7 +51,6 @@ class MetadataReview extends ConsolidatedReviewModel
             'abstract_complete' => 'boolean',
             'authors_complete' => 'boolean',
             'keywords_complete' => 'boolean',
-            'category_complete' => 'boolean',
         ];
     }
 

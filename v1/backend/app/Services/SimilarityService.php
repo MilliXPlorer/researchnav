@@ -40,7 +40,7 @@ class SimilarityService
         $sourceId = (int) $source->id;
         $sourceTitle = $source->title;
         $sourceSnapshot = clone $source;
-        $maximumCandidates = (int) config('researchnav.similarity.maximum_candidates');
+        $maximumCandidates = min(1000, max(1, (int) config('researchnav.similarity.maximum_candidates')));
         $candidates = ResearchDocument::query()
             ->with('manuscriptSearchDocument')
             ->whereKeyNot($sourceId)
@@ -54,7 +54,7 @@ class SimilarityService
         $candidateSnapshots = $this->candidateSnapshots($candidates);
 
         if ($candidates->count() > $maximumCandidates) {
-            throw new SimilarityProcessException('Archived public candidate limit exceeded.');
+            throw new PublicRepositorySimilarityCapacityException('Archived public candidate limit exceeded.');
         }
 
         // This is intentionally captured before the worker starts. It records

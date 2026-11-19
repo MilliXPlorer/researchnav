@@ -17,7 +17,6 @@ const record = {
   institution_name: "Example College",
   institute: "Institute of Computing",
   degree_program: "Computer Science",
-  category: { name: "Repositories" },
   abstract: "Rendered before hydration.",
   keywords: ["ssr"],
   research_stage: "completed",
@@ -43,7 +42,7 @@ describe("SSR entry", () => {
 
     expect(result.statusCode).toBe(200);
     expect(result.appHtml).toContain("Calculating similarity results");
-    expect(result.appHtml).not.toContain("SERVER RENDERED STUDY");
+    expect(result.appHtml).toContain("SERVER RENDERED STUDY");
     expect(result.serializedState).toContain("SERVER RENDERED STUDY");
     expect(result.setCookies).toEqual([]);
   });
@@ -80,7 +79,7 @@ describe("SSR entry", () => {
       fetcher,
     });
 
-    expect(result.appHtml).toContain("My research.");
+    expect(result.appHtml).toContain("My dashboard.");
     expect(result.appHtml).toContain("researcher@example.test");
     expect(result.appHtml).not.toContain("Loading ResearchNAV");
   });

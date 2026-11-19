@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Models\Category;
 use App\Models\ClassSection;
 use App\Models\DocumentFile;
 use App\Models\FeedbackComment;
@@ -23,14 +22,13 @@ class ResearcherAuthorizationHardeningTest extends TestCase
     {
         foreach (['adviser', 'instructor', 'panel', 'statistician', 'coordinator', 'librarian', 'research-office', 'research_editor'] as $role) {
             $actor = User::factory()->create(['role' => $role]);
-            $category = Category::query()->create(['name' => 'Category '.$role, 'slug' => 'category-'.$role]);
-            $research = ResearchDocument::factory()->create(['submitted_by' => $actor->id, 'category_id' => $category->id, 'submission_status' => 'draft']);
+            $research = ResearchDocument::factory()->create(['submitted_by' => $actor->id, 'submission_status' => 'draft']);
             ResearchAuthor::factory()->create(['research_document_id' => $research->id, 'user_id' => $actor->id]);
             $feedback = FeedbackComment::query()->create(['research_document_id' => $research->id, 'user_id' => User::factory()->create(['role' => 'adviser'])->id, 'comment' => 'Clarify this.', 'feedback_type' => 'suggestion', 'feedback_status' => 'open']);
             $research->update(['submission_status' => 'revision_required']);
             $revision = Revision::query()->create(['research_document_id' => $research->id, 'requested_by' => $feedback->user_id, 'revision_number' => 1, 'revision_remarks' => 'Revise.', 'revision_status' => 'requested', 'requested_at' => now()]);
 
-            $this->as($actor)->postJson('/api/research', $this->draftPayload($category->id), $this->origin())->assertForbidden();
+            $this->as($actor)->postJson('/api/research', $this->draftPayload(), $this->origin())->assertForbidden();
             $this->as($actor)->patchJson('/api/research/'.$research->id, ['title' => 'Hijacked'], $this->origin())->assertForbidden();
             $this->as($actor)->postJson('/api/research/'.$research->id.'/submit', [], $this->origin())->assertForbidden();
             $this->as($actor)->postJson('/api/research/'.$research->id.'/monitoring', ['progress_status' => 'on_track', 'remarks' => 'Not permitted.'], $this->origin())->assertForbidden();
@@ -45,7 +43,6 @@ class ResearcherAuthorizationHardeningTest extends TestCase
     {
         $researcher = User::factory()->create(['role' => 'researcher']);
         $instructor = User::factory()->create(['role' => 'instructor']);
-        $category = Category::query()->create(['name' => 'Computing', 'slug' => 'computing']);
         $section = ClassSection::query()->create([
             'instructor_id' => $instructor->id,
             'name' => 'Capstone 1',
@@ -53,12 +50,10 @@ class ResearcherAuthorizationHardeningTest extends TestCase
         $assigned = ResearchDocument::factory()->create([
             'submitted_by' => $instructor->id,
             'section_id' => $section->id,
-            'category_id' => $category->id,
             'submission_status' => 'draft',
         ]);
         $unassigned = ResearchDocument::factory()->create([
             'submitted_by' => $researcher->id,
-            'category_id' => $category->id,
             'submission_status' => 'draft',
         ]);
         ResearchAuthor::factory()->create([
@@ -67,7 +62,7 @@ class ResearcherAuthorizationHardeningTest extends TestCase
         ]);
 
         $this->as($researcher)
-            ->postJson('/api/research', $this->draftPayload($category->id), $this->origin())
+            ->postJson('/api/research', $this->draftPayload(), $this->origin())
             ->assertForbidden();
         $this->as($researcher)
             ->patchJson('/api/research/'.$unassigned->id, ['title' => 'Not allowed'], $this->origin())
@@ -97,6 +92,17 @@ class ResearcherAuthorizationHardeningTest extends TestCase
             ->assertJsonPath('data.submission_status', 'draft')
             ->assertJsonPath('data.section_id', $section->id)
             ->assertJsonPath('data.can_update_metadata', true);
+        $this->as($researcher)->getJson('/api/research/'.$assigned->id.'/folders')
+            ->assertOk()
+            ->assertExactJson(['data' => [
+                'Chapter 1',
+                'Chapter 2',
+                'Chapter 3',
+                'Chapter 4',
+                'Chapter 5',
+                'Chapter 6',
+                'Full Manuscript',
+            ]]);
         $this->as($researcher)
             ->patchJson('/api/research/'.$assigned->id, ['title' => 'Assigned folder title'], $this->origin())
             ->assertOk()
@@ -157,8 +163,7 @@ class ResearcherAuthorizationHardeningTest extends TestCase
 
     private function research(User $owner, array $attributes = []): ResearchDocument
     {
-        $category = Category::query()->create(['name' => 'Category '.fake()->unique()->word(), 'slug' => 'category-'.fake()->unique()->numberBetween(1, 999999)]);
-        $research = ResearchDocument::factory()->create(array_merge(['submitted_by' => $owner->id, 'category_id' => $category->id], $attributes));
+        $research = ResearchDocument::factory()->create(array_merge(['submitted_by' => $owner->id], $attributes));
         ResearchAuthor::factory()->create(['research_document_id' => $research->id, 'user_id' => $owner->id]);
 
         return $research;
@@ -186,9 +191,9 @@ class ResearcherAuthorizationHardeningTest extends TestCase
     }
 
     /** @return array<string, mixed> */
-    private function draftPayload(int $categoryId): array
+    private function draftPayload(): array
     {
-        return ['category_id' => $categoryId, 'title' => 'Blocked draft', 'research_stage' => 'title_proposal', 'authors' => [['author_name' => 'Blocked actor']]];
+        return ['title' => 'Blocked draft', 'research_stage' => 'title_proposal', 'authors' => [['author_name' => 'Blocked actor']]];
     }
 
     private function as(User $user): static

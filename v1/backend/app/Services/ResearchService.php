@@ -41,10 +41,11 @@ class ResearchService
                 'submission_status' => 'draft', 'archive_status' => 'not_archived', 'visibility' => 'private',
             ]));
             $this->replaceAuthors($research, $authors);
+            $research->sdgs()->sync($data['sdg_ids'] ?? []);
             $this->monitoring->log($research, 'RESEARCH_CREATED', $actor, 'Research draft created.', null, 'draft', 'open');
             $this->audit->log($actor, 'RESEARCH_CREATED', $research, 'Created research draft.', $request);
 
-            return $research->load(['authors.user', 'category', 'submitter']);
+            return $research->load(['authors.user', 'sdgs', 'submitter']);
         });
     }
 
@@ -59,9 +60,26 @@ class ResearchService
                 throw $this->notAuthorized();
             }
             if (! $importedArchive) {
-                $this->ensureEditable($locked);
+                $this->ensureMetadataEditable($locked);
             }
             $metadata = $this->metadata($data);
+            if ($locked->section_id !== null) {
+                $sectionInstitute = trim((string) $locked->section()->value('institute'));
+                $requestedInstitute = trim((string) ($metadata['institute'] ?? $sectionInstitute));
+                if ($sectionInstitute !== '' && array_key_exists('institute', $metadata) && $requestedInstitute !== $sectionInstitute) {
+                    throw ValidationException::withMessages([
+                        'institute' => ['The research institute must match its class section.'],
+                    ]);
+                }
+                if ($sectionInstitute !== ''
+                    && array_key_exists('degree_program', $metadata)
+                    && $metadata['degree_program'] !== null
+                    && ! in_array($metadata['degree_program'], ResearchDocument::PROGRAMS_BY_INSTITUTE[$sectionInstitute] ?? [], true)) {
+                    throw ValidationException::withMessages([
+                        'degree_program' => ['Select a program offered by the chosen institute.'],
+                    ]);
+                }
+            }
             if ($importedArchive && array_key_exists('abstract', $metadata) && (string) $metadata['abstract'] !== (string) $locked->abstract) {
                 $metadata['abstract_provenance'] = 'Manually corrected by authorized Research Office personnel.';
             }
@@ -73,10 +91,13 @@ class ResearchService
                 }
                 $this->replaceAuthors($locked, $authors);
             }
+            if (array_key_exists('sdg_ids', $data)) {
+                $locked->sdgs()->sync($data['sdg_ids']);
+            }
             $this->monitoring->log($locked, 'RESEARCH_UPDATED', $actor, 'Research metadata updated.', $locked->submission_status, $locked->submission_status, 'open');
             $this->audit->log($actor, 'RESEARCH_UPDATED', $locked, 'Updated editable research metadata.', $request);
 
-            return $locked->fresh(['authors.user', 'category', 'submitter']);
+            return $locked->fresh(['authors.user', 'sdgs', 'submitter']);
         });
     }
 
@@ -86,6 +107,9 @@ class ResearchService
         $research = ResearchDocument::query()->findOrFail($research->id);
         if (! (new ResearchDocumentPolicy)->delete($actor, $research)) {
             throw $this->notAuthorized('Only Research Office personnel can delete imported research records.');
+        }
+        if ($research->files()->whereHas('pdfAnnotations')->exists()) {
+            throw ValidationException::withMessages(['document_file_id' => ['A research record with PDF annotations cannot be deleted.']]);
         }
 
         foreach ($research->files()->get() as $file) {
@@ -118,7 +142,7 @@ class ResearchService
             $this->audit->log($actor, 'RESEARCH_SUBMITTED', $locked, 'Research was submitted for review.', $request);
             $locked->submitter?->notify(new ResearchActivityNotification($locked, 'RESEARCH_SUBMITTED', 'Research activity', 'Research was submitted for review.'));
 
-            return $locked->fresh(['authors.user', 'category', 'submitter']);
+            return $locked->fresh(['authors.user', 'sdgs', 'submitter']);
         });
     }
 
@@ -153,14 +177,14 @@ class ResearchService
             $this->audit->log($actor, 'RESEARCH_ARCHIVED', $locked, 'Archived approved research.', $request);
             $locked->submitter?->notify(new ResearchActivityNotification($locked, 'RESEARCH_ARCHIVED', 'Research archived', 'Your research has been archived.'));
 
-            return $locked->fresh(['authors.user', 'category', 'submitter']);
+            return $locked->fresh(['authors.user', 'sdgs', 'submitter']);
         });
     }
 
     /** @param array<string, mixed> $data @return array<string, mixed> */
     private function metadata(array $data): array
     {
-        $allowed = array_intersect_key($data, array_flip(['category_id', 'title', 'abstract', 'keywords', 'publication_year', 'institute', 'degree_program', 'manuscript_date_label', 'research_stage']));
+        $allowed = array_intersect_key($data, array_flip(['title', 'abstract', 'keywords', 'publication_year', 'institute', 'degree_program', 'manuscript_date_label', 'research_stage']));
         if (isset($allowed['title'])) {
             $allowed['normalized_title'] = str($allowed['title'])->lower()->replaceMatches('/[^a-z0-9]+/', ' ')->trim()->toString();
         }
@@ -210,6 +234,15 @@ class ResearchService
         }
     }
 
+    private function ensureMetadataEditable(ResearchDocument $research): void
+    {
+        if (! in_array($research->submission_status, ['draft', 'revision_required'], true)) {
+            throw ValidationException::withMessages([
+                'submission_status' => ['Research metadata cannot be edited at this stage.'],
+            ]);
+        }
+    }
+
     private function applyTransition(User $actor, ResearchDocument $research, ?string $target, string $activity, string $remarks, ?Request $request): ResearchDocument
     {
         return DB::transaction(function () use ($actor, $research, $target, $activity, $remarks, $request): ResearchDocument {
@@ -246,7 +279,7 @@ class ResearchService
             $this->audit->log($actor, $activity, $research, $remarks, $request);
             $research->submitter?->notify(new ResearchActivityNotification($research, $activity, 'Research activity', $remarks));
 
-            return $research->fresh(['authors.user', 'category', 'submitter']);
+            return $research->fresh(['authors.user', 'sdgs', 'submitter']);
         });
     }
 

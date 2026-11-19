@@ -194,7 +194,7 @@ class ConsolidationShadowService
                 'actor_id' => $review->reviewed_by, 'status' => $review->review_status,
                 'title_complete' => $review->title_complete, 'abstract_complete' => $review->abstract_complete,
                 'authors_complete' => $review->authors_complete, 'keywords_complete' => $review->keywords_complete,
-                'category_complete' => $review->category_complete, 'notes' => $review->notes,
+                'notes' => $review->notes,
                 'created_at' => $review->created_at ?? now(), 'updated_at' => $review->updated_at ?? now(),
             ],
         );

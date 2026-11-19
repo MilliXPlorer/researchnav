@@ -162,8 +162,7 @@ class ManuscriptSimilarityContentService
     private function verifiedPrivatePath(ResearchDocument $source, DocumentFile $file): string
     {
         $extension = strtolower((string) $file->file_extension);
-        $validMime = ($extension === 'pdf' && $file->mime_type === 'application/pdf')
-            || ($extension === 'docx' && $file->mime_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+        $validMime = $extension === 'pdf' && $file->mime_type === 'application/pdf';
         if (! $validMime || ! str_starts_with($file->file_path, 'research/'.$source->id.'/')
             || basename($file->file_path) !== $file->stored_filename
             || str_contains($file->file_path, "\0") || str_contains($file->file_path, '\\')

@@ -6,7 +6,6 @@ const research = {
   id: 42,
   submission_reference: "RN-2026-AB12CD34",
   submitted_by: "researcher@example.test",
-  category_id: 2,
   title: "Revision-ready study",
   normalized_title: null,
   abstract: "An owned research record.",
@@ -34,13 +33,6 @@ const research = {
       is_corresponding_author: true,
     },
   ],
-  category: {
-    id: 2,
-    name: "Education",
-    slug: "education",
-    description: null,
-    is_active: true,
-  },
 };
 
 const files = [
@@ -91,8 +83,9 @@ function installApi(
       updated_at: "2026-08-03T10:00:00.000Z",
     },
   ],
+  loadedResearch = research,
 ) {
-  let currentResearch = research;
+  let currentResearch = loadedResearch;
   const fetchMock = vi.fn(
     async (input: string | URL | Request, init?: RequestInit) => {
       const path = String(input);
@@ -114,6 +107,9 @@ function installApi(
           "Chapter 1",
           "Chapter 2",
           "Chapter 3",
+          "Chapter 4",
+          "Chapter 5",
+          "Chapter 6",
           "Full Manuscript",
         ]);
       }
@@ -146,7 +142,11 @@ function installApi(
           },
         ]);
       }
-      if (path.startsWith("/api/support-assignments/eligible?role=")) {
+      if (
+        path.startsWith(
+          "/api/support-assignments/eligible?research_document_id=42&role=",
+        )
+      ) {
         return response([
           { id: "editor-b", name: "New Editor", email: "editor@example.test" },
         ]);
@@ -182,15 +182,65 @@ function installApi(
           reviewers: [{ review_role: "adviser", name: "Ada Viser" }],
         });
       }
+      if (path.startsWith("/api/research/42/team?defense_type=")) {
+        const final = path.endsWith("final");
+        return response({
+          section_id: 3,
+          research_document_id: 42,
+          defense_type: final ? "final" : "proposal",
+          instructor: {
+            user_id: "instructor",
+            name: final ? "Final Instructor" : "Ina Structor",
+            email: "instructor@example.test",
+            team_role: "instructor",
+          },
+          researchers: [],
+          adviser: {
+            user_id: "adviser",
+            name: final ? "Final Adviser" : "Ada Viser",
+            email: "adviser@example.test",
+            team_role: "adviser",
+          },
+          research_office_representative: null,
+          chair: null,
+          panel_members: [],
+          support_assignments: {
+            editor: null,
+            statistician: null,
+            librarian: null,
+          },
+          pre_defense_ready: !final,
+          post_defense_ready: false,
+          complete: false,
+        });
+      }
       if (
         path === "/api/research/42/feedback" ||
         path === "/api/research/42/monitoring"
       )
         return response([]);
+      if (path === "/api/research/42/files/10/annotations") return response([]);
+      if (path === "/api/research/42/files/11/preview-content")
+        return response({
+          schema_version: 1,
+          research_document_id: 42,
+          document_file_id: 11,
+          document_file_version: 1,
+          filename: "chapter-two.docx",
+          mime_type:
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          paragraphs: [
+            {
+              index: 0,
+              text: "Read this paragraph in the app.",
+              truncated: false,
+            },
+          ],
+          truncated: false,
+        });
       if (path === "/api/research/42/similarity") return response([]);
       if (path === "/api/research/42/monitoring" && init?.method === "POST")
         return response({});
-      if (path === "/api/categories") return response([research.category]);
       if (path === "/api/research/42/revisions/6/resubmit") return response({});
       return new Response(JSON.stringify({ error: "NOT_FOUND" }), {
         status: 404,
@@ -204,7 +254,7 @@ function installApi(
 afterEach(() => vi.unstubAllGlobals());
 
 describe("researcher research workspace", () => {
-  it("opens an owned deep-linked record with revision, file, validation, activity, and similarity panels", async () => {
+  it("opens an owned deep-linked record without researcher review panels", async () => {
     installApi();
     render(
       <RoleWorkspace
@@ -224,44 +274,113 @@ describe("researcher research workspace", () => {
     expect(
       await screen.findByRole("heading", { name: "Revision-ready study" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Revision history")).toBeInTheDocument();
-    expect(screen.getByText("Title review decisions")).toBeInTheDocument();
-    expect(screen.getByText("Similarity results")).toBeInTheDocument();
+    expect(screen.queryByText("Revision history")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Title review decisions"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Similarity results")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("tab", { name: "Feedback" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Request title validation" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByText("revision-v2.pdf")).toBeInTheDocument();
-    expect(screen.getByText("final.pdf")).toBeInTheDocument();
-    expect(screen.getByText("RN-2026-AB12CD34")).toBeInTheDocument();
-    expect(screen.getByText(/Instructor: Ina Structor/)).toBeInTheDocument();
-    expect(screen.getByText(/Adviser: Ada Viser/)).toBeInTheDocument();
+    expect(screen.getAllByText("RN-2026-AB12CD34").length).toBeGreaterThan(0);
+    expect(screen.getByText("Ina Structor")).toBeInTheDocument();
+    expect(screen.getByText("Ada Viser")).toBeInTheDocument();
+    expect(screen.getByText("Research workspace")).toBeInTheDocument();
+    expect(screen.getByText("Study members")).toBeInTheDocument();
+    expect(screen.getByText("Latest documents")).toBeInTheDocument();
+    expect(screen.getByText("1 members")).toBeInTheDocument();
+    expect(screen.getByText("Revision Required")).toHaveClass(
+      "project-status-badge",
+    );
+    expect(screen.getByTitle("final.pdf")).toBeInTheDocument();
+    expect(screen.queryByText("Submission timeline")).not.toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "Report your current progress" }),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Submitting research")).toBeInTheDocument();
-    expect(screen.getByText("Reporting progress")).toBeInTheDocument();
+      screen.queryByRole("heading", { name: "Research progress" }),
+    ).not.toBeInTheDocument();
     expect(
-      screen.getByText(/progress update does not submit or approve/i),
-    ).toBeInTheDocument();
+      screen.queryByText(/continue toward approval/i),
+    ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("group", {
-        name: "How is the research progressing?",
-      }),
+      screen.queryByRole("heading", { name: "Report your current progress" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Documents" }));
+    expect(
+      screen.getByRole("complementary", { name: "Document folders" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: /On track/ })).toBeChecked();
+    for (const chapter of ["Chapter 4", "Chapter 5", "Chapter 6"]) {
+      expect(screen.getAllByText(chapter).length).toBeGreaterThan(0);
+    }
+    fireEvent.click(screen.getByRole("button", { name: /^Chapter 2/ }));
+    expect(screen.getAllByText("revision-v2.pdf").length).toBeGreaterThan(0);
     expect(
       screen.getAllByRole("link", { name: "Download" })[0],
     ).toHaveAttribute("href", "/api/research/42/files/10/download");
     expect(
       screen.getByRole("button", { name: "Rename revision-v2.pdf" }),
     ).toBeEnabled();
-    expect(
-      screen.queryByRole("button", { name: "Rename final.pdf" }),
-    ).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Preview PDF/ })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Open document" })).toHaveAttribute(
       "href",
       "/api/research/42/files/10/preview",
     );
+    expect(screen.getByRole("link", { name: "Open document" })).toHaveAttribute(
+      "target",
+      "_blank",
+    );
+    expect(
+      screen.queryByRole("button", { name: "Save annotation" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Full Manuscript/ }));
+    expect(screen.getAllByText("final.pdf").length).toBeGreaterThan(0);
+    expect(
+      screen.queryByRole("button", { name: "Rename final.pdf" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps a legacy DOCX file download-only", async () => {
+    installApi([
+      {
+        id: 11,
+        research_document_id: 42,
+        document_type: "revised_manuscript",
+        version_number: 1,
+        original_filename: "chapter-two.docx",
+        file_extension: "docx",
+        mime_type:
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        file_size: 512,
+        is_current: true,
+        relative_path: "Chapter 2",
+        uploaded_at: "2026-08-02T10:00:01.000Z",
+      },
+    ]);
+    render(
+      <RoleWorkspace
+        role="researcher"
+        navigate={vi.fn()}
+        selectNav={vi.fn()}
+        dashboardScope="researcher:researcher@example.test"
+        dashboardState={{
+          status: "loading",
+          scope: "researcher:researcher@example.test",
+        }}
+        onRetry={vi.fn()}
+        researchDocumentId="42"
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Revision-ready study" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Documents" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Chapter 2/ }));
+    expect(
+      screen.queryByRole("button", { name: "Open document" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Download" })).toBeInTheDocument();
   });
 
   it("does not expose legacy pending title-validation requests", async () => {
@@ -294,11 +413,75 @@ describe("researcher research workspace", () => {
     );
 
     expect(
-      await screen.findByText("No title review decisions have been recorded."),
+      await screen.findByRole("heading", { name: "Revision-ready study" }),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Title review decisions"),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByText("Pending request should not be shown."),
     ).not.toBeInTheDocument();
+  });
+
+  it("uploads submitted-study files directly to the active folder", async () => {
+    const fetchMock = installApi(files, [], {
+      ...research,
+      submission_status: "submitted",
+    });
+    render(
+      <RoleWorkspace
+        role="researcher"
+        navigate={vi.fn()}
+        selectNav={vi.fn()}
+        dashboardScope="researcher:researcher@example.test"
+        dashboardState={{
+          status: "loading",
+          scope: "researcher:researcher@example.test",
+        }}
+        onRetry={vi.fn()}
+        researchDocumentId="42"
+      />,
+    );
+
+    await screen.findByRole("heading", { name: "Revision-ready study" });
+    fireEvent.click(screen.getByRole("button", { name: "Documents" }));
+
+    expect(
+      screen.getByRole("heading", { name: "Upload a document" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Document type")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Document folder")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Upload purpose")).toHaveValue(
+      "initial_submission",
+    );
+    expect(
+      screen.getByText(/saved directly to Chapter 1/i),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Full Manuscript/ }));
+    fireEvent.change(screen.getByLabelText("Manuscript file"), {
+      target: {
+        files: [
+          new File(["manuscript"], "full-manuscript.pdf", {
+            type: "application/pdf",
+          }),
+        ],
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Upload document" }));
+
+    await waitFor(() => {
+      const uploadCall = fetchMock.mock.calls.find(
+        ([path, init]) =>
+          String(path) === "/api/research/42/files" && init?.method === "POST",
+      );
+      expect((uploadCall?.[1]?.body as FormData).get("relative_path")).toBe(
+        "Full Manuscript",
+      );
+      expect((uploadCall?.[1]?.body as FormData).get("document_type")).toBe(
+        "chapter",
+      );
+    });
   });
 
   it("updates the owned study abstract and related metadata", async () => {
@@ -320,7 +503,7 @@ describe("researcher research workspace", () => {
 
     await screen.findByRole("heading", { name: "Revision-ready study" });
     fireEvent.click(
-      screen.getByRole("button", { name: "Edit metadata and authors" }),
+      screen.getByRole("button", { name: "Edit research details" }),
     );
     await screen.findByRole("heading", { name: "Edit submission" });
     expect(screen.getByLabelText("Author name")).toHaveValue("Ada Lovelace");
@@ -338,6 +521,7 @@ describe("researcher research workspace", () => {
     fireEvent.change(screen.getByLabelText("Research stage"), {
       target: { value: "completed" },
     });
+    fireEvent.click(screen.getByRole("checkbox", { name: /Climate Action/i }));
     fireEvent.change(screen.getByLabelText("Author name"), {
       target: { value: "Ada Lovelace and Research Team" },
     });
@@ -355,6 +539,7 @@ describe("researcher research workspace", () => {
             abstract: "An abstract updated by the research owner.",
             keywords: "ownership, metadata, revision",
             publication_year: 2025,
+            sdg_ids: [13],
             research_stage: "completed",
             authors: [
               {
@@ -391,20 +576,26 @@ describe("researcher research workspace", () => {
 
     await screen.findByRole("heading", { name: "Revision-ready study" });
     fireEvent.click(
-      screen.getByRole("button", { name: "Edit metadata and authors" }),
+      screen.getByRole("button", { name: "Edit research details" }),
     );
     expect(
       await screen.findByRole("heading", { name: "Edit submission" }),
     ).toBeInTheDocument();
-    expect(screen.getAllByLabelText("Document type")[1]).toHaveValue(
+    expect(screen.getByLabelText("Document type")).toHaveValue(
       "revised_manuscript",
     );
     expect(
       screen.queryByRole("button", { name: "Save and submit" }),
     ).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("PDF or DOCX (maximum 25 MB)"), {
-      target: { files: [new File(["revision"], "revision.docx")] },
+    fireEvent.change(screen.getByLabelText("PDF (maximum 25 MB)"), {
+      target: {
+        files: [
+          new File(["%PDF revision"], "revision.pdf", {
+            type: "application/pdf",
+          }),
+        ],
+      },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => {
@@ -473,19 +664,26 @@ describe("researcher research workspace", () => {
 
     await screen.findByRole("heading", { name: "Revision-ready study" });
     expect(screen.getByText("Ed Itor")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Documents" }));
     expect(screen.getAllByText("Chapter 2").length).toBeGreaterThan(0);
+    for (const chapter of ["Chapter 4", "Chapter 5", "Chapter 6"]) {
+      expect(
+        screen.getByRole("button", { name: new RegExp(`^${chapter}`) }),
+      ).toBeInTheDocument();
+    }
 
-    fireEvent.change(screen.getByLabelText("Document folder"), {
-      target: { value: "Chapter 2" },
+    fireEvent.click(screen.getByRole("button", { name: /^Chapter 2/ }));
+    fireEvent.change(screen.getByLabelText("Upload purpose"), {
+      target: { value: "final_revision" },
     });
-    fireEvent.change(screen.getByLabelText("New file or replacement"), {
+    fireEvent.change(screen.getByLabelText("Manuscript file"), {
       target: {
         files: [
           new File(["updated"], "chapter-two.pdf", { type: "application/pdf" }),
         ],
       },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Upload file" }));
+    fireEvent.click(screen.getByRole("button", { name: "Upload document" }));
 
     await waitFor(() => {
       const uploadCall = fetchMock.mock.calls.find(
@@ -496,16 +694,38 @@ describe("researcher research workspace", () => {
       expect((uploadCall?.[1]?.body as FormData).get("relative_path")).toBe(
         "Chapter 2",
       );
+      expect((uploadCall?.[1]?.body as FormData).get("document_type")).toBe(
+        "revised_manuscript",
+      );
+      expect((uploadCall?.[1]?.body as FormData).get("upload_purpose")).toBe(
+        "final_revision",
+      );
     });
-
-    fireEvent.click(screen.getByRole("button", { name: "Change Editor" }));
-    await screen.findByRole("heading", { name: "Change Editor" });
-    fireEvent.change(screen.getByLabelText("Select Editor"), {
-      target: { value: "editor-b" },
-    });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Send change request" }),
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter(
+          ([path, init]) =>
+            String(path) === "/api/research/42/support-assignments" &&
+            !init?.method,
+        ).length,
+      ).toBeGreaterThan(1),
     );
+
+    fireEvent.click(screen.getByRole("button", { name: "Research Team" }));
+    fireEvent.click(screen.getByRole("button", { name: "Change Editor" }));
+    await screen.findByRole("heading", { name: "Change editor" });
+    fireEvent.change(screen.getByPlaceholderText("Search by name or email"), {
+      target: { value: "New" },
+    });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("option", { name: /New Editor/ }),
+      ).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("option", { name: /New Editor/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Send request" }));
+    await screen.findByRole("heading", { name: "Send support request?" });
+    fireEvent.click(screen.getByRole("button", { name: "Send request" }));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -516,9 +736,53 @@ describe("researcher research workspace", () => {
             user_id: "editor-b",
             assignment_role: "research_editor",
             replace_current: true,
+            expected_current_assignment_id: 71,
           }),
         }),
       ),
+    );
+  });
+
+  it("switches stage and defense phase while showing specialists in both roster and controls", async () => {
+    const fetchMock = installApi();
+    render(
+      <RoleWorkspace
+        role="researcher"
+        navigate={vi.fn()}
+        selectNav={vi.fn()}
+        dashboardScope="researcher:researcher@example.test"
+        dashboardState={{
+          status: "loading",
+          scope: "researcher:researcher@example.test",
+        }}
+        onRetry={vi.fn()}
+        researchDocumentId="42"
+      />,
+    );
+    await screen.findByRole("heading", { name: "Revision-ready study" });
+    fireEvent.click(screen.getByRole("button", { name: "Research Team" }));
+    expect((await screen.findAllByText("Ina Structor")).length).toBeGreaterThan(
+      0,
+    );
+    expect(screen.getByText("Complete")).toBeInTheDocument();
+    expect(screen.getAllByText("Editor")).toHaveLength(2);
+    expect(screen.getAllByText("Statistician")).toHaveLength(2);
+    expect(screen.getAllByText("Librarian")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("tab", { name: "After defense" }));
+    expect(screen.getAllByText("Editor")).toHaveLength(2);
+    expect(screen.getAllByText("Librarian")).toHaveLength(2);
+    expect(screen.getAllByText("Statistician")).toHaveLength(1);
+    expect(screen.getByText("Panel 1").nextSibling).toHaveTextContent(
+      "Unassigned",
+    );
+    expect(screen.getByText("Incomplete")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Defense stage"), {
+      target: { value: "final" },
+    });
+    expect(await screen.findByText("Final Instructor")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/research/42/team?defense_type=final",
+      expect.anything(),
     );
   });
 
@@ -595,7 +859,7 @@ describe("researcher research workspace", () => {
       "Some research sections are unavailable: Files",
     );
     expect(
-      screen.getByText("No files have been uploaded."),
+      screen.getByText("No documents in this folder yet."),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("link", { name: "Download" }),
@@ -605,14 +869,12 @@ describe("researcher research workspace", () => {
         name: /Rename/,
       }),
     ).not.toBeInTheDocument();
-    expect(
-      screen.queryByLabelText("New file or replacement"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Manuscript file")).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /Resubmit revision 2/ }),
     ).toBeDisabled();
     expect(
-      screen.getByRole("button", { name: "Edit metadata and authors" }),
+      screen.getByRole("button", { name: "Edit research details" }),
     ).toBeEnabled();
   });
 

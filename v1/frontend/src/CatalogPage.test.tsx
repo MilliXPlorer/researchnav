@@ -19,7 +19,6 @@ const fallbackRecord: ResearchRecord = {
   institute: "Example Unit",
   degreeProgram: "Example Program",
   program: "Example Program",
-  category: "Example Category",
   abstract:
     "This record must not be client-filtered during a similarity search.",
   keywords: ["literal"],
@@ -62,7 +61,6 @@ function resource(
     institution_name: "Example College",
     institute: "Example Unit",
     degree_program: "Example Program",
-    category: { name: "Example Category" },
     abstract: "Algorithm-scored public metadata.",
     keywords: ["algorithm"],
     research_stage: "completed",
@@ -93,22 +91,45 @@ function resource(
   };
 }
 
-function renderCatalog(initialSearch?: string, session?: UserSession | null) {
+function renderCatalog(
+  initialSearch?: string,
+  session?: UserSession | null,
+  records: ResearchRecord[] = [fallbackRecord],
+) {
   return render(
     <CatalogPage
       onSignIn={vi.fn()}
       session={session}
       navigate={vi.fn()}
-      records={[fallbackRecord]}
+      records={records}
       initialSearch={initialSearch}
     />,
   );
 }
 
 beforeEach(() => window.history.replaceState({}, "", "/catalog"));
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("CatalogPage public similarity search", () => {
+  it("shows a back-to-top control after scrolling", () => {
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
+    Object.defineProperty(window, "scrollY", {
+      value: 500,
+      configurable: true,
+    });
+
+    renderCatalog();
+    fireEvent.scroll(window);
+    fireEvent.click(screen.getByRole("button", { name: "Back to top" }));
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
+    Object.defineProperty(window, "scrollY", { value: 0, configurable: true });
+  });
+
   it("keeps loaded studies visible when a later catalog page fails", () => {
     render(
       <CatalogPage
@@ -144,7 +165,15 @@ describe("CatalogPage public similarity search", () => {
     );
   });
 
-  it("opens manuscript files separately so catalog results stay mounted", () => {
+  it("opens manuscript files separately after an authorized access check", async () => {
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    const createObjectURL = vi
+      .spyOn(URL, "createObjectURL")
+      .mockReturnValue("blob:research-files");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("files", { status: 200 })),
+    );
     render(
       <CatalogPage
         onSignIn={vi.fn()}
@@ -154,14 +183,67 @@ describe("CatalogPage public similarity search", () => {
       />,
     );
 
-    expect(screen.getByRole("link", { name: /view files/i })).toHaveAttribute(
-      "target",
-      "_blank",
+    fireEvent.click(screen.getByRole("button", { name: /view files/i }));
+
+    await waitFor(() =>
+      expect(open).toHaveBeenCalledWith(
+        "blob:research-files",
+        "_blank",
+        "noopener,noreferrer",
+      ),
     );
-    expect(screen.getByRole("link", { name: /view files/i })).toHaveAttribute(
-      "rel",
-      "noopener noreferrer",
+    expect(createObjectURL).toHaveBeenCalled();
+  });
+
+  it("keeps anonymous visitors on the catalog and shows sign-in guidance", () => {
+    const onSignIn = vi.fn();
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <CatalogPage
+        onSignIn={onSignIn}
+        session={null}
+        navigate={vi.fn()}
+        records={[{ ...fallbackRecord, hasDownloadableManuscript: true }]}
+      />,
     );
+
+    fireEvent.click(screen.getByRole("button", { name: /view files/i }));
+
+    const dialog = screen.getByRole("dialog", { name: "Sign In Required" });
+    expect(dialog).toHaveTextContent(
+      "To view or download research files, please sign in to your ResearchNAV account.",
+    );
+    expect(open).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Sign In" }));
+    expect(onSignIn).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    [403, "Access Restricted"],
+    [404, "Files Unavailable"],
+    [500, "Unable to Open Files"],
+  ])("shows a friendly %s file access error", async (status, heading) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status })),
+    );
+    render(
+      <CatalogPage
+        onSignIn={vi.fn()}
+        session={authenticatedSession}
+        navigate={vi.fn()}
+        records={[{ ...fallbackRecord, hasDownloadableManuscript: true }]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /view files/i }));
+
+    expect(
+      await screen.findByRole("dialog", { name: heading }),
+    ).toBeInTheDocument();
   });
 
   it("shows final manuscript unavailable in metadata for authenticated users without a final manuscript", () => {
@@ -187,24 +269,27 @@ describe("CatalogPage public similarity search", () => {
     expect(toolbar?.nextElementSibling).toHaveTextContent("Search tip");
   });
 
-  it("shows a typeable year range, category, and institute metadata filters", () => {
+  it("shows year range, SDG, and institute metadata filters", () => {
     renderCatalog();
 
     expect(
-      screen.getByLabelText("Filter from publication year"),
-    ).toHaveAttribute("list");
-    expect(screen.getByLabelText("Filter to publication year")).toHaveAttribute(
-      "list",
+      screen.getByRole("button", { name: /filter from publication year/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /filter to publication year/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "All SDGs" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /filter by institute/i }),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: /filter by institute/i }),
     );
     expect(
-      screen.getByRole("combobox", { name: /filter by category/i }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("combobox", { name: /filter by institute/i }),
-    ).toBeInTheDocument();
-    expect(
       within(
-        screen.getByRole("combobox", { name: /filter by institute/i }),
+        screen.getByRole("listbox", { name: "Filter by institute" }),
       ).getAllByRole("option"),
     ).toHaveLength(7);
     expect(
@@ -228,21 +313,29 @@ describe("CatalogPage public similarity search", () => {
     );
     renderCatalog();
 
-    const from = screen.getByLabelText("Filter from publication year");
-    const to = screen.getByLabelText("Filter to publication year");
-    fireEvent.change(from, { target: { value: "2022" } });
-    fireEvent.change(to, { target: { value: "2024" } });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Filter from publication year" }),
+    );
+    fireEvent.click(screen.getByRole("option", { name: "2022" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Filter to publication year" }),
+    );
+    fireEvent.click(screen.getByRole("option", { name: "2024" }));
 
     expect(window.location.search).toContain("year_from=2022");
     expect(window.location.search).toContain("year_to=2024");
-    expect(from).toHaveAttribute("max", "2024");
-    expect(to).toHaveAttribute("min", "2022");
+    expect(
+      screen.queryByRole("option", { name: "2020" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: "2026" }),
+    ).not.toBeInTheDocument();
     expect(
       await screen.findByText("No studies match these filters"),
     ).toBeInTheDocument();
   });
 
-  it("requests category and institute filters from the repository", async () => {
+  it("requests institute filters from the repository", async () => {
     const fetchMock = vi.fn(
       async () =>
         new Response(JSON.stringify({ data: [], links: { next: null } })),
@@ -250,25 +343,42 @@ describe("CatalogPage public similarity search", () => {
     vi.stubGlobal("fetch", fetchMock);
     renderCatalog();
 
-    fireEvent.change(
-      screen.getByRole("combobox", { name: /filter by category/i }),
-      { target: { value: "Example Category" } },
+    fireEvent.click(
+      screen.getByRole("button", { name: /filter by institute/i }),
     );
-    fireEvent.change(
-      screen.getByRole("combobox", { name: /filter by institute/i }),
-      { target: { value: "Institute of Teacher Education" } },
+    fireEvent.click(
+      screen.getByRole("option", { name: "Institute of Teacher Education" }),
     );
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenLastCalledWith(
-        expect.stringContaining("category=Example+Category"),
+        expect.stringContaining("institute=Institute+of+Teacher+Education"),
         expect.objectContaining({ signal: expect.any(AbortSignal) }),
       ),
     );
-    expect(fetchMock).toHaveBeenLastCalledWith(
-      expect.stringContaining("institute=Institute+of+Teacher+Education"),
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+  });
+
+  it("requests selected Sustainable Development Goal filters", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ data: [], links: { next: null } })),
     );
+    vi.stubGlobal("fetch", fetchMock);
+    renderCatalog();
+
+    fireEvent.click(screen.getByRole("button", { name: "All SDGs" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Quality Education/i }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Apply \(1\)/ }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenLastCalledWith(
+        expect.stringContaining("sdg_ids%5B%5D=4"),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      ),
+    );
+    expect(window.location.search).toContain("sdgs=4");
   });
 
   it("requests an initial catalog q and preserves the backend ranking order", async () => {
@@ -307,6 +417,28 @@ describe("CatalogPage public similarity search", () => {
     );
   });
 
+  it("orders the normal catalog by Study ID while displaying sequence numbers", () => {
+    renderCatalog("", null, [
+      { ...fallbackRecord, id: "9", title: "Ninth study" },
+      { ...fallbackRecord, id: "2", title: "Second study" },
+      { ...fallbackRecord, id: "5", title: "Fifth study" },
+    ]);
+
+    const resultTitles = screen
+      .getAllByRole("heading", { level: 2 })
+      .map((heading) => heading.textContent);
+    expect(resultTitles).toEqual([
+      "Second study",
+      "Fifth study",
+      "Ninth study",
+    ]);
+    expect(
+      Array.from(
+        document.querySelectorAll(".result-accession > span:first-child"),
+      ).map((item) => item.textContent),
+    ).toEqual(["1", "2", "3"]);
+  });
+
   it("allows similarity results to be sorted by publication year", async () => {
     vi.stubGlobal(
       "fetch",
@@ -335,13 +467,90 @@ describe("CatalogPage public similarity search", () => {
       target: { value: "newest" },
     });
 
-    const titles = screen
-      .getAllByRole("heading", { level: 2 })
-      .map((heading) => heading.textContent);
-    expect(titles).toEqual([
-      "Less relevant newer study",
-      "More relevant older study",
+    await waitFor(() =>
+      expect(fetch).toHaveBeenLastCalledWith(
+        "/api/repository/similarity",
+        expect.objectContaining({
+          body: JSON.stringify({ q: "water", sort: "newest" }),
+        }),
+      ),
+    );
+  });
+
+  it("shows the full total and requests only the selected page of ten", async () => {
+    const fetchMock = vi.fn(async (_path: string, init?: RequestInit) => {
+      const requestedPage = JSON.parse(String(init?.body)).page ?? 1;
+      return new Response(
+        JSON.stringify({
+          data: [resource(requestedPage, `Page ${requestedPage} result`)],
+          links: { first: null, last: null, prev: null, next: null },
+          meta: {
+            current_page: requestedPage,
+            from: (requestedPage - 1) * 10 + 1,
+            last_page: 45,
+            links: [],
+            path: "/api/repository/similarity",
+            per_page: 10,
+            to: requestedPage * 10,
+            total: 450,
+          },
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderCatalog("?q=education");
+
+    expect(await screen.findByText("450")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Page 2" }));
+    await screen.findByText("Page 2 result");
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/repository/similarity",
+      expect.objectContaining({
+        body: JSON.stringify({ q: "education", page: 2 }),
+      }),
+    );
+    expect(window.location.search).toContain("page=2");
+  });
+
+  it("uses a centered accessible title-aware circular progress indicator", () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise<Response>(() => undefined)),
+    );
+
+    const { container } = renderCatalog("?q=education", null, [
+      {
+        ...fallbackRecord,
+        id: "7",
+        title: "Assessment of Physical Education",
+        keywords: ["education"],
+      },
     ]);
+
+    expect(
+      screen.getByRole("status", { name: /Calculating similarity results/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("progressbar", {
+        name: "Ranking Assessment of Physical Education",
+      }),
+    ).toHaveAttribute("aria-valuenow", "3");
+    expect(
+      screen.getByRole("heading", {
+        name: "Assessment of Physical Education",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Highest similarity results will appear first."),
+    ).toBeInTheDocument();
+    expect(
+      container.querySelector(".similarity-progress-ring"),
+    ).toBeInTheDocument();
+    expect(
+      container.querySelector(".similarity-progress-track"),
+    ).not.toBeInTheDocument();
+    expect(container.querySelector("video")).not.toBeInTheDocument();
   });
 
   it("displays only the overall score, API classification, and alert statuses on the card", async () => {

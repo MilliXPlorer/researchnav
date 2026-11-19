@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Exceptions\ApiValidationException;
 use App\Models\MethodologyReview;
 use App\Models\ResearchDocument;
+use App\Services\DefenseMonitoringAuthorization;
 use App\Services\DomainAuthorization;
 use App\Services\MethodologyReviewService;
 use App\Services\MonitoringService;
@@ -77,6 +78,7 @@ class StatisticianController extends DomainController
     {
         $actor = $this->actor($request);
         $this->allowed(DomainAuthorization::isAssignedRecordReader($actor, $researchDocument));
+        app(DefenseMonitoringAuthorization::class)->authorizeSection($actor, $researchDocument, 'before_proposal_defense');
         $input = $this->validated($request, ['activity_date' => ['required', 'date'], 'activity' => ['required', 'string', 'max:10000'], 'remarks' => ['nullable', 'string', 'max:10000'], 'status' => ['required', 'in:pending,completed'], 'signature_status' => ['required', 'in:unsigned,signed']]);
         DB::table('monitoring_entries')->updateOrInsert(['research_document_id' => $researchDocument->id, 'reviewer_id' => $actor->id, 'monitoring_stage' => 'before_proposal_defense', 'designation' => 'Statistician'], ['reviewer_role' => 'statistician', 'activity_date' => $input['activity_date'], 'activity' => $input['activity'], 'remarks' => $input['remarks'] ?? null, 'status' => $input['status'], 'signature_status' => $input['signature_status'], 'updated_at' => now(), 'created_at' => now()]);
         $activity->log($researchDocument, 'STATISTICIAN_MONITORING_UPDATED', $actor, 'Statistician monitoring entry updated.', null, $input['status'], $input['status']);

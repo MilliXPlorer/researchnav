@@ -87,6 +87,161 @@ export interface RoleDashboard {
   sections: RoleDashboardSection[];
   analytics?: RoleDashboardAnalytics;
   institutional_overview?: Array<{ institute: string; total: number }> | null;
+  panel?: PanelDashboardProjection | null;
+  statistician?: StatisticianDashboardProjection | null;
+  librarian?: LibrarianDashboardProjection | null;
+  editor?: EditorDashboardProjection | null;
+}
+
+export interface EditorDashboardProjection {
+  schema_version: 1;
+  counts: {
+    pending_requests: number;
+    assigned_research: number;
+    for_review: number;
+    completed_reviews: number;
+  };
+  workload: { for_review: number; completed: number };
+  assignments: Array<{
+    research_document_id: number;
+    title: string;
+    submission_reference: string | null;
+    research_stage: string;
+    submission_status: string;
+    review_status: "for_review" | "completed";
+    updated_at: string | null;
+  }>;
+  recent_activity: Array<{
+    id: string;
+    research_document_id: number;
+    title: string;
+    type: "study_assigned" | "review_recorded" | "review_completed";
+    occurred_at: string;
+  }>;
+}
+
+export interface PanelDashboardProjection {
+  schema_version: 1;
+  counts: {
+    assigned: number;
+    pending: number;
+    completed: number;
+    repository_references: number;
+  };
+  assignments: Array<{
+    research_document_id: number;
+    title: string;
+    submission_reference: string | null;
+    defense_stage: string | null;
+    review_status: "pending" | "completed";
+    updated_at: string | null;
+  }>;
+  recent_activity: Array<{
+    id: string;
+    research_document_id: number;
+    title: string;
+    type: "study_assigned" | "evaluation_submitted";
+    occurred_at: string;
+  }>;
+}
+
+export interface LibrarianDashboardProjection {
+  schema_version: 1;
+  counts: {
+    archiving_queue: number;
+    metadata_validation: number;
+    repository_records: number;
+    archived_this_month: number;
+  };
+  queue: Array<{
+    research_document_id: number;
+    title: string;
+    submitted_by: string;
+    research_stage: string;
+    status: "pending" | "validating" | "ready";
+    updated_at: string | null;
+  }>;
+  queue_status: { pending: number; validating: number; ready: number };
+  activity: {
+    six_months: LibrarianDashboardActivity;
+    twelve_months: LibrarianDashboardActivity;
+  };
+  recent_activity: Array<{
+    id: string;
+    research_document_id: number;
+    title: string;
+    type:
+      | "record_archived"
+      | "metadata_updated"
+      | "record_returned"
+      | "archiving_review_completed";
+    occurred_at: string;
+  }>;
+}
+
+export interface LibrarianDashboardActivity {
+  months: Array<{
+    key: string;
+    label: string;
+    archived: number;
+    returned: number;
+  }>;
+}
+
+export type StatisticianReviewStatus =
+  | "pending"
+  | "in_progress"
+  | "returned_for_clarification"
+  | "signed_off"
+  | "not_applicable";
+
+export interface StatisticianDashboardWorkloadItem {
+  research_document_id: number;
+  title: string;
+  research_stage: string;
+  submission_status: string;
+  review_status: StatisticianReviewStatus;
+  due_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  updated_at: string | null;
+}
+
+export interface StatisticianDashboardProjection {
+  schema_version: 1;
+  counts: {
+    assigned: number;
+    pending: number;
+    in_review: number;
+    for_sign_off: number;
+    completed: number;
+  };
+  workload: StatisticianDashboardWorkloadItem[];
+  workload_status: {
+    pending: number;
+    in_review: number;
+    completed: number;
+  };
+  activity: {
+    months: Array<{
+      key: string;
+      label: string;
+      started: number;
+      completed: number;
+    }>;
+  };
+  recent_activity: Array<{
+    id: string;
+    research_document_id: number;
+    title: string;
+    type:
+      | "study_assigned"
+      | "review_started"
+      | "review_completed"
+      | "sign_off_requested"
+      | "sign_off_completed";
+    occurred_at: string;
+  }>;
 }
 
 export interface RoleDashboardResponse {
@@ -107,6 +262,7 @@ export interface AdminUserResource {
     last_name: string | null;
   };
   role: AdminRole;
+  institute: string | null;
   access_status: AccessStatus;
   is_admin: boolean;
   invitation_sent_at: string | null;
@@ -139,6 +295,139 @@ export interface LaravelPaginatedResponse<T> {
   data: T[];
   links: LaravelPaginationLinks;
   meta: LaravelPaginationMeta;
+}
+
+export interface UserDirectorySummary {
+  total: number;
+  active: number;
+  inactive: number;
+}
+
+export interface UserDirectoryResponse<T> extends LaravelPaginatedResponse<T> {
+  summary: UserDirectorySummary;
+}
+
+export interface OfficeRepositorySummary {
+  /** All non-deleted records, regardless of the current list filters. */
+  all: number;
+  ongoing: number;
+  archived: number;
+  recycle: number;
+}
+
+export interface OfficeRepositoryListResponse extends LaravelPaginatedResponse<OfficeRepositoryItemResource> {
+  summary: OfficeRepositorySummary;
+}
+
+export interface CoordinatorRepositoryResponse extends OfficeRepositoryListResponse {
+  filters: { years: number[] };
+  institute: { name: string; acronym: string };
+}
+
+/** Safe, office-only representation used by the Manage Repository workspace. */
+export interface OfficeRepositoryItemResource {
+  id: number;
+  submission_reference: string | null;
+  title: string;
+  publication_year: number | null;
+  institute: string | null;
+  research_stage: string | null;
+  submission_status: string | null;
+  archive_status: string | null;
+  visibility: string | null;
+  author_names: string[];
+  updated_at: string | null;
+  deleted_at: string | null;
+  can_edit: boolean;
+  can_delete: boolean;
+  can_restore: boolean;
+}
+
+export interface OfficeRepositoryFileResource {
+  id: number;
+  document_type: string;
+  upload_purpose: string | null;
+  version_number: number;
+  file_order: number | null;
+  original_filename: string;
+  file_extension: string;
+  mime_type: string;
+  file_size: number;
+  is_current: boolean;
+  uploaded_at: string | null;
+}
+
+/** A searchable active account that may be linked to a repository author. */
+export interface OfficeAuthorAccount {
+  id: string;
+  name: string;
+  email: string;
+  is_available: boolean;
+}
+
+/** The persisted author representation returned in repository detail responses. */
+export interface OfficeRepositoryAuthorResource {
+  id: number;
+  user_id: string | null;
+  author_name: string;
+  author_order: number;
+  is_corresponding_author: boolean;
+  /** Present when the API can report the linked account's current availability. */
+  account?: OfficeAuthorAccount | null;
+}
+
+/** An author save payload. Array position determines the server-side author order. */
+export interface OfficeRepositoryAuthorInput {
+  /** Include this only when updating an existing author row. */
+  id?: number;
+  user_id: string | null;
+  author_name: string;
+  is_corresponding_author: boolean;
+}
+
+export interface OfficeRepositoryDetailResource extends Omit<
+  OfficeRepositoryItemResource,
+  "author_names"
+> {
+  abstract: string | null;
+  keywords: string | null;
+  degree_program: string | null;
+  manuscript_date_label: string | null;
+  sdgs: SdgResource[];
+  authors: OfficeRepositoryAuthorResource[];
+  submitted_at: string | null;
+  approved_at: string | null;
+  archived_at: string | null;
+  files: OfficeRepositoryFileResource[];
+}
+
+export type OfficeRepositoryBucket = "all" | "ongoing" | "archived" | "recycle";
+
+export interface OfficeRepositoryListInput {
+  bucket?: OfficeRepositoryBucket;
+  search?: string;
+  institute?: string;
+  publication_year?: number;
+  sort?: "title" | "publication_year" | "updated_at" | "archive_status";
+  direction?: "asc" | "desc";
+  page?: number;
+  per_page?: 10 | 25 | 50 | 100;
+}
+
+/** The only metadata fields accepted by the office repository update route. */
+export interface OfficeRepositoryUpdateInput {
+  /** Detail version required by the server to prevent overwriting another edit. */
+  expected_updated_at?: string;
+  title?: string;
+  abstract?: string | null;
+  keywords?: string | null;
+  publication_year?: number | null;
+  sdg_ids?: number[];
+  institute?: string | null;
+  degree_program?: string | null;
+  manuscript_date_label?: string | null;
+  research_stage?: "title_proposal" | "ongoing" | "completed";
+  authors?: OfficeRepositoryAuthorInput[];
 }
 
 /** The exact public representation from AdminAuditLogResource. */
@@ -182,6 +471,7 @@ export interface SystemStatusResource {
       applied: number | null;
       available: number | null;
       pending: number | null;
+      historical: number | null;
     };
   };
   storage: {
@@ -189,7 +479,7 @@ export interface SystemStatusResource {
       disk: string;
       driver: string | null;
       status: "operational" | "unavailable";
-      capabilities: { read: boolean; write: boolean; delete: boolean } | null;
+      capabilities: { read: boolean; write: boolean; delete: boolean };
     };
   };
 }
@@ -258,6 +548,7 @@ export interface InternalResearchResource {
   visibility: "private" | "registered_only" | "public";
   is_imported?: boolean;
   can_update_metadata?: boolean;
+  sdgs?: SdgResource[];
 }
 
 export interface ResearchRevisionResource {
@@ -301,6 +592,7 @@ export interface ResearchMetadataInput {
   abstract: string | null;
   keywords: string | null;
   publication_year: number | null;
+  sdg_ids?: number[];
   institute?: string | null;
   degree_program?: string | null;
   manuscript_date_label?: string | null;
@@ -344,6 +636,11 @@ export interface DocumentFileResource {
     | "revised_manuscript"
     | "final_manuscript"
     | "attachment";
+  upload_purpose?:
+    | "initial_submission"
+    | "response_to_feedback"
+    | "revision"
+    | "final_revision";
   version_number: number;
   uploaded_by?: string | null;
   uploader_name?: string | null;
@@ -364,7 +661,19 @@ export interface ResearchPeopleResource {
     academic_year: string | null;
     instructor_name: string | null;
   } | null;
-  reviewers: Array<{ review_role: string; name: string | null }>;
+  reviewers: Array<{
+    review_role: string;
+    designation?: string | null;
+    name: string | null;
+  }>;
+}
+
+export interface FeedbackAttachment {
+  original_filename: string;
+  file_extension: string;
+  mime_type: string;
+  file_size: number;
+  url: string;
 }
 
 export interface FeedbackResource {
@@ -380,11 +689,13 @@ export interface FeedbackResource {
     | "approval_remark"
     | "general_feedback";
   feedback_status: "open" | "acknowledged" | "resolved";
+  resolved_at?: string | null;
   reviewer_name?: string | null;
   reviewer_role?: string | null;
   researcher_acknowledged_at?: string | null;
   researcher_addressed_at?: string | null;
   researcher_action_remarks?: string | null;
+  attachment?: FeedbackAttachment | null;
   created_at: string | null;
 }
 
@@ -392,6 +703,42 @@ export interface FeedbackInput {
   comment: string;
   feedback_type: FeedbackResource["feedback_type"];
   document_file_id?: number | null;
+  attachment?: File | null;
+}
+
+export interface PdfAnnotationRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface PdfAnnotationAnchor {
+  schema_version: 1;
+  page_number: number;
+  exact: string;
+  prefix?: string | null;
+  suffix?: string | null;
+  rects: PdfAnnotationRect[];
+}
+
+export interface PdfAnnotationResource {
+  id: number;
+  research_document_id: number;
+  document_file_id: number;
+  document_file_version: number;
+  author_name: string;
+  author_role: string;
+  kind: "highlight" | "comment";
+  body: string | null;
+  anchor: PdfAnnotationAnchor;
+  created_at: string | null;
+}
+
+export interface PdfAnnotationInput {
+  kind: "highlight" | "comment";
+  body?: string | null;
+  anchor: PdfAnnotationAnchor;
 }
 
 export interface MonitoringLogResource {
@@ -835,6 +1182,7 @@ export async function uploadResearchFile(
   file: File,
   documentType: DocumentFileResource["document_type"],
   relativePathOrFetcher?: string | null | ApiFetch,
+  uploadPurpose?: DocumentFileResource["upload_purpose"],
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<DocumentFileResource> {
   const relativePath =
@@ -847,6 +1195,7 @@ export async function uploadResearchFile(
   body.append("file", file);
   body.append("document_type", documentType);
   if (relativePath?.trim()) body.append("relative_path", relativePath.trim());
+  if (uploadPurpose) body.append("upload_purpose", uploadPurpose);
   return (
     await apiRequest<{ data: DocumentFileResource }>(
       `${researchPath(researchDocumentId)}/files`,
@@ -904,9 +1253,58 @@ export async function createFeedback(
   input: FeedbackInput,
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<FeedbackResource> {
+  const body =
+    input.attachment instanceof File
+      ? (() => {
+          const form = new FormData();
+          form.append("comment", input.comment);
+          form.append("feedback_type", input.feedback_type);
+          if (input.document_file_id != null) {
+            form.append("document_file_id", String(input.document_file_id));
+          }
+          form.append("attachment", input.attachment);
+          return form;
+        })()
+      : JSON.stringify(input);
   return (
     await apiRequest<{ data: FeedbackResource }>(
       `${researchPath(researchDocumentId)}/feedback`,
+      { method: "POST", body },
+      fetcher,
+    )
+  ).data;
+}
+
+export function feedbackAttachmentDownloadUrl(
+  researchDocumentId: string | number,
+  feedbackId: string | number,
+) {
+  return `${researchPath(researchDocumentId)}/feedback/${encodeURIComponent(String(feedbackId))}/attachment`;
+}
+
+export async function listPdfAnnotations(
+  researchDocumentId: string | number,
+  fileId: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<PdfAnnotationResource[]> {
+  return (
+    await apiRequest<{ data: PdfAnnotationResource[] }>(
+      `${researchPath(researchDocumentId)}/files/${encodeURIComponent(String(fileId))}/annotations`,
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export async function createPdfAnnotation(
+  researchDocumentId: string | number,
+  fileId: string | number,
+  input: PdfAnnotationInput,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<PdfAnnotationResource> {
+  return (
+    await apiRequest<{ data: PdfAnnotationResource }>(
+      `${researchPath(researchDocumentId)}/files/${encodeURIComponent(String(fileId))}/annotations`,
       { method: "POST", body: JSON.stringify(input) },
       fetcher,
     )
@@ -916,7 +1314,7 @@ export async function createFeedback(
 export async function updateFeedbackStatus(
   researchDocumentId: string | number,
   feedbackId: string | number,
-  feedback_status: "acknowledged" | "resolved",
+  feedback_status: "open" | "resolved",
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<FeedbackResource> {
   return (
@@ -999,16 +1397,29 @@ export async function listProvisionedAccounts(
   ).users;
 }
 
-export async function listNotifications(): Promise<NotificationResource[]> {
+export async function getNotificationUnreadCount(
+  signal?: AbortSignal,
+): Promise<number> {
+  const response = await apiRequest<{ unread_count: number }>(
+    "/api/notifications/unread-count",
+    { signal },
+  );
+  return response.unread_count;
+}
+
+export async function listNotifications(
+  signal?: AbortSignal,
+): Promise<NotificationResource[]> {
   const notifications: NotificationResource[] = [];
   let next: string | null = "/api/notifications";
   const maxPages = 100;
 
   for (let page = 0; next && page < maxPages; page += 1) {
+    signal?.throwIfAborted();
     const response = await apiRequest<{
       data?: NotificationResource[];
       links?: { next?: string | null };
-    }>(next);
+    }>(next, { signal });
     notifications.push(...(response.data ?? []));
     next = normalizeNextPath(response.links?.next ?? null);
   }
@@ -1027,6 +1438,12 @@ export async function markNotificationRead(
   ).data;
 }
 
+export async function deleteNotification(id: string): Promise<void> {
+  await apiRequest<void>(`/api/notifications/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
 export async function provisionAccount(
   endpoint:
     | "/api/admin/accounts"
@@ -1034,6 +1451,7 @@ export async function provisionAccount(
     | "/api/coordinator/instructors",
   email: string,
   role?: RequestableRole,
+  institute?: string,
   fetcher: ApiFetch = globalThis.fetch,
 ) {
   return (
@@ -1041,7 +1459,11 @@ export async function provisionAccount(
       endpoint,
       {
         method: "POST",
-        body: JSON.stringify({ email, ...(role ? { role } : {}) }),
+        body: JSON.stringify({
+          email,
+          ...(role ? { role } : {}),
+          ...(institute ? { institute } : {}),
+        }),
       },
       fetcher,
     )
@@ -1058,9 +1480,16 @@ export function listAdminCoordinators(
 /** Provisions one coordinator account through the administrator-only endpoint. */
 export function provisionCoordinator(
   email: string,
+  institute: string,
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<UserSession> {
-  return provisionAccount("/api/admin/coordinators", email, undefined, fetcher);
+  return provisionAccount(
+    "/api/admin/coordinators",
+    email,
+    undefined,
+    institute,
+    fetcher,
+  );
 }
 
 export function listAdminProvisionedAccounts(
@@ -1072,9 +1501,16 @@ export function listAdminProvisionedAccounts(
 export function provisionAdminAccount(
   email: string,
   role: RequestableRole,
+  institute?: string,
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<UserSession> {
-  return provisionAccount("/api/admin/accounts", email, role, fetcher);
+  return provisionAccount(
+    "/api/admin/accounts",
+    email,
+    role,
+    institute,
+    fetcher,
+  );
 }
 
 function adminQuery(
@@ -1089,6 +1525,106 @@ function adminQuery(
   return serialized ? `${path}?${serialized}` : path;
 }
 
+function officeRepositoryPath(researchDocumentId?: string | number) {
+  const base = "/api/office/repository";
+  return researchDocumentId === undefined
+    ? base
+    : `${base}/${encodeURIComponent(String(researchDocumentId))}`;
+}
+
+/** Lists one server-defined repository bucket. This endpoint is shared by Admin and Research Office. */
+export function listOfficeRepository(
+  input: OfficeRepositoryListInput = {},
+  fetcher: ApiFetch = globalThis.fetch,
+  signal?: AbortSignal,
+): Promise<OfficeRepositoryListResponse> {
+  // The recycle bucket's server-defined order is by removal time. `updated_at`
+  // is not a meaningful replacement for that order and is not a supported
+  // default sort for this bucket.
+  const omitRecycleDefaultSort =
+    input.bucket === "recycle" && input.sort === "updated_at";
+  return apiRequest(
+    adminQuery(officeRepositoryPath(), {
+      bucket: input.bucket ?? "ongoing",
+      search: input.search?.trim(),
+      institute: input.institute,
+      publication_year: input.publication_year,
+      sort: omitRecycleDefaultSort ? undefined : input.sort,
+      direction: omitRecycleDefaultSort ? undefined : input.direction,
+      page: input.page,
+      per_page: input.per_page,
+    }),
+    { signal },
+    fetcher,
+  );
+}
+
+export async function getOfficeRepositoryDetail(
+  researchDocumentId: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+  signal?: AbortSignal,
+): Promise<OfficeRepositoryDetailResource> {
+  return (
+    await apiRequest<{ data: OfficeRepositoryDetailResource }>(
+      officeRepositoryPath(researchDocumentId),
+      { signal },
+      fetcher,
+    )
+  ).data;
+}
+
+export async function listOfficeAuthorAccounts(
+  search: string,
+  fetcher: ApiFetch = globalThis.fetch,
+  signal?: AbortSignal,
+): Promise<OfficeAuthorAccount[]> {
+  return (
+    await apiRequest<{ data: OfficeAuthorAccount[] }>(
+      adminQuery("/api/office/author-accounts", { search: search.trim() }),
+      { signal },
+      fetcher,
+    )
+  ).data;
+}
+
+export async function updateOfficeRepository(
+  researchDocumentId: string | number,
+  input: OfficeRepositoryUpdateInput,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<OfficeRepositoryDetailResource> {
+  return (
+    await apiRequest<{ data: OfficeRepositoryDetailResource }>(
+      officeRepositoryPath(researchDocumentId),
+      { method: "PATCH", body: JSON.stringify(input) },
+      fetcher,
+    )
+  ).data;
+}
+
+export async function deleteOfficeRepository(
+  researchDocumentId: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<void> {
+  await apiRequest<void>(
+    officeRepositoryPath(researchDocumentId),
+    { method: "DELETE" },
+    fetcher,
+  );
+}
+
+export async function restoreOfficeRepository(
+  researchDocumentId: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<OfficeRepositoryDetailResource> {
+  return (
+    await apiRequest<{ data: OfficeRepositoryDetailResource }>(
+      `${officeRepositoryPath(researchDocumentId)}/restore`,
+      { method: "POST", body: JSON.stringify({}) },
+      fetcher,
+    )
+  ).data;
+}
+
 export function listAdminUsers(
   input: {
     search?: string;
@@ -1096,15 +1632,25 @@ export function listAdminUsers(
     access_status?: AccessStatus;
     page?: number;
     per_page?: 10 | 25 | 50 | 100;
+    sort?:
+      | "last_name"
+      | "email"
+      | "role"
+      | "access_status"
+      | "last_login_at"
+      | "created_at";
+    direction?: "asc" | "desc";
   } = {},
   fetcher: ApiFetch = globalThis.fetch,
-): Promise<LaravelPaginatedResponse<AdminUserResource>> {
+): Promise<UserDirectoryResponse<AdminUserResource>> {
   return apiRequest(adminQuery("/api/admin/users", input), undefined, fetcher);
 }
 
 export async function updateAdminUser(
   id: string,
-  input: Partial<Pick<AdminUserResource, "role" | "access_status">>,
+  input: Partial<
+    Pick<AdminUserResource, "role" | "access_status" | "institute">
+  >,
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<AdminUserResource> {
   return (
@@ -1133,6 +1679,8 @@ export function listAdminAuditLogs(
     actor_id?: string;
     created_from?: string;
     created_to?: string;
+    sort?: "actor" | "action" | "subject" | "created_at";
+    direction?: "asc" | "desc";
     page?: number;
     per_page?: 10 | 25 | 50 | 100;
   } = {},
@@ -1143,6 +1691,20 @@ export function listAdminAuditLogs(
     undefined,
     fetcher,
   );
+}
+
+export function listUserLogs(
+  input: {
+    search?: string;
+    created_from?: string;
+    created_to?: string;
+    sort?: "action" | "subject" | "created_at";
+    direction?: "asc" | "desc";
+    page?: number;
+  } = {},
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<LaravelPaginatedResponse<AdminAuditLogResource>> {
+  return apiRequest(adminQuery("/api/user-logs", input), undefined, fetcher);
 }
 
 export async function getSystemStatus(
@@ -1171,7 +1733,7 @@ export interface PublicResearchResource {
   institution_location?: string;
   institute?: string;
   degree_program?: string;
-  category?: { name?: string } | string | null;
+  sdgs?: SdgResource[];
   abstract?: string;
   keywords?: string[] | string | null;
   research_stage?: string;
@@ -1246,6 +1808,50 @@ export interface PublicRepositorySimilarityResource extends PublicResearchResour
 
 export interface PublicRepositorySimilarityResponse {
   data?: PublicRepositorySimilarityResource[];
+  links?: LaravelPaginationLinks;
+  meta?: LaravelPaginationMeta;
+}
+
+export interface ContentUploadSimilarityResult {
+  matches: ResearchRecord[];
+  fileName: string;
+  diagnostics: ContentUploadFileDiagnostic[];
+  extractedText: string;
+}
+
+export interface ContentUploadFileDiagnostic {
+  index: number;
+  status: "included" | "excluded" | "duplicate" | "error";
+  reason: string | null;
+  extractionSuccess: boolean;
+  textLength: number;
+  detectedChapters: number[];
+  kind: "manuscript" | "supporting_document" | "unknown";
+  eligible: boolean;
+  extractedText: string | null;
+}
+
+export interface PublicRepositorySimilaritySearch {
+  q: string;
+  page?: number;
+  yearFrom?: string | number;
+  yearTo?: string | number;
+  institute?: string;
+  sdgIds?: number[];
+  sort?: "relevance" | "newest" | "oldest";
+}
+
+export async function clearUserLogs(
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<void> {
+  await apiRequest<void>(
+    "/api/user-logs/clear",
+    {
+      method: "POST",
+      body: JSON.stringify({}),
+    },
+    fetcher,
+  );
 }
 
 function toAuthors(authors: PublicResearchResource["authors"]) {
@@ -1263,12 +1869,6 @@ function toKeywords(keywords: PublicResearchResource["keywords"]) {
         .map((keyword) => keyword.trim())
         .filter(Boolean)
     : [];
-}
-
-function toCategory(category: PublicResearchResource["category"]) {
-  return typeof category === "string"
-    ? category
-    : (category?.name ?? "Uncategorized");
 }
 
 function toResearchStage(researchStage?: string) {
@@ -1296,7 +1896,7 @@ export function toResearchRecord(
     institute,
     degreeProgram,
     program: degreeProgram,
-    category: toCategory(resource.category),
+    sdgs: resource.sdgs ?? [],
     abstract: resource.abstract ?? "",
     keywords: toKeywords(resource.keywords),
     researchStage: toResearchStage(resource.research_stage),
@@ -1370,15 +1970,15 @@ export async function getPublicResearch(
  *
  * Unlike `listPublicResearch`, this delegates matching and filtering to Laravel,
  * which compares the query against titles, abstracts, keywords, and author names
- * and applies the author/keyword/category/year filters in SQL. Callers therefore
+ * and applies the author, keyword, and year filters in SQL. Callers therefore
  * never need to download the whole catalog to filter it in the browser.
  */
 export type PublicResearchFilters = {
   q?: string;
   author?: string;
   keywords?: string;
-  category?: string;
   institute?: string;
+  sdgIds?: number[];
   year?: string | number;
   yearFrom?: string | number;
   yearTo?: string | number;
@@ -1400,8 +2000,8 @@ export async function searchPublicResearch(
   append("q", filters.q);
   append("author", filters.author);
   append("keywords", filters.keywords);
-  append("category", filters.category);
   append("institute", filters.institute);
+  filters.sdgIds?.forEach((id) => params.append("sdg_ids[]", String(id)));
   append("year", filters.year);
   append("year_from", filters.yearFrom);
   append("year_to", filters.yearTo);
@@ -1426,25 +2026,113 @@ export async function searchPublicResearch(
   return records;
 }
 
+export async function searchArchivedRoleRepository(
+  filters: Pick<PublicResearchFilters, "q" | "year" | "perPage"> = {},
+  fetcher: ApiFetch = globalThis.fetch,
+  signal?: AbortSignal,
+): Promise<LaravelPaginatedResponse<ResearchRecord> & { years: number[] }> {
+  const params = new URLSearchParams();
+  const query = filters.q?.trim();
+  if (query) params.set("q", query);
+  if (filters.year !== undefined && String(filters.year).trim() !== "") {
+    params.set("year", String(filters.year));
+  }
+  params.set("per_page", String(filters.perPage ?? 25));
+
+  let next: string | null = `/api/archived-repository?${params.toString()}`;
+  const data: ResearchRecord[] = [];
+  let years: number[] = [];
+  let links: LaravelPaginationLinks | undefined;
+  let meta: LaravelPaginationMeta | undefined;
+  for (let page = 0; next && page < 100; page += 1) {
+    const response = await apiRequest<{
+      data?: PublicResearchResource[];
+      links?: LaravelPaginationLinks;
+      meta?: LaravelPaginationMeta;
+      filters?: { years?: number[] };
+    }>(next, { signal }, fetcher);
+    data.push(...(response.data ?? []).map(toResearchRecord));
+    years = response.filters?.years ?? years;
+    links = response.links;
+    meta = response.meta;
+    next = normalizeNextPath(response.links?.next ?? null);
+  }
+  const fallbackMeta: LaravelPaginationMeta = {
+    current_page: 1,
+    from: data.length > 0 ? 1 : null,
+    last_page: 1,
+    links: [],
+    path: "/api/archived-repository",
+    per_page: filters.perPage ?? 25,
+    to: data.length > 0 ? data.length : null,
+    total: data.length,
+  };
+
+  return {
+    data,
+    links: links ?? { first: null, last: null, prev: null, next: null },
+    meta: meta
+      ? {
+          ...meta,
+          from: data.length ? 1 : null,
+          to: data.length || null,
+          total: data.length,
+        }
+      : fallbackMeta,
+    years,
+  };
+}
+
 /**
  * Requests public, algorithm-ranked repository matches for one submitted query.
  * The returned order is the server's ranking and must remain unchanged by callers.
  */
 export async function searchPublicResearchBySimilarity(
-  q: string,
+  search: string | PublicRepositorySimilaritySearch,
   fetcher: ApiFetch = globalThis.fetch,
   signal?: AbortSignal,
-): Promise<ResearchRecord[]> {
+): Promise<LaravelPaginatedResponse<ResearchRecord>> {
+  const input = typeof search === "string" ? { q: search } : search;
+  const body = {
+    q: input.q,
+    ...(input.page && input.page > 1 ? { page: input.page } : {}),
+    ...(input.yearFrom ? { year_from: Number(input.yearFrom) } : {}),
+    ...(input.yearTo ? { year_to: Number(input.yearTo) } : {}),
+    ...(input.institute ? { institute: input.institute } : {}),
+    ...(input.sdgIds?.length ? { sdg_ids: input.sdgIds } : {}),
+    ...(input.sort && input.sort !== "relevance" ? { sort: input.sort } : {}),
+  };
   const response = await apiRequest<PublicRepositorySimilarityResponse>(
     "/api/repository/similarity",
     {
       method: "POST",
-      body: JSON.stringify({ q }),
+      body: JSON.stringify(body),
       signal,
     },
     fetcher,
   );
-  return (response.data ?? []).map(toResearchRecord);
+  const records = (response.data ?? []).map(toResearchRecord);
+  const fallbackMeta: LaravelPaginationMeta = {
+    current_page: input.page ?? 1,
+    from: records.length > 0 ? ((input.page ?? 1) - 1) * 10 + 1 : null,
+    last_page: 1,
+    links: [],
+    path: "/api/repository/similarity",
+    per_page: 10,
+    to:
+      records.length > 0 ? ((input.page ?? 1) - 1) * 10 + records.length : null,
+    total: records.length,
+  };
+  return {
+    data: records,
+    links: response.links ?? {
+      first: null,
+      last: null,
+      prev: null,
+      next: null,
+    },
+    meta: response.meta ?? fallbackMeta,
+  };
 }
 
 /**
@@ -1479,6 +2167,60 @@ export async function checkContentQuerySimilarity(
     fetcher,
   );
   return (response.data ?? []).map(toResearchRecord);
+}
+
+export async function checkContentUploadSimilarity(
+  files: File[],
+  fetcher: ApiFetch = globalThis.fetch,
+  signal?: AbortSignal,
+): Promise<ContentUploadSimilarityResult> {
+  const body = new FormData();
+  if (files.length === 1) {
+    body.append("file", files[0]);
+    body.append("mode", "file");
+  } else {
+    body.append("mode", "folder");
+    files.forEach((file) => body.append("files[]", file));
+  }
+  const response = await apiRequest<
+    PublicRepositorySimilarityResponse & {
+      file_name?: string;
+      extracted_text?: string;
+      file_diagnostics?: Array<{
+        index: number;
+        status: ContentUploadFileDiagnostic["status"];
+        reason: string | null;
+        extraction_success: boolean;
+        text_length: number;
+        detected_chapters: number[];
+        kind: ContentUploadFileDiagnostic["kind"];
+        eligible: boolean;
+        extracted_text?: string | null;
+      }>;
+    }
+  >(
+    "/api/similarity/content-upload",
+    { method: "POST", body, signal },
+    fetcher,
+  );
+  return {
+    matches: (response.data ?? []).map(toResearchRecord),
+    fileName:
+      response.file_name ??
+      (files.length === 1 ? files[0].name : `${files.length} PDF files`),
+    diagnostics: (response.file_diagnostics ?? []).map((item) => ({
+      index: item.index,
+      status: item.status,
+      reason: item.reason,
+      extractionSuccess: item.extraction_success,
+      textLength: item.text_length,
+      detectedChapters: item.detected_chapters,
+      kind: item.kind,
+      eligible: item.eligible,
+      extractedText: item.extracted_text ?? null,
+    })),
+    extractedText: response.extracted_text ?? "",
+  };
 }
 
 export async function listPersistedSimilarityResults(
@@ -1520,13 +2262,12 @@ export function roleLabel(role: Role) {
     .join(" ");
 }
 
-/** The exact public representation from CategoryResource. */
-export interface CategoryResource {
+export interface SdgResource {
   id: number;
-  name: string;
-  slug: string;
-  description: string | null;
-  is_active: boolean;
+  code: string;
+  title: string;
+  short_title: string;
+  color_hex: string;
 }
 
 /** The exact fields returned by ResearchDocumentResource for authenticated actors. */
@@ -1534,7 +2275,6 @@ export interface ResearchDocumentSummaryResource {
   id: number;
   submission_reference?: string | null;
   submitted_by: string | null;
-  category_id: number | null;
   section_id?: number | null;
   title: string;
   normalized_title: string | null;
@@ -1552,14 +2292,15 @@ export interface ResearchDocumentSummaryResource {
   archive_status: InternalResearchResource["archive_status"];
   visibility: InternalResearchResource["visibility"];
   submitted_at: string | null;
+  updated_at: string | null;
   approved_at: string | null;
   archived_at: string | null;
   authors: ResearchAuthorResource[];
-  category: CategoryResource | null;
+  sdgs?: SdgResource[];
 }
 
 export interface ResearchDraftInput {
-  category_id?: number | null;
+  sdg_ids?: number[];
   institute?: string | null;
   degree_program?: string | null;
   title: string;
@@ -1671,18 +2412,6 @@ export async function listAdviserFeedbackHistory(
   ).data;
 }
 
-export async function listAdviserReviewHistory(
-  fetcher: ApiFetch = globalThis.fetch,
-): Promise<InstructorReviewHistoryItem[]> {
-  return (
-    await apiRequest<{ data: InstructorReviewHistoryItem[] }>(
-      "/api/adviser/review-history",
-      undefined,
-      fetcher,
-    )
-  ).data;
-}
-
 export async function listAdviserMonitoring(
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<InstructorMonitoringEntry[]> {
@@ -1721,6 +2450,7 @@ export async function saveAdviserMonitoring(
 export interface InstructorSectionResource {
   id: number;
   name: string;
+  institute: string | null;
   section_code: string | null;
   academic_year: string | null;
   is_active: boolean;
@@ -1731,6 +2461,7 @@ export interface InstructorSectionResource {
 
 export interface InstructorSectionInput {
   name: string;
+  institute: string;
   section_code: string;
   academic_year?: string | null;
 }
@@ -1777,19 +2508,6 @@ export interface InstructorClassReport {
   documents_count: number;
   statuses: Record<string, number>;
   similarity_buckets: { low: number; moderate: number; high: number };
-}
-
-export interface InstructorReviewHistoryItem {
-  id: number;
-  research_document_id: number;
-  title: string;
-  document_file_id: number | null;
-  review_type: string;
-  remarks: string | null;
-  required_action: string | null;
-  status: string;
-  reviewed_at: string | null;
-  created_at: string | null;
 }
 
 export interface InstructorMonitoringEntry {
@@ -1889,6 +2607,7 @@ export interface InstructorStudentResource {
 
 export type ProjectTeamRole =
   | "instructor"
+  | "researcher"
   | "adviser"
   | "research_office_representative"
   | "chair"
@@ -1901,23 +2620,49 @@ export interface ProjectTeamPerson {
   team_role: ProjectTeamRole;
 }
 
+export type SupportRole = "statistician" | "librarian" | "research_editor";
+
+export type SupportAssignmentStatus =
+  | "requested"
+  | "pending"
+  | "accepted"
+  | "confirmed"
+  | "active"
+  | "declined"
+  | "replaced";
+
+/** An active account returned by the research-scoped support account search. */
+export interface EligibleSupportAccountResource {
+  id: string;
+  name: string;
+  email: string;
+  role: SupportRole;
+}
+
 export interface ProjectSupportActor {
   user_id: string;
   name: string;
   email: string | null;
-  assignment_role: "statistician" | "librarian" | "research_editor";
-  status: string;
+  assignment_role: SupportRole;
+  status: SupportAssignmentStatus;
 }
 
 export interface InstructorProjectTeam {
   section_id: number;
   research_document_id: number;
+  defense_type: "proposal" | "final";
   instructor: ProjectTeamPerson | null;
+  researchers: ProjectTeamPerson[];
   adviser: ProjectTeamPerson | null;
   research_office_representative: ProjectTeamPerson | null;
   chair: ProjectTeamPerson | null;
   panel_members: ProjectTeamPerson[];
   support_assignments: {
+    editor: ProjectSupportActor | null;
+    statistician: ProjectSupportActor | null;
+    librarian: ProjectSupportActor | null;
+  };
+  pending_support_assignments?: {
     editor: ProjectSupportActor | null;
     statistician: ProjectSupportActor | null;
     librarian: ProjectSupportActor | null;
@@ -1928,6 +2673,8 @@ export interface InstructorProjectTeam {
 }
 
 export interface InstructorProjectTeamInput {
+  defense_type: "proposal" | "final";
+  researcher_ids: string[];
   adviser_id: string | null;
   research_office_representative_id: string | null;
   chair_id: string | null;
@@ -1935,16 +2682,17 @@ export interface InstructorProjectTeamInput {
 }
 
 export type InstructorProjectTeamRoleKey =
-  "adviser" | "researchOffice" | "chair" | "panelMembers";
+  "researcher" | "adviser" | "researchOffice" | "chair" | "panelMembers";
 
 export async function getInstructorProjectTeam(
   sectionId: string | number,
   researchDocumentId: string | number,
+  defenseType: "proposal" | "final" = "proposal",
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<InstructorProjectTeam> {
   return (
     await apiRequest<{ data: InstructorProjectTeam }>(
-      `/api/instructor/sections/${encodeURIComponent(String(sectionId))}/documents/${encodeURIComponent(String(researchDocumentId))}/team`,
+      `/api/instructor/sections/${encodeURIComponent(String(sectionId))}/documents/${encodeURIComponent(String(researchDocumentId))}/team?defense_type=${encodeURIComponent(defenseType)}`,
       undefined,
       fetcher,
     )
@@ -1984,6 +2732,7 @@ export async function replaceInstructorProjectTeam(
 export async function replaceInstructorProjectTeamRole(
   sectionId: string | number,
   researchDocumentId: string | number,
+  defenseType: "proposal" | "final",
   teamRole: ProjectTeamRole,
   userId: string | null,
   fetcher: ApiFetch = globalThis.fetch,
@@ -1993,7 +2742,11 @@ export async function replaceInstructorProjectTeamRole(
       `/api/instructor/sections/${encodeURIComponent(String(sectionId))}/documents/${encodeURIComponent(String(researchDocumentId))}/team/role`,
       {
         method: "PUT",
-        body: JSON.stringify({ team_role: teamRole, user_id: userId }),
+        body: JSON.stringify({
+          defense_type: defenseType,
+          team_role: teamRole,
+          user_id: userId,
+        }),
       },
       fetcher,
     )
@@ -2257,18 +3010,6 @@ export async function assignInstructorPanelist(
   );
 }
 
-export async function listInstructorReviewHistory(
-  fetcher: ApiFetch = globalThis.fetch,
-): Promise<InstructorReviewHistoryItem[]> {
-  return (
-    await apiRequest<{ data: InstructorReviewHistoryItem[] }>(
-      "/api/instructor/review-history",
-      undefined,
-      fetcher,
-    )
-  ).data;
-}
-
 export async function listInstructorMonitoring(
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<InstructorMonitoringEntry[]> {
@@ -2364,18 +3105,6 @@ export interface PanelEvaluationInput {
   methodology: number;
   clarity: number;
   comments?: string | null;
-}
-
-export async function listPanelSchedule(
-  fetcher: ApiFetch = globalThis.fetch,
-): Promise<DefenseScheduleResource[]> {
-  return (
-    await apiRequest<{ data: DefenseScheduleResource[] }>(
-      "/api/panel/schedule",
-      undefined,
-      fetcher,
-    )
-  ).data;
 }
 
 export async function listPanelAssignments(
@@ -2517,9 +3246,17 @@ export interface SupportAssignmentResource {
   researchers: string[];
   user_id: string;
   name: string | null;
-  assignment_role: "statistician" | "librarian" | "research_editor";
-  status: string;
+  assignment_role: SupportRole;
+  status: SupportAssignmentStatus;
   created_at: string | null;
+}
+
+/** The exact body accepted by the research support-assignment request endpoint. */
+export interface RequestResearchSupportInput {
+  user_id: string;
+  assignment_role: SupportRole;
+  replace_current: boolean;
+  expected_current_assignment_id?: number;
 }
 
 export async function listSupportAssignmentInbox(
@@ -2561,16 +3298,26 @@ export async function listResearchSupportAssignments(
   ).data;
 }
 
-export async function listEligibleSupportUsers(
-  role: SupportAssignmentResource["assignment_role"],
+/**
+ * Searches eligible support accounts for a specific research document. The
+ * document scope lets the API exclude accounts that cannot receive this request.
+ */
+export async function searchEligibleSupportAccounts(
+  researchDocumentId: string | number,
+  role: SupportRole,
+  search: string,
   fetcher: ApiFetch = globalThis.fetch,
-): Promise<Array<{ id: string; name: string; email: string }>> {
+  signal?: AbortSignal,
+): Promise<EligibleSupportAccountResource[]> {
+  const query = new URLSearchParams({
+    research_document_id: String(researchDocumentId),
+    role,
+    search: search.trim(),
+  });
   return (
-    await apiRequest<{
-      data: Array<{ id: string; name: string; email: string }>;
-    }>(
-      `/api/support-assignments/eligible?role=${encodeURIComponent(role)}`,
-      undefined,
+    await apiRequest<{ data: EligibleSupportAccountResource[] }>(
+      `/api/support-assignments/eligible?${query.toString()}`,
+      { signal },
       fetcher,
     )
   ).data;
@@ -2579,8 +3326,9 @@ export async function listEligibleSupportUsers(
 export async function requestResearchSupport(
   researchId: string | number,
   userId: string,
-  assignmentRole: SupportAssignmentResource["assignment_role"],
+  assignmentRole: SupportRole,
   replaceCurrent = false,
+  expectedCurrentAssignmentId?: number,
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<SupportAssignmentResource> {
   return (
@@ -2592,7 +3340,10 @@ export async function requestResearchSupport(
           user_id: userId,
           assignment_role: assignmentRole,
           replace_current: replaceCurrent,
-        }),
+          ...(expectedCurrentAssignmentId === undefined
+            ? {}
+            : { expected_current_assignment_id: expectedCurrentAssignmentId }),
+        } satisfies RequestResearchSupportInput),
       },
       fetcher,
     )
@@ -2604,7 +3355,6 @@ export interface LibrarianResearchItem {
   title: string;
   researchers: string[];
   program: string | null;
-  category: string | null;
   academic_year: number | null;
   research_stage: string;
   submission_status: string;
@@ -2639,18 +3389,6 @@ export async function saveLibrarianReferenceReview(
     { method: "POST", body: JSON.stringify(input) },
     fetcher,
   );
-}
-
-export async function listLibrarianReviewHistory(
-  fetcher: ApiFetch = globalThis.fetch,
-): Promise<InstructorReviewHistoryItem[]> {
-  return (
-    await apiRequest<{ data: InstructorReviewHistoryItem[] }>(
-      "/api/librarian/review-history",
-      undefined,
-      fetcher,
-    )
-  ).data;
 }
 
 export async function listLibrarianMonitoring(
@@ -2710,17 +3448,7 @@ export async function saveEditorReview(
     fetcher,
   );
 }
-export async function listEditorHistory(
-  fetcher: ApiFetch = globalThis.fetch,
-): Promise<InstructorReviewHistoryItem[]> {
-  return (
-    await apiRequest<{ data: InstructorReviewHistoryItem[] }>(
-      "/api/editor/review-history",
-      undefined,
-      fetcher,
-    )
-  ).data;
-}
+
 export async function listEditorMonitoring(
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<InstructorMonitoringEntry[]> {
@@ -2757,6 +3485,8 @@ export interface SharedMonitoringResearch {
   research_stage: string;
   institute?: string | null;
   researchers: string[];
+  assignment_id?: number | null;
+  assignment_status?: string | null;
 }
 export interface SharedMonitoringEntry {
   id: number;
@@ -2776,8 +3506,17 @@ export interface SharedMonitoringData {
   research_document_id: number;
   title: string;
   researchers: string[];
+  editable_stages: Array<
+    | "before_proposal_defense"
+    | "after_proposal_defense"
+    | "before_final_defense"
+    | "after_final_defense"
+  >;
   stages: Record<
-    "before_proposal_defense" | "after_proposal_defense",
+    | "before_proposal_defense"
+    | "after_proposal_defense"
+    | "before_final_defense"
+    | "after_final_defense",
     {
       sections: Array<{
         designation: string;
@@ -2958,35 +3697,174 @@ export interface CoordinatorScheduleUpdateInput {
   status?: "scheduled" | "completed" | "cancelled";
 }
 
-export interface DuplicateFlagResource {
-  id: number;
-  overall_similarity_score: string | null;
-  classification: "low" | "moderate" | "high" | null;
-  adviser_review_required: boolean;
-  analyzed_at: string | null;
-  source: {
-    research_document_id: number;
-    title: string | null;
-    submission_status: string | null;
-    research_stage: string | null;
-  };
-  matched: {
-    research_document_id: number;
-    title: string | null;
-    submission_status: string | null;
-    research_stage: string | null;
-  };
-}
-
 export interface AdviserLoadItem {
   user_id: string;
   name: string | null;
   email: string | null;
   active_assignments: number;
+  studies: Array<{
+    id: number;
+    title: string | null;
+    submission_status: string | null;
+    research_stage: string | null;
+  }>;
+}
+
+export interface CoordinatorAssignmentUser {
+  id: string;
+  name: string;
+  email: string;
+  role: "instructor" | "adviser";
+  access_status: "active" | "invited" | "blocked";
+  created_at: string | null;
+}
+
+export interface CoordinatorAssignmentStudy {
+  id: number;
+  title: string | null;
+  researchers: string[];
+  instructor: Pick<CoordinatorAssignmentUser, "id" | "name"> | null;
+  adviser: Pick<CoordinatorAssignmentUser, "id" | "name"> | null;
+  status: string | null;
+  research_stage: string | null;
+  academic_year: string | null;
+  updated_at: string | null;
+  detail_url: string;
+  abstract?: string | null;
+  keywords?: string | null;
+  degree_program?: string | null;
+  institute?: string | null;
+}
+
+export interface CoordinatorAssignmentsPage {
+  data: CoordinatorAssignmentUser[];
+  summary: {
+    total_users: number;
+    total_instructors: number;
+    total_advisers: number;
+    inactive_users: number;
+  };
+  meta: LaravelPaginationMeta;
+}
+
+export async function listCoordinatorResearchAssignments(
+  query: {
+    search?: string;
+    role?: "instructor" | "adviser" | "";
+    access_status?: "active" | "invited" | "blocked" | "";
+    sort?: "name" | "email" | "role" | "access_status" | "created_at";
+    direction?: "asc" | "desc";
+    page?: number;
+    per_page?: number;
+  } = {},
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<CoordinatorAssignmentsPage> {
+  const params = new URLSearchParams();
+  Object.entries(query).forEach(([key, value]) => {
+    if (value !== undefined && value !== "") params.set(key, String(value));
+  });
+  const suffix = params.toString();
+  return apiRequest<CoordinatorAssignmentsPage>(
+    `/api/coordinator/research-assignments${suffix ? `?${suffix}` : ""}`,
+    undefined,
+    fetcher,
+  );
+}
+
+export async function getCoordinatorAssignmentStudies(
+  userId: string,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<{
+  user: CoordinatorAssignmentUser;
+  studies: CoordinatorAssignmentStudy[];
+}> {
+  return (
+    await apiRequest<{
+      data: {
+        user: CoordinatorAssignmentUser;
+        studies: CoordinatorAssignmentStudy[];
+      };
+    }>(
+      `/api/coordinator/research-assignments/${encodeURIComponent(userId)}`,
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export async function getCoordinatorResearchDetails(
+  researchDocumentId: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<CoordinatorAssignmentStudy> {
+  return (
+    await apiRequest<{ data: CoordinatorAssignmentStudy }>(
+      `/api/coordinator/research-details/${encodeURIComponent(String(researchDocumentId))}`,
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export interface CoordinatorRepositoryListInput {
+  bucket?: OfficeRepositoryBucket;
+  search?: string;
+  visibility?: string;
+  publication_year?: number;
+  sort?:
+    | "title"
+    | "submission_status"
+    | "visibility"
+    | "publication_year"
+    | "updated_at";
+  direction?: "asc" | "desc";
+  page?: number;
+  per_page?: 10 | 25 | 50 | 100;
+}
+
+export function listCoordinatorRepository(
+  input: CoordinatorRepositoryListInput = {},
+  fetcher: ApiFetch = globalThis.fetch,
+  signal?: AbortSignal,
+): Promise<CoordinatorRepositoryResponse> {
+  return apiRequest(
+    adminQuery("/api/coordinator/repository", {
+      bucket: input.bucket ?? "all",
+      search: input.search?.trim(),
+      visibility: input.visibility,
+      publication_year: input.publication_year,
+      sort: input.bucket === "recycle" ? undefined : input.sort,
+      direction: input.bucket === "recycle" ? undefined : input.direction,
+      page: input.page,
+      per_page: input.per_page,
+    }),
+    { signal },
+    fetcher,
+  );
+}
+
+export async function getCoordinatorRepositoryDetail(
+  researchDocumentId: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+  signal?: AbortSignal,
+): Promise<OfficeRepositoryDetailResource> {
+  return (
+    await apiRequest<{ data: OfficeRepositoryDetailResource }>(
+      `/api/coordinator/repository/${encodeURIComponent(String(researchDocumentId))}`,
+      { signal },
+      fetcher,
+    )
+  ).data;
+}
+
+export function coordinatorRepositoryDownloadUrl(
+  researchDocumentId: string | number,
+): string {
+  return `/api/coordinator/repository/${encodeURIComponent(String(researchDocumentId))}/download`;
 }
 
 export interface CoordinatorProgramReport {
   schema_version: 1;
+  filters: { institute: string | null; program: string | null };
   counts: {
     active_instructors: number;
     active_advisers: number;
@@ -3004,7 +3882,126 @@ export interface CoordinatorProgramReport {
     methodology_signed_off: number;
   };
   by_section: Array<{ id: number; name: string; documents_count: number }>;
+  instructors: CoordinatorReportInstructor[];
   adviser_load: AdviserLoadItem[];
+  studies: CoordinatorReportStudy[];
+  researchers: CoordinatorReportResearcher[];
+  defense_schedules: CoordinatorReportDefense[];
+  evaluations: CoordinatorReportEvaluation[];
+  methodology_reviews: CoordinatorReportMethodology[];
+  active_instructors_list: Array<{ id: string; name: string; email: string }>;
+  active_advisers_list: Array<{ id: string; name: string; email: string }>;
+}
+
+export async function getResearchProjectTeam(
+  researchDocumentId: string | number,
+  defenseType: "proposal" | "final" = "proposal",
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<InstructorProjectTeam> {
+  return (
+    await apiRequest<{ data: InstructorProjectTeam }>(
+      `/api/research/${encodeURIComponent(String(researchDocumentId))}/team?defense_type=${defenseType}`,
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export async function listInstitutes(
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<string[]> {
+  return (
+    await apiRequest<{ data: string[] }>("/api/institutes", undefined, fetcher)
+  ).data;
+}
+
+export async function createInstitute(
+  name: string,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<string> {
+  return (
+    await apiRequest<{ data: string }>(
+      "/api/admin/institutes",
+      { method: "POST", body: JSON.stringify({ name }) },
+      fetcher,
+    )
+  ).data;
+}
+
+export async function deleteInstitute(
+  name: string,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<void> {
+  await apiRequest(
+    `/api/admin/institutes/${encodeURIComponent(name)}`,
+    { method: "DELETE" },
+    fetcher,
+  );
+}
+
+export interface CoordinatorReportStudy {
+  id: number;
+  title: string | null;
+  research_stage: string | null;
+  submission_status: string | null;
+  institute: string | null;
+  degree_program: string | null;
+  section: string | null;
+  updated_at: string | null;
+}
+
+export async function listCoordinatorReportStudies(
+  input: { status: string; program?: string; page?: number; per_page?: number },
+  fetcher: ApiFetch = globalThis.fetch,
+  signal?: AbortSignal,
+): Promise<LaravelPaginatedResponse<CoordinatorReportStudy>> {
+  return apiRequest(
+    adminQuery("/api/coordinator/reports/studies", input),
+    { signal },
+    fetcher,
+  );
+}
+
+export interface CoordinatorReportResearcher {
+  user_id: string;
+  name: string | null;
+  email: string | null;
+  documents_count: number;
+}
+
+export interface CoordinatorReportDefense {
+  id: number;
+  title: string | null;
+  research_stage: string | null;
+  submission_status: string | null;
+  status: string;
+  scheduled_at: string | null;
+  room: string | null;
+}
+
+export interface CoordinatorReportEvaluation {
+  id: number;
+  title: string | null;
+  panelist: string | null;
+  originality: number | null;
+  methodology: number | null;
+  clarity: number | null;
+  submitted_at: string | null;
+}
+
+export interface CoordinatorReportMethodology {
+  id: number;
+  title: string | null;
+  statistician: string | null;
+  signed_off_at: string | null;
+}
+
+export interface CoordinatorReportInstructor {
+  user_id: string;
+  name: string;
+  email: string;
+  sections: string[];
+  studies: Array<{ id: number; title: string }>;
 }
 
 export async function listCoordinatorSchedules(
@@ -3046,18 +4043,6 @@ export async function updateCoordinatorSchedule(
   ).data;
 }
 
-export async function listDuplicateFlags(
-  fetcher: ApiFetch = globalThis.fetch,
-): Promise<DuplicateFlagResource[]> {
-  return (
-    await apiRequest<{ data: DuplicateFlagResource[] }>(
-      "/api/coordinator/duplicate-flags",
-      undefined,
-      fetcher,
-    )
-  ).data;
-}
-
 export async function listAdviserLoad(
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<AdviserLoadItem[]> {
@@ -3070,12 +4055,51 @@ export async function listAdviserLoad(
   ).data;
 }
 
+export interface CoordinatorProgramOverview {
+  schema_version: 1;
+  institute: { name: string };
+  counts: {
+    total_users: number;
+    total_instructors: number;
+    total_advisers: number;
+    total_studies: number;
+  };
+  adviser_workload: AdviserLoadItem[];
+  repository_status: { total: number; ongoing: number; archived: number };
+  recent_activity: Array<{
+    id: string;
+    type: string;
+    label: string;
+    research_document_id: number;
+    title: string;
+    occurred_at: string | null;
+  }>;
+}
+
+export async function getCoordinatorProgramOverview(
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<CoordinatorProgramOverview> {
+  return (
+    await apiRequest<{ data: CoordinatorProgramOverview }>(
+      "/api/coordinator/program-overview",
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
 export async function getCoordinatorProgramReport(
+  program?: string,
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<CoordinatorProgramReport> {
+  const params = new URLSearchParams();
+  if (program && program.trim() !== "") {
+    params.set("program", program.trim());
+  }
+  const query = params.toString();
   return (
     await apiRequest<{ data: CoordinatorProgramReport }>(
-      "/api/coordinator/reports",
+      `/api/coordinator/reports${query ? `?${query}` : ""}`,
       undefined,
       fetcher,
     )
@@ -3089,7 +4113,6 @@ export interface MetadataCompleteness {
   abstract: boolean;
   keywords: boolean;
   authors: boolean;
-  category: boolean;
 }
 
 export interface ArchivingQueueItem {
@@ -3099,7 +4122,6 @@ export interface ArchivingQueueItem {
   archive_status: string;
   visibility: string;
   publication_year: number | null;
-  category: string | null;
   metadata_completeness: MetadataCompleteness;
   updated_at: string | null;
 }
@@ -3107,12 +4129,16 @@ export interface ArchivingQueueItem {
 export interface RepositoryCatalogRow {
   id: number;
   title: string;
-  category: { id: number; name: string } | null;
   submission_status: string;
   archive_status: string;
   visibility: string;
   publication_year: number | null;
   updated_at: string | null;
+  authors: Array<{ id: number; author_name: string }>;
+}
+
+export interface RepositoryCatalogResponse extends LaravelPaginatedResponse<RepositoryCatalogRow> {
+  filters: { years: number[] };
 }
 
 export interface MetadataStandardsItem {
@@ -3121,7 +4147,6 @@ export interface MetadataStandardsItem {
   submission_status: string;
   archive_status: string;
   publication_year: number | null;
-  category: string | null;
   metadata_completeness: MetadataCompleteness;
   metadata_review: {
     id: number;
@@ -3129,7 +4154,6 @@ export interface MetadataStandardsItem {
     abstract_complete: boolean;
     authors_complete: boolean;
     keywords_complete: boolean;
-    category_complete: boolean;
     notes: string | null;
     review_status: string;
   } | null;
@@ -3140,7 +4164,6 @@ export interface MetadataReviewInput {
   abstract_complete?: boolean | null;
   authors_complete?: boolean | null;
   keywords_complete?: boolean | null;
-  category_complete?: boolean | null;
   notes?: string | null;
   review_status?: "pending" | "complete" | "needs_correction";
 }
@@ -3152,7 +4175,6 @@ export interface MetadataReviewResource {
   abstract_complete: boolean;
   authors_complete: boolean;
   keywords_complete: boolean;
-  category_complete: boolean;
   notes: string | null;
   review_status: string;
 }
@@ -3190,20 +4212,109 @@ export async function listArchivingQueue(
   ).data;
 }
 
-export function listRepositoryCatalog(
+export async function listRepositoryCatalog(
   input: {
     search?: string;
-    category?: string | number;
+    visibility?: "private" | "registered_only" | "public";
+    year?: number;
     page?: number;
     per_page?: number;
+    sort?:
+      | "title"
+      | "submission_status"
+      | "archive_status"
+      | "visibility"
+      | "publication_year"
+      | "updated_at";
+    direction?: "asc" | "desc";
   } = {},
   fetcher: ApiFetch = globalThis.fetch,
-): Promise<LaravelPaginatedResponse<RepositoryCatalogRow>> {
-  return apiRequest(
-    adminQuery("/api/librarian/catalog", input),
-    undefined,
-    fetcher,
-  );
+): Promise<RepositoryCatalogResponse> {
+  const response = await apiRequest<
+    | LaravelPaginatedResponse<RepositoryCatalogRow>
+    | {
+        filters?: { years: number[] };
+        data: {
+          data: RepositoryCatalogRow[];
+          current_page: number;
+          from: number | null;
+          last_page: number;
+          links: Array<{ url: string | null; label: string; active: boolean }>;
+          path: string;
+          per_page: number;
+          to: number | null;
+          total: number;
+          first_page_url: string | null;
+          last_page_url: string | null;
+          prev_page_url: string | null;
+          next_page_url: string | null;
+        };
+      }
+  >(adminQuery("/api/librarian/catalog", input), undefined, fetcher);
+
+  if ("meta" in response) {
+    return {
+      ...response,
+      filters:
+        "filters" in response &&
+        response.filters !== null &&
+        typeof response.filters === "object" &&
+        "years" in response.filters &&
+        Array.isArray(response.filters.years)
+          ? { years: response.filters.years.map(Number) }
+          : { years: [] },
+    };
+  }
+
+  const page = response.data;
+
+  return {
+    data: page.data,
+    links: {
+      first: page.first_page_url,
+      last: page.last_page_url,
+      prev: page.prev_page_url,
+      next: page.next_page_url,
+    },
+    meta: {
+      current_page: page.current_page,
+      from: page.from,
+      last_page: page.last_page,
+      links: page.links,
+      path: page.path,
+      per_page: page.per_page,
+      to: page.to,
+      total: page.total,
+    },
+    filters: response.filters ?? { years: [] },
+  };
+}
+
+export async function listLibrarianRepositoryFiles(
+  researchDocumentId: string | number,
+  fetcher: ApiFetch = globalThis.fetch,
+): Promise<DocumentFileResource[]> {
+  return (
+    await apiRequest<{ data: DocumentFileResource[] }>(
+      `/api/librarian/catalog/${encodeURIComponent(String(researchDocumentId))}/files`,
+      undefined,
+      fetcher,
+    )
+  ).data;
+}
+
+export function librarianRepositoryFilePreviewUrl(
+  researchDocumentId: string | number,
+  fileId: string | number,
+) {
+  return `/api/librarian/catalog/${encodeURIComponent(String(researchDocumentId))}/files/${encodeURIComponent(String(fileId))}/preview`;
+}
+
+export function librarianRepositoryFileDownloadUrl(
+  researchDocumentId: string | number,
+  fileId: string | number,
+) {
+  return `/api/librarian/catalog/${encodeURIComponent(String(researchDocumentId))}/files/${encodeURIComponent(String(fileId))}/download`;
 }
 
 export async function listMetadataStandards(
@@ -3315,11 +4426,20 @@ export interface InstitutionalReport {
   };
   by_institute: Array<{ institute: string; total: number }>;
   by_status: Array<{ status: string; total: number }>;
+  by_sdg?: Array<{
+    id: number;
+    code: string;
+    title: string;
+    color_hex: string;
+    total: number;
+  }>;
 }
 
 export interface OfficeInstituteStudy {
+  id: number;
   year: string;
   title: string;
+  sdgs?: SdgResource[];
 }
 
 export async function listComplianceQueue(
@@ -3355,11 +4475,13 @@ export async function listOfficeUsers(
     access_status?: AccessStatus;
     page?: number;
     per_page?: number;
+    sort?: "last_name" | "email" | "role" | "access_status" | "created_at";
+    direction?: "asc" | "desc";
   } = {},
   fetcher: ApiFetch = globalThis.fetch,
-): Promise<LaravelPaginatedResponse<OfficeUserRow>> {
+): Promise<UserDirectoryResponse<OfficeUserRow>> {
   const response = await apiRequest<
-    | LaravelPaginatedResponse<OfficeUserRow>
+    | UserDirectoryResponse<OfficeUserRow>
     | {
         data: {
           data: OfficeUserRow[];
@@ -3376,6 +4498,7 @@ export async function listOfficeUsers(
           prev_page_url: string | null;
           next_page_url: string | null;
         };
+        summary: UserDirectorySummary;
       }
   >(adminQuery("/api/office/users", input), undefined, fetcher);
   if ("meta" in response) return response;
@@ -3400,6 +4523,7 @@ export async function listOfficeUsers(
       to: page.to,
       total: page.total,
     },
+    summary: response.summary,
   };
 }
 
@@ -3458,7 +4582,7 @@ export function officeInstituteStudyOpenUrl(
   institute: string,
   study: OfficeInstituteStudy,
 ): string {
-  return `/api/office/institutes/${encodeURIComponent(institute)}/studies/${encodeURIComponent(study.year)}/${encodeURIComponent(study.title)}/open`;
+  return `/api/office/institutes/${encodeURIComponent(institute)}/studies/${encodeURIComponent(study.year)}/${encodeURIComponent(study.title)}/open?id=${encodeURIComponent(String(study.id))}`;
 }
 
 /* -------------------------------- Researcher APIs -------------------------------- */
@@ -3467,6 +4591,8 @@ export function listResearchDocuments(
   input: {
     mine?: boolean;
     submission_status?: ResearchDocumentSummaryResource["submission_status"];
+    sort?: "title" | "submission_status" | "updated_at";
+    direction?: "asc" | "desc";
     page?: number;
     per_page?: number;
   } = {},
@@ -3497,7 +4623,7 @@ export async function createResearchDraft(
 
 export async function updateResearchDraft(
   researchDocumentId: string | number,
-  input: ResearchDraftInput,
+  input: ResearchDraftInput | ResearchMetadataInput,
   fetcher: ApiFetch = globalThis.fetch,
 ): Promise<ResearchDocumentSummaryResource> {
   return (
@@ -3522,15 +4648,11 @@ export async function submitResearchDocument(
   ).data;
 }
 
-export async function listCategories(
+export async function listSdgs(
   fetcher: ApiFetch = globalThis.fetch,
-): Promise<CategoryResource[]> {
+): Promise<SdgResource[]> {
   return (
-    await apiRequest<{ data: CategoryResource[] }>(
-      "/api/categories",
-      undefined,
-      fetcher,
-    )
+    await apiRequest<{ data: SdgResource[] }>("/api/sdgs", undefined, fetcher)
   ).data;
 }
 
@@ -3572,9 +4694,9 @@ export interface AccessRequestResource {
 
 export interface AccessRequestInput {
   requested_role: RequestableRole;
-  full_name?: string;
-  program?: string;
-  justification?: string;
+  full_name: string;
+  program: string;
+  justification: string;
 }
 
 export async function getMyAccessRequest(

@@ -15,14 +15,14 @@ The thesis claim remains exactly eight major entities:
 7. `NOTIFICATIONS`
 8. `MONITORING_LOGS`
 
-Supporting and workflow implementation entities are `categories`, `research_authors`, `document_files`, `manuscript_search_documents`, `title_validations`, `audit_logs`, `research_review_assignments`, `class_sections`, `class_section_members`, `defense_schedules`, `evaluations`, `methodology_reviews`, `compliance_reviews`, `metadata_reviews`, `saved_library_items`, `retention_logs`, and `privacy_logs`. `sessions` and `migrations` are Laravel framework tables. There are no vector tables.
+Supporting and workflow implementation entities are `research_authors`, `document_files`, `manuscript_search_documents`, `title_validations`, `audit_logs`, `research_review_assignments`, `class_sections`, `class_section_members`, `defense_schedules`, `evaluations`, `methodology_reviews`, `compliance_reviews`, `metadata_reviews`, `saved_library_items`, `retention_logs`, and `privacy_logs`. `sessions` and `migrations` are Laravel framework tables. There are no vector tables.
 
 ## Conventions and key decisions
 
 - The active local driver is MariaDB. The schema targets `utf8mb4` and InnoDB with strict mode.
 - User identifiers are UUID strings stored as `CHAR(36)`. Domain identifiers are auto-incrementing unsigned `BIGINT` values unless noted otherwise. `notifications.id` is a UUID.
 - Eloquent casts are application behavior. MariaDB enum and check constraints are database behavior. Both are listed below.
-- `USERS` and `categories` use Laravel soft deletes. The other application tables do not have a soft-delete column unless stated. Monitoring and audit rows are append-only and their models reject update and delete operations.
+- `USERS` use Laravel soft deletes. The other application tables do not have a soft-delete column unless stated. Monitoring and audit rows are append-only and their models reject update and delete operations.
 - Research metadata has both the original `title` and an indexed `normalized_title`. The original title is displayed and preserved. `ResearchService` derives the normalized value by lowercasing, replacing non-alphanumeric runs with spaces, and trimming. It is not a replacement for the original title.
 - Uploaded file rows retain every version. `is_current` moves from the previous row to the new row for each document and type. The database does not enforce immutable `document_files` updates, but the upload service appends versions rather than replacing file rows.
 - Private files use the `researchnav_private` local disk at `storage/app/private`. A stored path is `research/{research_document_id}/{uuid}.{extension}`. Files are served through the authenticated download route, not the public disk.
@@ -90,7 +90,6 @@ Columns and constraints:
 - `id` unsigned `BIGINT`, primary key, auto-increment.
 - `submitted_by` `CHAR(36)`, required FK to `users.id`.
 - `submission_reference` required unique `VARCHAR(40)`; legacy rows are backfilled as deterministic `RN-LEGACY-` references before the constraint is applied.
-- `category_id` unsigned `BIGINT`, nullable FK to `categories.id`.
 - `section_id` unsigned `BIGINT`, nullable FK to `class_sections.id`, nulls on section deletion and restricts on section update.
 - `title` `VARCHAR(500)`, original title.
 - `normalized_title` `VARCHAR(500)`, nullable, indexed normalized title used for comparison and search support.
@@ -111,9 +110,9 @@ Columns and constraints:
 
 Model casts: `publication_year` integer; the five date fields are datetime. Statuses and visibility remain strings backed by enums.
 
-Indexes: `research_documents_submitter_status_idx` on (`submitted_by`, `submission_status`); `research_documents_category_year_idx` on (`category_id`, `publication_year`); `research_documents_stage_status_archive_idx` on (`research_stage`, `submission_status`, `archive_status`); `research_documents_visibility_status_idx` on (`visibility`, `submission_status`); `rd_section_stage_idx` on (`section_id`, `research_stage`); single-column indexes on `normalized_title`, `title` (`rd_title_idx`), `category_id` (`rd_category_idx`), `publication_year` (`rd_year_idx`), `research_stage` (`rd_stage_idx`), `submission_status` (`rd_submission_status_idx`), `archive_status` (`rd_archive_status_idx`), `visibility` (`rd_visibility_idx`), `submitted_by` (`rd_submitted_by_idx`), and `submitted_at` (`rd_submitted_at_idx`).
+Indexes: `research_documents_submitter_status_idx` on (`submitted_by`, `submission_status`); `research_documents_stage_status_archive_idx` on (`research_stage`, `submission_status`, `archive_status`); `research_documents_visibility_status_idx` on (`visibility`, `submission_status`); `rd_section_stage_idx` on (`section_id`, `research_stage`); single-column indexes on `normalized_title`, `title` (`rd_title_idx`), `publication_year` (`rd_year_idx`), `research_stage` (`rd_stage_idx`), `submission_status` (`rd_submission_status_idx`), `archive_status` (`rd_archive_status_idx`), `visibility` (`rd_visibility_idx`), `submitted_by` (`rd_submitted_by_idx`), and `submitted_at` (`rd_submitted_at_idx`).
 
-Relationships: belongs to the submitter and optional category; belongs to an optional class section; has authors, files, similarity results as source and matched document, feedback comments, revisions, monitoring logs, title validations, review assignments, defense schedules, evaluations, methodology reviews, compliance reviews, metadata reviews, saved library entries, and retention logs. Both document foreign keys in `similarity_results` restrict deletion. The submitter and category foreign keys also restrict deletion and update.
+Relationships: belongs to the submitter and an optional class section; has authors, files, similarity results as source and matched document, feedback comments, revisions, monitoring logs, title validations, review assignments, defense schedules, evaluations, methodology reviews, compliance reviews, metadata reviews, saved library entries, and retention logs. Both document foreign keys in `similarity_results` restrict deletion. The submitter foreign key restricts deletion and update.
 
 Reviewed corpus imports match only the immutable source checksum, reject title and normalized-title collisions, preserve the original import owner, and validate every source as a contained, non-symlink OOXML package. The current corpus has eleven DOCX files but ten distinct studies because the two Caralos files have the same checksum. Canonical files are copied to private storage; source filenames and checksums are not public metadata.
 
@@ -174,14 +173,6 @@ Purpose: the built-in notification table used by the custom `ResearchDatabaseCha
 Columns and constraints: UUID `id` primary key; `type` string; `notifiable_type` and UUID `notifiable_id` from `uuidMorphs('notifiable')`; nullable `research_document_id` unsigned `BIGINT` FK to `research_documents.id`; `data` text; nullable `read_at` timestamp; and `created_at`, `updated_at` timestamps. The research document FK nulls on delete and restricts on update.
 
 `notifiable_type` and `notifiable_id` are a polymorphic application link and have no FK to `users` or any other table. The custom channel creates rows through the notifiable model and stores the document ID separately when present. Indexes are the morph index from `uuidMorphs` and `research_document_id`.
-
-### Supporting table: `categories`
-
-Purpose: research classification.
-
-Columns: `id` unsigned `BIGINT` primary key; unique `name` `VARCHAR(150)`; unique `slug` `VARCHAR(180)`; nullable `description` text; `is_active` boolean default `true`, cast to boolean; `created_at`, `updated_at`; and nullable `deleted_at` for Eloquent soft deletes.
-
-Indexes: unique `name`, unique `slug`, and (`is_active`, `name`). A document's category FK restricts category deletion and update. Soft-deleted categories remain physically present and are excluded by ordinary model queries.
 
 ### Supporting table: `research_authors`
 
@@ -277,9 +268,9 @@ One review per document (unique `research_document_id`, named `compliance_review
 
 Purpose: librarian completeness review of repository metadata.
 
-Columns: `id` unsigned `BIGINT` primary key; required `research_document_id` FK; nullable `reviewed_by` `CHAR(36)` FK to `users.id`; booleans `title_complete`, `abstract_complete`, `authors_complete`, `keywords_complete`, and `category_complete`, all default `false`; nullable `notes` text; `review_status` enum `pending`, `complete`, `needs_correction`, default `pending`; and `created_at`, `updated_at` datetime(6). The document FK restricts deletion and update; the reviewer FK nulls on user deletion and restricts on update.
+Columns: `id` unsigned `BIGINT` primary key; required `research_document_id` FK; nullable `reviewed_by` `CHAR(36)` FK to `users.id`; booleans `title_complete`, `abstract_complete`, `authors_complete`, and `keywords_complete`, all default `false`; nullable `notes` text; `review_status` enum `pending`, `complete`, `needs_correction`, default `pending`; and `created_at`, `updated_at` datetime(6). The document FK restricts deletion and update; the reviewer FK nulls on user deletion and restricts on update.
 
-One review per document (unique `research_document_id`, named `metadata_review_document_unique`). The model casts the five completeness booleans.
+One review per document (unique `research_document_id`, named `metadata_review_document_unique`). The model casts the four completeness booleans.
 
 ### Supporting table: `saved_library_items`
 
@@ -336,7 +327,7 @@ draft -> submitted -> under_review -> approved -> archived
 
 ## Referential actions summary
 
-The schema uses restrict-on-delete for required document, category, role, submitter, uploader, reviewer, assigner, validator, requester, section instructor, defense creator, panelist, statistician, and similarity references. `class_section_members.class_section_id` cascades on section deletion. Optional historical actor references use null-on-delete for `research_authors.user_id`, `monitoring_logs.performed_by`, `audit_logs.user_id`, `compliance_reviews.reviewed_by`, `metadata_reviews.reviewed_by`, `retention_logs` and `privacy_logs` FKs, and `research_documents.section_id` nulls on section deletion. Optional file references in feedback and revisions null on file deletion. The optional notification document reference nulls on document deletion. User soft deletes do not cascade to domain rows.
+The schema uses restrict-on-delete for required document, role, submitter, uploader, reviewer, assigner, validator, requester, section instructor, defense creator, panelist, statistician, and similarity references. `class_section_members.class_section_id` cascades on section deletion. Optional historical actor references use null-on-delete for `research_authors.user_id`, `monitoring_logs.performed_by`, `audit_logs.user_id`, `compliance_reviews.reviewed_by`, `metadata_reviews.reviewed_by`, `retention_logs` and `privacy_logs` FKs, and `research_documents.section_id` nulls on section deletion. Optional file references in feedback and revisions null on file deletion. The optional notification document reference nulls on document deletion. User soft deletes do not cascade to domain rows.
 
 ## Manuscript search projection rules
 

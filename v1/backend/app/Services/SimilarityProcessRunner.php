@@ -138,9 +138,129 @@ class SimilarityProcessRunner implements SimilarityProcess
      */
     public function runContentTextQuery(string $query, Collection $candidates): array
     {
+        return $this->runStandaloneContentQuery('query', $query, $candidates);
+    }
+
+    /**
+     * Compare extracted upload text with trusted cached candidate content.
+     *
+     * @param  Collection<int, ResearchDocument>  $candidates
+     * @return array<int, array<string, mixed>>
+     */
+    /** @param list<string> $uploadedFileHashes */
+    public function runUploadedContentQuery(string $uploadedContent, Collection $candidates, array $uploadedFileHashes = []): array
+    {
         $decoded = $this->execute([
-            'query' => $query,
-            'candidates' => $candidates->map(fn (ResearchDocument $candidate): array => $this->queryRecord($candidate))->values()->all(),
+            'uploaded_content' => $uploadedContent,
+            'candidates' => $candidates->map(function (ResearchDocument $candidate) use ($uploadedFileHashes): array {
+                $projection = $candidate->manuscriptSearchDocument;
+                $projections = app(ManuscriptSearchProjectionService::class);
+                $hasExactSource = $projections->hasCurrentSourceHash($candidate, $uploadedFileHashes);
+                $hasCurrentFiles = $candidate->files->contains(
+                    fn ($file): bool => $file->is_current && $file->document_type === 'final_manuscript',
+                );
+                $current = ! $hasCurrentFiles || $projections->isCurrentReadyProjection($candidate, $projection);
+                $content = $current ? $projection->body_text : ($hasExactSource ? $projections->currentCanonicalText($candidate) : null);
+
+                return ['id' => (int) $candidate->id, 'title' => $candidate->title, 'content' => $content];
+            })->filter(fn (array $candidate): bool => is_string($candidate['content']) && trim($candidate['content']) !== '')->values()->all(),
+        ]);
+        $policy = $this->policy ?? app(SimilarityScorePolicy::class);
+
+        return collect($this->validateUploadedContentOutput($decoded, $candidates))
+            ->map(function (array $result) use ($policy): array {
+                $score = $result['content_similarity_score'];
+                if ($result['exact_content_match']) {
+                    $score = '1.000000000000';
+                } elseif ($score === '1.000000000000') {
+                    $score = '0.999999999999';
+                }
+
+                return [
+                    ...$result,
+                    ...$policy->evaluateStandalone($score, false),
+                    'title_similarity_score' => $score,
+                    'content_similarity_score' => $score,
+                    'score_status' => 'scored',
+                ];
+            })
+            ->map(function (array $result): array {
+                unset($result['exact_content_match']);
+
+                return $result;
+            })
+            ->sortBy([
+                ['content_similarity_score', 'desc'],
+                ['matched_research_id', 'asc'],
+            ])
+            ->values()
+            ->all();
+    }
+
+    /** @return list<int> */
+    public function detectUploadedContentChapters(string $uploadedContent, bool $requireChapterOne = false): array
+    {
+        $decoded = $this->execute([
+            'scope_text' => $uploadedContent,
+            'require_chapter_one' => $requireChapterOne,
+        ]);
+        if (array_keys($decoded) !== ['status', 'chapters', 'scope_characters']
+            || $decoded['status'] !== 'valid'
+            || ! is_array($decoded['chapters'])
+            || ! is_int($decoded['scope_characters'])
+            || $decoded['scope_characters'] < 1) {
+            throw new SimilarityProcessException('Similarity worker scope response is invalid.');
+        }
+        foreach ($decoded['chapters'] as $chapter) {
+            if (! is_int($chapter) || $chapter < 1 || $chapter > 10) {
+                throw new SimilarityProcessException('Similarity worker scope response is invalid.');
+            }
+        }
+
+        return array_values(array_unique($decoded['chapters']));
+    }
+
+    /**
+     * @param  list<string>  $uploadedContents
+     * @return list<list<int>>
+     */
+    public function detectUploadedContentChaptersBatch(array $uploadedContents): array
+    {
+        $decoded = $this->execute(['scope_texts' => array_map(
+            fn (string $text): array => ['text' => $text, 'require_chapter_one' => false],
+            $uploadedContents,
+        )]);
+        if (array_keys($decoded) !== ['results'] || ! is_array($decoded['results']) || count($decoded['results']) !== count($uploadedContents)) {
+            throw new SimilarityProcessException('Similarity worker scope response is invalid.');
+        }
+
+        $chapters = [];
+        foreach ($decoded['results'] as $result) {
+            if (! is_array($result) || array_keys($result) !== ['status', 'chapters']
+                || ! in_array($result['status'], ['valid', 'supporting'], true) || ! is_array($result['chapters'])
+                || ($result['status'] === 'supporting' && $result['chapters'] !== [])) {
+                throw new SimilarityProcessException('Similarity worker scope response is invalid.');
+            }
+            foreach ($result['chapters'] as $chapter) {
+                if (! is_int($chapter) || $chapter < 1 || $chapter > 10) {
+                    throw new SimilarityProcessException('Similarity worker scope response is invalid.');
+                }
+            }
+            $chapters[] = array_values(array_unique($result['chapters']));
+        }
+
+        return $chapters;
+    }
+
+    /**
+     * @param  Collection<int, ResearchDocument>  $candidates
+     * @return array<int, array<string, mixed>>
+     */
+    private function runStandaloneContentQuery(string $sourceKey, string $source, Collection $candidates): array
+    {
+        $decoded = $this->execute([
+            $sourceKey => $source,
+            'candidates' => $candidates->map(fn (ResearchDocument $candidate): array => $this->queryRecord($candidate, false))->values()->all(),
         ]);
         $policy = $this->policy ?? app(SimilarityScorePolicy::class);
 
@@ -255,13 +375,13 @@ class SimilarityProcessRunner implements SimilarityProcess
 
         $decoded = $this->decode($process->getOutput());
         if (! $process->isSuccessful()) {
-            throw new SimilarityProcessException('Similarity worker returned an unsuccessful status.');
+            $this->throwWorkerError($decoded);
         }
 
         return $decoded;
     }
 
-    /** @return array{id: int, title: string}|array{id: int, title: string, content: string} */
+    /** @return array{id: int, title: string, metadata: string}|array{id: int, title: string, metadata: string, content: string} */
     private function record(ResearchDocument $research, ?string $content = null): array
     {
         $record = ['id' => $research->id, 'title' => $research->title];
@@ -270,7 +390,7 @@ class SimilarityProcessRunner implements SimilarityProcess
     }
 
     /** @return array{id: int, title: string}|array{id: int, title: string, content: string} */
-    private function queryRecord(ResearchDocument $research): array
+    private function queryRecord(ResearchDocument $research, bool $includeMetadata = true): array
     {
         $projection = $research->relationLoaded('manuscriptSearchDocument')
             ? $research->getRelation('manuscriptSearchDocument')
@@ -280,23 +400,69 @@ class SimilarityProcessRunner implements SimilarityProcess
                 ? $projection->body_text
                 : null;
 
-        return $this->record($research, $content);
+        if (! $includeMetadata) {
+            return $this->record($research, $content);
+        }
+
+        $authors = $research->relationLoaded('authors')
+            ? $research->getRelation('authors')->pluck('author_name')->filter()->implode(' ')
+            : '';
+        $record = [
+            'id' => $research->id,
+            'title' => $research->title,
+            'metadata' => trim(implode(' ', array_filter([
+                $research->abstract,
+                $research->keywords,
+                $authors,
+            ]))),
+        ];
+
+        return $content === null ? $record : $record + ['content' => $content];
     }
 
     /** @param array<string, mixed> $value */
     private function encode(array $value): string
     {
+        if ($this->rawInputBytes($value) > $this->maximumInputBytes()) {
+            throw new PublicRepositorySimilarityCapacityException('Similarity input exceeded its transport limit.');
+        }
+
         try {
             $encoded = json_encode($value, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
         } catch (JsonException $exception) {
             throw new SimilarityProcessException('Similarity input could not be encoded.', previous: $exception);
         }
 
-        if (strlen($encoded) > (int) config('researchnav.similarity.maximum_input_bytes')) {
-            throw new SimilarityProcessException('Similarity input exceeded its limit.');
+        if (strlen($encoded) > $this->maximumInputBytes()) {
+            throw new PublicRepositorySimilarityCapacityException('Similarity input exceeded its transport limit.');
         }
 
         return $encoded;
+    }
+
+    /** @param array<string, mixed> $value */
+    private function rawInputBytes(array $value): int
+    {
+        $bytes = 0;
+        $pending = [$value];
+        while ($pending !== []) {
+            $current = array_pop($pending);
+            if (is_string($current)) {
+                $bytes += strlen($current);
+                if ($bytes > $this->maximumInputBytes()) {
+                    return $bytes;
+                }
+
+                continue;
+            }
+            if (is_array($current)) {
+                foreach ($current as $item) {
+                    $pending[] = $item;
+                }
+            }
+        }
+
+        return $bytes;
     }
 
     /** @return array<string, mixed> */
@@ -317,6 +483,31 @@ class SimilarityProcessRunner implements SimilarityProcess
         }
 
         return $decoded;
+    }
+
+    /** @param array<string, mixed> $output */
+    private function throwWorkerError(array $output): never
+    {
+        $code = $output['error']['code'] ?? null;
+        if (! is_string($code) || array_keys($output) !== ['error'] || ! is_array($output['error'])
+            || array_keys($output['error']) !== ['code']) {
+            throw new SimilarityProcessException('Similarity worker returned an unsuccessful status.');
+        }
+
+        if ($code === 'CHAPTER_ONE_NOT_FOUND' || $code === 'INVALID_UPLOAD_SCOPE') {
+            throw new UploadedContentChapterOneNotFoundException;
+        }
+        if ($code === 'CHAPTER_ORDER_INVALID') {
+            throw new UploadedContentChapterOrderException('chapter_order_invalid');
+        }
+        if ($code === 'CHAPTER_SCOPE_EMPTY') {
+            throw new UploadedContentEmptyScopeException('chapter_scope_empty');
+        }
+        if ($code === 'CAPACITY_EXCEEDED') {
+            throw new PublicRepositorySimilarityCapacityException('Public similarity capacity exceeded.');
+        }
+
+        throw new SimilarityProcessException('Similarity worker returned an unsuccessful status.');
     }
 
     /**
@@ -352,7 +543,7 @@ class SimilarityProcessRunner implements SimilarityProcess
                 throw new SimilarityProcessException('Similarity worker returned an invalid score.');
             }
             if (($result['content_similarity_score'] !== null && ! $this->validScore($result['content_similarity_score']))
-                || ! is_array($result['matched_terms']) || ! is_string($result['contextual_analysis'])
+                || ! is_array($result['matched_terms']) || count($result['matched_terms']) > 32 || ! is_string($result['contextual_analysis'])
                 || strlen($result['contextual_analysis']) > 1000) {
                 throw new SimilarityProcessException('Similarity worker returned inconsistent document analysis.');
             }
@@ -401,8 +592,52 @@ class SimilarityProcessRunner implements SimilarityProcess
             }
             if (
                 ($result['fasttext_support_score'] !== null && ! $this->validScore($result['fasttext_support_score']))
-                || ! is_array($result['matched_terms'])) {
+                || ! is_array($result['matched_terms']) || count($result['matched_terms']) > 32) {
                 throw new SimilarityProcessException('Similarity worker returned an invalid query score.');
+            }
+            foreach ($result['matched_terms'] as $term) {
+                if (! is_string($term) || strlen($term) > 100) {
+                    throw new SimilarityProcessException('Similarity worker returned invalid matched terms.');
+                }
+            }
+            $validated[$result['matched_research_id']] = $result;
+        }
+
+        return array_values($validated);
+    }
+
+    /**
+     * Upload scoring emits only its positive, deterministic top-ten results.
+     * Unlike query scoring, it intentionally does not echo every source input.
+     *
+     * @param  array<string, mixed>  $output
+     * @param  Collection<int, ResearchDocument>  $candidates
+     * @return array<int, array<string, mixed>>
+     */
+    private function validateUploadedContentOutput(array $output, Collection $candidates): array
+    {
+        if (array_keys($output) !== ['results'] || ! is_array($output['results']) || count($output['results']) > 10) {
+            throw new SimilarityProcessException('Similarity worker response schema is invalid.');
+        }
+
+        $candidateIds = $candidates->pluck('id')->map(fn ($id): int => (int) $id)->all();
+        $validated = [];
+        foreach ($output['results'] as $result) {
+            if (! is_array($result) || array_keys($result) !== [
+                'matched_research_id', 'title_similarity_score', 'content_similarity_score',
+                'matched_terms', 'fasttext_support_score', 'exact_content_match',
+            ]) {
+                throw new SimilarityProcessException('Similarity worker result schema is invalid.');
+            }
+            if (! is_int($result['matched_research_id']) || ! in_array($result['matched_research_id'], $candidateIds, true)
+                || isset($validated[$result['matched_research_id']])
+                || $result['title_similarity_score'] !== '0.000000000000'
+                || $result['fasttext_support_score'] !== null
+                || ! is_bool($result['exact_content_match'])
+                || ! $this->validScore($result['content_similarity_score'])
+                || $result['content_similarity_score'] === '0.000000000000'
+                || ! is_array($result['matched_terms']) || count($result['matched_terms']) > 32) {
+                throw new SimilarityProcessException('Similarity worker returned an invalid upload result.');
             }
             foreach ($result['matched_terms'] as $term) {
                 if (! is_string($term) || strlen($term) > 100) {
@@ -471,10 +706,25 @@ class SimilarityProcessRunner implements SimilarityProcess
         }
 
         $environment['SIMILARITY_FASTTEXT_MODEL_PATH'] = (string) config('researchnav.similarity.fasttext_model_path');
-        $environment['SIMILARITY_MAXIMUM_CANDIDATES'] = (string) config('researchnav.similarity.maximum_candidates');
-        $environment['SIMILARITY_MAXIMUM_INPUT_BYTES'] = (string) config('researchnav.similarity.maximum_input_bytes');
-        $environment['SIMILARITY_MAXIMUM_CONTENT_CHARACTERS'] = (string) config('researchnav.manuscript_search.maximum_text_characters');
+        $environment['SIMILARITY_MAXIMUM_CANDIDATES'] = (string) $this->maximumCandidates();
+        $environment['SIMILARITY_MAXIMUM_INPUT_BYTES'] = (string) $this->maximumInputBytes();
+        $environment['SIMILARITY_MAXIMUM_CONTENT_CHARACTERS'] = (string) $this->maximumContentCharacters();
 
         return $environment;
+    }
+
+    private function maximumCandidates(): int
+    {
+        return min(1000, max(1, (int) config('researchnav.similarity.maximum_candidates')));
+    }
+
+    private function maximumInputBytes(): int
+    {
+        return min(512 * 1024 * 1024, max(1, (int) config('researchnav.similarity.maximum_input_bytes')));
+    }
+
+    private function maximumContentCharacters(): int
+    {
+        return min(2_000_000, max(1, (int) config('researchnav.manuscript_search.maximum_text_characters')));
     }
 }

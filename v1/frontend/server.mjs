@@ -63,6 +63,7 @@ function securityHeaders(nonce) {
       `script-src 'self' 'nonce-${nonce}' https://accounts.google.com`,
       "style-src 'self' 'unsafe-inline'",
       "font-src 'self' data:",
+      "img-src 'self' data: blob:",
       "connect-src 'self' https://accounts.google.com",
       "frame-src https://accounts.google.com",
       "frame-ancestors 'none'",
@@ -101,8 +102,28 @@ export async function createApp(options = {}) {
     100,
     120_000,
   );
+  const contentUploadTimeoutMs = configuredInteger(
+    options.contentUploadTimeoutMs ??
+      process.env.SSR_CONTENT_UPLOAD_TIMEOUT_MS ??
+      120_000,
+    "SSR_CONTENT_UPLOAD_TIMEOUT_MS",
+    100,
+    180_000,
+  );
+  const repositorySimilarityTimeoutMs = configuredInteger(
+    options.repositorySimilarityTimeoutMs ??
+      process.env.SSR_REPOSITORY_SIMILARITY_TIMEOUT_MS ??
+      180_000,
+    "SSR_REPOSITORY_SIMILARITY_TIMEOUT_MS",
+    100,
+    300_000,
+  );
   const maxBodyBytes = configuredInteger(
-    options.maxBodyBytes ?? process.env.SSR_MAX_BODY_BYTES ?? 27 * 1024 * 1024,
+    options.maxBodyBytes ??
+      Math.min(
+        Number(process.env.SSR_MAX_BODY_BYTES) || 100 * 1024 * 1024,
+        100 * 1024 * 1024,
+      ),
     "SSR_MAX_BODY_BYTES",
     32 * 1024,
     100 * 1024 * 1024,
@@ -154,14 +175,22 @@ export async function createApp(options = {}) {
       }
       const contentLength = Number(contentLengthHeader ?? 0);
       const jsonLimit = 32 * 1024;
+      const annotationLimit = 160 * 1024;
       const profilePhotoLimit = 3 * 1024 * 1024;
       const normalizedPathname = pathname.replace(/\/+$/, "");
+      const isAnnotationMutation =
+        request.method === "POST" &&
+        /^\/api\/research\/[^/]+\/files\/[^/]+\/annotations$/.test(
+          normalizedPathname,
+        );
       const requestLimit =
         request.method === "POST" && normalizedPathname === "/api/profile/photo"
           ? profilePhotoLimit
-          : request.is("application/json")
-            ? jsonLimit
-            : maxBodyBytes;
+          : isAnnotationMutation
+            ? annotationLimit
+            : request.is("application/json")
+              ? jsonLimit
+              : maxBodyBytes;
       if (
         !Number.isSafeInteger(contentLength) ||
         contentLength < 0 ||
@@ -169,13 +198,29 @@ export async function createApp(options = {}) {
       ) {
         return response.status(413).json({ error: "PAYLOAD_TOO_LARGE" });
       }
-      request.setTimeout(apiTimeoutMs);
+      const isContentUpload =
+        request.method === "POST" &&
+        normalizedPathname === "/api/similarity/content-upload";
+      const isRepositorySimilarity =
+        request.method === "POST" &&
+        normalizedPathname === "/api/repository/similarity";
+      const requestTimeoutMs = isContentUpload
+        ? contentUploadTimeoutMs
+        : isRepositorySimilarity
+          ? repositorySimilarityTimeoutMs
+          : apiTimeoutMs;
+      request.setTimeout(requestTimeoutMs);
 
-      proxy.web(request, response, {}, () => {
-        if (!response.headersSent) {
-          response.status(502).json({ error: "API_UPSTREAM_UNAVAILABLE" });
-        }
-      });
+      proxy.web(
+        request,
+        response,
+        { timeout: requestTimeoutMs, proxyTimeout: requestTimeoutMs },
+        () => {
+          if (!response.headersSent) {
+            response.status(502).json({ error: "API_UPSTREAM_UNAVAILABLE" });
+          }
+        },
+      );
     } catch {
       response.status(400).send("Bad Request");
     }
@@ -186,6 +231,12 @@ export async function createApp(options = {}) {
   });
 
   if (production) {
+    app.use(
+      express.static(path.resolve(root, "dist/client"), {
+        index: false,
+        maxAge: "1h",
+      }),
+    );
     app.use(
       "/assets",
       express.static(path.resolve(root, "dist/client/assets"), {

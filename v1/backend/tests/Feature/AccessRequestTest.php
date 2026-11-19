@@ -30,7 +30,7 @@ class AccessRequestTest extends TestCase
         $this->submit($applicant, [
             'requested_role' => 'researcher',
             'full_name' => 'Filjoy Adala',
-            'program' => 'BS Computer Science',
+            'program' => 'Institute of Computer Studies',
             'justification' => 'I am starting my capstone.',
         ])
             ->assertCreated()
@@ -43,7 +43,7 @@ class AccessRequestTest extends TestCase
             ->assertJsonPath('data.status', 'pending');
 
         // A second open request is refused so the queue cannot be flooded.
-        $this->submit($applicant, ['requested_role' => 'adviser'])
+        $this->submit($applicant, $this->validPayload(['requested_role' => 'adviser']))
             ->assertStatus(409)
             ->assertExactJson(['error' => 'REQUEST_ALREADY_PENDING']);
 
@@ -57,7 +57,7 @@ class AccessRequestTest extends TestCase
 
     public function test_an_active_account_has_nothing_to_request(): void
     {
-        $this->submit($this->user('researcher'), ['requested_role' => 'researcher'])
+        $this->submit($this->user('researcher'), $this->validPayload())
             ->assertStatus(409)
             ->assertExactJson(['error' => 'ACCESS_ALREADY_GRANTED']);
     }
@@ -66,6 +66,13 @@ class AccessRequestTest extends TestCase
     {
         $this->submit($this->user('researcher', 'blocked'), ['requested_role' => 'admin'])
             ->assertStatus(422);
+    }
+
+    public function test_request_profile_fields_are_required(): void
+    {
+        $applicant = $this->user('researcher', 'blocked');
+
+        $this->submit($applicant, ['requested_role' => 'researcher'])->assertUnprocessable();
     }
 
     public function test_only_active_administrators_may_read_or_decide_requests(): void
@@ -219,6 +226,16 @@ class AccessRequestTest extends TestCase
     {
         return $this->withSession(['user_id' => $applicant->id])
             ->postJson('/api/access-requests', $payload, $this->origin());
+    }
+
+    private function validPayload(array $overrides = []): array
+    {
+        return array_merge([
+            'requested_role' => 'researcher',
+            'full_name' => 'Filjoy Adala',
+            'program' => 'Institute of Computer Studies',
+            'justification' => 'I need access to the research workspace.',
+        ], $overrides);
     }
 
     /** Mutating routes require an allowed browser origin. */

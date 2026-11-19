@@ -4,7 +4,9 @@ import Dashboard from "./Dashboard";
 import GoogleSignInDialog from "./GoogleSignInDialog";
 import LandingPage from "./LandingPage";
 import { getCurrentSession, listPublicResearch, logout } from "./api";
-import { isProtectedRoute } from "./paths";
+import { roleConfigs } from "./data";
+import { isProtectedRoute, navItemPath } from "./paths";
+import { parseResearchWorkspaceDestination } from "./researchWorkspaceRoute";
 import { createBrowserInitialState, type InitialState } from "./ssr";
 import type { ResearchRecord, UserSession } from "./types";
 
@@ -33,13 +35,42 @@ export default function App({ initialState }: { initialState?: InitialState }) {
   const researcherSection = path.match(
     /^\/app\/researcher\/(submissions|similarity|related-studies)(?:\/(title|content))?$/,
   )?.[1];
+  const hasResearcherSpecialRoute =
+    session?.role === "researcher" && researcherSection !== undefined;
   const researcherSimilarityMode = path.match(
-    /^\/app\/researcher\/similarity\/(title|content)$/,
+    /^\/app\/(?:researcher|research-office)\/similarity\/(title|content)$/,
   )?.[1] as "title" | "content" | undefined;
-  const instructorSectionRoute = path.match(
-    /^\/app\/instructor\/sections\/(\d+)(?:\/projects\/(\d+))?$/,
-  );
+  const similarityRoute =
+    /^\/app\/(?:researcher|research-office)\/similarity(?:\/(?:title|content))?$/.test(
+      path,
+    ) &&
+    (session?.role === "researcher" || session?.role === "research-office");
+  const dashboardNavSlug = path.match(
+    /^\/app\/(?:admin|researcher|adviser|instructor|panel|statistician|coordinator|librarian|research-office|research_editor)\/([a-z0-9-]+)$/,
+  )?.[1];
+  const instructorSectionRoute =
+    session?.role === "instructor"
+      ? path.match(
+          /^\/app\/instructor\/sections\/(\d+)(?:\/projects\/(\d+))?$/,
+        )
+      : null;
+  const instructorSectionsListRoute =
+    session?.role === "instructor" && path === "/app/instructor/sections";
   const isDashboardRoute = isProtectedRoute(path);
+  const isDashboardRoot = path === "/app";
+  const routeRole = path.split("/")[2];
+  const hasRoleRoutePrefix =
+    path.startsWith("/app/") &&
+    routeRole === session?.role.replace("_", "-");
+  const hasConfiguredDashboardSlug =
+    (isDashboardRoot ||
+      selectedResearchDocumentId !== undefined ||
+      hasResearcherSpecialRoute ||
+      similarityRoute ||
+      instructorSectionsListRoute ||
+      instructorSectionRoute !== null ||
+      isConfiguredDashboardSlug(session, dashboardNavSlug)) &&
+    (isDashboardRoot || selectedResearchDocumentId !== undefined || hasRoleRoutePrefix);
 
   /** Auth middleware: any sign-out or expired session lands on the landing page. */
   const clearSessionToLanding = useCallback(() => {
@@ -138,26 +169,29 @@ export default function App({ initialState }: { initialState?: InitialState }) {
           error={repositoryError}
           initialSearch={location.search}
         />
-      ) : isDashboardRoute && session ? (
+      ) : isDashboardRoute && session && hasConfiguredDashboardSlug ? (
         <Dashboard
           session={session}
           onSessionChange={setSession}
           navigate={navigate}
           researchDocumentId={selectedResearchDocumentId}
+          researchWorkspaceDestination={parseResearchWorkspaceDestination(
+            location.search,
+          )}
           instructorSectionsRoute={
-            instructorSectionRoute !== null ||
-            path === "/app/instructor/sections"
+            instructorSectionRoute !== null || instructorSectionsListRoute
           }
           instructorSectionId={instructorSectionRoute?.[1]}
           instructorProjectDocumentId={instructorSectionRoute?.[2]}
           initialNav={
-            researcherSection === "submissions"
+            hasResearcherSpecialRoute && researcherSection === "submissions"
               ? "My Research"
-              : researcherSection === "similarity"
+              : (hasResearcherSpecialRoute && researcherSection === "similarity") ||
+                  similarityRoute
                 ? "Similarity Check"
-                : instructorSectionRoute || path === "/app/instructor/sections"
+                : instructorSectionRoute || instructorSectionsListRoute
                   ? "My Sections"
-                  : undefined
+                  : roleNavFromSlug(session, dashboardNavSlug)
           }
           initialSimilarityMode={researcherSimilarityMode}
           onLogout={signOut}
@@ -186,4 +220,25 @@ export default function App({ initialState }: { initialState?: InitialState }) {
       )}
     </>
   );
+}
+
+function isConfiguredDashboardSlug(
+  session: UserSession | null | undefined,
+  slug: string | undefined,
+) {
+  return session !== null && session !== undefined && Boolean(roleNavFromSlug(session, slug));
+}
+
+function roleNavFromSlug(
+  session: UserSession,
+  slug: string | undefined,
+): string | undefined {
+  if (!slug) return undefined;
+  return roleConfigsForSession(session).find(
+    (item) => navItemPath(session.role, item).split("/").pop() === slug,
+  );
+}
+
+function roleConfigsForSession(session: UserSession): string[] {
+  return roleConfigs.find((config) => config.id === session.role)?.nav ?? [];
 }

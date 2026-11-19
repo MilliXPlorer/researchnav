@@ -2,12 +2,12 @@
 
 namespace Tests\Feature;
 
-use App\Models\Category;
 use App\Models\DocumentFile;
 use App\Models\ResearchAuthor;
 use App\Models\ResearchDocument;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class PublicRepositoryTest extends TestCase
@@ -17,14 +17,13 @@ class PublicRepositoryTest extends TestCase
     public function test_index_is_sessionless_and_returns_only_archived_public_non_deleted_records(): void
     {
         config()->set('session.driver', 'database');
-        $category = $this->category('Public');
-        $archived = $this->document($category, ['title' => 'Archived Public', 'submission_status' => 'archived']);
-        $approved = $this->document($category, ['title' => 'Approved Public', 'submission_status' => 'approved']);
-        $this->document($category, ['title' => 'Draft Private', 'submission_status' => 'draft', 'archive_status' => 'not_archived', 'visibility' => 'private']);
-        $this->document($category, ['title' => 'Under Review', 'submission_status' => 'under_review', 'archive_status' => 'not_archived', 'visibility' => 'private']);
-        $this->document($category, ['title' => 'Approved Unarchived', 'submission_status' => 'approved', 'archive_status' => 'not_archived']);
-        $this->document($category, ['title' => 'Registered Only', 'visibility' => 'registered_only']);
-        $deleted = $this->document($category, ['title' => 'Deleted Public']);
+        $archived = $this->document(['title' => 'Archived Public', 'submission_status' => 'archived']);
+        $approved = $this->document(['title' => 'Approved Public', 'submission_status' => 'approved']);
+        $this->document(['title' => 'Draft Private', 'submission_status' => 'draft', 'archive_status' => 'not_archived', 'visibility' => 'private']);
+        $this->document(['title' => 'Under Review', 'submission_status' => 'under_review', 'archive_status' => 'not_archived', 'visibility' => 'private']);
+        $this->document(['title' => 'Approved Unarchived', 'submission_status' => 'approved', 'archive_status' => 'not_archived']);
+        $this->document(['title' => 'Registered Only', 'visibility' => 'registered_only']);
+        $deleted = $this->document(['title' => 'Deleted Public']);
         $deleted->delete();
 
         $response = $this->getJson('/api/repository')
@@ -36,15 +35,38 @@ class PublicRepositoryTest extends TestCase
         $this->assertDatabaseCount('sessions', 0);
     }
 
+    public function test_specialist_archived_repository_is_role_protected_and_uses_the_public_archive_scope(): void
+    {
+        $archived = $this->document(['title' => 'Archived Public', 'publication_year' => 2026]);
+        $this->document(['title' => 'Older Archived Public', 'publication_year' => 2021]);
+        $this->document(['title' => 'Approved Unarchived', 'submission_status' => 'approved', 'archive_status' => 'not_archived']);
+        $this->document(['title' => 'Archived Private', 'visibility' => 'private']);
+        $this->document(['title' => 'Registered Only', 'visibility' => 'registered_only']);
+
+        $this->getJson('/api/archived-repository')->assertUnauthorized();
+        $this->withSession(['user_id' => User::factory()->create(['role' => 'researcher'])->id])
+            ->getJson('/api/archived-repository')
+            ->assertForbidden();
+
+        foreach (['panel', 'statistician', 'research_editor'] as $role) {
+            $this->app['session']->flush();
+            $this->withSession(['user_id' => User::factory()->create(['role' => $role])->id])
+                ->getJson('/api/archived-repository')
+                ->assertOk()
+                ->assertJsonCount(2, 'data')
+                ->assertJsonPath('data.0.id', $archived->id)
+                ->assertJsonPath('filters.years', [2026, 2021]);
+        }
+    }
+
     public function test_index_searches_title_abstract_keywords_and_authors(): void
     {
-        $category = $this->category('Computing');
-        $title = $this->document($category, ['title' => 'Climate Resilience']);
-        $abstract = $this->document($category, ['title' => 'Water Systems', 'abstract' => 'A climate adaptation study.']);
-        $keywords = $this->document($category, ['title' => 'Community Planning', 'keywords' => 'climate, policy']);
-        $author = $this->document($category, ['title' => 'Coastal Mapping']);
+        $title = $this->document(['title' => 'Climate Resilience']);
+        $abstract = $this->document(['title' => 'Water Systems', 'abstract' => 'A climate adaptation study.']);
+        $keywords = $this->document(['title' => 'Community Planning', 'keywords' => 'climate, policy']);
+        $author = $this->document(['title' => 'Coastal Mapping']);
         ResearchAuthor::factory()->create(['research_document_id' => $author->id, 'author_name' => 'Climate Santos']);
-        $this->document($category, ['title' => 'Quantum Computing', 'abstract' => 'Unrelated', 'keywords' => 'qubits']);
+        $this->document(['title' => 'Quantum Computing', 'abstract' => 'Unrelated', 'keywords' => 'qubits']);
 
         $response = $this->getJson('/api/repository?q=climate')->assertOk()->assertJsonCount(4, 'data');
 
@@ -56,11 +78,10 @@ class PublicRepositoryTest extends TestCase
 
     public function test_index_escapes_like_wildcards_in_literal_searches(): void
     {
-        $category = $this->category('Energy');
-        $percent = $this->document($category, ['title' => '100% Renewable Energy']);
-        $underscore = $this->document($category, ['title' => 'Project_A Research']);
-        $this->document($category, ['title' => '1000 Renewable Energy']);
-        $this->document($category, ['title' => 'Project XA Research']);
+        $percent = $this->document(['title' => '100% Renewable Energy']);
+        $underscore = $this->document(['title' => 'Project_A Research']);
+        $this->document(['title' => '1000 Renewable Energy']);
+        $this->document(['title' => 'Project XA Research']);
 
         $this->getJson('/api/repository?q=100%')
             ->assertOk()
@@ -73,28 +94,23 @@ class PublicRepositoryTest extends TestCase
             ->assertJsonPath('data.0.id', $underscore->id);
     }
 
-    public function test_index_combines_author_keyword_category_and_year_filters(): void
+    public function test_index_combines_author_keyword_and_year_filters(): void
     {
-        $computing = $this->category('Computing');
-        $health = $this->category('Health');
-        $match = $this->document($computing, [
+        $match = $this->document([
             'title' => 'Target Study',
             'keywords' => 'machine learning, education',
             'publication_year' => 2025,
         ]);
         ResearchAuthor::factory()->create(['research_document_id' => $match->id, 'author_name' => 'Ada Rivera']);
 
-        $wrongYear = $this->document($computing, ['title' => 'Wrong Year', 'keywords' => 'machine learning', 'publication_year' => 2024]);
+        $wrongYear = $this->document(['title' => 'Wrong Year', 'keywords' => 'machine learning', 'publication_year' => 2024]);
         ResearchAuthor::factory()->create(['research_document_id' => $wrongYear->id, 'author_name' => 'Ada Rivera']);
-        $wrongCategory = $this->document($health, ['title' => 'Wrong Category', 'keywords' => 'machine learning', 'publication_year' => 2025]);
-        ResearchAuthor::factory()->create(['research_document_id' => $wrongCategory->id, 'author_name' => 'Ada Rivera']);
-
-        $this->getJson('/api/repository?author=Ada&keywords=machine&category=computing&year=2025')
+        $this->getJson('/api/repository?author=Ada&keywords=machine&year=2025')
             ->assertOk()
             ->assertJsonCount(1, 'data')
             ->assertJsonPath('data.0.id', $match->id);
 
-        $this->getJson('/api/repository?category_id='.$computing->id.'&publication_year=2025')
+        $this->getJson('/api/repository?publication_year=2025')
             ->assertOk()
             ->assertJsonCount(1, 'data')
             ->assertJsonPath('data.0.id', $match->id);
@@ -102,11 +118,10 @@ class PublicRepositoryTest extends TestCase
 
     public function test_index_filters_public_research_by_inclusive_year_range(): void
     {
-        $category = $this->category('Range');
-        $older = $this->document($category, ['title' => 'Older', 'publication_year' => 2021]);
-        $firstMatch = $this->document($category, ['title' => 'First match', 'publication_year' => 2022]);
-        $lastMatch = $this->document($category, ['title' => 'Last match', 'publication_year' => 2024]);
-        $newer = $this->document($category, ['title' => 'Newer', 'publication_year' => 2025]);
+        $older = $this->document(['title' => 'Older', 'publication_year' => 2021]);
+        $firstMatch = $this->document(['title' => 'First match', 'publication_year' => 2022]);
+        $lastMatch = $this->document(['title' => 'Last match', 'publication_year' => 2024]);
+        $newer = $this->document(['title' => 'Newer', 'publication_year' => 2025]);
 
         $response = $this->getJson('/api/repository?year_from=2022&year_to=2024')
             ->assertOk()
@@ -133,9 +148,8 @@ class PublicRepositoryTest extends TestCase
 
     public function test_index_filters_public_research_by_institute(): void
     {
-        $category = $this->category('Institute');
-        $match = $this->document($category, ['institute' => 'Institute of Teacher Education']);
-        $this->document($category, ['institute' => 'Institute of Computer Studies']);
+        $match = $this->document(['institute' => 'Institute of Teacher Education']);
+        $this->document(['institute' => 'Institute of Computer Studies']);
 
         $this->getJson('/api/repository?institute=Institute%20of%20Teacher%20Education')
             ->assertOk()
@@ -143,12 +157,41 @@ class PublicRepositoryTest extends TestCase
             ->assertJsonPath('data.0.id', $match->id);
     }
 
+    public function test_sdgs_are_canonical_serialized_and_filterable(): void
+    {
+        $combined = $this->document(['title' => 'Education and Climate']);
+        $combined->sdgs()->sync([4, 13]);
+        $educationOnly = $this->document(['title' => 'Education Only']);
+        $educationOnly->sdgs()->sync([4]);
+        $this->document(['title' => 'No SDG']);
+
+        $this->getJson('/api/sdgs')
+            ->assertOk()
+            ->assertJsonCount(17, 'data')
+            ->assertJsonPath('data.0.code', 'SDG 1')
+            ->assertJsonPath('data.16.title', 'Partnerships for the Goals');
+
+        $this->getJson('/api/repository?sdg_ids[]=4&sdg_ids[]=13')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $combined->id)
+            ->assertJsonPath('data.0.sdgs.0.id', 4)
+            ->assertJsonPath('data.0.sdgs.1.id', 13);
+
+        $this->getJson('/api/repository?sdg_ids[]=4')
+            ->assertOk()
+            ->assertJsonCount(2, 'data');
+
+        $this->getJson('/api/repository?sdg_ids[]=99')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['sdg_ids.0']);
+    }
+
     public function test_index_orders_and_paginates_by_year_then_title(): void
     {
-        $category = $this->category('Ordering');
-        $alpha = $this->document($category, ['title' => 'Alpha', 'publication_year' => 2025]);
-        $beta = $this->document($category, ['title' => 'Beta', 'publication_year' => 2025]);
-        $older = $this->document($category, ['title' => 'Older', 'publication_year' => 2024]);
+        $alpha = $this->document(['title' => 'Alpha', 'publication_year' => 2025]);
+        $beta = $this->document(['title' => 'Beta', 'publication_year' => 2025]);
+        $older = $this->document(['title' => 'Older', 'publication_year' => 2024]);
 
         $first = $this->getJson('/api/repository?per_page=2&page=1')
             ->assertOk()
@@ -167,8 +210,7 @@ class PublicRepositoryTest extends TestCase
 
     public function test_show_returns_public_metadata_without_internal_identity_or_import_fields(): void
     {
-        $category = $this->category('Privacy');
-        $document = $this->document($category, [
+        $document = $this->document([
             'title' => 'Public Detail',
             'import_source_sha256' => str_repeat('a', 64),
             'import_source_filename' => 'private-source.docx',
@@ -183,7 +225,6 @@ class PublicRepositoryTest extends TestCase
         $response = $this->getJson('/api/repository/'.$document->id)
             ->assertOk()
             ->assertJsonPath('data.title', 'Public Detail')
-            ->assertJsonPath('data.category.slug', 'privacy')
             ->assertJsonPath('data.authors.0.author_name', 'Public Author');
 
         foreach (['submitted_by', 'section_id', 'submission_status', 'archive_status', 'visibility', 'deleted_at', 'import_source_sha256', 'import_source_filename'] as $field) {
@@ -195,9 +236,9 @@ class PublicRepositoryTest extends TestCase
 
     public function test_index_reports_a_current_final_manuscript_as_downloadable(): void
     {
-        $category = $this->category('Files');
-        $document = $this->document($category, ['title' => 'Available manuscript']);
-        DocumentFile::query()->create([
+        Storage::fake('researchnav_private');
+        $document = $this->document(['title' => 'Available manuscript']);
+        $file = DocumentFile::query()->create([
             'research_document_id' => $document->id,
             'uploaded_by' => $document->submitted_by,
             'document_type' => 'final_manuscript',
@@ -211,18 +252,42 @@ class PublicRepositoryTest extends TestCase
             'is_current' => true,
             'uploaded_at' => now(),
         ]);
+        Storage::disk('researchnav_private')->put($file->file_path, '%PDF-1.4 available manuscript');
 
         $this->getJson('/api/repository')
             ->assertOk()
             ->assertJsonPath('data.0.has_downloadable_manuscript', true);
     }
 
+    public function test_index_does_not_advertise_a_missing_private_manuscript(): void
+    {
+        Storage::fake('researchnav_private');
+        $document = $this->document(['title' => 'Missing manuscript']);
+        DocumentFile::query()->create([
+            'research_document_id' => $document->id,
+            'uploaded_by' => $document->submitted_by,
+            'document_type' => 'final_manuscript',
+            'version_number' => 1,
+            'original_filename' => 'missing.pdf',
+            'stored_filename' => 'missing.pdf',
+            'file_path' => 'research/'.$document->id.'/missing.pdf',
+            'file_extension' => 'pdf',
+            'mime_type' => 'application/pdf',
+            'file_size' => 100,
+            'is_current' => true,
+            'uploaded_at' => now(),
+        ]);
+
+        $this->getJson('/api/repository')
+            ->assertOk()
+            ->assertJsonPath('data.0.has_downloadable_manuscript', false);
+    }
+
     public function test_show_returns_not_found_for_non_public_or_deleted_documents(): void
     {
-        $category = $this->category('Hidden');
-        $private = $this->document($category, ['visibility' => 'private']);
-        $unarchived = $this->document($category, ['archive_status' => 'not_archived']);
-        $deleted = $this->document($category);
+        $private = $this->document(['visibility' => 'private']);
+        $unarchived = $this->document(['archive_status' => 'not_archived']);
+        $deleted = $this->document();
         $deleted->delete();
 
         foreach ([$private->id, $unarchived->id, $deleted->id, 999999] as $id) {
@@ -242,20 +307,17 @@ class PublicRepositoryTest extends TestCase
             '/api/repository?category_id=999999',
             '/api/repository?q='.str_repeat('x', 201),
         ] as $path) {
-            $this->getJson($path)->assertUnprocessable()->assertJsonPath('error', 'VALIDATION_FAILED');
+            $response = $this->getJson($path);
+            $path === '/api/repository?category_id=999999'
+                ? $response->assertOk()
+                : $response->assertUnprocessable()->assertJsonPath('error', 'VALIDATION_FAILED');
         }
     }
 
-    private function category(string $name): Category
-    {
-        return Category::query()->create(['name' => $name, 'slug' => str($name)->slug()->toString()]);
-    }
-
     /** @param array<string, mixed> $attributes */
-    private function document(Category $category, array $attributes = []): ResearchDocument
+    private function document(array $attributes = []): ResearchDocument
     {
         return ResearchDocument::factory()->create(array_merge([
-            'category_id' => $category->id,
             'submission_status' => 'archived',
             'archive_status' => 'archived',
             'visibility' => 'public',

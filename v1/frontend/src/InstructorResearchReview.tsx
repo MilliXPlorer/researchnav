@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { formatPhilippineDateTime } from "./dateTime";
 import { Download, MessageSquareText, RotateCcw, Scale } from "lucide-react";
 import {
   ApiError,
@@ -19,6 +20,7 @@ import {
 } from "./api";
 import { Button } from "./components";
 import ResearchActivity from "./ResearchActivity";
+import PdfAnnotationWorkspace from "./PdfAnnotationWorkspace";
 import { classificationLabel, formatSimilarityPercentage } from "./similarity";
 
 type ReviewContext = {
@@ -73,6 +75,8 @@ export default function InstructorResearchReview({
   const [feedbackType, setFeedbackType] =
     useState<FeedbackResource["feedback_type"]>("comment");
   const [feedbackFileId, setFeedbackFileId] = useState("");
+  const [annotationFile, setAnnotationFile] =
+    useState<DocumentFileResource | null>(null);
   const [revisionRemarks, setRevisionRemarks] = useState("");
   const [revisionFileId, setRevisionFileId] = useState("");
   const [recommendation, setRecommendation] =
@@ -188,18 +192,23 @@ export default function InstructorResearchReview({
 
   if (loading && !context)
     return (
-      <p className="admin-empty" aria-busy="true">
-        Loading assigned research…
-      </p>
+      <section
+        className="panel-card dashboard-loading"
+        role="region"
+        aria-label="Loading assigned research"
+        aria-busy="true"
+      >
+        <p>Loading assigned research…</p>
+      </section>
     );
   if (!context) {
     return (
-      <div className="dashboard-error" role="alert">
+      <section className="panel-card dashboard-error" role="alert">
         <p>{error}</p>
         <Button variant="secondary" onClick={() => void load()}>
           Retry
         </Button>
-      </div>
+      </section>
     );
   }
 
@@ -280,20 +289,39 @@ export default function InstructorResearchReview({
                 <div>
                   <strong>{file.original_filename}</strong>
                   <span>
-                    {humanize(file.document_type)} · Version{" "}
-                    {file.version_number} · {fileSize(file.file_size)}
+                    {humanize(file.upload_purpose ?? "initial_submission")} ·
+                    Version {file.version_number} · {fileSize(file.file_size)}
                     {file.is_current ? " · Current" : ""}
                   </span>
                 </div>
-                <a
-                  className="button button-secondary"
-                  href={researchFileDownloadUrl(research.id, file.id)}
-                >
-                  <Download size={15} /> Download
-                </a>
+                <div className="review-file-actions">
+                  {!isReadOnly && file.mime_type === "application/pdf" && (
+                    <Button
+                      variant="quiet"
+                      onClick={() => setAnnotationFile(file)}
+                    >
+                      Open annotations
+                    </Button>
+                  )}
+                  <a
+                    className="button button-secondary"
+                    href={researchFileDownloadUrl(research.id, file.id)}
+                  >
+                    <Download size={15} /> Download
+                  </a>
+                </div>
               </li>
             ))}
           </ul>
+        )}
+        {!isReadOnly && annotationFile && (
+          <PdfAnnotationWorkspace
+            key={annotationFile.id}
+            researchDocumentId={research.id}
+            file={annotationFile}
+            canAnnotate={!isReadOnly}
+            onClose={() => setAnnotationFile(null)}
+          />
         )}
       </section>
 
@@ -517,7 +545,7 @@ export default function InstructorResearchReview({
                   </span>
                   <time>
                     {item.validated_at
-                      ? new Date(item.validated_at).toLocaleString()
+                      ? formatPhilippineDateTime(item.validated_at)
                       : "Pending"}
                   </time>
                 </div>

@@ -13,7 +13,6 @@ use App\Policies\ResearchDocumentPolicy;
 use App\Services\AuditService;
 use App\Services\DocumentService;
 use App\Services\PrivateDocumentFileResolver;
-use App\Services\SupabaseStorageService;
 use Illuminate\Http\Request;
 
 class DocumentFileController extends DomainController
@@ -40,7 +39,7 @@ class DocumentFileController extends DomainController
         $data = $request->validated();
         $this->allowed((new DocumentFilePolicy)->upload($this->actor($request), $researchDocument, $data['document_type']));
 
-        return (new DocumentFileResource($service->upload($this->actor($request), $researchDocument, $data['file'], $data['document_type'], $data['relative_path'] ?? null, $request)->load('uploader')))->response()->setStatusCode(201);
+        return (new DocumentFileResource($service->upload($this->actor($request), $researchDocument, $data['file'], $data['document_type'], $data['relative_path'] ?? null, $data['upload_purpose'] ?? null, $request)->load('uploader')))->response()->setStatusCode(201);
     }
 
     public function folders(Request $request, ResearchDocument $researchDocument)
@@ -50,21 +49,11 @@ class DocumentFileController extends DomainController
         return response()->json(['data' => $this->folderNames($researchDocument)]);
     }
 
-    public function download(Request $request, ResearchDocument $researchDocument, DocumentFile $documentFile, PrivateDocumentFileResolver $files, SupabaseStorageService $supabase)
+    public function download(Request $request, ResearchDocument $researchDocument, DocumentFile $documentFile, PrivateDocumentFileResolver $files)
     {
         abort_unless($documentFile->research_document_id === $researchDocument->id, 404);
         $this->allowed((new DocumentFilePolicy)->view($this->actor($request), $documentFile));
         app(AuditService::class)->log($this->actor($request), 'DOCUMENT_DOWNLOADED', $documentFile, 'Downloaded a private research document.', $request);
-
-        if ($supabase->isSupabasePath($documentFile->file_path)) {
-            $contents = $supabase->download($documentFile->file_path);
-
-            return response()->streamDownload(
-                fn () => print $contents,
-                $documentFile->original_filename,
-                ['Content-Type' => $documentFile->mime_type, 'Cache-Control' => 'private, no-store'],
-            );
-        }
 
         $resolved = $files->resolve($researchDocument, $documentFile);
 
@@ -75,24 +64,16 @@ class DocumentFileController extends DomainController
             } finally {
                 fclose($handle);
             }
-        }, $documentFile->original_filename, ['Content-Type' => $documentFile->mime_type]);
+        }, $documentFile->original_filename, ['Content-Type' => $documentFile->mime_type, 'Cache-Control' => 'private, no-store']);
     }
 
-    public function preview(Request $request, ResearchDocument $researchDocument, DocumentFile $documentFile, PrivateDocumentFileResolver $files, SupabaseStorageService $supabase)
+    public function preview(Request $request, ResearchDocument $researchDocument, DocumentFile $documentFile, PrivateDocumentFileResolver $files)
     {
         abort_unless($documentFile->research_document_id === $researchDocument->id, 404);
         $this->allowed((new DocumentFilePolicy)->view($this->actor($request), $documentFile));
         abort_unless($documentFile->mime_type === 'application/pdf', 404);
 
         app(AuditService::class)->log($this->actor($request), 'DOCUMENT_PREVIEWED', $documentFile, 'Previewed a private PDF research document.', $request);
-
-        if ($supabase->isSupabasePath($documentFile->file_path)) {
-            return response($supabase->download($documentFile->file_path), 200, [
-                'Content-Type' => 'application/pdf',
-                'Content-Disposition' => 'inline; filename="'.$documentFile->original_filename.'"',
-                'Cache-Control' => 'private, no-store',
-            ]);
-        }
 
         $resolved = $files->resolve($researchDocument, $documentFile);
         abort_unless($files->isPdf($resolved), 404);
@@ -104,7 +85,7 @@ class DocumentFileController extends DomainController
             } finally {
                 fclose($handle);
             }
-        }, 200, ['Content-Type' => 'application/pdf', 'Content-Disposition' => 'inline; filename="'.$documentFile->original_filename.'"']);
+        }, 200, ['Content-Type' => 'application/pdf', 'Content-Disposition' => 'inline; filename="'.$documentFile->original_filename.'"', 'Cache-Control' => 'private, no-store', 'X-Content-Type-Options' => 'nosniff']);
     }
 
     public function update(UpdateDocumentFileRequest $request, ResearchDocument $researchDocument, DocumentFile $documentFile, DocumentService $service)
@@ -130,7 +111,7 @@ class DocumentFileController extends DomainController
     private function folderNames(ResearchDocument $researchDocument): array
     {
         $fromFiles = $researchDocument->files()->whereNotNull('relative_path')->pluck('relative_path');
-        $folders = collect(['Chapter 1', 'Chapter 2', 'Chapter 3', 'Full Manuscript'])->merge($fromFiles)
+        $folders = collect(['Chapter 1', 'Chapter 2', 'Chapter 3', 'Chapter 4', 'Chapter 5', 'Chapter 6', 'Full Manuscript'])->merge($fromFiles)
             ->filter(fn ($item) => is_string($item) && trim($item) !== '')
             ->map(fn ($item) => trim($item))
             ->unique(fn ($item) => mb_strtolower($item))

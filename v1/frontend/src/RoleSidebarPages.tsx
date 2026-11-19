@@ -1,62 +1,116 @@
-import { useEffect, useRef, useState } from "react";
+﻿import { useEffect, useRef, useState } from "react";
+import { formatPhilippineDateTime, philippineDateToday } from "./dateTime";
+import { processingProgress } from "./processingProgress";
+import UserRoleManagementWorkspace, {
+  type UserDirectoryQuery,
+} from "./UserRoleManagement";
+import SelectMenu from "./SelectMenu";
+import { DashboardKpiCard } from "./DashboardPrimitives";
+
+const loadOfficeManagedUsers = (query: UserDirectoryQuery) =>
+  listOfficeUsers({
+    search: query.search || undefined,
+    role: query.role || undefined,
+    access_status: query.access_status || undefined,
+    sort: query.sort,
+    direction: query.direction,
+    page: query.page,
+    per_page: query.per_page,
+  }).then((response) => ({
+    users: response.data.map((user) => ({
+      id: user.id,
+      email: user.email,
+      name: officeUserName(user),
+      role: user.role,
+      accessStatus: user.access_status,
+      createdAt: user.created_at,
+    })),
+    summary: response.summary,
+    meta: response.meta,
+  }));
+
+const saveOfficeManagedUser = async (
+  user: { id: string },
+  draft: { accessStatus: AccessStatus },
+) => {
+  await updateOfficeUserAccess(user.id, draft.accessStatus);
+};
 import {
+  Archive,
   ArrowLeft,
-  CheckCircle2,
-  ClipboardCheck,
+  Building2,
+  ChevronRight,
+  ClipboardList,
   Download,
   ExternalLink,
   Eye,
   FileText,
   Folder,
+  FolderOpen,
+  GraduationCap,
+  Globe2,
+  Layers3,
+  Mail,
   MessageSquareText,
   Pencil,
   Plus,
   Power,
+  Printer,
   RefreshCw,
   Send,
   Trash2,
+  User,
+  UserCog,
   UserPlus,
+  UserRound,
+  UserRoundCheck,
+  UserRoundX,
+  Users,
   UsersRound,
+  Search,
 } from "lucide-react";
 import {
   ApiError,
-  checkContentQuerySimilarity,
+  checkContentUploadSimilarity,
   checkTitleQuerySimilarity,
-  createCoordinatorSchedule,
   createInstructorSection,
-  createFeedback,
   getCoordinatorProgramReport,
+  getCoordinatorAssignmentStudies,
+  getCoordinatorResearchDetails,
+  getCoordinatorRepositoryDetail,
+  coordinatorRepositoryDownloadUrl,
   getInstructorProjectTeam,
+  getInternalResearch,
+  getResearchPeople,
   getInstitutionalReport,
   listAdviserAdvisees,
   listAdviserMonitoring,
   listAdviserPendingReviews,
-  listAdviserReviewHistory,
   listAdviserFeedbackHistory,
   listAdviserSimilarityAlerts,
-  listCategories,
-  listCoordinatorSchedules,
-  listDuplicateFlags,
   listAdviserLoad,
+  listCoordinatorResearchAssignments,
+  listCoordinatorRepository,
+  listCoordinatorReportStudies,
   listInstructorClassReports,
   listInstructorMonitoring,
   listInstructorPanelists,
-  listInstructorReviewHistory,
   listInstructorAssignedSubmissions,
   listInstructorSections,
+  listInstitutes,
   listInstructorSimilarityOverview,
   listInstructorStudents,
   listInstructorProjectTeamCandidates,
   listOfficeUsers,
   listPanelAssignments,
   listPanelHistory,
-  listPanelSchedule,
   listProvisionedAccounts,
   listRepositoryCatalog,
+  searchArchivedRoleRepository,
+  listLibrarianRepositoryFiles,
+  librarianRepositoryFileDownloadUrl,
+  librarianRepositoryFilePreviewUrl,
   listResearchDocuments,
-  listResearchFiles,
-  listResearchFolders,
-  listFeedback,
   listMetadataStandards,
   listRetentionLogs,
   listSectionDocuments,
@@ -67,9 +121,9 @@ import {
   listSupportAssignmentInbox,
   listLibrarianAssignedResearch,
   listLibrarianMonitoring,
-  listLibrarianReviewHistory,
   listEditorAssignedResearch,
-  listEditorHistory,
+  listUserLogs,
+  clearUserLogs,
   listEditorMonitoring,
   markStatisticalReviewNotApplicable,
   provisionAccount,
@@ -98,22 +152,18 @@ import {
   submitResearchDocument,
   verifyInstructorMonitoring,
   updateResearchDraft,
-  updateCoordinatorSchedule,
   updateInstructorSection,
   updateOfficeUserAccess,
   uploadResearchFile,
-  researchFileDownloadUrl,
-  researchFilePreviewUrl,
   addSectionMembers,
   type AccessStatus,
   type AdminRole,
-  type OfficeUserRow,
   type CoordinatorProgramReport,
-  type DefenseScheduleResource,
+  type CoordinatorAssignmentStudy,
+  type CoordinatorAssignmentUser,
+  type AdviserLoadItem,
   type DocumentFileResource,
-  type FeedbackResource,
   type InstructorSectionDocumentItem,
-  type InstructorAssignedSubmissionItem,
   type InstructorSectionResource,
   type InstructorStudentResource,
   type InstructorMonitoringEntry,
@@ -123,9 +173,16 @@ import {
   type MetadataStandardsItem,
   type PanelAssignmentResource,
   type ResearchDocumentSummaryResource,
+  type ResearchPeopleResource,
   type StatisticianQueueItem,
 } from "./api";
-import { Button } from "./components";
+import ManuscriptFilePicker from "./ManuscriptFilePicker";
+import {
+  Button,
+  Pagination,
+  SortableHeader,
+  ToastNotification,
+} from "./components";
 import {
   AcademicYearSelect,
   DatePickerInput,
@@ -135,17 +192,23 @@ import { instituteNames, programsByInstitute, roleConfigs } from "./data";
 import { ConfirmDialog, Modal } from "./Modal";
 import ResearchActivity from "./ResearchActivity";
 import ResearchFolderRow from "./ResearchFolderRow";
-import InstructorResearchReview from "./InstructorResearchReview";
 import SimilarityResults from "./SimilarityResults";
-import SharedMonitoring from "./SharedMonitoring";
 import AssignedResearchFolders from "./AssignedResearchFolders";
+import StudyWorkspace from "./StudyWorkspace";
 import ResearchProgressUpdates from "./ResearchProgressUpdates";
 import PublicResearchMetadataDialog from "./PublicResearchMetadataDialog";
-import ManuscriptFilePicker from "./ManuscriptFilePicker";
 import { classificationLabel, formatSimilarityPercentage } from "./similarity";
 import type { ResearchRecord, Role } from "./types";
 import { useLiveFilters } from "./useLiveFilters";
-import { filterUserRows } from "./userManagement";
+import { useClientSorting } from "./useClientSorting";
+import { matchesStudySearch } from "./studySearch";
+import { SdgSelector } from "./SdgMetadata";
+import { SdgIcon } from "./SdgIcon";
+import {
+  buildOfficeReportCsv,
+  officeReportOptions,
+  type OfficeReportSection,
+} from "./officeReportExport";
 
 const roles: AdminRole[] = [
   "admin",
@@ -159,11 +222,10 @@ const roles: AdminRole[] = [
   "research_editor",
   "research-office",
 ];
-import ResearchOfficeBulkImport from "./ResearchOfficeBulkImport";
+import ManageRepository from "./ManageRepository";
 
 const accessStatuses: AccessStatus[] = ["active", "invited", "blocked"];
 const researchStages = ["title_proposal", "ongoing", "completed"];
-const scheduleStatuses = ["scheduled", "completed", "cancelled"] as const;
 
 type LoadState<T> =
   | { status: "loading" }
@@ -209,6 +271,7 @@ export default function RoleSidebarPage({
   similarityMode,
   instructorSectionId,
   instructorProjectDocumentId,
+  actorKey,
 }: {
   role: Role;
   selectedNav: string;
@@ -216,6 +279,7 @@ export default function RoleSidebarPage({
   similarityMode?: "title" | "content";
   instructorSectionId?: string | number;
   instructorProjectDocumentId?: string | number;
+  actorKey?: string;
 }) {
   switch (role) {
     case "research_editor":
@@ -224,14 +288,15 @@ export default function RoleSidebarPage({
           return <EditorDashboard role={role} />;
         case "Assigned Research":
         case "Research Folders":
-          return <AssignedResearchFolders role={role} />;
+          return <AssignedResearchFolders role={role} actorKey={actorKey} />;
+        case "Repository":
+          return <ArchivedRoleRepository role={role} />;
         case "Editorial Review":
           return <EditorReview role={role} />;
-        case "Defense Monitoring Forms":
         case "Monitoring":
           return <EditorMonitoring role={role} />;
-        case "Review History":
-          return <EditorHistory role={role} navigate={navigate} />;
+        case "User Logs":
+          return <UserLogs role={role} />;
         default:
           return null;
       }
@@ -239,7 +304,7 @@ export default function RoleSidebarPage({
       switch (selectedNav) {
         case "Assigned Research":
         case "Research Folders":
-          return <AssignedResearchFolders role={role} />;
+          return <AssignedResearchFolders role={role} actorKey={actorKey} />;
         case "My Advisees":
           return <AdviserAdvisees role={role} navigate={navigate} />;
         case "Pending Reviews":
@@ -261,15 +326,14 @@ export default function RoleSidebarPage({
           );
         case "Research Progress Updates":
           return <ResearchProgressUpdates role={role} />;
-        case "Defense Monitoring Forms":
         case "Monitoring":
           return <AdviserMonitoring role={role} />;
-        case "Review History":
-          return <AdviserReviewHistory role={role} navigate={navigate} />;
         case "Similarity Alerts":
           return <AdviserSimilarityAlerts role={role} navigate={navigate} />;
         case "Feedback History":
           return <AdviserFeedbackHistory role={role} />;
+        case "User Logs":
+          return <UserLogs role={role} />;
         default:
           return null;
       }
@@ -278,11 +342,16 @@ export default function RoleSidebarPage({
         case "Title Proposals":
         case "Title Review":
           return (
-            <InstructorAssignedSubmissions role={role} stage="title_proposal" />
+            <InstructorAssignedSubmissions
+              role={role}
+              navigate={navigate}
+              stage="title_proposal"
+            />
           );
         case "My Sections":
           return (
             <InstructorSections
+              key={actorKey}
               role={role}
               navigate={navigate}
               sectionId={instructorSectionId}
@@ -292,48 +361,54 @@ export default function RoleSidebarPage({
         case "Assigned Submissions":
         case "Manuscript Review":
           return (
-            <InstructorAssignedSubmissions role={role} stage="manuscript" />
+            <InstructorAssignedSubmissions
+              role={role}
+              navigate={navigate}
+              stage="manuscript"
+            />
           );
         case "Assigned Research":
-          return <AssignedResearchFolders role={role} />;
+          return <AssignedResearchFolders role={role} actorKey={actorKey} />;
         case "Review Submissions":
           return (
-            <InstructorAssignedSubmissions role={role} stage="manuscript" />
+            <InstructorAssignedSubmissions
+              role={role}
+              navigate={navigate}
+              stage="manuscript"
+            />
           );
         case "Research Progress Updates":
           return <ResearchProgressUpdates role={role} />;
-        case "Defense Monitoring Forms":
         case "Monitoring":
           return <InstructorMonitoring role={role} />;
-        case "Review History":
-          return <InstructorReviewHistory role={role} navigate={navigate} />;
         case "Panelist Availability":
           return <InstructorPanelists role={role} />;
         case "Similarity Overview":
           return <InstructorSimilarityOverview role={role} />;
         case "Class Reports":
           return <InstructorClassReports role={role} />;
+        case "User Logs":
+          return <UserLogs role={role} />;
         default:
           return null;
       }
     case "panel":
       switch (selectedNav) {
+        case "Assigned Research":
         case "Research Folders":
-          return <AssignedResearchFolders role={role} />;
-        case "Assigned Defenses":
-        case "Defense Schedule":
-          return <PanelDefenseSchedule role={role} />;
+          return <AssignedResearchFolders role={role} actorKey={actorKey} />;
+        case "Repository":
+          return <ArchivedRoleRepository role={role} />;
         case "Defense Evaluation":
         case "Evaluation Form":
           return <PanelEvaluationForm role={role} />;
         case "Availability Calendar":
           return <PanelAvailability role={role} />;
-        case "Defense Monitoring Forms":
-        case "Monitoring":
-          return <SharedMonitoring role={role} />;
         case "Evaluation History":
         case "Panel History":
           return <PanelHistory role={role} />;
+        case "User Logs":
+          return <UserLogs role={role} />;
         default:
           return null;
       }
@@ -341,29 +416,29 @@ export default function RoleSidebarPage({
       switch (selectedNav) {
         case "Assigned Research":
         case "Research Folders":
-          return <AssignedResearchFolders role={role} />;
+          return <AssignedResearchFolders role={role} actorKey={actorKey} />;
+        case "Repository":
+          return <ArchivedRoleRepository role={role} />;
         case "Statistical Review":
         case "Methodology Checklist":
           return <StatisticianMethodologyChecklist role={role} />;
-        case "Defense Monitoring Forms":
-        case "Monitoring":
-          return <SharedMonitoring role={role} />;
-        case "Review History":
         case "Sign-offs Issued":
           return <StatisticianSignoffs role={role} />;
+        case "User Logs":
+          return <UserLogs role={role} />;
         default:
           return null;
       }
     case "coordinator":
       switch (selectedNav) {
-        case "Schedules":
-          return <CoordinatorSchedules role={role} />;
-        case "Duplicate Flags":
-          return <CoordinatorDuplicateFlags role={role} />;
+        case "Research Assignments":
+          return <CoordinatorResearchAssignments />;
         case "Adviser Load":
           return <CoordinatorAdviserLoad role={role} />;
         case "Account Roles":
           return <CoordinatorAccountRoles role={role} />;
+        case "Repository":
+          return <CoordinatorRepository role={role} navigate={navigate} />;
         case "Reports":
           return <CoordinatorReports role={role} />;
         default:
@@ -375,31 +450,39 @@ export default function RoleSidebarPage({
           return <LibrarianAssignmentRequests role={role} />;
         case "Assigned Research":
         case "Research Folders":
-          return <AssignedResearchFolders role={role} />;
+          return <AssignedResearchFolders role={role} actorKey={actorKey} />;
         case "Reference Review":
           return <LibrarianReferenceReview role={role} />;
-        case "Defense Monitoring Forms":
         case "Monitoring":
           return <LibrarianMonitoring role={role} />;
-        case "Review History":
-          return <LibrarianReviewHistory role={role} navigate={navigate} />;
+        case "Repository":
         case "Repository Catalog":
           return <LibrarianRepositoryCatalog role={role} navigate={navigate} />;
         case "Metadata Standards":
           return <LibrarianMetadataStandards role={role} />;
         case "Retention & Compliance":
           return <LibrarianRetentionLogs role={role} />;
+        case "User Logs":
+          return <UserLogs role={role} />;
         default:
           return null;
       }
     case "research-office":
       switch (selectedNav) {
+        case "Assigned Research":
         case "Research Folders":
-          return <AssignedResearchFolders role={role} />;
+          return <AssignedResearchFolders role={role} actorKey={actorKey} />;
+
         case "Similarity Check":
-          return <ResearcherSimilarityCheck role={role} showModePicker />;
-        case "Upload Manuscript":
-          return <ResearchOfficeBulkImport />;
+          return (
+            <ResearcherSimilarityCheck
+              key={similarityMode}
+              role={role}
+              initialMode={similarityMode}
+            />
+          );
+        case "Manage Repository":
+          return <ManageRepository contextLabel="Research Office" />;
 
         case "User & Role Management":
           return <OfficeUsers role={role} />;
@@ -469,13 +552,278 @@ function PanelAvailability({ role }: { role: Role }) {
   );
 }
 
+function UserLogs({ role }: { role: Role }) {
+  const [logs, setLogs] = useState<
+    Awaited<ReturnType<typeof listUserLogs>>["data"]
+  >([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const [page, setPage] = useState(1);
+  const [paginationMeta, setPaginationMeta] = useState<
+    Awaited<ReturnType<typeof listUserLogs>>["meta"] | null
+  >(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [query, setQuery] = useState({
+    search: "",
+    created_from: "",
+    created_to: "",
+  });
+
+  function reloadLogs() {
+    setLoading(true);
+    setError(null);
+    setAttempt((value) => value + 1);
+  }
+
+  const { filters, change } = useLiveFilters(
+    { search: "", created_from: "", created_to: "" },
+    (next) => {
+      setPage(1);
+      setQuery(next);
+      setLoading(true);
+      setError(null);
+    },
+  );
+  const [sort, setSort] = useState<"action" | "subject" | "created_at" | null>(
+    null,
+  );
+  const [direction, setDirection] = useState<"asc" | "desc">("asc");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void listUserLogs({
+      ...query,
+      sort: sort || undefined,
+      direction: sort ? direction : undefined,
+      page: page > 1 ? page : undefined,
+    })
+      .then((response) => {
+        if (!cancelled) {
+          setLogs(response.data);
+          setPaginationMeta(response.meta);
+        }
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled) {
+          setError(
+            reason instanceof Error
+              ? reason.message
+              : "Unable to load your activity logs.",
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [attempt, direction, page, query, sort]);
+
+  function sortLogs(column: "action" | "subject" | "created_at") {
+    setPage(1);
+    setLoading(true);
+    setError(null);
+    if (sort === column) {
+      setDirection((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSort(column);
+    setDirection("asc");
+  }
+  async function clearVisibleLogs() {
+    setClearing(true);
+    setError(null);
+
+    try {
+      await clearUserLogs();
+      setConfirmClear(false);
+      setPage(1);
+      reloadLogs();
+    } catch (reason: unknown) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Unable to clear your visible activity logs.",
+      );
+    } finally {
+      setClearing(false);
+    }
+  }
+  return (
+    <div className="workspace-content admin-sidebar-page">
+      <RolePageHeader
+        role={role}
+        title="User Logs"
+        description="Activity recorded for your account."
+        action={
+          <div className="row-actions">
+            <Button
+              variant="secondary"
+              className="icon-button"
+              disabled={loading || clearing || logs.length === 0}
+              onClick={() => setConfirmClear(true)}
+              aria-label="Clear Logs"
+              title="Clear Logs"
+            >
+              <Trash2 aria-hidden="true" />
+            </Button>
+
+            <Button
+              className="icon-button"
+              disabled={clearing}
+              onClick={reloadLogs}
+              aria-label="Refresh"
+              title="Refresh"
+            >
+              <RefreshCw aria-hidden="true" />
+            </Button>
+          </div>
+        }
+      />
+
+      <section className="panel-card admin-data-card">
+        <form
+          className="admin-filters"
+          onSubmit={(event) => event.preventDefault()}
+        >
+          <label>
+            Search logs
+            <input
+              type="search"
+              value={filters.search}
+              placeholder="Action, record, or description"
+              onChange={(event) => change("search", event.target.value)}
+            />
+          </label>
+          <label>
+            From
+            <DatePickerInput
+              type="date"
+              value={filters.created_from}
+              max={filters.created_to || undefined}
+              onChange={(event) => change("created_from", event.target.value)}
+            />
+          </label>
+          <label>
+            To
+            <DatePickerInput
+              type="date"
+              value={filters.created_to}
+              min={filters.created_from || undefined}
+              onChange={(event) => change("created_to", event.target.value)}
+            />
+          </label>
+        </form>
+      </section>
+
+      {loading ? (
+        <Loading label="Loading user logs" />
+      ) : error ? (
+        <InlineError message={error} retry={reloadLogs} />
+      ) : logs.length === 0 ? (
+        <p className="admin-empty">
+          {Object.values(query).some(Boolean)
+            ? "No activity matches these filters."
+            : "No activity has been recorded yet."}
+        </p>
+      ) : (
+        <section className="panel-card admin-data-card">
+          <div className="admin-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <SortableHeader
+                    sortKey="action"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      sortLogs(key as "action" | "subject" | "created_at")
+                    }
+                  >
+                    Action
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="subject"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      sortLogs(key as "action" | "subject" | "created_at")
+                    }
+                  >
+                    Related record
+                  </SortableHeader>
+                  <th>Description</th>
+                  <SortableHeader
+                    sortKey="created_at"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      sortLogs(key as "action" | "subject" | "created_at")
+                    }
+                  >
+                    Date &amp; time
+                  </SortableHeader>
+                </tr>
+              </thead>
+
+              <tbody>
+                {logs.map((log) => (
+                  <tr key={log.id}>
+                    <td>{label(log.action)}</td>
+                    <td>
+                      {log.subject
+                        ? `${label(log.subject.type)} #${log.subject.id}`
+                        : "—"}
+                    </td>
+                    <td>{log.description ?? "—"}</td>
+                    <td>{displayDate(log.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {paginationMeta && (
+            <Pagination
+              meta={paginationMeta}
+              noun="logs"
+              onPage={(nextPage) => {
+                setLoading(true);
+                setError(null);
+                setPage(nextPage);
+              }}
+            />
+          )}
+        </section>
+      )}
+      {confirmClear && (
+        <ConfirmDialog
+          title="Clear Logs"
+          message="Are you sure you want to clear all logs? This action cannot be undone."
+          confirmLabel="Clear Logs"
+          className="clear-logs-confirmation"
+          busy={clearing}
+          onConfirm={() => void clearVisibleLogs()}
+          onCancel={() => setConfirmClear(false)}
+        />
+      )}
+    </div>
+  );
+}
+
 function RolePageHeader({
   role,
   title,
   description,
   action,
 }: {
-  role: Role;
+  role?: Role;
   title: string;
   description: string;
   action?: React.ReactNode;
@@ -483,9 +831,11 @@ function RolePageHeader({
   return (
     <header className="workspace-header">
       <div>
-        <p className="eyebrow">
-          {roleConfigs.find((config) => config.id === role)?.label}
-        </p>
+        {role && role !== "researcher" && (
+          <p className="eyebrow">
+            {roleConfigs.find((config) => config.id === role)?.label}
+          </p>
+        )}
         <h1>{title}</h1>
         <p>{description}</p>
       </div>
@@ -524,42 +874,56 @@ function InlineError({
   );
 }
 
-function Pagination({
-  meta,
-  onPage,
+type ReportSpotlight = {
+  title: string;
+  description: string;
+  columns: string[];
+  rows: string[][];
+};
+
+function SpotlightModal({
+  spotlight,
+  onClose,
 }: {
-  meta: LaravelPaginatedResponse<unknown>["meta"];
-  onPage: (page: number) => void;
+  spotlight: ReportSpotlight;
+  onClose: () => void;
 }) {
   return (
-    <nav className="admin-pagination" aria-label="Pagination">
-      <span>
-        Page {meta.current_page} of {meta.last_page} · {meta.total} total
-      </span>
-      <Button
-        variant="secondary"
-        disabled={meta.current_page <= 1}
-        onClick={() => onPage(meta.current_page - 1)}
-      >
-        Previous
-      </Button>
-      <Button
-        variant="secondary"
-        disabled={meta.current_page >= meta.last_page}
-        onClick={() => onPage(meta.current_page + 1)}
-      >
-        Next
-      </Button>
-    </nav>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: number | null }) {
-  return (
-    <section className="panel-card admin-stat">
-      <strong>{value === null ? "—" : value.toLocaleString()}</strong>
-      <span>{label}</span>
-    </section>
+    <Modal label={spotlight.title} onClose={onClose} size="large">
+      <section className="panel-card admin-data-card">
+        <div className="admin-card-heading">
+          <div>
+            <h2>{spotlight.title}</h2>
+            <p>{spotlight.description}</p>
+          </div>
+        </div>
+        {spotlight.rows.length === 0 ? (
+          <p className="admin-empty">No records in this scope.</p>
+        ) : (
+          <div className="admin-table-wrap">
+            <table>
+              <caption className="sr-only">{spotlight.title}</caption>
+              <thead>
+                <tr>
+                  {spotlight.columns.map((column) => (
+                    <th key={column}>{column}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {spotlight.rows.map((row, index) => (
+                  <tr key={index}>
+                    {row.map((cell, cellIndex) => (
+                      <td key={cellIndex}>{cell}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </Modal>
   );
 }
 
@@ -596,7 +960,7 @@ function requireResearcherPage(
 }
 
 function displayDate(value: string | null) {
-  return value ? new Date(value).toLocaleString() : "—";
+  return formatPhilippineDateTime(value);
 }
 
 function label(value: string) {
@@ -687,81 +1051,6 @@ function AdviserPendingReviews({
   );
 }
 
-function AdviserReviewHistory({
-  role,
-  navigate,
-}: {
-  role: Role;
-  navigate: (path: string) => void;
-}) {
-  const [attempt, reload] = useAttempt();
-  const state = useLoad(() => listAdviserReviewHistory(), attempt);
-  return (
-    <div className="workspace-content admin-sidebar-page">
-      <RolePageHeader
-        role={role}
-        title="Review history"
-        description="Your persisted title and manuscript review actions."
-        action={<Button onClick={reload}>Refresh</Button>}
-      />
-      {state.status === "loading" ? (
-        <Loading label="Loading review history" />
-      ) : state.status === "error" ? (
-        <InlineError message={state.message} retry={reload} />
-      ) : state.data.length === 0 ? (
-        <p className="admin-empty">No Adviser review history is available.</p>
-      ) : (
-        <section className="panel-card admin-data-card">
-          <div className="admin-table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Research</th>
-                  <th>Stage</th>
-                  <th>Type</th>
-                  <th>Remarks</th>
-                  <th>Required action</th>
-                  <th>Status</th>
-                  <th>Date</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {state.data.map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.title}</td>
-                    <td>
-                      {label(
-                        (item as typeof item & { research_stage?: string })
-                          .research_stage ?? "",
-                      )}
-                    </td>
-                    <td>{label(item.review_type)}</td>
-                    <td>{item.remarks ?? "—"}</td>
-                    <td>{item.required_action ?? "—"}</td>
-                    <td>{label(item.status)}</td>
-                    <td>{displayDate(item.reviewed_at ?? item.created_at)}</td>
-                    <td>
-                      <Button
-                        variant="secondary"
-                        onClick={() =>
-                          navigate(`/research/${item.research_document_id}`)
-                        }
-                      >
-                        Open research
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
-    </div>
-  );
-}
-
 function AdviserMonitoring({ role }: { role: Role }) {
   const [attempt, reload] = useAttempt();
   const entries = useLoad(() => listAdviserMonitoring(), attempt);
@@ -778,6 +1067,18 @@ function AdviserMonitoring({ role }: { role: Role }) {
   const [remarks, setRemarks] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const { sortedRows, sort, direction, changeSort } = useClientSorting(
+    entries.status === "ready" ? entries.data : [],
+    {
+      title: (entry) => entry.title,
+      stage: (entry) => entry.monitoring_stage,
+      designation: (entry) => entry.designation ?? entry.reviewer_role,
+      status: (entry) => entry.status,
+      signature: (entry) => entry.signature_status,
+      verification: (entry) =>
+        entry.verified_at ? Date.parse(entry.verified_at) : null,
+    },
+  );
   async function save(event: React.FormEvent) {
     event.preventDefault();
     if (!researchId || !activity.trim()) return;
@@ -786,7 +1087,7 @@ function AdviserMonitoring({ role }: { role: Role }) {
     try {
       await saveAdviserMonitoring(researchId, {
         monitoring_stage: stage,
-        activity_date: new Date().toISOString().slice(0, 10),
+        activity_date: philippineDateToday(),
         activity: activity.trim(),
         remarks: remarks.trim() || null,
         status: "completed",
@@ -896,18 +1197,120 @@ function AdviserMonitoring({ role }: { role: Role }) {
             <table>
               <thead>
                 <tr>
-                  <th>Research</th>
-                  <th>Stage</th>
-                  <th>Designation</th>
+                  <SortableHeader
+                    sortKey="title"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "title"
+                          | "stage"
+                          | "designation"
+                          | "status"
+                          | "signature"
+                          | "verification",
+                      )
+                    }
+                  >
+                    Research
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="stage"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "title"
+                          | "stage"
+                          | "designation"
+                          | "status"
+                          | "signature"
+                          | "verification",
+                      )
+                    }
+                  >
+                    Stage
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="designation"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "title"
+                          | "stage"
+                          | "designation"
+                          | "status"
+                          | "signature"
+                          | "verification",
+                      )
+                    }
+                  >
+                    Designation
+                  </SortableHeader>
                   <th>Activity</th>
                   <th>Remarks</th>
-                  <th>Status</th>
-                  <th>Signature</th>
-                  <th>Verification</th>
+                  <SortableHeader
+                    sortKey="status"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "title"
+                          | "stage"
+                          | "designation"
+                          | "status"
+                          | "signature"
+                          | "verification",
+                      )
+                    }
+                  >
+                    Status
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="signature"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "title"
+                          | "stage"
+                          | "designation"
+                          | "status"
+                          | "signature"
+                          | "verification",
+                      )
+                    }
+                  >
+                    Signature
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="verification"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "title"
+                          | "stage"
+                          | "designation"
+                          | "status"
+                          | "signature"
+                          | "verification",
+                      )
+                    }
+                  >
+                    Verification
+                  </SortableHeader>
                 </tr>
               </thead>
               <tbody>
-                {entries.data.map((entry) => (
+                {sortedRows.map((entry) => (
                   <tr key={entry.id}>
                     <td>{entry.title}</td>
                     <td>{label(entry.monitoring_stage)}</td>
@@ -978,46 +1381,102 @@ function AdviserAdvisees({
                   </p>
                 </div>
               </div>
-              <div className="admin-table-wrap">
-                <table className="checker-results-table">
-                  <caption className="sr-only">Advisee documents</caption>
-                  <thead>
-                    <tr>
-                      <th>Title</th>
-                      <th>Stage</th>
-                      <th>Status</th>
-                      <th>Updated</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {group.documents.map((document) => (
-                      <tr key={document.research_document_id}>
-                        <td>{document.title}</td>
-                        <td>{label(document.research_stage)}</td>
-                        <td>{label(document.submission_status)}</td>
-                        <td>{displayDate(document.updated_at)}</td>
-                        <td>
-                          <Button
-                            variant="secondary"
-                            onClick={() =>
-                              navigate(
-                                `/research/${document.research_document_id}`,
-                              )
-                            }
-                          >
-                            <Eye aria-hidden="true" /> Open review
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <AdviseeDocumentsTable
+                documents={group.documents}
+                navigate={navigate}
+              />
             </section>
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function AdviseeDocumentsTable({
+  documents,
+  navigate,
+}: {
+  documents: Awaited<
+    ReturnType<typeof listAdviserAdvisees>
+  >[number]["documents"];
+  navigate: (path: string) => void;
+}) {
+  const { sortedRows, sort, direction, changeSort } = useClientSorting(
+    documents,
+    {
+      title: (document) => document.title,
+      stage: (document) => document.research_stage,
+      status: (document) => document.submission_status,
+      updated: (document) =>
+        document.updated_at ? Date.parse(document.updated_at) : null,
+    },
+  );
+  const onSort = (key: string) =>
+    changeSort(key as "title" | "stage" | "status" | "updated");
+
+  return (
+    <div className="admin-table-wrap">
+      <table className="checker-results-table">
+        <caption className="sr-only">Advisee documents</caption>
+        <thead>
+          <tr>
+            <SortableHeader
+              sortKey="title"
+              activeSort={sort}
+              direction={direction}
+              onSort={onSort}
+            >
+              Title
+            </SortableHeader>
+            <SortableHeader
+              sortKey="stage"
+              activeSort={sort}
+              direction={direction}
+              onSort={onSort}
+            >
+              Stage
+            </SortableHeader>
+            <SortableHeader
+              sortKey="status"
+              activeSort={sort}
+              direction={direction}
+              onSort={onSort}
+            >
+              Status
+            </SortableHeader>
+            <SortableHeader
+              sortKey="updated"
+              activeSort={sort}
+              direction={direction}
+              onSort={onSort}
+            >
+              Updated
+            </SortableHeader>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sortedRows.map((document) => (
+            <tr key={document.research_document_id}>
+              <td>{document.title}</td>
+              <td>{label(document.research_stage)}</td>
+              <td>{label(document.submission_status)}</td>
+              <td>{displayDate(document.updated_at)}</td>
+              <td>
+                <Button
+                  variant="secondary"
+                  onClick={() =>
+                    navigate(`/research/${document.research_document_id}`)
+                  }
+                >
+                  <Eye aria-hidden="true" /> Open review
+                </Button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -1119,6 +1578,16 @@ function AdviserSimilarityAlerts({
 function AdviserFeedbackHistory({ role }: { role: Role }) {
   const [attempt, reload] = useAttempt();
   const state = useLoad(() => listAdviserFeedbackHistory(), attempt);
+  const { sortedRows, sort, direction, changeSort } = useClientSorting(
+    state.status === "ready" ? state.data : [],
+    {
+      title: (entry) => entry.title,
+      type: (entry) => entry.feedback_type,
+      status: (entry) => entry.feedback_status,
+      posted: (entry) =>
+        entry.created_at ? Date.parse(entry.created_at) : null,
+    },
+  );
   return (
     <div className="workspace-content admin-sidebar-page">
       <RolePageHeader
@@ -1144,15 +1613,51 @@ function AdviserFeedbackHistory({ role }: { role: Role }) {
               <caption className="sr-only">Feedback history</caption>
               <thead>
                 <tr>
-                  <th>Research title</th>
-                  <th>Type</th>
-                  <th>Status</th>
+                  <SortableHeader
+                    sortKey="title"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(key as "title" | "type" | "status" | "posted")
+                    }
+                  >
+                    Research title
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="type"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(key as "title" | "type" | "status" | "posted")
+                    }
+                  >
+                    Type
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="status"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(key as "title" | "type" | "status" | "posted")
+                    }
+                  >
+                    Status
+                  </SortableHeader>
                   <th>Comment</th>
-                  <th>Posted</th>
+                  <SortableHeader
+                    sortKey="posted"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(key as "title" | "type" | "status" | "posted")
+                    }
+                  >
+                    Posted
+                  </SortableHeader>
                 </tr>
               </thead>
               <tbody>
-                {state.data.map((entry) => (
+                {sortedRows.map((entry) => (
                   <tr key={entry.id}>
                     <td>{entry.title ?? "—"}</td>
                     <td>{label(entry.feedback_type)}</td>
@@ -1182,8 +1687,16 @@ function CreateSectionDialog({
   const [name, setName] = useState("");
   const [sectionCode, setSectionCode] = useState("");
   const [academicYear, setAcademicYear] = useState("");
+  const [institute, setInstitute] = useState("");
+  const [institutes, setInstitutes] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    void listInstitutes()
+      .then(setInstitutes)
+      .catch(() => setNotice("Institute options could not be loaded."));
+  }, []);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1194,6 +1707,7 @@ function CreateSectionDialog({
         name: name.trim(),
         section_code: sectionCode.trim(),
         academic_year: academicYear.trim() || null,
+        institute,
       });
       onCreated();
     } catch (error) {
@@ -1205,7 +1719,6 @@ function CreateSectionDialog({
   return (
     <Modal label="Create class section" onClose={onClose} busy={busy}>
       <div className="create-section-card">
-        <p className="eyebrow">Instructor</p>
         <h2>Create a class section</h2>
         <p>
           Add a class section to organize the student researchers and research
@@ -1215,7 +1728,7 @@ function CreateSectionDialog({
           onSubmit={submit}
           className="admin-inline-form section-dialog-form"
         >
-          <label>
+          <label className="section-dialog-name">
             Section name
             <input
               value={name}
@@ -1239,6 +1752,21 @@ function CreateSectionDialog({
               value={academicYear}
               onChange={(event) => setAcademicYear(event.target.value)}
             />
+          </label>
+          <label className="section-dialog-institute">
+            Institute
+            <select
+              value={institute}
+              onChange={(event) => setInstitute(event.target.value)}
+              required
+            >
+              <option value="">Select institute</option>
+              {institutes.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
           </label>
           <div className="modal-actions">
             <Button
@@ -1331,9 +1859,11 @@ function ProjectAccountOptions({
 
 function InstructorAssignedSubmissions({
   role,
+  navigate,
   stage,
 }: {
   role: Role;
+  navigate: (path: string) => void;
   stage: "title_proposal" | "manuscript";
 }) {
   const [attempt, reload] = useAttempt();
@@ -1341,10 +1871,7 @@ function InstructorAssignedSubmissions({
     () => listInstructorAssignedSubmissions(stage),
     attempt,
   );
-  const [selected, setSelected] =
-    useState<InstructorAssignedSubmissionItem | null>(null);
   const [statusFilter, setStatusFilter] = useState("");
-  const [reviewBusy, setReviewBusy] = useState(false);
   const titleOnly = stage === "title_proposal";
   const filteredSubmissions =
     state.status === "ready"
@@ -1388,7 +1915,11 @@ function InstructorAssignedSubmissions({
               >
                 <option value="">All statuses</option>
                 {Array.from(
-                  new Set(state.data.map((item) => item.submission_status)),
+                  new Set(
+                    state.data
+                      .map((item) => item.submission_status)
+                      .filter(Boolean),
+                  ),
                 ).map((status) => (
                   <option key={status} value={status}>
                     {label(status)}
@@ -1416,7 +1947,7 @@ function InstructorAssignedSubmissions({
                 </span>
               </div>
               <div className="admin-table-wrap">
-                <table>
+                <table className="checker-results-table">
                   <caption className="sr-only">
                     {titleOnly ? "Title" : "Manuscript"} review assignments
                   </caption>
@@ -1441,7 +1972,11 @@ function InstructorAssignedSubmissions({
                         <td>
                           <Button
                             variant="secondary"
-                            onClick={() => setSelected(item)}
+                            onClick={() =>
+                              navigate(
+                                `/research/${item.research_document_id}?tab=documents`,
+                              )
+                            }
                           >
                             Open review
                           </Button>
@@ -1454,20 +1989,6 @@ function InstructorAssignedSubmissions({
             </section>
           )}
         </div>
-      )}
-      {selected && (
-        <Modal
-          label={`Review assigned research: ${selected.title}`}
-          onClose={() => setSelected(null)}
-          size="large"
-          busy={reviewBusy}
-        >
-          <InstructorResearchReview
-            submission={selected}
-            onUpdated={reload}
-            onBusyChange={setReviewBusy}
-          />
-        </Modal>
       )}
     </div>
   );
@@ -1573,76 +2094,6 @@ function InstructorPanelists({ role }: { role: Role }) {
   );
 }
 
-function InstructorReviewHistory({
-  role,
-  navigate,
-}: {
-  role: Role;
-  navigate: (path: string) => void;
-}) {
-  const [attempt, reload] = useAttempt();
-  const state = useLoad(() => listInstructorReviewHistory(), attempt);
-  return (
-    <div className="workspace-content admin-sidebar-page">
-      <RolePageHeader
-        role={role}
-        title="Review history"
-        description="Your persisted comments, revision requests, and recommendations."
-        action={<Button onClick={reload}>Refresh</Button>}
-      />
-      {state.status === "loading" ? (
-        <Loading label="Loading review history" />
-      ) : state.status === "error" ? (
-        <InlineError message={state.message} retry={reload} />
-      ) : state.data.length === 0 ? (
-        <p className="admin-empty">
-          No Instructor review history is available.
-        </p>
-      ) : (
-        <section className="panel-card admin-data-card">
-          <div className="admin-table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Research</th>
-                  <th>Type</th>
-                  <th>Remarks</th>
-                  <th>Required action</th>
-                  <th>Status</th>
-                  <th>Date</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {state.data.map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.title}</td>
-                    <td>{label(item.review_type)}</td>
-                    <td>{item.remarks ?? "—"}</td>
-                    <td>{item.required_action ?? "—"}</td>
-                    <td>{label(item.status)}</td>
-                    <td>{displayDate(item.reviewed_at ?? item.created_at)}</td>
-                    <td>
-                      <Button
-                        variant="secondary"
-                        onClick={() =>
-                          navigate(`/research/${item.research_document_id}`)
-                        }
-                      >
-                        Open research
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
-    </div>
-  );
-}
-
 function InstructorMonitoring({ role }: { role: Role }) {
   const [attempt, reload] = useAttempt();
   const entries = useLoad(() => listInstructorMonitoring(), attempt);
@@ -1658,6 +2109,18 @@ function InstructorMonitoring({ role }: { role: Role }) {
   const [remarks, setRemarks] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const { sortedRows, sort, direction, changeSort } = useClientSorting(
+    entries.status === "ready" ? entries.data : [],
+    {
+      title: (entry) => entry.title,
+      stage: (entry) => entry.monitoring_stage,
+      designation: (entry) => entry.designation ?? entry.reviewer_role,
+      status: (entry) => entry.status,
+      signature: (entry) => entry.signature_status,
+      verified: (entry) =>
+        entry.verified_at ? Date.parse(entry.verified_at) : null,
+    },
+  );
   async function save(event: React.FormEvent) {
     event.preventDefault();
     if (!researchId || !activity.trim()) return;
@@ -1666,7 +2129,7 @@ function InstructorMonitoring({ role }: { role: Role }) {
     try {
       await saveInstructorMonitoring(researchId, {
         monitoring_stage: stage,
-        activity_date: new Date().toISOString().slice(0, 10),
+        activity_date: philippineDateToday(),
         activity: activity.trim(),
         remarks: remarks.trim() || null,
         status: "completed",
@@ -1800,17 +2263,119 @@ function InstructorMonitoring({ role }: { role: Role }) {
             <table>
               <thead>
                 <tr>
-                  <th>Research</th>
-                  <th>Stage</th>
-                  <th>Designation</th>
+                  <SortableHeader
+                    sortKey="title"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "title"
+                          | "stage"
+                          | "designation"
+                          | "status"
+                          | "signature"
+                          | "verified",
+                      )
+                    }
+                  >
+                    Research
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="stage"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "title"
+                          | "stage"
+                          | "designation"
+                          | "status"
+                          | "signature"
+                          | "verified",
+                      )
+                    }
+                  >
+                    Stage
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="designation"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "title"
+                          | "stage"
+                          | "designation"
+                          | "status"
+                          | "signature"
+                          | "verified",
+                      )
+                    }
+                  >
+                    Designation
+                  </SortableHeader>
                   <th>Activity</th>
-                  <th>Status</th>
-                  <th>Signature</th>
-                  <th>Verified</th>
+                  <SortableHeader
+                    sortKey="status"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "title"
+                          | "stage"
+                          | "designation"
+                          | "status"
+                          | "signature"
+                          | "verified",
+                      )
+                    }
+                  >
+                    Status
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="signature"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "title"
+                          | "stage"
+                          | "designation"
+                          | "status"
+                          | "signature"
+                          | "verified",
+                      )
+                    }
+                  >
+                    Signature
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="verified"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "title"
+                          | "stage"
+                          | "designation"
+                          | "status"
+                          | "signature"
+                          | "verified",
+                      )
+                    }
+                  >
+                    Verified
+                  </SortableHeader>
                 </tr>
               </thead>
               <tbody>
-                {entries.data.map((entry) => (
+                {sortedRows.map((entry) => (
                   <tr key={entry.id}>
                     <td>{entry.title}</td>
                     <td>{label(entry.monitoring_stage)}</td>
@@ -1834,6 +2399,17 @@ function InstructorMonitoring({ role }: { role: Role }) {
   );
 }
 
+const PROJECT_ROLE_FIELDS = [
+  ["adviser", "Assign research adviser", "Research adviser", "adviser_id"],
+  [
+    "researchOffice",
+    "Assign Research Office representative",
+    "Research Office representative",
+    "research_office_representative_id",
+  ],
+  ["chair", "Assign panel chair", "Panel chair", "chair_id"],
+] as const;
+
 function InstructorSections({
   role,
   navigate,
@@ -1849,6 +2425,12 @@ function InstructorSections({
   const state = useLoad(() => listInstructorSections(), attempt);
   const [pageNotice, setPageNotice] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [sectionSearch, setSectionSearch] = useState("");
+  const [academicYearFilter, setAcademicYearFilter] = useState("");
+  const [sectionStatusFilter, setSectionStatusFilter] = useState("");
+  const [studySearch, setStudySearch] = useState("");
+  const [studyStageFilter, setStudyStageFilter] = useState("");
+  const [studyStatusFilter, setStudyStatusFilter] = useState("");
   const openSection =
     sectionId !== undefined && state.status === "ready"
       ? (state.data.find((item) => String(item.id) === String(sectionId)) ??
@@ -1857,6 +2439,9 @@ function InstructorSections({
   const [detailsNotice, setDetailsNotice] = useState("");
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState("");
+  const [editInstitute, setEditInstitute] = useState("");
+  const [institutes, setInstitutes] = useState<string[]>([]);
+  const [editError, setEditError] = useState("");
   const [editSectionCode, setEditSectionCode] = useState("");
   const [editYear, setEditYear] = useState("");
   const [editBusy, setEditBusy] = useState(false);
@@ -1873,6 +2458,22 @@ function InstructorSections({
   const [studentsFor, setStudentsFor] = useState<
     Record<number, InstructorStudentResource[]>
   >({});
+  const visibleStudents = (
+    openSection ? (studentsFor[openSection.id] ?? []) : []
+  ).filter((student) =>
+    matchesStudySearch(studySearch, [studentName(student), student.email]),
+  );
+  const {
+    sortedRows: sortedStudents,
+    sort: studentSort,
+    direction: studentSortDirection,
+    changeSort: changeStudentSort,
+  } = useClientSorting(visibleStudents, {
+    student: (student) => studentName(student),
+    email: (student) => student.email,
+    added: (student) =>
+      student.added_at ? Date.parse(student.added_at) : null,
+  });
   const [studentsState, setStudentsState] = useState<
     Record<number, "loading" | "ready" | "error">
   >({});
@@ -1883,20 +2484,27 @@ function InstructorSections({
     {},
   );
   const [studentBusy, setStudentBusy] = useState<Record<number, boolean>>({});
-  const [selectedDocument, setSelectedDocument] =
-    useState<InstructorSectionDocumentItem | null>(null);
-  const [documentMembers, setDocumentMembers] = useState<
-    InstructorStudentResource[]
-  >([]);
-  const [documentMembersLoading, setDocumentMembersLoading] = useState(false);
   const [projectTeam, setProjectTeam] = useState<InstructorProjectTeam | null>(
     null,
   );
+  const [selectedDocument, setSelectedDocument] =
+    useState<InstructorSectionDocumentItem | null>(null);
+  const [selectedResearch, setSelectedResearch] =
+    useState<ResearchDocumentSummaryResource | null>(null);
+  const [documentPeople, setDocumentPeople] =
+    useState<ResearchPeopleResource | null>(null);
+  const [documentMembers, setDocumentMembers] = useState<
+    InstructorStudentResource[]
+  >([]);
+  const [managedDefenseStage, setManagedDefenseStage] = useState<
+    "proposal" | "final"
+  >("proposal");
   const [teamCandidates, setTeamCandidates] = useState<
     Record<string, ProjectTeamPerson[]>
   >({});
   const [teamSearches, setTeamSearches] = useState<Record<string, string>>({});
   const [teamDraft, setTeamDraft] = useState({
+    researcher_ids: [] as string[],
     adviser_id: "",
     research_office_representative_id: "",
     chair_id: "",
@@ -1937,25 +2545,60 @@ function InstructorSections({
   const [editProjectBusy, setEditProjectBusy] = useState(false);
   const [confirmProjectDelete, setConfirmProjectDelete] = useState(false);
   const [deleteProjectBusy, setDeleteProjectBusy] = useState(false);
-  const [projectTab, setProjectTab] = useState<
-    "overview" | "team" | "documents" | "feedback" | "monitoring"
-  >("overview");
-  const [projectFiles, setProjectFiles] = useState<DocumentFileResource[]>([]);
-  const [projectFolders, setProjectFolders] = useState<string[]>([]);
-  const [activeFolder, setActiveFolder] = useState("");
-  const [projectFeedback, setProjectFeedback] = useState<FeedbackResource[]>(
-    [],
-  );
-  const [workspaceLoading, setWorkspaceLoading] = useState(false);
-  const [feedbackText, setFeedbackText] = useState("");
-  const [feedbackType, setFeedbackType] =
-    useState<FeedbackResource["feedback_type"]>("comment");
-  const [feedbackFileId, setFeedbackFileId] = useState("");
-  const [feedbackBusy, setFeedbackBusy] = useState(false);
   const studentSearchRef = useRef<Record<number, number>>({});
-  const showingProjectPage = openSection !== null && selectedDocument !== null;
-  const projectAssignmentEditing =
-    Object.values(projectDisclosures).some(Boolean);
+
+  useEffect(() => {
+    void listInstitutes().then(setInstitutes).catch(() => setInstitutes([]));
+  }, []);
+  const showingProjectPage =
+    openSection !== null &&
+    selectedDocument !== null &&
+    projectDocumentId !== undefined &&
+    String(selectedDocument.research_document_id) === String(projectDocumentId);
+  const sections = state.status === "ready" ? state.data : [];
+  const academicYears = Array.from(
+    new Set(sections.map((section) => section.academic_year).filter(Boolean)),
+  ).sort() as string[];
+  const visibleSections = sections.filter(
+    (section) =>
+      (!academicYearFilter || section.academic_year === academicYearFilter) &&
+      (!sectionStatusFilter ||
+        (section.is_active ? "active" : "inactive") === sectionStatusFilter) &&
+      matchesStudySearch(sectionSearch, [
+        section.name,
+        section.section_code,
+        section.academic_year,
+        section.is_active ? "active" : "inactive",
+      ]),
+  );
+  const sectionDocuments = openSection
+    ? (documentsFor[openSection.id] ?? [])
+    : [];
+  const studyStages = Array.from(
+    new Set(
+      sectionDocuments
+        .map((document) => document.research_stage)
+        .filter(Boolean),
+    ),
+  ).sort();
+  const studyStatuses = Array.from(
+    new Set(
+      sectionDocuments
+        .map((document) => document.submission_status)
+        .filter(Boolean),
+    ),
+  ).sort();
+  const visibleDocuments = sectionDocuments.filter(
+    (document) =>
+      (!studyStageFilter || document.research_stage === studyStageFilter) &&
+      (!studyStatusFilter ||
+        document.submission_status === studyStatusFilter) &&
+      matchesStudySearch(studySearch, [
+        document.title,
+        document.research_stage,
+        document.submission_status,
+      ]),
+  );
 
   function resetProjectDisclosures() {
     setProjectDisclosures({
@@ -1987,7 +2630,6 @@ function InstructorSections({
     );
     if (document) void openDocumentMembers(openSection.id, document);
     // Route identifiers and loaded documents intentionally drive this one-time open.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openSection, projectDocumentId, documentsFor]);
 
   function openSectionDetails(section: InstructorSectionResource) {
@@ -2038,116 +2680,97 @@ function InstructorSections({
     }
   }
 
-  async function loadProjectWorkspace(researchDocumentId: number) {
-    setWorkspaceLoading(true);
-    const [files, folders, feedback] = await Promise.allSettled([
-      listResearchFiles(researchDocumentId),
-      listResearchFolders(researchDocumentId),
-      listFeedback(researchDocumentId),
-    ]);
-
-    if (files.status === "fulfilled") setProjectFiles(files.value);
-    if (feedback.status === "fulfilled") setProjectFeedback(feedback.value);
-    if (folders.status === "fulfilled") {
-      setProjectFolders(folders.value);
-      setActiveFolder((current) =>
-        current && folders.value.includes(current)
-          ? current
-          : (folders.value[0] ?? ""),
-      );
-    }
-
-    const failed = [files, folders, feedback].find(
-      (result) => result.status === "rejected",
-    );
-    if (failed?.status === "rejected") {
-      setDetailsNotice(
-        friendlyError(
-          failed.reason,
-          "Some project workspace data could not be loaded",
-        ),
-      );
-    }
-    setWorkspaceLoading(false);
-  }
-
-  async function submitProjectFeedback(
-    event: React.FormEvent<HTMLFormElement>,
-  ) {
-    event.preventDefault();
-    if (!selectedDocument || !feedbackText.trim()) return;
-    setFeedbackBusy(true);
-    setDetailsNotice("");
-    try {
-      await createFeedback(selectedDocument.research_document_id, {
-        comment: feedbackText.trim(),
-        feedback_type: feedbackType,
-        document_file_id: feedbackFileId ? Number(feedbackFileId) : null,
-      });
-      setProjectFeedback(
-        await listFeedback(selectedDocument.research_document_id),
-      );
-      setFeedbackText("");
-      setFeedbackFileId("");
-      setDetailsNotice("Feedback added to the research workspace.");
-    } catch (error) {
-      setDetailsNotice(friendlyError(error, "The feedback could not be added"));
-    } finally {
-      setFeedbackBusy(false);
-    }
-  }
-
   async function openDocumentMembers(
     sectionId: number,
     document: InstructorSectionDocumentItem,
   ) {
     const requestId = ++teamRequestRef.current;
-    if (
-      selectedDocument?.research_document_id !== document.research_document_id
-    ) {
-      setProjectTab("overview");
-    }
+    setDocumentMembers([]);
+    setProjectTeam(null);
+    setSelectedResearch(null);
+    setDocumentPeople(null);
+    setTeamCandidates({});
+    setTeamDraft({
+      researcher_ids: [],
+      adviser_id: "",
+      research_office_representative_id: "",
+      chair_id: "",
+      panel_member_ids: [],
+    });
+    setTeamBusy(false);
+    setConfirmTeamSave(null);
+    setConfirmDocumentRemove(null);
+    setStudentBusy((current) => ({ ...current, [sectionId]: false }));
     setSelectedDocument(document);
-    setDocumentMembersLoading(true);
     setTeamLoading(true);
-    void loadProjectWorkspace(document.research_document_id);
     try {
-      const [members, team, advisers, officePersonnel, chairs, panelists] =
-        await Promise.allSettled([
-          listSectionDocumentMembers(sectionId, document.research_document_id),
-          getInstructorProjectTeam(sectionId, document.research_document_id),
-          listInstructorProjectTeamCandidates(
-            sectionId,
-            document.research_document_id,
-            "adviser",
-          ),
-          listInstructorProjectTeamCandidates(
-            sectionId,
-            document.research_document_id,
-            "research_office_representative",
-          ),
-          listInstructorPanelists().then((people) =>
-            people.map((person) => ({
-              user_id: person.id,
-              name: person.name,
-              email: person.email,
-              team_role: "chair" as const,
-            })),
-          ),
-          listInstructorPanelists().then((people) =>
-            people.map((person) => ({
-              user_id: person.id,
-              name: person.name,
-              email: person.email,
-              team_role: "panel_member" as const,
-            })),
-          ),
-        ]);
+      const [
+        fullResearch,
+        members,
+        team,
+        people,
+        advisers,
+        officePersonnel,
+        chairs,
+        panelists,
+      ] = await Promise.allSettled([
+        getInternalResearch(document.research_document_id),
+        listSectionDocumentMembers(sectionId, document.research_document_id),
+        getInstructorProjectTeam(
+          sectionId,
+          document.research_document_id,
+          "proposal",
+        ),
+        getResearchPeople(document.research_document_id),
+        listInstructorProjectTeamCandidates(
+          sectionId,
+          document.research_document_id,
+          "adviser",
+        ),
+        listInstructorProjectTeamCandidates(
+          sectionId,
+          document.research_document_id,
+          "research_office_representative",
+        ),
+        listInstructorPanelists().then((people) =>
+          people.map((person) => ({
+            user_id: person.id,
+            name: person.name,
+            email: person.email,
+            team_role: "chair" as const,
+          })),
+        ),
+        listInstructorPanelists().then((people) =>
+          people.map((person) => ({
+            user_id: person.id,
+            name: person.name,
+            email: person.email,
+            team_role: "panel_member" as const,
+          })),
+        ),
+      ]);
       if (requestId !== teamRequestRef.current) return;
-      if (members.status === "fulfilled") setDocumentMembers(members.value);
+
+      if (fullResearch.status === "fulfilled") {
+        setSelectedResearch(fullResearch.value);
+      } else {
+        setSelectedResearch(null);
+      }
+
+      if (members.status === "fulfilled") {
+        setDocumentMembers(members.value);
+      }
+      if (people.status === "fulfilled") {
+        setDocumentPeople(people.value);
+      } else {
+        setDocumentPeople(null);
+      }
       if (team.status === "fulfilled") {
         setProjectTeam(team.value);
         setTeamDraft({
+          researcher_ids: team.value.researchers.map(
+            (member) => member.user_id,
+          ),
           adviser_id: team.value.adviser?.user_id ?? "",
           research_office_representative_id:
             team.value.research_office_representative?.user_id ?? "",
@@ -2165,6 +2788,7 @@ function InstructorSections({
         panel_member: panelists.status === "fulfilled" ? panelists.value : [],
       });
       const failedRequest = [
+        fullResearch,
         members,
         team,
         advisers,
@@ -2188,7 +2812,6 @@ function InstructorSections({
       setDocumentMembers([]);
     } finally {
       if (requestId === teamRequestRef.current) {
-        setDocumentMembersLoading(false);
         setTeamLoading(false);
       }
     }
@@ -2199,11 +2822,8 @@ function InstructorSections({
     setSelectedDocument(null);
     setDocumentMembers([]);
     setProjectTeam(null);
-    setProjectFiles([]);
-    setProjectFolders([]);
-    setProjectFeedback([]);
-    setActiveFolder("");
-    setProjectTab("overview");
+    setSelectedResearch(null);
+    setDocumentPeople(null);
     setProjectManageOpen(false);
     resetProjectDisclosures();
     if (openSection) navigate(`/app/instructor/sections/${openSection.id}`);
@@ -2214,10 +2834,48 @@ function InstructorSections({
     navigate("/app/instructor/sections");
   }
 
+  async function loadProjectTeamStage(
+    stage: "proposal" | "final",
+    options?: { openModal?: boolean; resetDisclosures?: boolean },
+  ) {
+    if (!openSection || !selectedDocument) return;
+    setManagedDefenseStage(stage);
+    if (options?.resetDisclosures) {
+      resetProjectDisclosures();
+    } else {
+      setDetailsNotice("");
+    }
+    setTeamLoading(true);
+    try {
+      const team = await getInstructorProjectTeam(
+        openSection.id,
+        selectedDocument.research_document_id,
+        stage,
+      );
+      setProjectTeam(team);
+      setTeamDraft({
+        researcher_ids: team.researchers.map((member) => member.user_id),
+        adviser_id: team.adviser?.user_id ?? "",
+        research_office_representative_id:
+          team.research_office_representative?.user_id ?? "",
+        chair_id: team.chair?.user_id ?? "",
+        panel_member_ids: team.panel_members.map((member) => member.user_id),
+      });
+      if (options?.openModal) setProjectManageOpen(true);
+    } catch (error) {
+      setDetailsNotice(
+        friendlyError(error, "The selected defense team could not be loaded"),
+      );
+    } finally {
+      setTeamLoading(false);
+    }
+  }
+
   async function saveProjectTeamRole(
     role: "adviser" | "researchOffice" | "chair" | "panelMembers",
   ) {
     if (!openSection || !selectedDocument) return;
+    const requestId = teamRequestRef.current;
     setTeamBusy(true);
     setDetailsNotice("");
     const teamRole =
@@ -2232,6 +2890,9 @@ function InstructorSections({
           openSection.id,
           selectedDocument.research_document_id,
           {
+            defense_type: managedDefenseStage,
+            researcher_ids:
+              projectTeam?.researchers.map((member) => member.user_id) ?? [],
             adviser_id: projectTeam?.adviser?.user_id ?? null,
             research_office_representative_id:
               projectTeam?.research_office_representative?.user_id ?? null,
@@ -2243,6 +2904,7 @@ function InstructorSections({
                   []),
           },
         );
+        if (requestId !== teamRequestRef.current) return;
         setProjectTeam(team);
       } else {
         const field =
@@ -2254,19 +2916,23 @@ function InstructorSections({
         const team = await replaceInstructorProjectTeamRole(
           openSection.id,
           selectedDocument.research_document_id,
+          managedDefenseStage,
           teamRole,
           teamDraft[field] || null,
         );
+        if (requestId !== teamRequestRef.current) return;
         setProjectTeam(team);
       }
+      if (requestId !== teamRequestRef.current) return;
       setDetailsNotice("Research project assignment saved.");
       resetProjectDisclosures();
     } catch (error) {
+      if (requestId !== teamRequestRef.current) return;
       setDetailsNotice(
         friendlyError(error, "The project assignment could not be saved"),
       );
     } finally {
-      setTeamBusy(false);
+      if (requestId === teamRequestRef.current) setTeamBusy(false);
     }
   }
 
@@ -2363,6 +3029,7 @@ function InstructorSections({
     role: "adviser" | "researchOffice" | "chair" | "panelMembers",
   ) {
     if (!openSection || !selectedDocument) return;
+    const requestId = teamRequestRef.current;
     const teamRole =
       role === "researchOffice"
         ? "research_office_representative"
@@ -2383,11 +3050,13 @@ function InstructorSections({
               selectedDocument.research_document_id,
               teamRole,
             );
+      if (requestId !== teamRequestRef.current) return;
       setTeamCandidates((current) => ({
         ...current,
         [teamRole]: candidates,
       }));
     } catch (error) {
+      if (requestId !== teamRequestRef.current) return;
       setDetailsNotice(
         friendlyError(error, "Eligible project staff could not be refreshed"),
       );
@@ -2396,38 +3065,46 @@ function InstructorSections({
 
   async function addStudentToDocument(userId: string) {
     if (!openSection || !selectedDocument) return;
+    const requestId = teamRequestRef.current;
+    const sectionId = openSection.id;
     setStudentBusy((current) => ({ ...current, [openSection.id]: true }));
     try {
-      setDocumentMembers(
-        await addSectionDocumentMember(
-          openSection.id,
-          selectedDocument.research_document_id,
-          userId,
-        ),
+      const members = await addSectionDocumentMember(
+        sectionId,
+        selectedDocument.research_document_id,
+        userId,
       );
+      if (requestId !== teamRequestRef.current) return;
+      setDocumentMembers(members);
       setDetailsNotice("Student researcher added to this research title.");
     } catch (error) {
+      if (requestId !== teamRequestRef.current) return;
       setDetailsNotice(
         friendlyError(error, "The student could not be assigned to this title"),
       );
     } finally {
-      setStudentBusy((current) => ({ ...current, [openSection.id]: false }));
+      if (requestId === teamRequestRef.current) {
+        setStudentBusy((current) => ({ ...current, [sectionId]: false }));
+      }
     }
   }
 
   async function removeStudentFromDocument(userId: string) {
     if (!openSection || !selectedDocument) return;
+    const requestId = teamRequestRef.current;
+    const sectionId = openSection.id;
     setStudentBusy((current) => ({ ...current, [openSection.id]: true }));
     try {
-      setDocumentMembers(
-        await removeSectionDocumentMember(
-          openSection.id,
-          selectedDocument.research_document_id,
-          userId,
-        ),
+      const members = await removeSectionDocumentMember(
+        sectionId,
+        selectedDocument.research_document_id,
+        userId,
       );
+      if (requestId !== teamRequestRef.current) return;
+      setDocumentMembers(members);
       setDetailsNotice("Student researcher removed from this research title.");
     } catch (error) {
+      if (requestId !== teamRequestRef.current) return;
       setDetailsNotice(
         friendlyError(
           error,
@@ -2435,7 +3112,9 @@ function InstructorSections({
         ),
       );
     } finally {
-      setStudentBusy((current) => ({ ...current, [openSection.id]: false }));
+      if (requestId === teamRequestRef.current) {
+        setStudentBusy((current) => ({ ...current, [sectionId]: false }));
+      }
     }
   }
 
@@ -2530,19 +3209,23 @@ function InstructorSections({
     event.preventDefault();
     if (!openSection) return;
     setEditBusy(true);
-    setDetailsNotice("");
+    setEditError("");
     try {
       await updateInstructorSection(openSection.id, {
         name: editName.trim(),
         section_code: editSectionCode.trim(),
         academic_year: editYear.trim() || null,
+        institute: editInstitute,
       });
+      setEditError("");
       setEditing(false);
       setDetailsNotice(`Section "${editName.trim()}" updated.`);
       reload();
     } catch (error) {
-      setDetailsNotice(
-        friendlyError(error, "The section could not be updated"),
+      setEditError(
+        error instanceof ApiError && error.fields?.institute?.[0]
+          ? error.fields.institute[0]
+          : friendlyError(error, "The section could not be updated"),
       );
     } finally {
       setEditBusy(false);
@@ -2584,13 +3267,13 @@ function InstructorSections({
   }
 
   return (
-    <div className="workspace-content admin-sidebar-page">
+    <div className="workspace-content admin-sidebar-page my-sections-page">
       {!openSection && (
         <>
           <RolePageHeader
             role={role}
             title="My sections"
-            description="Class sections you own and the research assigned to each."
+            description="Manage your class sections."
             action={
               <span className="row-actions">
                 <Button variant="secondary" onClick={reload}>
@@ -2603,26 +3286,83 @@ function InstructorSections({
             }
           />
           {pageNotice && (
-            <p
-              role="status"
-              className={
-                pageNotice.includes("could not")
-                  ? "admin-error"
-                  : "admin-success"
-              }
-            >
-              {pageNotice}
-            </p>
+            <ToastNotification
+              message={pageNotice}
+              type={pageNotice.includes("could not") ? "error" : "success"}
+              onDismiss={() => setPageNotice("")}
+            />
+          )}
+          {state.status === "ready" && (
+            <div className="study-list-controls my-sections-controls">
+              <label className="study-list-search">
+                <span>Search sections or studies</span>
+                <input
+                  type="search"
+                  value={sectionSearch}
+                  placeholder="Search sections or studies..."
+                  onChange={(event) => setSectionSearch(event.target.value)}
+                />
+              </label>
+              <label>
+                <span>Academic year</span>
+                <select
+                  aria-label="Academic year filter"
+                  value={academicYearFilter}
+                  onChange={(event) =>
+                    setAcademicYearFilter(event.target.value)
+                  }
+                >
+                  <option value="">All academic years</option>
+                  {academicYears.map((year) => (
+                    <option key={year} value={year}>
+                      {year}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Status</span>
+                <select
+                  aria-label="Section status filter"
+                  value={sectionStatusFilter}
+                  onChange={(event) =>
+                    setSectionStatusFilter(event.target.value)
+                  }
+                >
+                  <option value="">All statuses</option>
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </label>
+              {(academicYearFilter || sectionStatusFilter) && (
+                <Button
+                  type="button"
+                  variant="quiet"
+                  onClick={() => {
+                    setAcademicYearFilter("");
+                    setSectionStatusFilter("");
+                  }}
+                >
+                  Clear filters
+                </Button>
+              )}
+            </div>
           )}
           {state.status === "loading" ? (
             <Loading label="Loading sections" />
           ) : state.status === "error" ? (
             <InlineError message={state.message} retry={reload} />
           ) : state.data.length === 0 ? (
-            <p className="admin-empty">No class sections have been created.</p>
+            <p className="admin-empty my-sections-empty">
+              No class sections have been created.
+            </p>
+          ) : visibleSections.length === 0 ? (
+            <p className="admin-empty my-sections-empty">
+              No sections or studies match your search.
+            </p>
           ) : (
             <section className="section-folder-grid" aria-label="Your sections">
-              {state.data.map((section) => (
+              {visibleSections.map((section) => (
                 <button
                   type="button"
                   className="section-folder-card"
@@ -2634,28 +3374,29 @@ function InstructorSections({
                     <Folder />
                   </span>
                   <span className="folder-card-copy">
-                    <strong>{section.name}</strong>
+                    <span className="folder-card-heading">
+                      <strong>{section.name}</strong>
+                      <span
+                        className={
+                          section.is_active
+                            ? "badge badge-active"
+                            : "badge badge-inactive"
+                        }
+                      >
+                        {section.is_active ? "Active" : "Inactive"}
+                      </span>
+                    </span>
                     <small>
-                      {section.section_code ?? "Section code not set"}
-                    </small>
-                    <small>
+                      {section.section_code ?? "Section code not set"} ·{" "}
                       {section.academic_year ?? "Academic year not set"}
                     </small>
+                    <small>{section.institute || "Institute not set"}</small>
                     <span>
                       {section.documents_count} project
                       {section.documents_count === 1 ? "" : "s"} ·{" "}
                       {section.members_count} student
                       {section.members_count === 1 ? "" : "s"}
                     </span>
-                  </span>
-                  <span
-                    className={
-                      section.is_active
-                        ? "badge badge-active"
-                        : "badge badge-inactive"
-                    }
-                  >
-                    {section.is_active ? "Active" : "Inactive"}
                   </span>
                 </button>
               ))}
@@ -2679,85 +3420,144 @@ function InstructorSections({
           aria-label={`Section details: ${openSection.name}`}
         >
           <div className="section-page-toolbar">
-            <Button variant="quiet" onClick={closeSectionDetails}>
-              Back to Sections
+            <Button
+              variant="secondary"
+              className="icon-button"
+              aria-label="Back to sections"
+              title="Back to sections"
+              onClick={closeSectionDetails}
+            >
+              <ArrowLeft />
             </Button>
           </div>
           <div className="section-details section-details-redesigned">
             <div className="section-details-header">
-              <div>
-                <p className="eyebrow">Instructor workspace / Class section</p>
+              <div className="section-details-heading-copy">
                 <h2>{openSection.name}</h2>
-                <p className="section-details-intro">
+                <p className="sr-only">
                   Manage enrolled researchers and the studies connected to this
                   section.
                 </p>
+                <div className="section-details-meta">
+                  <span
+                    className={
+                      openSection.is_active
+                        ? "badge badge-active"
+                        : "badge badge-inactive"
+                    }
+                  >
+                    {openSection.is_active ? "Active" : "Inactive"}
+                  </span>
+                  <span>{openSection.academic_year ?? "No academic year"}</span>
+                  <span>{openSection.institute || "No institute"}</span>
+                  <span>
+                    {openSection.documents_count} project
+                    {openSection.documents_count === 1 ? "" : "s"}
+                  </span>
+                  <span>
+                    {openSection.members_count} student
+                    {openSection.members_count === 1 ? "" : "s"}
+                  </span>
+                </div>
               </div>
-              <span
-                className={
-                  openSection.is_active
-                    ? "badge badge-active"
-                    : "badge badge-inactive"
-                }
-              >
-                {openSection.is_active ? "Active section" : "Inactive section"}
-              </span>
-            </div>
-            <div className="section-details-meta">
-              <span>{openSection.academic_year ?? "No academic year"}</span>
-              <span>
-                {openSection.documents_count} document
-                {openSection.documents_count === 1 ? "" : "s"}
-              </span>
-              <span>
-                {openSection.members_count} student
-                {openSection.members_count === 1 ? "" : "s"}
-              </span>
+              <div className="section-details-header-actions">
+                <div className="section-details-actions">
+                  <Button
+                    variant="secondary"
+                    className="icon-button"
+                    aria-label={
+                      openSection.is_active
+                        ? "Deactivate section"
+                        : "Activate section"
+                    }
+                    title={
+                      openSection.is_active
+                        ? "Deactivate section"
+                        : "Activate section"
+                    }
+                    onClick={() => void toggleActive(openSection)}
+                  >
+                    <Power />
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    className="icon-button"
+                    aria-label="Edit section"
+                    title="Edit section"
+                    onClick={() => {
+                      setEditName(openSection.name);
+                      setEditSectionCode(openSection.section_code ?? "");
+                      setEditYear(openSection.academic_year ?? "");
+                      setEditInstitute(openSection.institute ?? "");
+                      setEditError("");
+                      setEditing(true);
+                    }}
+                  >
+                    <Pencil />
+                  </Button>
+                </div>
+              </div>
             </div>
             {detailsNotice && (
-              <p
-                role="status"
-                className={
-                  detailsNotice.includes("could not")
-                    ? "admin-error"
-                    : "admin-success"
-                }
-              >
-                {detailsNotice}
-              </p>
+              <ToastNotification
+                message={detailsNotice}
+                type={detailsNotice.includes("could not") ? "error" : "success"}
+                onDismiss={() => setDetailsNotice("")}
+              />
             )}
-            <div className="section-details-actions">
-              <Button
-                variant="secondary"
-                className="icon-button"
-                aria-label={
-                  openSection.is_active
-                    ? "Deactivate section"
-                    : "Activate section"
-                }
-                title={
-                  openSection.is_active
-                    ? "Deactivate section"
-                    : "Activate section"
-                }
-                onClick={() => void toggleActive(openSection)}
-              >
-                <Power />
-              </Button>
-              <Button
-                variant="secondary"
-                className="icon-button"
-                aria-label="Edit section"
-                title="Edit section"
-                onClick={() => {
-                  setEditName(openSection.name);
-                  setEditSectionCode(openSection.section_code ?? "");
-                  setEditYear(openSection.academic_year ?? "");
-                  setEditing(true);
-                }}
-              >
-                <Pencil />
-              </Button>
+            <div className="study-list-controls section-study-controls">
+              <label className="study-list-search">
+                <span>Search</span>
+                <input
+                  type="search"
+                  aria-label="Search studies or researchers"
+                  value={studySearch}
+                  placeholder="Search projects or students..."
+                  onChange={(event) => setStudySearch(event.target.value)}
+                />
+              </label>
+              <label>
+                <span>Research stage</span>
+                <select
+                  aria-label="Research stage filter"
+                  value={studyStageFilter}
+                  onChange={(event) => setStudyStageFilter(event.target.value)}
+                >
+                  <option value="">All stages</option>
+                  {studyStages.map((stage) => (
+                    <option key={stage} value={stage}>
+                      {label(stage)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Submission status</span>
+                <select
+                  aria-label="Submission status filter"
+                  value={studyStatusFilter}
+                  onChange={(event) => setStudyStatusFilter(event.target.value)}
+                >
+                  <option value="">All statuses</option>
+                  {studyStatuses.map((status) => (
+                    <option key={status} value={status}>
+                      {label(status)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {(studyStageFilter || studyStatusFilter) && (
+                <Button
+                  type="button"
+                  variant="quiet"
+                  onClick={() => {
+                    setStudyStageFilter("");
+                    setStudyStatusFilter("");
+                  }}
+                >
+                  Clear filters
+                </Button>
+              )}
             </div>
             {editing && (
               <Modal
@@ -2770,7 +3570,7 @@ function InstructorSections({
                   className="admin-inline-form section-edit-form section-dialog-form"
                 >
                   <h2>Edit section</h2>
-                  <label>
+                  <label className="section-dialog-name">
                     Section name
                     <input
                       value={editName}
@@ -2797,7 +3597,35 @@ function InstructorSections({
                       onChange={(event) => setEditYear(event.target.value)}
                     />
                   </label>
+                  <label className="section-dialog-institute">
+                    Institute
+                    <select
+                      value={editInstitute}
+                      onChange={(event) => setEditInstitute(event.target.value)}
+                      required
+                    >
+                      <option value="">Select institute</option>
+                      {institutes.map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {editError && (
+                    <p role="alert" className="admin-error">
+                      {editError}
+                    </p>
+                  )}
                   <div className="modal-actions">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => setEditing(false)}
+                      disabled={editBusy}
+                    >
+                      Cancel
+                    </Button>
                     <Button type="submit" disabled={editBusy}>
                       {editBusy ? "Saving…" : "Save changes"}
                     </Button>
@@ -2805,25 +3633,23 @@ function InstructorSections({
                 </form>
               </Modal>
             )}
-            <section className="section-detail-block">
+            <section className="section-detail-block research-folder-surface">
               <div className="section-block-heading">
                 <div>
-                  <p className="eyebrow">Research records</p>
                   <h3>Research projects</h3>
                 </div>
-                <span>{openSection.documents_count}</span>
-              </div>
-              <div className="section-block-actions">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className="icon-button"
-                  aria-label="Add Research Project"
-                  title="Add research project"
-                  onClick={() => setAddProjectOpen(true)}
-                >
-                  <Plus />
-                </Button>
+                <div className="section-block-heading-actions">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="icon-button"
+                    aria-label="Add Research Project"
+                    title="Add research project"
+                    onClick={() => setAddProjectOpen(true)}
+                  >
+                    <Plus />
+                  </Button>
+                </div>
               </div>
               {addProjectOpen && (
                 <Modal
@@ -2851,6 +3677,14 @@ function InstructorSections({
                       />
                     </label>
                     <div className="modal-actions">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => setAddProjectOpen(false)}
+                        disabled={newProjectBusy}
+                      >
+                        Cancel
+                      </Button>
                       <Button type="submit" disabled={newProjectBusy}>
                         {newProjectBusy ? "Creating…" : "Create project"}
                       </Button>
@@ -2859,27 +3693,23 @@ function InstructorSections({
                 </Modal>
               )}
               {documentsState[openSection.id] === "loading" ? (
-                <p className="section-documents-loading">Loading documents…</p>
+                <Loading label="Loading documents" />
               ) : documentsState[openSection.id] === "error" ? (
-                <p className="section-documents-loading">
-                  <span>Section documents could not be loaded.</span>{" "}
-                  <Button
-                    variant="secondary"
-                    onClick={() => void loadDocuments(openSection.id)}
-                  >
-                    Retry
-                  </Button>
-                </p>
-              ) : (documentsFor[openSection.id] ?? []).length === 0 ? (
+                <InlineError
+                  message="Section documents could not be loaded."
+                  retry={() => void loadDocuments(openSection.id)}
+                />
+              ) : sectionDocuments.length === 0 ? (
                 <div className="section-empty-folder-state">
-                  <p className="admin-empty">No research-title folders yet.</p>
-                  <p>
-                    Create a research project to add its folder to this section.
-                  </p>
+                  <p className="admin-empty">No research projects yet.</p>
                 </div>
+              ) : visibleDocuments.length === 0 ? (
+                <p className="admin-empty">
+                  No studies match your search and filters.
+                </p>
               ) : (
-                <div className="research-title-folders">
-                  {(documentsFor[openSection.id] ?? []).map((document) => (
+                <div className="research-title-folders research-folder-list">
+                  {visibleDocuments.map((document) => (
                     <ResearchFolderRow
                       key={document.research_document_id}
                       title={document.title}
@@ -2904,47 +3734,44 @@ function InstructorSections({
             <section className="section-detail-block">
               <div className="section-block-heading">
                 <div>
-                  <p className="eyebrow">Section roster</p>
-                  <h3>Student researchers</h3>
+                  <h3>Students</h3>
                 </div>
-                <span>{openSection.members_count}</span>
-              </div>
-              <div className="section-block-actions">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className="icon-button"
-                  aria-label="Add student"
-                  title="Add student"
-                  onClick={() => setAddStudentOpen(true)}
-                >
-                  <UserPlus />
-                </Button>
+                <div className="section-block-heading-actions">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="icon-button"
+                    aria-label="Add student"
+                    title="Add student"
+                    onClick={() => setAddStudentOpen(true)}
+                  >
+                    <UserPlus />
+                  </Button>
+                </div>
               </div>
               {studentsState[openSection.id] === "loading" ? (
-                <p className="section-documents-loading">Loading students…</p>
+                <Loading label="Loading students" />
               ) : studentsState[openSection.id] === "error" ? (
-                <p className="section-documents-loading">
-                  <span>Section students could not be loaded.</span>{" "}
-                  <Button
-                    variant="secondary"
-                    onClick={() => {
-                      setStudentsState((current) => ({
-                        ...current,
-                        [openSection.id]: "loading",
-                      }));
-                      void loadStudents(
-                        openSection.id,
-                        studentQueries[openSection.id] ?? "",
-                      );
-                    }}
-                  >
-                    Retry
-                  </Button>
-                </p>
+                <InlineError
+                  message="Section students could not be loaded."
+                  retry={() => {
+                    setStudentsState((current) => ({
+                      ...current,
+                      [openSection.id]: "loading",
+                    }));
+                    void loadStudents(
+                      openSection.id,
+                      studentQueries[openSection.id] ?? "",
+                    );
+                  }}
+                />
               ) : (studentsFor[openSection.id] ?? []).length === 0 ? (
-                <p className="admin-empty">
-                  No student researchers are enrolled in this section.
+                <p className="admin-empty section-block-empty">
+                  No students enrolled.
+                </p>
+              ) : sortedStudents.length === 0 ? (
+                <p className="admin-empty section-block-empty">
+                  No researchers match your search.
                 </p>
               ) : (
                 <div className="admin-table-wrap">
@@ -2954,19 +3781,50 @@ function InstructorSections({
                     </caption>
                     <thead>
                       <tr>
-                        <th>Student</th>
-                        <th>Email</th>
-                        <th>Student ID</th>
-                        <th>Added</th>
+                        <SortableHeader
+                          sortKey="student"
+                          activeSort={studentSort}
+                          direction={studentSortDirection}
+                          onSort={(key) =>
+                            changeStudentSort(
+                              key as "student" | "email" | "added",
+                            )
+                          }
+                        >
+                          Student
+                        </SortableHeader>
+                        <SortableHeader
+                          sortKey="email"
+                          activeSort={studentSort}
+                          direction={studentSortDirection}
+                          onSort={(key) =>
+                            changeStudentSort(
+                              key as "student" | "email" | "added",
+                            )
+                          }
+                        >
+                          Email
+                        </SortableHeader>
+                        <SortableHeader
+                          sortKey="added"
+                          activeSort={studentSort}
+                          direction={studentSortDirection}
+                          onSort={(key) =>
+                            changeStudentSort(
+                              key as "student" | "email" | "added",
+                            )
+                          }
+                        >
+                          Added
+                        </SortableHeader>
                         <th>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {(studentsFor[openSection.id] ?? []).map((member) => (
+                      {sortedStudents.map((member) => (
                         <tr key={member.id}>
                           <td>{studentName(member)}</td>
                           <td>{member.email}</td>
-                          <td>{member.student_employee_id ?? "—"}</td>
                           <td>{displayDate(member.added_at)}</td>
                           <td>
                             <Button
@@ -2998,7 +3856,7 @@ function InstructorSections({
                   busy={studentBusy[openSection.id]}
                 >
                   <div className="student-add-form">
-                    <h3>Add a student researcher</h3>
+                    <h2>Add a student researcher</h2>
                     <label>
                       Search students
                       <input
@@ -3006,7 +3864,7 @@ function InstructorSections({
                         onChange={(event) =>
                           changeStudentQuery(openSection.id, event.target.value)
                         }
-                        placeholder="Name, email, or student ID"
+                        placeholder="Name or email"
                       />
                     </label>
                     <ul className="student-candidates">
@@ -3029,18 +3887,21 @@ function InstructorSections({
                           )
                           .map((candidate) => (
                             <li key={candidate.id}>
-                              <span>
-                                <strong>{studentName(candidate)}</strong> (
-                                {candidate.email})
+                              <span className="student-candidate-copy">
+                                <strong>{studentName(candidate)}</strong>
+                                <small>{candidate.email}</small>
                               </span>
                               <Button
                                 variant="secondary"
+                                className="icon-button"
+                                aria-label={`Add ${studentName(candidate)}`}
+                                title={`Add ${studentName(candidate)}`}
                                 disabled={studentBusy[openSection.id]}
                                 onClick={() =>
                                   void addStudent(openSection.id, candidate.id)
                                 }
                               >
-                                Add
+                                <Plus />
                               </Button>
                             </li>
                           ))
@@ -3053,7 +3914,7 @@ function InstructorSections({
           </div>
         </section>
       )}
-      {openSection && selectedDocument && (
+      {showingProjectPage && openSection && selectedDocument && (
         <section
           className="section-page-view"
           aria-label={`Research project: ${selectedDocument.title}`}
@@ -3070,806 +3931,146 @@ function InstructorSections({
               <ArrowLeft />
             </Button>
           </div>
-          <div className="title-member-panel project-page-panel">
-            <div className="title-member-panel-heading">
-              <div>
-                <p className="eyebrow">Research project</p>
-                <h3>{selectedDocument.title}</h3>
-              </div>
-              <div className="section-block-actions">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className="icon-button"
-                  aria-label="Edit research title"
-                  title="Edit research title"
-                  onClick={() => {
-                    setEditProjectTitle(selectedDocument.title);
-                    setEditingProject(true);
-                  }}
-                >
-                  <Pencil />
-                </Button>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className="icon-button"
-                  aria-label="Delete research project"
-                  title="Delete research project"
-                  onClick={() => setConfirmProjectDelete(true)}
-                >
-                  <Trash2 />
-                </Button>
-              </div>
-            </div>
-            {editingProject && (
-              <Modal
-                label="Edit research title"
-                onClose={() => setEditingProject(false)}
-                busy={editProjectBusy}
-              >
-                <form
-                  onSubmit={saveProjectTitle}
-                  className="admin-inline-form section-project-create"
-                  aria-label="Edit research title"
-                >
-                  <h2>Edit research title</h2>
-                  <label>
-                    Research title
-                    <input
-                      value={editProjectTitle}
-                      onChange={(event) =>
-                        setEditProjectTitle(event.target.value)
-                      }
-                      required
-                      maxLength={500}
-                      disabled={editProjectBusy}
-                    />
-                  </label>
-                  <div className="modal-actions">
-                    <Button type="submit" disabled={editProjectBusy}>
-                      {editProjectBusy ? "Saving…" : "Save title"}
-                    </Button>
-                  </div>
-                </form>
-              </Modal>
-            )}
-            <div className="project-workspace-context">
-              <span>{openSection.name}</span>
-              <span>{openSection.section_code}</span>
-              <span>
-                {openSection.academic_year ?? "Academic year not set"}
-              </span>
-              <span>{label(selectedDocument.research_stage)}</span>
-              <span>{label(selectedDocument.submission_status)}</span>
-            </div>
-
-            <nav
-              className="project-workspace-tabs"
-              aria-label="Research study workspace"
+          <StudyWorkspace
+            key={selectedDocument.research_document_id}
+            role={role}
+            researchDocumentId={selectedDocument.research_document_id}
+            title={selectedDocument.title}
+            context={[
+              openSection.name,
+              openSection.section_code ?? "Section code not set",
+              openSection.academic_year ?? "Academic year not set",
+              label(selectedDocument.research_stage),
+              label(selectedDocument.submission_status),
+            ]}
+            researchers={documentMembers.map((member) => ({
+              id: member.id,
+              name: studentName(member),
+              email: member.email,
+            }))}
+            sdgs={selectedResearch?.sdgs ?? []}
+            projectTeam={projectTeam}
+            people={documentPeople}
+            teamLoading={teamLoading}
+            canPostFeedback
+            monitoringReadOnly={false}
+            controls={{
+              onEditTitle: () => {
+                setEditProjectTitle(selectedDocument.title);
+                setEditingProject(true);
+              },
+              onDeleteProject: () => setConfirmProjectDelete(true),
+              onManageAssignments: teamLoading
+                ? undefined
+                : (stage) => {
+                    void loadProjectTeamStage(stage, {
+                      openModal: true,
+                      resetDisclosures: true,
+                    });
+                  },
+              onDefenseTeamStageChange: (stage) => {
+                void loadProjectTeamStage(stage);
+              },
+              onRemoveResearcher: teamLoading
+                ? undefined
+                : (researcher) => {
+                    const member = documentMembers.find(
+                      (candidate) => candidate.id === researcher.id,
+                    );
+                    if (member) setConfirmDocumentRemove(member);
+                  },
+              researcherActionsDisabled: studentBusy[openSection.id],
+            }}
+          />
+          {editingProject && (
+            <Modal
+              label="Edit research title"
+              onClose={() => setEditingProject(false)}
+              busy={editProjectBusy}
             >
-              {(
-                [
-                  ["overview", "Overview", FileText],
-                  ["team", "Research actors", UsersRound],
-                  ["documents", "Documents", Folder],
-                  ["feedback", "Feedback", MessageSquareText],
-                  ["monitoring", "Defense Monitoring Forms", ClipboardCheck],
-                ] as const
-              ).map(([tab, tabLabel, Icon]) => (
-                <button
-                  type="button"
-                  key={tab}
-                  className={projectTab === tab ? "is-active" : ""}
-                  aria-current={projectTab === tab ? "page" : undefined}
-                  onClick={() => setProjectTab(tab)}
-                >
-                  <Icon aria-hidden="true" />
-                  <span>{tabLabel}</span>
-                </button>
-              ))}
-            </nav>
-
-            {workspaceLoading && (
-              <p className="section-documents-loading">
-                Loading study workspace…
-              </p>
-            )}
-
-            {projectTab === "overview" && (
-              <div className="project-workspace-section project-overview-grid">
-                <section className="project-overview-card project-overview-card-wide">
-                  <div className="project-card-heading">
-                    <div>
-                      <p className="eyebrow">Study summary</p>
-                      <h4>Research workspace</h4>
-                    </div>
-                    <span className="badge badge-active">Central record</span>
-                  </div>
-                  <dl className="project-overview-stats">
-                    <div>
-                      <dt>Researchers</dt>
-                      <dd>{documentMembers.length}</dd>
-                    </div>
-                    <div>
-                      <dt>Documents</dt>
-                      <dd>{projectFiles.length}</dd>
-                    </div>
-                    <div>
-                      <dt>Feedback</dt>
-                      <dd>{projectFeedback.length}</dd>
-                    </div>
-                    <div>
-                      <dt>Document folders</dt>
-                      <dd>{projectFolders.length}</dd>
-                    </div>
-                  </dl>
-                  <div className="project-readiness-list">
-                    <div>
-                      <CheckCircle2 aria-hidden="true" />
-                      <span>
-                        <strong>Before Proposal Defense</strong>
-                        <small>
-                          {projectTeam?.pre_defense_ready
-                            ? "Required actors are assigned and accepted."
-                            : "Waiting for one or more required actor assignments."}
-                        </small>
-                      </span>
-                    </div>
-                    <div>
-                      <CheckCircle2 aria-hidden="true" />
-                      <span>
-                        <strong>After Proposal Defense</strong>
-                        <small>
-                          {projectTeam?.post_defense_ready
-                            ? "Adviser, editor, librarian, three panels, Research Rep, and Chair are ready."
-                            : "Post-defense actor list is not complete yet."}
-                        </small>
-                      </span>
-                    </div>
-                  </div>
-                </section>
-
-                <section className="project-overview-card">
-                  <div className="project-card-heading">
-                    <div>
-                      <p className="eyebrow">Researchers</p>
-                      <h4>Study members</h4>
-                    </div>
-                    <button
-                      type="button"
-                      className="text-action"
-                      onClick={() => setProjectTab("team")}
-                    >
-                      Manage
-                    </button>
-                  </div>
-                  {documentMembers.length === 0 ? (
-                    <p className="project-empty-copy">
-                      No researchers assigned yet.
-                    </p>
-                  ) : (
-                    <ul className="project-compact-list">
-                      {documentMembers.map((member) => (
-                        <li key={member.id}>
-                          <span
-                            className="project-person-avatar"
-                            aria-hidden="true"
-                          >
-                            {studentName(member).slice(0, 1).toUpperCase()}
-                          </span>
-                          <span>
-                            <strong>{studentName(member)}</strong>
-                            <small>{member.email}</small>
-                          </span>
-                          <button
-                            type="button"
-                            className="icon-button button-quiet"
-                            aria-label={`Remove ${studentName(member)}`}
-                            title="Remove researcher"
-                            onClick={() => setConfirmDocumentRemove(member)}
-                          >
-                            <Trash2 />
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </section>
-
-                <section className="project-overview-card">
-                  <div className="project-card-heading">
-                    <div>
-                      <p className="eyebrow">Recent files</p>
-                      <h4>Latest documents</h4>
-                    </div>
-                    <button
-                      type="button"
-                      className="text-action"
-                      onClick={() => setProjectTab("documents")}
-                    >
-                      View all
-                    </button>
-                  </div>
-                  {projectFiles.length === 0 ? (
-                    <p className="project-empty-copy">
-                      No manuscript files uploaded yet.
-                    </p>
-                  ) : (
-                    <ul className="project-compact-list project-file-preview-list">
-                      {[...projectFiles]
-                        .sort(
-                          (a, b) =>
-                            new Date(b.uploaded_at ?? 0).getTime() -
-                            new Date(a.uploaded_at ?? 0).getTime(),
-                        )
-                        .slice(0, 4)
-                        .map((file) => (
-                          <li key={file.id}>
-                            <FileText aria-hidden="true" />
-                            <span>
-                              <strong>{file.original_filename}</strong>
-                              <small>
-                                {file.relative_path ?? "Unfiled"} · v
-                                {file.version_number}
-                              </small>
-                            </span>
-                          </li>
-                        ))}
-                    </ul>
-                  )}
-                </section>
-              </div>
-            )}
-
-            {projectTab === "team" && (
-              <div className="project-workspace-section">
-                <div className="project-section-heading">
-                  <div>
-                    <p className="eyebrow">Research actors</p>
-                    <h4>People assigned to this study</h4>
-                    <p>
-                      Instructor-managed roles can be updated here. Editor,
-                      Librarian, and Statistician are requested by the
-                      researchers and remain visible in the same study
-                      workspace.
-                    </p>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => {
-                      resetProjectDisclosures();
-                      setProjectManageOpen(true);
-                      void openDocumentMembers(
-                        openSection.id,
-                        selectedDocument,
-                      );
-                    }}
-                  >
-                    <UsersRound /> Manage assignments
+              <form
+                onSubmit={saveProjectTitle}
+                className="admin-inline-form section-project-create"
+                aria-label="Edit research title"
+              >
+                <h2>Edit research title</h2>
+                <label>
+                  Research title
+                  <input
+                    value={editProjectTitle}
+                    onChange={(event) =>
+                      setEditProjectTitle(event.target.value)
+                    }
+                    required
+                    maxLength={500}
+                    disabled={editProjectBusy}
+                  />
+                </label>
+                <div className="modal-actions">
+                  <Button type="submit" disabled={editProjectBusy}>
+                    {editProjectBusy ? "Saving…" : "Save title"}
                   </Button>
                 </div>
-
-                <section className="project-team-block">
-                  <div className="project-team-block-heading">
-                    <div>
-                      <h5>Student researchers</h5>
-                      <span>{documentMembers.length} assigned</span>
-                    </div>
-                  </div>
-                  {documentMembersLoading ? (
-                    <p className="section-documents-loading">
-                      Loading assigned students…
-                    </p>
-                  ) : documentMembers.length === 0 ? (
-                    <p className="project-empty-copy">
-                      No students are assigned to this research title.
-                    </p>
-                  ) : (
-                    <ul className="title-member-list project-researcher-list">
-                      {documentMembers.map((member) => (
-                        <li key={member.id}>
-                          <span>
-                            <strong>{studentName(member)}</strong>
-                            <small>{member.email}</small>
-                          </span>
-                          <Button
-                            type="button"
-                            variant="quiet"
-                            className="icon-button"
-                            aria-label={`Remove ${studentName(member)}`}
-                            title="Remove student from this study"
-                            disabled={studentBusy[openSection.id]}
-                            onClick={() => setConfirmDocumentRemove(member)}
-                          >
-                            <Trash2 />
-                          </Button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </section>
-
-                {teamLoading ? (
-                  <p className="section-documents-loading">
-                    Loading current actor assignments…
-                  </p>
-                ) : (
-                  <div className="project-stage-columns">
-                    <section className="project-team-block">
-                      <div className="project-team-block-heading">
-                        <div>
-                          <p className="eyebrow">Before Proposal Defense</p>
-                          <h5>Pre-defense actors</h5>
-                        </div>
-                        <span
-                          className={
-                            projectTeam?.pre_defense_ready
-                              ? "status-dot is-ready"
-                              : "status-dot"
-                          }
-                        >
-                          {projectTeam?.pre_defense_ready
-                            ? "Ready"
-                            : "Incomplete"}
-                        </span>
-                      </div>
-                      <div className="project-actor-grid">
-                        {[
-                          [
-                            "Research Instructor",
-                            projectTeam?.instructor?.name,
-                            "Automatically assigned",
-                          ],
-                          [
-                            "Research Adviser",
-                            projectTeam?.adviser?.name,
-                            "Instructor assigned",
-                          ],
-                          [
-                            "Editor",
-                            projectTeam?.support_assignments?.editor?.name,
-                            projectTeam?.support_assignments?.editor?.status ??
-                              "Researcher assigned",
-                          ],
-                          [
-                            "Statistician",
-                            projectTeam?.support_assignments?.statistician
-                              ?.name,
-                            projectTeam?.support_assignments?.statistician
-                              ?.status ?? "Researcher assigned",
-                          ],
-                          [
-                            "Librarian",
-                            projectTeam?.support_assignments?.librarian?.name,
-                            projectTeam?.support_assignments?.librarian
-                              ?.status ?? "Researcher assigned",
-                          ],
-                        ].map(([actorLabel, actorName, note]) => (
-                          <div
-                            className="project-actor-row"
-                            key={`pre-${actorLabel}`}
-                          >
-                            <span>
-                              <strong>{actorLabel}</strong>
-                              <small>{note}</small>
-                            </span>
-                            <span
-                              className={
-                                actorName ? "actor-name" : "actor-name is-empty"
-                              }
-                            >
-                              {actorName || "Unassigned"}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </section>
-
-                    <section className="project-team-block">
-                      <div className="project-team-block-heading">
-                        <div>
-                          <p className="eyebrow">After Proposal Defense</p>
-                          <h5>Post-defense actors</h5>
-                        </div>
-                        <span
-                          className={
-                            projectTeam?.post_defense_ready
-                              ? "status-dot is-ready"
-                              : "status-dot"
-                          }
-                        >
-                          {projectTeam?.post_defense_ready
-                            ? "Ready"
-                            : "Incomplete"}
-                        </span>
-                      </div>
-                      <div className="project-actor-grid">
-                        {[
-                          [
-                            "Research Instructor",
-                            projectTeam?.instructor?.name,
-                            "Automatically assigned",
-                          ],
-                          [
-                            "Research Adviser",
-                            projectTeam?.adviser?.name,
-                            "Instructor assigned",
-                          ],
-                          [
-                            "Editor",
-                            projectTeam?.support_assignments?.editor?.name,
-                            projectTeam?.support_assignments?.editor?.status ??
-                              "Researcher assigned",
-                          ],
-                          [
-                            "Librarian",
-                            projectTeam?.support_assignments?.librarian?.name,
-                            projectTeam?.support_assignments?.librarian
-                              ?.status ?? "Researcher assigned",
-                          ],
-                          [
-                            "Panel 1",
-                            projectTeam?.panel_members[0]?.name,
-                            "Instructor assigned",
-                          ],
-                          [
-                            "Panel 2",
-                            projectTeam?.panel_members[1]?.name,
-                            "Instructor assigned",
-                          ],
-                          [
-                            "Panel 3",
-                            projectTeam?.panel_members[2]?.name,
-                            "Instructor assigned",
-                          ],
-                          [
-                            "Research Rep",
-                            projectTeam?.research_office_representative?.name,
-                            "Research Office personnel",
-                          ],
-                          ["Chair", projectTeam?.chair?.name, "Panel chair"],
-                        ].map(([actorLabel, actorName, note]) => (
-                          <div
-                            className="project-actor-row"
-                            key={`post-${actorLabel}`}
-                          >
-                            <span>
-                              <strong>{actorLabel}</strong>
-                              <small>{note}</small>
-                            </span>
-                            <span
-                              className={
-                                actorName ? "actor-name" : "actor-name is-empty"
-                              }
-                            >
-                              {actorName || "Unassigned"}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </section>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {projectTab === "documents" && (
-              <div className="project-workspace-section project-documents-layout">
-                <aside
-                  className="project-folder-sidebar"
-                  aria-label="Document folders"
-                >
-                  <div className="project-folder-sidebar-heading">
-                    <div>
-                      <p className="eyebrow">Paper files</p>
-                      <h4>Folders</h4>
-                    </div>
-                  </div>
-                  <div className="project-folder-nav">
-                    {[
-                      ...projectFolders,
-                      ...(projectFiles.some((file) => !file.relative_path)
-                        ? ["Unfiled"]
-                        : []),
-                    ].map((folder) => {
-                      const count = projectFiles.filter((file) =>
-                        folder === "Unfiled"
-                          ? !file.relative_path
-                          : file.relative_path === folder,
-                      ).length;
-                      return (
-                        <button
-                          type="button"
-                          key={folder}
-                          className={activeFolder === folder ? "is-active" : ""}
-                          onClick={() => setActiveFolder(folder)}
-                        >
-                          <Folder aria-hidden="true" />
-                          <span>{folder}</span>
-                          <small>{count}</small>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </aside>
-
-                <section className="project-folder-content">
-                  <div className="project-section-heading project-folder-heading">
-                    <div>
-                      <p className="eyebrow">Document folder</p>
-                      <h4>{activeFolder || "Select a folder"}</h4>
-                      <p>
-                        Previous revisions stay visible so the review history is
-                        never lost.
-                      </p>
-                    </div>
-                  </div>
-
-                  {!activeFolder ? (
-                    <p className="project-empty-copy">
-                      Choose a document folder.
-                    </p>
-                  ) : projectFiles.filter((file) =>
-                      activeFolder === "Unfiled"
-                        ? !file.relative_path
-                        : file.relative_path === activeFolder,
-                    ).length === 0 ? (
-                    <div className="project-empty-folder">
-                      <Folder aria-hidden="true" />
-                      <strong>No documents in this folder yet.</strong>
-                      <span>
-                        Files uploaded by the researchers will appear here with
-                        their revision history.
-                      </span>
-                    </div>
-                  ) : (
-                    <div className="project-document-list">
-                      {projectFiles
-                        .filter((file) =>
-                          activeFolder === "Unfiled"
-                            ? !file.relative_path
-                            : file.relative_path === activeFolder,
-                        )
-                        .sort((a, b) => b.version_number - a.version_number)
-                        .map((file) => (
-                          <article
-                            className="project-document-row"
-                            key={file.id}
-                          >
-                            <div
-                              className="project-document-icon"
-                              aria-hidden="true"
-                            >
-                              <FileText />
-                            </div>
-                            <div className="project-document-copy">
-                              <div>
-                                <strong>{file.original_filename}</strong>
-                                <span
-                                  className={
-                                    file.is_current
-                                      ? "file-version is-current"
-                                      : "file-version"
-                                  }
-                                >
-                                  {file.is_current ? "Current" : "Previous"} · v
-                                  {file.version_number}
-                                </span>
-                              </div>
-                              <small>
-                                {label(file.document_type)} ·{" "}
-                                {file.uploader_name ?? "Researcher"} ·{" "}
-                                {displayDate(file.uploaded_at)}
-                              </small>
-                            </div>
-                            <div className="project-document-actions">
-                              {file.mime_type === "application/pdf" && (
-                                <a
-                                  className="icon-link-button"
-                                  href={researchFilePreviewUrl(
-                                    selectedDocument.research_document_id,
-                                    file.id,
-                                  )}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  aria-label={`Preview ${file.original_filename}`}
-                                  title="Preview PDF"
-                                >
-                                  <Eye />
-                                </a>
-                              )}
-                              <a
-                                className="icon-link-button"
-                                href={researchFileDownloadUrl(
-                                  selectedDocument.research_document_id,
-                                  file.id,
-                                )}
-                                aria-label={`Download ${file.original_filename}`}
-                                title="Download file"
-                              >
-                                <Download />
-                              </a>
-                            </div>
-                          </article>
-                        ))}
-                    </div>
-                  )}
-                </section>
-              </div>
-            )}
-
-            {projectTab === "feedback" && (
-              <div className="project-workspace-section project-feedback-layout">
-                <section className="project-feedback-thread">
-                  <div className="project-section-heading">
-                    <div>
-                      <p className="eyebrow">Review conversation</p>
-                      <h4>Feedback and comments</h4>
-                      <p>
-                        Comments stay attached to this study and can optionally
-                        reference a specific file.
-                      </p>
-                    </div>
-                    <span>
-                      {projectFeedback.length} comment
-                      {projectFeedback.length === 1 ? "" : "s"}
-                    </span>
-                  </div>
-                  {projectFeedback.length === 0 ? (
-                    <div className="project-empty-folder">
-                      <MessageSquareText aria-hidden="true" />
-                      <strong>No feedback yet.</strong>
-                      <span>
-                        Review comments from assigned research actors will
-                        appear here.
-                      </span>
-                    </div>
-                  ) : (
-                    <div className="project-comment-list">
-                      {projectFeedback.map((feedback) => {
-                        const linkedFile = projectFiles.find(
-                          (file) => file.id === feedback.document_file_id,
-                        );
-                        return (
-                          <article
-                            className="project-comment"
-                            key={feedback.id}
-                          >
-                            <span
-                              className="project-person-avatar"
-                              aria-hidden="true"
-                            >
-                              {(feedback.reviewer_name ?? "R")
-                                .slice(0, 1)
-                                .toUpperCase()}
-                            </span>
-                            <div className="project-comment-body">
-                              <div className="project-comment-meta">
-                                <span>
-                                  <strong>
-                                    {feedback.reviewer_name ??
-                                      "Assigned reviewer"}
-                                  </strong>
-                                  <small>
-                                    {feedback.reviewer_role ?? "Research actor"}
-                                  </small>
-                                </span>
-                                <time>{displayDate(feedback.created_at)}</time>
-                              </div>
-                              <p>{feedback.comment}</p>
-                              <div className="project-comment-footer">
-                                <span>{label(feedback.feedback_type)}</span>
-                                <span>{label(feedback.feedback_status)}</span>
-                                {linkedFile && (
-                                  <span>{linkedFile.original_filename}</span>
-                                )}
-                              </div>
-                            </div>
-                          </article>
-                        );
-                      })}
-                    </div>
-                  )}
-                </section>
-
-                <aside className="project-feedback-composer">
-                  <form onSubmit={submitProjectFeedback}>
-                    <div>
-                      <p className="eyebrow">Add review note</p>
-                      <h4>New feedback</h4>
-                    </div>
-                    <label>
-                      Feedback type
-                      <select
-                        value={feedbackType}
-                        onChange={(event) =>
-                          setFeedbackType(
-                            event.target
-                              .value as FeedbackResource["feedback_type"],
-                          )
-                        }
-                      >
-                        <option value="comment">Comment</option>
-                        <option value="suggestion">Suggestion</option>
-                        <option value="revision_request">
-                          Revision request
-                        </option>
-                        <option value="approval_remark">Approval remark</option>
-                        <option value="general_feedback">
-                          General feedback
-                        </option>
-                      </select>
-                    </label>
-                    <label>
-                      Related document
-                      <select
-                        value={feedbackFileId}
-                        onChange={(event) =>
-                          setFeedbackFileId(event.target.value)
-                        }
-                      >
-                        <option value="">Whole study / no specific file</option>
-                        {projectFiles.map((file) => (
-                          <option key={file.id} value={file.id}>
-                            {file.relative_path ?? "Unfiled"} —{" "}
-                            {file.original_filename} (v{file.version_number})
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      Comment
-                      <textarea
-                        required
-                        value={feedbackText}
-                        onChange={(event) =>
-                          setFeedbackText(event.target.value)
-                        }
-                        placeholder="Write a clear review note for the researchers…"
-                      />
-                    </label>
-                    <Button disabled={feedbackBusy || !feedbackText.trim()}>
-                      <Send /> {feedbackBusy ? "Posting…" : "Post feedback"}
-                    </Button>
-                  </form>
-                </aside>
-              </div>
-            )}
-
-            {projectTab === "monitoring" && (
-              <div className="project-workspace-section">
-                <SharedMonitoring
-                  role={role}
-                  researchDocumentId={selectedDocument.research_document_id}
-                  embedded
-                />
-              </div>
-            )}
-            {projectManageOpen && (
-              <Modal
-                label="Manage project assignments"
-                onClose={() => {
-                  resetProjectDisclosures();
-                  setProjectManageOpen(false);
-                }}
-                busy={teamBusy}
+              </form>
+            </Modal>
+          )}
+          {projectManageOpen && (
+            <Modal
+              label="Manage project assignments"
+              className="modal-panel-manage-assignments"
+              onClose={() => {
+                resetProjectDisclosures();
+                setProjectManageOpen(false);
+              }}
+              busy={teamBusy}
+            >
+              <div
+                className="project-disclosures project-assignment-modal"
+                aria-label="Project assignments"
               >
+                <h2>Manage project assignments</h2>
+                <div className="project-team-stage-control project-assignment-stage-control">
+                  <label>
+                    Defense stage
+                    <select
+                      aria-label="Assignment defense stage"
+                      value={managedDefenseStage}
+                      disabled={teamLoading || teamBusy}
+                      onChange={(event) => {
+                        void loadProjectTeamStage(
+                          event.target.value as "proposal" | "final",
+                          { resetDisclosures: true },
+                        );
+                      }}
+                    >
+                      <option value="proposal">Proposal Defense</option>
+                      <option value="final">Final Defense</option>
+                    </select>
+                  </label>
+                  <p className="project-picker-note">
+                    {managedDefenseStage === "proposal"
+                      ? "Assignments saved here apply to the proposal defense only."
+                      : "Assignments saved here apply to the final defense only."}
+                  </p>
+                </div>
                 <div
-                  className={`project-disclosures project-assignment-modal${projectAssignmentEditing ? " is-editing" : ""}`}
-                  aria-label="Project assignments"
-                >
-                  <h2>Manage project assignments</h2>
+                  className="project-assignment-divider"
+                  aria-hidden="true"
+                />
+                <div key="students">
                   <div className="project-assignment-control">
+                    <span
+                      className="project-assignment-icon"
+                      aria-hidden="true"
+                    >
+                      <GraduationCap />
+                    </span>
                     <span>
                       <strong>Student researchers</strong>
                       <small>Add students enrolled in this section.</small>
                     </span>
                     <Button
                       type="button"
-                      variant="secondary"
-                      className="icon-button"
                       aria-label="Add students"
                       title="Add students"
                       aria-expanded={projectDisclosures.students}
@@ -3888,431 +4089,470 @@ function InstructorSections({
                         })
                       }
                     >
-                      <UserPlus />
+                      <UserPlus /> Add
                     </Button>
                   </div>
-                  {projectDisclosures.students && (
-                    <div
-                      id="project-students-editor"
-                      className="title-member-picker"
-                    >
-                      <div className="project-editor-heading">
-                        <p className="eyebrow">Project assignment</p>
-                        <h3>Student researchers</h3>
+                </div>
+                {PROJECT_ROLE_FIELDS.map(
+                  ([disclosure, buttonLabel, fieldLabel]) => (
+                    <div key={disclosure}>
+                      <div className="project-assignment-control">
+                        <span
+                          className="project-assignment-icon"
+                          aria-hidden="true"
+                        >
+                          {disclosure === "chair" ? (
+                            <UserCog />
+                          ) : disclosure === "researchOffice" ? (
+                            <Users />
+                          ) : (
+                            <User />
+                          )}
+                        </span>
+                        <span>
+                          <strong>{fieldLabel}</strong>
+                        </span>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          className="icon-button"
+                          aria-label={buttonLabel}
+                          title={buttonLabel}
+                          aria-expanded={projectDisclosures[disclosure]}
+                          aria-controls={
+                            projectDisclosures[disclosure]
+                              ? `project-${disclosure}-editor`
+                              : undefined
+                          }
+                          onClick={() => {
+                            const opening = !projectDisclosures[disclosure];
+                            setProjectDisclosures({
+                              students: false,
+                              adviser: false,
+                              researchOffice: false,
+                              chair: false,
+                              panelMembers: false,
+                              [disclosure]: opening,
+                            });
+                            if (opening) {
+                              void refreshProjectTeamCandidates(disclosure);
+                            }
+                          }}
+                        >
+                          {projectTeam?.[
+                            disclosure === "researchOffice"
+                              ? "research_office_representative"
+                              : disclosure
+                          ] ? (
+                            <Pencil />
+                          ) : (
+                            <Plus />
+                          )}
+                        </Button>
                       </div>
-                      <label>
-                        Search students
-                        <input
-                          value={studentQueries[openSection.id] ?? ""}
-                          onChange={(event) =>
-                            setStudentQueries((current) => ({
+                    </div>
+                  ),
+                )}
+                <div>
+                  <div className="project-assignment-control">
+                    <span
+                      className="project-assignment-icon"
+                      aria-hidden="true"
+                    >
+                      <Users />
+                    </span>
+                    <span>
+                      <strong>Panel members</strong>
+                      <small>Select the project evaluation panel.</small>
+                    </span>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="icon-button"
+                      aria-label="Assign panel members"
+                      title="Assign panel members"
+                      aria-expanded={projectDisclosures.panelMembers}
+                      aria-controls={
+                        projectDisclosures.panelMembers
+                          ? "project-panel-members-editor"
+                          : undefined
+                      }
+                      onClick={() => {
+                        const opening = !projectDisclosures.panelMembers;
+                        setProjectDisclosures({
+                          students: false,
+                          adviser: false,
+                          researchOffice: false,
+                          chair: false,
+                          panelMembers: opening,
+                        });
+                        if (opening) {
+                          void refreshProjectTeamCandidates("panelMembers");
+                        }
+                      }}
+                    >
+                      {projectTeam?.panel_members.length ? (
+                        <Pencil />
+                      ) : (
+                        <Plus />
+                      )}
+                    </Button>
+                  </div>
+                </div>
+                <div className="project-assignment-footer">
+                  <Button
+                    type="button"
+                    disabled={teamBusy}
+                    onClick={() => {
+                      resetProjectDisclosures();
+                      setProjectManageOpen(false);
+                    }}
+                  >
+                    Done
+                  </Button>
+                </div>
+              </div>
+            </Modal>
+          )}
+          {projectManageOpen && projectDisclosures.students && (
+            <Modal
+              label="Student researchers"
+              onClose={() => resetProjectDisclosures()}
+              busy={teamBusy}
+            >
+              <div id="project-students-editor" className="title-member-picker">
+                <div className="project-editor-back">
+                  <Button
+                    type="button"
+                    variant="quiet"
+                    onClick={() => resetProjectDisclosures()}
+                  >
+                    <ArrowLeft aria-hidden="true" /> Back
+                  </Button>
+                </div>
+                <div className="project-editor-heading">
+                  <p className="eyebrow">
+                    {managedDefenseStage === "proposal"
+                      ? "Proposal defense"
+                      : "Final defense"}
+                  </p>
+                  <h3>Student researchers</h3>
+                </div>
+                <label>
+                  Search students
+                  <input
+                    value={studentQueries[openSection.id] ?? ""}
+                    onChange={(event) =>
+                      setStudentQueries((current) => ({
+                        ...current,
+                        [openSection.id]: event.target.value,
+                      }))
+                    }
+                    placeholder="Search this section roster"
+                  />
+                </label>
+                <p className="project-picker-note">
+                  Only students already enrolled in this section can be assigned
+                  to the study.
+                </p>
+                <ul className="student-candidates">
+                  {(studentsFor[openSection.id] ?? [])
+                    .filter(
+                      (candidate) =>
+                        !documentMembers.some(
+                          (member) => member.id === candidate.id,
+                        ),
+                    )
+                    .filter((candidate) => {
+                      const query = (studentQueries[openSection.id] ?? "")
+                        .trim()
+                        .toLocaleLowerCase();
+                      return (
+                        query === "" ||
+                        `${studentName(candidate)} ${candidate.email}`
+                          .toLocaleLowerCase()
+                          .includes(query)
+                      );
+                    })
+                    .map((candidate) => (
+                      <li key={candidate.id}>
+                        <span>
+                          {studentName(candidate)} ({candidate.email})
+                        </span>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          disabled={studentBusy[openSection.id]}
+                          onClick={() =>
+                            void addStudentToDocument(candidate.id)
+                          }
+                        >
+                          Add
+                        </Button>
+                      </li>
+                    ))}
+                </ul>
+              </div>
+            </Modal>
+          )}
+          {projectManageOpen &&
+            PROJECT_ROLE_FIELDS.map(([disclosure, , fieldLabel, field]) => {
+              if (!projectDisclosures[disclosure]) return null;
+              const candidateKey =
+                disclosure === "researchOffice"
+                  ? "research_office_representative"
+                  : disclosure;
+              const candidates = teamCandidates[candidateKey] ?? [];
+              const searchQuery = (teamSearches[disclosure] ?? "")
+                .trim()
+                .toLocaleLowerCase();
+              const matchingCandidates = candidates.filter(
+                (person) =>
+                  searchQuery === "" ||
+                  `${person.name} ${person.email}`
+                    .toLocaleLowerCase()
+                    .includes(searchQuery),
+              );
+              return (
+                <Modal
+                  label={fieldLabel}
+                  onClose={() => resetProjectDisclosures()}
+                  busy={teamBusy}
+                >
+                  <div
+                    id={`project-${disclosure}-editor`}
+                    className="project-role-editor"
+                  >
+                    <div className="project-editor-back">
+                      <Button
+                        type="button"
+                        variant="quiet"
+                        onClick={() => resetProjectDisclosures()}
+                      >
+                        <ArrowLeft aria-hidden="true" /> Back
+                      </Button>
+                    </div>
+                    <div className="project-editor-heading">
+                      <p className="eyebrow">
+                        {managedDefenseStage === "proposal"
+                          ? "Proposal defense"
+                          : "Final defense"}
+                      </p>
+                      <h3>{fieldLabel}</h3>
+                    </div>
+                    <p>
+                      <strong>Current:</strong>{" "}
+                      {projectTeam?.[
+                        disclosure === "researchOffice"
+                          ? "research_office_representative"
+                          : disclosure
+                      ]?.name ?? "Unassigned"}
+                    </p>
+                    <label>
+                      Search and select {fieldLabel.toLowerCase()}
+                      <input
+                        type="search"
+                        value={teamSearches[disclosure] ?? ""}
+                        placeholder="Search by name or email"
+                        autoComplete="off"
+                        onChange={(event) =>
+                          setTeamSearches((current) => ({
+                            ...current,
+                            [disclosure]: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <fieldset>
+                      <legend className="sr-only">{fieldLabel}</legend>
+                      {teamLoading ? (
+                        <p className="project-assignment-empty" role="status">
+                          Loading eligible accounts…
+                        </p>
+                      ) : candidates.length === 0 ? (
+                        <p className="project-assignment-empty">
+                          No eligible {fieldLabel.toLowerCase()} account is
+                          available. Ask the Coordinator or Administrator to
+                          activate the required account first.
+                        </p>
+                      ) : matchingCandidates.length === 0 ? (
+                        <p className="project-assignment-empty" role="status">
+                          No accounts match “{teamSearches[disclosure]?.trim()}
+                          ”.
+                        </p>
+                      ) : (
+                        <ProjectAccountOptions
+                          candidates={matchingCandidates}
+                          selectedIds={
+                            teamDraft[field] ? [teamDraft[field]] : []
+                          }
+                          mode="single"
+                          groupName={`project-${disclosure}-selection`}
+                          onClear={() =>
+                            setTeamDraft((current) => ({
                               ...current,
-                              [openSection.id]: event.target.value,
+                              [field]: "",
                             }))
                           }
-                          placeholder="Search this section roster"
+                          disabledIds={
+                            disclosure === "chair"
+                              ? teamDraft.panel_member_ids
+                              : []
+                          }
+                          disabledLabel={
+                            disclosure === "chair" ? "Panel member" : undefined
+                          }
+                          onToggle={(person, selected) =>
+                            setTeamDraft((current) => ({
+                              ...current,
+                              [field]: selected ? person.user_id : "",
+                            }))
+                          }
                         />
-                      </label>
-                      <p className="project-picker-note">
-                        Only students already enrolled in this section can be
-                        assigned to the study.
-                      </p>
-                      <ul className="student-candidates">
-                        {(studentsFor[openSection.id] ?? [])
-                          .filter(
-                            (candidate) =>
-                              !documentMembers.some(
-                                (member) => member.id === candidate.id,
-                              ),
-                          )
-                          .filter((candidate) => {
-                            const query = (studentQueries[openSection.id] ?? "")
-                              .trim()
-                              .toLocaleLowerCase();
-                            return (
-                              query === "" ||
-                              `${studentName(candidate)} ${candidate.email} ${candidate.student_employee_id ?? ""}`
-                                .toLocaleLowerCase()
-                                .includes(query)
-                            );
-                          })
-                          .map((candidate) => (
-                            <li key={candidate.id}>
-                              <span>
-                                {studentName(candidate)} ({candidate.email})
-                              </span>
-                              <Button
-                                type="button"
-                                variant="secondary"
-                                disabled={studentBusy[openSection.id]}
-                                onClick={() =>
-                                  void addStudentToDocument(candidate.id)
-                                }
-                              >
-                                Add
-                              </Button>
-                            </li>
-                          ))}
-                      </ul>
-                    </div>
-                  )}
-                  {(
-                    [
-                      [
-                        "adviser",
-                        "Assign research adviser",
-                        "Research adviser",
-                        "adviser_id",
-                      ],
-                      [
-                        "researchOffice",
-                        "Assign Research Office representative",
-                        "Research Office representative",
-                        "research_office_representative_id",
-                      ],
-                      [
-                        "chair",
-                        "Assign panel chair",
-                        "Panel chair",
-                        "chair_id",
-                      ],
-                    ] as const
-                  ).map(([disclosure, buttonLabel, fieldLabel, field]) => {
-                    const candidateKey =
-                      disclosure === "researchOffice"
-                        ? "research_office_representative"
-                        : disclosure;
-                    const candidates = teamCandidates[candidateKey] ?? [];
-                    const searchQuery = (teamSearches[disclosure] ?? "")
-                      .trim()
-                      .toLocaleLowerCase();
-                    const matchingCandidates = candidates.filter(
-                      (person) =>
-                        searchQuery === "" ||
-                        `${person.name} ${person.email}`
-                          .toLocaleLowerCase()
-                          .includes(searchQuery),
-                    );
-
-                    return (
-                      <div key={disclosure}>
-                        <div className="project-assignment-control">
-                          <span>
-                            <strong>{fieldLabel}</strong>
-                            <small>
-                              View or change the current assignment.
-                            </small>
-                          </span>
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            className="icon-button"
-                            aria-label={buttonLabel}
-                            title={buttonLabel}
-                            aria-expanded={projectDisclosures[disclosure]}
-                            aria-controls={
-                              projectDisclosures[disclosure]
-                                ? `project-${disclosure}-editor`
-                                : undefined
-                            }
-                            onClick={() => {
-                              const opening = !projectDisclosures[disclosure];
-                              setProjectDisclosures({
-                                students: false,
-                                adviser: false,
-                                researchOffice: false,
-                                chair: false,
-                                panelMembers: false,
-                                [disclosure]: opening,
-                              });
-                              if (opening) {
-                                void refreshProjectTeamCandidates(disclosure);
-                              }
-                            }}
-                          >
-                            {projectTeam?.[
-                              disclosure === "researchOffice"
-                                ? "research_office_representative"
-                                : disclosure
-                            ] ? (
-                              <Pencil />
-                            ) : (
-                              <Plus />
-                            )}
-                          </Button>
-                        </div>
-                        {projectDisclosures[disclosure] && (
-                          <div
-                            id={`project-${disclosure}-editor`}
-                            className="project-role-editor"
-                          >
-                            <div className="project-editor-heading">
-                              <p className="eyebrow">Project assignment</p>
-                              <h3>{fieldLabel}</h3>
-                            </div>
-                            <p>
-                              <strong>Current:</strong>{" "}
-                              {projectTeam?.[
-                                disclosure === "researchOffice"
-                                  ? "research_office_representative"
-                                  : disclosure
-                              ]?.name ?? "Unassigned"}
-                            </p>
-                            <label>
-                              Search and select {fieldLabel.toLowerCase()}
-                              <input
-                                type="search"
-                                value={teamSearches[disclosure] ?? ""}
-                                placeholder="Search by name or email"
-                                autoComplete="off"
-                                onChange={(event) =>
-                                  setTeamSearches((current) => ({
-                                    ...current,
-                                    [disclosure]: event.target.value,
-                                  }))
-                                }
-                              />
-                            </label>
-                            <fieldset>
-                              <legend>{fieldLabel}</legend>
-                              {teamLoading ? (
-                                <p
-                                  className="project-assignment-empty"
-                                  role="status"
-                                >
-                                  Loading eligible accounts…
-                                </p>
-                              ) : candidates.length === 0 ? (
-                                <p className="project-assignment-empty">
-                                  No eligible {fieldLabel.toLowerCase()} account
-                                  is available. Ask the Coordinator or
-                                  Administrator to activate the required account
-                                  first.
-                                </p>
-                              ) : matchingCandidates.length === 0 ? (
-                                <p
-                                  className="project-assignment-empty"
-                                  role="status"
-                                >
-                                  No accounts match “
-                                  {teamSearches[disclosure]?.trim()}”.
-                                </p>
-                              ) : (
-                                <ProjectAccountOptions
-                                  candidates={matchingCandidates}
-                                  selectedIds={
-                                    teamDraft[field] ? [teamDraft[field]] : []
-                                  }
-                                  mode="single"
-                                  groupName={`project-${disclosure}-selection`}
-                                  onClear={() =>
-                                    setTeamDraft((current) => ({
-                                      ...current,
-                                      [field]: "",
-                                    }))
-                                  }
-                                  disabledIds={
-                                    disclosure === "chair"
-                                      ? teamDraft.panel_member_ids
-                                      : []
-                                  }
-                                  disabledLabel={
-                                    disclosure === "chair"
-                                      ? "Panel member"
-                                      : undefined
-                                  }
-                                  onToggle={(person, selected) =>
-                                    setTeamDraft((current) => ({
-                                      ...current,
-                                      [field]: selected ? person.user_id : "",
-                                    }))
-                                  }
-                                />
-                              )}
-                            </fieldset>
-                            <div className="project-role-actions">
-                              <span>
-                                {teamDraft[field]
-                                  ? "1 account selected"
-                                  : "No account selected"}
-                              </span>
-                              <Button
-                                type="button"
-                                disabled={
-                                  teamBusy ||
-                                  teamLoading ||
-                                  !projectTeamRoleChanged(disclosure)
-                                }
-                                onClick={() =>
-                                  requestProjectTeamSave(disclosure)
-                                }
-                              >
-                                {teamBusy
-                                  ? "Saving…"
-                                  : projectTeamRoleAction(disclosure)}
-                              </Button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                  <div>
-                    <div className="project-assignment-control">
+                      )}
+                    </fieldset>
+                    <div className="project-role-actions">
                       <span>
-                        <strong>Panel members</strong>
-                        <small>Select the project evaluation panel.</small>
+                        {teamDraft[field]
+                          ? "1 account selected"
+                          : "No account selected"}
                       </span>
                       <Button
                         type="button"
-                        variant="secondary"
-                        className="icon-button"
-                        aria-label="Assign panel members"
-                        title="Assign panel members"
-                        aria-expanded={projectDisclosures.panelMembers}
-                        aria-controls={
-                          projectDisclosures.panelMembers
-                            ? "project-panel-members-editor"
-                            : undefined
+                        disabled={
+                          teamBusy ||
+                          teamLoading ||
+                          !projectTeamRoleChanged(disclosure)
                         }
-                        onClick={() => {
-                          const opening = !projectDisclosures.panelMembers;
-                          setProjectDisclosures({
-                            students: false,
-                            adviser: false,
-                            researchOffice: false,
-                            chair: false,
-                            panelMembers: opening,
-                          });
-                          if (opening) {
-                            void refreshProjectTeamCandidates("panelMembers");
-                          }
-                        }}
+                        onClick={() => requestProjectTeamSave(disclosure)}
                       >
-                        {projectTeam?.panel_members.length ? (
-                          <Pencil />
-                        ) : (
-                          <Plus />
-                        )}
+                        {teamBusy
+                          ? "Saving…"
+                          : projectTeamRoleAction(disclosure)}
                       </Button>
                     </div>
-                    {projectDisclosures.panelMembers && (
-                      <div
-                        id="project-panel-members-editor"
-                        className="project-role-editor"
-                      >
-                        <div className="project-editor-heading">
-                          <p className="eyebrow">Project assignment</p>
-                          <h3>Panel members</h3>
-                        </div>
-                        <p>
-                          <strong>Current:</strong>{" "}
-                          {projectTeam?.panel_members
-                            .map((member) => member.name)
-                            .join(", ") || "None"}
-                        </p>
-                        <label>
-                          Search and select panel members
-                          <input
-                            type="search"
-                            value={teamSearches.panelMembers ?? ""}
-                            placeholder="Search by name or email"
-                            onChange={(event) =>
-                              setTeamSearches((current) => ({
-                                ...current,
-                                panelMembers: event.target.value,
-                              }))
-                            }
-                          />
-                        </label>
-                        <fieldset>
-                          <legend>Panel members</legend>
-                          {teamLoading ? (
-                            <p
-                              className="project-assignment-empty"
-                              role="status"
-                            >
-                              Loading eligible panel members…
-                            </p>
-                          ) : (teamCandidates.panel_member ?? []).length ===
-                            0 ? (
-                            <p className="project-assignment-empty">
-                              No eligible panel accounts are available. Ask the
-                              Coordinator or Administrator to activate a Panel
-                              account first.
-                            </p>
-                          ) : matchingPanelCandidates.length === 0 ? (
-                            <p
-                              className="project-assignment-empty"
-                              role="status"
-                            >
-                              No panel accounts match “
-                              {teamSearches.panelMembers?.trim()}”.
-                            </p>
-                          ) : (
-                            <ProjectAccountOptions
-                              candidates={matchingPanelCandidates}
-                              selectedIds={teamDraft.panel_member_ids}
-                              disabledIds={
-                                teamDraft.chair_id ? [teamDraft.chair_id] : []
-                              }
-                              disabledLabel="Panel chair"
-                              onToggle={(person, selected) =>
-                                setTeamDraft((current) => {
-                                  if (
-                                    selected &&
-                                    current.panel_member_ids.length >= 3 &&
-                                    !current.panel_member_ids.includes(
-                                      person.user_id,
-                                    )
-                                  ) {
-                                    return current;
-                                  }
-                                  return {
-                                    ...current,
-                                    panel_member_ids: selected
-                                      ? Array.from(
-                                          new Set([
-                                            ...current.panel_member_ids,
-                                            person.user_id,
-                                          ]),
-                                        ).slice(0, 3)
-                                      : current.panel_member_ids.filter(
-                                          (id) => id !== person.user_id,
-                                        ),
-                                  };
-                                })
-                              }
-                            />
-                          )}
-                        </fieldset>
-                        <div className="project-role-actions">
-                          <span>
-                            {teamDraft.panel_member_ids.length} / 3 selected
-                          </span>
-                          <Button
-                            type="button"
-                            disabled={
-                              teamBusy ||
-                              teamLoading ||
-                              !projectTeamRoleChanged("panelMembers")
-                            }
-                            onClick={() =>
-                              requestProjectTeamSave("panelMembers")
-                            }
-                          >
-                            {teamBusy
-                              ? "Saving…"
-                              : projectTeamRoleAction("panelMembers")}
-                          </Button>
-                        </div>
-                      </div>
-                    )}
                   </div>
+                </Modal>
+              );
+            })}
+          {projectManageOpen && projectDisclosures.panelMembers && (
+            <Modal
+              label="Panel members"
+              onClose={() => resetProjectDisclosures()}
+              busy={teamBusy}
+            >
+              <div
+                id="project-panel-members-editor"
+                className="project-role-editor"
+              >
+                <div className="project-editor-back">
+                  <Button
+                    type="button"
+                    variant="quiet"
+                    onClick={() => resetProjectDisclosures()}
+                  >
+                    <ArrowLeft aria-hidden="true" /> Back
+                  </Button>
                 </div>
-              </Modal>
-            )}
-          </div>
+                <div className="project-editor-heading">
+                  <p className="eyebrow">
+                    {managedDefenseStage === "proposal"
+                      ? "Proposal defense"
+                      : "Final defense"}
+                  </p>
+                  <h3>Panel members</h3>
+                </div>
+                <p>
+                  <strong>Current:</strong>{" "}
+                  {projectTeam?.panel_members
+                    .map((member) => member.name)
+                    .join(", ") || "None"}
+                </p>
+                <label>
+                  Search and select panel members
+                  <input
+                    type="search"
+                    value={teamSearches.panelMembers ?? ""}
+                    placeholder="Search by name or email"
+                    onChange={(event) =>
+                      setTeamSearches((current) => ({
+                        ...current,
+                        panelMembers: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <fieldset>
+                  <legend className="sr-only">Panel members</legend>
+                  {teamLoading ? (
+                    <p className="project-assignment-empty" role="status">
+                      Loading eligible panel members…
+                    </p>
+                  ) : (teamCandidates.panel_member ?? []).length === 0 ? (
+                    <p className="project-assignment-empty">
+                      No eligible panel accounts are available. Ask the
+                      Coordinator or Administrator to activate a Panel account
+                      first.
+                    </p>
+                  ) : matchingPanelCandidates.length === 0 ? (
+                    <p className="project-assignment-empty" role="status">
+                      No panel accounts match “
+                      {teamSearches.panelMembers?.trim()}”.
+                    </p>
+                  ) : (
+                    <ProjectAccountOptions
+                      candidates={matchingPanelCandidates}
+                      selectedIds={teamDraft.panel_member_ids}
+                      disabledIds={
+                        teamDraft.chair_id ? [teamDraft.chair_id] : []
+                      }
+                      disabledLabel="Panel chair"
+                      onToggle={(person, selected) =>
+                        setTeamDraft((current) => {
+                          if (
+                            selected &&
+                            current.panel_member_ids.length >= 3 &&
+                            !current.panel_member_ids.includes(person.user_id)
+                          ) {
+                            return current;
+                          }
+                          return {
+                            ...current,
+                            panel_member_ids: selected
+                              ? Array.from(
+                                  new Set([
+                                    ...current.panel_member_ids,
+                                    person.user_id,
+                                  ]),
+                                ).slice(0, 3)
+                              : current.panel_member_ids.filter(
+                                  (id) => id !== person.user_id,
+                                ),
+                          };
+                        })
+                      }
+                    />
+                  )}
+                </fieldset>
+                <div className="project-role-actions">
+                  <span>{teamDraft.panel_member_ids.length} / 3 selected</span>
+                  <Button
+                    type="button"
+                    disabled={
+                      teamBusy ||
+                      teamLoading ||
+                      !projectTeamRoleChanged("panelMembers")
+                    }
+                    onClick={() => requestProjectTeamSave("panelMembers")}
+                  >
+                    {teamBusy
+                      ? "Saving…"
+                      : projectTeamRoleAction("panelMembers")}
+                  </Button>
+                </div>
+              </div>
+            </Modal>
+          )}
         </section>
       )}
       {confirmRemove && openSection && (
@@ -4513,34 +4753,6 @@ function InstructorClassReports({ role }: { role: Role }) {
 
 /* ---------------------------------- Panel ---------------------------------- */
 
-function PanelDefenseSchedule({ role }: { role: Role }) {
-  const [attempt, reload] = useAttempt();
-  const state = useLoad(() => listPanelSchedule(), attempt);
-  return (
-    <div className="workspace-content admin-sidebar-page">
-      <RolePageHeader
-        role={role}
-        title="Defense schedule"
-        description="Scheduled defenses for manuscripts assigned to you."
-        action={
-          <Button variant="secondary" onClick={reload}>
-            <RefreshCw /> Refresh
-          </Button>
-        }
-      />
-      {state.status === "loading" ? (
-        <Loading label="Loading defense schedule" />
-      ) : state.status === "error" ? (
-        <InlineError message={state.message} retry={reload} />
-      ) : state.data.length === 0 ? (
-        <p className="admin-empty">No defenses are currently scheduled.</p>
-      ) : (
-        <ScheduleTable schedules={state.data} />
-      )}
-    </div>
-  );
-}
-
 function PanelEvaluationForm({ role }: { role: Role }) {
   const [attempt, reload] = useAttempt();
   const state = useLoad(() => listPanelAssignments(), attempt);
@@ -4675,6 +4887,17 @@ function PanelEvaluationForm({ role }: { role: Role }) {
 function PanelHistory({ role }: { role: Role }) {
   const [attempt, reload] = useAttempt();
   const state = useLoad(() => listPanelHistory(), attempt);
+  const { sortedRows, sort, direction, changeSort } = useClientSorting(
+    state.status === "ready" ? state.data : [],
+    {
+      manuscript: (evaluation) => evaluation.title,
+      originality: (evaluation) => evaluation.originality,
+      methodology: (evaluation) => evaluation.methodology,
+      clarity: (evaluation) => evaluation.clarity,
+      submitted: (evaluation) =>
+        evaluation.submitted_at ? Date.parse(evaluation.submitted_at) : null,
+    },
+  );
   return (
     <div className="workspace-content admin-sidebar-page">
       <RolePageHeader
@@ -4700,16 +4923,96 @@ function PanelHistory({ role }: { role: Role }) {
               <caption className="sr-only">Panel evaluation history</caption>
               <thead>
                 <tr>
-                  <th>Manuscript</th>
-                  <th>Originality</th>
-                  <th>Methodology</th>
-                  <th>Clarity</th>
+                  <SortableHeader
+                    sortKey="manuscript"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "manuscript"
+                          | "originality"
+                          | "methodology"
+                          | "clarity"
+                          | "submitted",
+                      )
+                    }
+                  >
+                    Manuscript
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="originality"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "manuscript"
+                          | "originality"
+                          | "methodology"
+                          | "clarity"
+                          | "submitted",
+                      )
+                    }
+                  >
+                    Originality
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="methodology"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "manuscript"
+                          | "originality"
+                          | "methodology"
+                          | "clarity"
+                          | "submitted",
+                      )
+                    }
+                  >
+                    Methodology
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="clarity"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "manuscript"
+                          | "originality"
+                          | "methodology"
+                          | "clarity"
+                          | "submitted",
+                      )
+                    }
+                  >
+                    Clarity
+                  </SortableHeader>
                   <th>Comments</th>
-                  <th>Submitted</th>
+                  <SortableHeader
+                    sortKey="submitted"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as
+                          | "manuscript"
+                          | "originality"
+                          | "methodology"
+                          | "clarity"
+                          | "submitted",
+                      )
+                    }
+                  >
+                    Submitted
+                  </SortableHeader>
                 </tr>
               </thead>
               <tbody>
-                {state.data.map((evaluation) => (
+                {sortedRows.map((evaluation) => (
                   <tr key={evaluation.id}>
                     <td>{evaluation.title ?? "—"}</td>
                     <td>{evaluation.originality}</td>
@@ -4725,42 +5028,6 @@ function PanelHistory({ role }: { role: Role }) {
         </section>
       )}
     </div>
-  );
-}
-
-function ScheduleTable({
-  schedules,
-}: {
-  schedules: DefenseScheduleResource[];
-}) {
-  return (
-    <section className="panel-card admin-data-card">
-      <div className="admin-table-wrap">
-        <table>
-          <caption className="sr-only">Defense schedules</caption>
-          <thead>
-            <tr>
-              <th>Research title</th>
-              <th>Scheduled</th>
-              <th>Room</th>
-              <th>Status</th>
-              <th>Created by</th>
-            </tr>
-          </thead>
-          <tbody>
-            {schedules.map((schedule) => (
-              <tr key={schedule.id}>
-                <td>{schedule.title ?? "—"}</td>
-                <td>{displayDate(schedule.scheduled_at)}</td>
-                <td>{schedule.room ?? "—"}</td>
-                <td>{label(schedule.status)}</td>
-                <td>{schedule.created_by?.name ?? "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
   );
 }
 
@@ -5042,6 +5309,16 @@ function StatisticianMethodologyChecklist({ role }: { role: Role }) {
 function StatisticianSignoffs({ role }: { role: Role }) {
   const [attempt, reload] = useAttempt();
   const state = useLoad(() => listStatisticianSignoffs(), attempt);
+  const { sortedRows, sort, direction, changeSort } = useClientSorting(
+    state.status === "ready" ? state.data : [],
+    {
+      title: (item) => item.title,
+      status: (item) => item.submission_status,
+      stage: (item) => item.research_stage,
+      signed_off: (item) =>
+        item.signed_off_at ? Date.parse(item.signed_off_at) : null,
+    },
+  );
   return (
     <div className="workspace-content admin-sidebar-page">
       <RolePageHeader
@@ -5067,14 +5344,58 @@ function StatisticianSignoffs({ role }: { role: Role }) {
               <caption className="sr-only">Issued sign-offs</caption>
               <thead>
                 <tr>
-                  <th>Research title</th>
-                  <th>Status</th>
-                  <th>Stage</th>
-                  <th>Signed off</th>
+                  <SortableHeader
+                    sortKey="title"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as "title" | "status" | "stage" | "signed_off",
+                      )
+                    }
+                  >
+                    Research title
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="status"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as "title" | "status" | "stage" | "signed_off",
+                      )
+                    }
+                  >
+                    Status
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="stage"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as "title" | "status" | "stage" | "signed_off",
+                      )
+                    }
+                  >
+                    Stage
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="signed_off"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as "title" | "status" | "stage" | "signed_off",
+                      )
+                    }
+                  >
+                    Signed off
+                  </SortableHeader>
                 </tr>
               </thead>
               <tbody>
-                {state.data.map((item) => (
+                {sortedRows.map((item) => (
                   <tr key={item.id}>
                     <td>{item.title ?? "—"}</td>
                     <td>
@@ -5099,247 +5420,18 @@ function StatisticianSignoffs({ role }: { role: Role }) {
 
 /* ---------------------------------- Coordinator ---------------------------------- */
 
-function CoordinatorSchedules({ role }: { role: Role }) {
+export function CoordinatorAdviserLoad({ role }: { role: Role }) {
   const [attempt, reload] = useAttempt();
-  const state = useLoad(() => listCoordinatorSchedules(), attempt);
-  const [documentId, setDocumentId] = useState("");
-  const [scheduledAt, setScheduledAt] = useState("");
-  const [room, setRoom] = useState("");
-  const [notes, setNotes] = useState("");
-  const [busy, setBusy] = useState("");
-  const [notice, setNotice] = useState("");
-
-  async function createSchedule(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setNotice("");
-    setBusy("create");
-    try {
-      await createCoordinatorSchedule({
-        research_document_id: Number(documentId),
-        scheduled_at: new Date(scheduledAt).toISOString(),
-        room: room.trim() || null,
-        notes: notes.trim() || null,
-      });
-      setDocumentId("");
-      setScheduledAt("");
-      setRoom("");
-      setNotes("");
-      setNotice("Defense schedule created.");
-      reload();
-    } catch (error) {
-      setNotice(
-        friendlyError(error, "The defense schedule could not be created"),
-      );
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function updateStatus(
-    schedule: DefenseScheduleResource,
-    status: string,
-  ) {
-    setNotice("");
-    setBusy(String(schedule.id));
-    try {
-      await updateCoordinatorSchedule(schedule.id, {
-        status: status as (typeof scheduleStatuses)[number],
-      });
-      setNotice("Defense schedule updated.");
-      reload();
-    } catch (error) {
-      setNotice(
-        friendlyError(error, "The defense schedule could not be updated"),
-      );
-    } finally {
-      setBusy("");
-    }
-  }
-
-  return (
-    <div className="workspace-content admin-sidebar-page">
-      <RolePageHeader
-        role={role}
-        title="Defense schedules"
-        description="Create and manage proposal-defense schedules."
-        action={
-          <Button variant="secondary" onClick={reload}>
-            <RefreshCw /> Refresh
-          </Button>
-        }
-      />
-      <section className="panel-card admin-provision-card">
-        <h2>Schedule a defense</h2>
-        <form onSubmit={createSchedule} className="admin-inline-form">
-          <label>
-            Research document ID
-            <input
-              type="number"
-              value={documentId}
-              onChange={(event) => setDocumentId(event.target.value)}
-              required
-              min={1}
-            />
-          </label>
-          <label>
-            Scheduled at
-            <DatePickerInput
-              type="datetime-local"
-              value={scheduledAt}
-              onChange={(event) => setScheduledAt(event.target.value)}
-              required
-            />
-          </label>
-          <label>
-            Room
-            <input
-              value={room}
-              onChange={(event) => setRoom(event.target.value)}
-              maxLength={150}
-            />
-          </label>
-          <label>
-            Notes
-            <textarea
-              value={notes}
-              onChange={(event) => setNotes(event.target.value)}
-              rows={2}
-              maxLength={5000}
-            />
-          </label>
-          <Button type="submit" disabled={busy === "create"}>
-            {busy === "create" ? "Scheduling…" : "Create schedule"}
-          </Button>
-        </form>
-        {notice && (
-          <p
-            role="status"
-            className={
-              notice.includes("could not") ? "admin-error" : "admin-success"
-            }
-          >
-            {notice}
-          </p>
-        )}
-      </section>
-      {state.status === "loading" ? (
-        <Loading label="Loading schedules" />
-      ) : state.status === "error" ? (
-        <InlineError message={state.message} retry={reload} />
-      ) : state.data.length === 0 ? (
-        <p className="admin-empty">No defense schedules exist yet.</p>
-      ) : (
-        <section className="panel-card admin-data-card">
-          <div className="admin-table-wrap">
-            <table>
-              <caption className="sr-only">Defense schedules</caption>
-              <thead>
-                <tr>
-                  <th>Research title</th>
-                  <th>Scheduled</th>
-                  <th>Room</th>
-                  <th>Notes</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {state.data.map((schedule) => (
-                  <tr key={schedule.id}>
-                    <td>{schedule.title ?? "—"}</td>
-                    <td>{displayDate(schedule.scheduled_at)}</td>
-                    <td>{schedule.room ?? "—"}</td>
-                    <td>{schedule.notes ?? "—"}</td>
-                    <td>
-                      <select
-                        aria-label={`Status for schedule ${schedule.id}`}
-                        value={schedule.status}
-                        onChange={(event) =>
-                          void updateStatus(schedule, event.target.value)
-                        }
-                        disabled={busy === String(schedule.id)}
-                      >
-                        {scheduleStatuses.map((status) => (
-                          <option key={status} value={status}>
-                            {label(status)}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
-    </div>
-  );
-}
-
-function CoordinatorDuplicateFlags({ role }: { role: Role }) {
-  const [attempt, reload] = useAttempt();
-  const state = useLoad(() => listDuplicateFlags(), attempt);
-  return (
-    <div className="workspace-content admin-sidebar-page">
-      <RolePageHeader
-        role={role}
-        title="Duplicate flags"
-        description="Research pairs flagged for possible title duplication."
-        action={
-          <Button variant="secondary" onClick={reload}>
-            <RefreshCw /> Refresh
-          </Button>
-        }
-      />
-      {state.status === "loading" ? (
-        <Loading label="Loading duplicate flags" />
-      ) : state.status === "error" ? (
-        <InlineError message={state.message} retry={reload} />
-      ) : state.data.length === 0 ? (
-        <p className="admin-empty">
-          No duplicate flags are currently recorded.
-        </p>
-      ) : (
-        <section className="panel-card admin-data-card">
-          <div className="admin-table-wrap">
-            <table>
-              <caption className="sr-only">Duplicate flags</caption>
-              <thead>
-                <tr>
-                  <th>Source title</th>
-                  <th>Matched title</th>
-                  <th>Score</th>
-                  <th>Classification</th>
-                  <th>Analyzed</th>
-                </tr>
-              </thead>
-              <tbody>
-                {state.data.map((flag) => (
-                  <tr key={flag.id}>
-                    <td>{flag.source.title ?? "—"}</td>
-                    <td>{flag.matched.title ?? "—"}</td>
-                    <td>
-                      <ScoreCell value={flag.overall_similarity_score} />
-                    </td>
-                    <td>
-                      {classificationLabel(flag.classification) ??
-                        "Unavailable"}
-                    </td>
-                    <td>{displayDate(flag.analyzed_at)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
-    </div>
-  );
-}
-
-function CoordinatorAdviserLoad({ role }: { role: Role }) {
-  const [attempt, reload] = useAttempt();
+  const [spotlight, setSpotlight] = useState<ReportSpotlight | null>(null);
   const state = useLoad(() => listAdviserLoad(), attempt);
+  const { sortedRows, sort, direction, changeSort } = useClientSorting(
+    state.status === "ready" ? state.data : [],
+    {
+      adviser: (item) => item.name,
+      email: (item) => item.email,
+      assignments: (item) => item.active_assignments,
+    },
+  );
   return (
     <div className="workspace-content admin-sidebar-page">
       <RolePageHeader
@@ -5365,15 +5457,50 @@ function CoordinatorAdviserLoad({ role }: { role: Role }) {
               <caption className="sr-only">Adviser load</caption>
               <thead>
                 <tr>
-                  <th>Adviser</th>
-                  <th>Email</th>
-                  <th>Active assignments</th>
+                  <SortableHeader
+                    sortKey="adviser"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(key as "adviser" | "email" | "assignments")
+                    }
+                  >
+                    Adviser
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="email"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(key as "adviser" | "email" | "assignments")
+                    }
+                  >
+                    Email
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="assignments"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(key as "adviser" | "email" | "assignments")
+                    }
+                  >
+                    Active assignments
+                  </SortableHeader>
                 </tr>
               </thead>
               <tbody>
-                {state.data.map((item) => (
+                {sortedRows.map((item) => (
                   <tr key={item.user_id}>
-                    <td>{item.name ?? "—"}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="coordinator-report-link"
+                        onClick={() => setSpotlight(adviserSpotlight(item))}
+                      >
+                        {item.name ?? "—"}
+                      </button>
+                    </td>
                     <td>{item.email ?? "—"}</td>
                     <td>{item.active_assignments}</td>
                   </tr>
@@ -5383,11 +5510,17 @@ function CoordinatorAdviserLoad({ role }: { role: Role }) {
           </div>
         </section>
       )}
+      {spotlight && (
+        <SpotlightModal
+          spotlight={spotlight}
+          onClose={() => setSpotlight(null)}
+        />
+      )}
     </div>
   );
 }
 
-function CoordinatorAccountRoles({ role }: { role: Role }) {
+export function CoordinatorAccountRoles({ role }: { role: Role }) {
   const [users, setUsers] = useState<Awaited<
     ReturnType<typeof listProvisionedAccounts>
   > | null>(null);
@@ -5397,6 +5530,14 @@ function CoordinatorAccountRoles({ role }: { role: Role }) {
   const [notice, setNotice] = useState("");
   const [attempt, reload] = useAttempt();
   const [loading, setLoading] = useState(true);
+  const { sortedRows, sort, direction, changeSort } = useClientSorting(
+    users ?? [],
+    {
+      email: (user) => user.email,
+      role: (user) => user.role,
+      access: (user) => user.accessStatus,
+    },
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -5424,15 +5565,20 @@ function CoordinatorAccountRoles({ role }: { role: Role }) {
     setNotice("");
     setProvisioning(true);
     try {
-      await provisionAccount("/api/coordinator/instructors", email.trim());
+      await provisionAccount(
+        "/api/coordinator/instructors",
+        email.trim(),
+        undefined,
+        undefined,
+      );
       setEmail("");
-      setNotice("Instructor account provisioned.");
+      setNotice("Instructor account added.");
       reload();
     } catch (requestError) {
       setNotice(
         friendlyError(
           requestError,
-          "The instructor account could not be provisioned",
+          "The instructor account could not be added",
         ),
       );
     } finally {
@@ -5445,10 +5591,10 @@ function CoordinatorAccountRoles({ role }: { role: Role }) {
       <RolePageHeader
         role={role}
         title="Account roles"
-        description="Provision and review Research Instructor accounts."
+        description="Add and review Research Instructor accounts."
       />
-      <section className="panel-card admin-provision-card">
-        <h2>Provision instructor</h2>
+      <section className="panel-card admin-provision-card similarity-query-panel">
+        <h2>Add instructor account</h2>
         <form onSubmit={submit} className="admin-inline-form">
           <label>
             Instructor email
@@ -5461,14 +5607,16 @@ function CoordinatorAccountRoles({ role }: { role: Role }) {
             />
           </label>
           <Button type="submit" disabled={provisioning}>
-            {provisioning ? "Provisioning…" : "Provision account"}
+            {provisioning ? "Adding…" : "Add instructor"}
           </Button>
         </form>
         {notice && (
           <p
             role="status"
             className={
-              notice.includes("provisioned") ? "admin-success" : "admin-error"
+              notice === "Instructor account added."
+                ? "admin-success"
+                : "admin-error"
             }
           >
             {notice}
@@ -5478,7 +5626,7 @@ function CoordinatorAccountRoles({ role }: { role: Role }) {
       <section className="panel-card admin-data-card">
         <div className="admin-card-heading">
           <div>
-            <h2>Provisioned instructors</h2>
+            <h2>Instructor accounts</h2>
             <p>Only role and account-access information is listed.</p>
           </div>
           <Button variant="secondary" onClick={reload}>
@@ -5490,24 +5638,47 @@ function CoordinatorAccountRoles({ role }: { role: Role }) {
         ) : loading || users === null ? (
           <Loading label="Loading instructor accounts" />
         ) : users.length === 0 ? (
-          <p className="admin-empty">
-            No instructor accounts have been provisioned.
-          </p>
+          <p className="admin-empty">No instructor accounts yet.</p>
         ) : (
           <div className="admin-table-wrap">
             <table>
-              <caption className="sr-only">
-                Provisioned instructor accounts
-              </caption>
+              <caption className="sr-only">Instructor accounts</caption>
               <thead>
                 <tr>
-                  <th>Email</th>
-                  <th>Role</th>
-                  <th>Access</th>
+                  <SortableHeader
+                    sortKey="email"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(key as "email" | "role" | "access")
+                    }
+                  >
+                    Email
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="role"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(key as "email" | "role" | "access")
+                    }
+                  >
+                    Role
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="access"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(key as "email" | "role" | "access")
+                    }
+                  >
+                    Access
+                  </SortableHeader>
                 </tr>
               </thead>
               <tbody>
-                {users.map((user) => (
+                {sortedRows.map((user) => (
                   <tr key={user.email}>
                     <td>{user.email}</td>
                     <td>{label(user.role)}</td>
@@ -5523,94 +5694,1111 @@ function CoordinatorAccountRoles({ role }: { role: Role }) {
   );
 }
 
+function CoordinatorResearchAssignments() {
+  const [search, setSearch] = useState("");
+  const [roleFilter, setRoleFilter] = useState<"" | "instructor" | "adviser">(
+    "",
+  );
+  const [statusFilter, setStatusFilter] = useState<"" | AccessStatus>("");
+  const [sort, setSort] = useState<
+    "name" | "email" | "role" | "access_status" | "created_at"
+  >("name");
+  const [direction, setDirection] = useState<"asc" | "desc">("asc");
+  const [pageNumber, setPageNumber] = useState(1);
+  const [attempt, reload] = useAttempt();
+  const [page, setPage] = useState<Awaited<
+    ReturnType<typeof listCoordinatorResearchAssignments>
+  > | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [email, setEmail] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [addInstructorOpen, setAddInstructorOpen] = useState(false);
+  const [selectedUser, setSelectedUser] =
+    useState<CoordinatorAssignmentUser | null>(null);
+  const [studies, setStudies] = useState<CoordinatorAssignmentStudy[] | null>(
+    null,
+  );
+  const [studiesError, setStudiesError] = useState("");
+  const [selectedStudy, setSelectedStudy] =
+    useState<CoordinatorAssignmentStudy | null>(null);
+  const [studyLoading, setStudyLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void listCoordinatorResearchAssignments({
+      search: search.trim() || undefined,
+      role: roleFilter,
+      access_status: statusFilter,
+      sort,
+      direction,
+      page: pageNumber,
+      per_page: 10,
+    })
+      .then((result) => {
+        if (!cancelled) {
+          setPage(result);
+          setError("");
+        }
+      })
+      .catch((requestError) => {
+        if (!cancelled)
+          setError(
+            friendlyError(requestError, "Research assignments are unavailable"),
+          );
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [attempt, direction, pageNumber, roleFilter, search, sort, statusFilter]);
+
+  const summary = page?.summary ?? {
+    total_users: 0,
+    total_instructors: 0,
+    total_advisers: 0,
+    inactive_users: 0,
+  };
+  const changeSort = (nextSort: typeof sort) => {
+    setLoading(true);
+    setPageNumber(1);
+    if (sort === nextSort)
+      setDirection((current) => (current === "asc" ? "desc" : "asc"));
+    else {
+      setSort(nextSort);
+      setDirection("asc");
+    }
+  };
+  const openAssignments = async (user: CoordinatorAssignmentUser) => {
+    setSelectedUser(user);
+    setStudies(null);
+    setStudiesError("");
+    try {
+      setStudies((await getCoordinatorAssignmentStudies(user.id)).studies);
+    } catch (requestError) {
+      setStudiesError(
+        friendlyError(requestError, "Assigned studies are unavailable"),
+      );
+    }
+  };
+  const addInstructor = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setAdding(true);
+    setNotice("");
+    try {
+      await provisionAccount("/api/coordinator/instructors", email.trim());
+      setEmail("");
+      setNotice("Instructor account added.");
+      reload();
+    } catch (requestError) {
+      setNotice(
+        friendlyError(
+          requestError,
+          "The instructor account could not be added",
+        ),
+      );
+    } finally {
+      setAdding(false);
+    }
+  };
+  const name = selectedUser?.name || selectedUser?.email || "Instructor";
+  const initials = name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  return (
+    <div className="workspace-content admin-sidebar-page coordinator-assignments">
+      <header className="workspace-header coordinator-assignment-header">
+        <div>
+          <p className="eyebrow">Research Coordinator</p>
+          <div className="user-management-title">
+            <span aria-hidden="true">
+              <UsersRound />
+            </span>
+            <h1>Research Assignment</h1>
+          </div>
+          <p>
+            Manage research instructors and advisers assigned to your institute.
+          </p>
+        </div>
+        <Button
+          onClick={() => {
+            setNotice("");
+            setAddInstructorOpen(true);
+          }}
+        >
+          <Plus aria-hidden="true" /> Add Instructor
+        </Button>
+      </header>
+      <section
+        className="user-management-stats"
+        aria-label="Assignment statistics"
+      >
+        {[
+          ["Total Users", summary.total_users, <UsersRound key="users" />],
+          [
+            "Total Instructors",
+            summary.total_instructors,
+            <GraduationCap key="instructors" />,
+          ],
+          [
+            "Total Advisers",
+            summary.total_advisers,
+            <UserRoundCheck key="advisers" />,
+          ],
+          [
+            "Inactive Users",
+            summary.inactive_users,
+            <UserRoundX key="inactive" />,
+          ],
+        ].map(([text, value, icon]) => (
+          <article className="coordinator-assignment-stat" key={String(text)}>
+            <span aria-hidden="true">{icon}</span>
+            <div>
+              <p>{text}</p>
+              <strong>{value}</strong>
+            </div>
+          </article>
+        ))}
+      </section>
+      <section className="panel-card user-management-directory">
+        <div className="user-management-toolbar">
+          <label className="user-management-search">
+            <span className="sr-only">Search assignments</span>
+            <Search aria-hidden="true" />
+            <input
+              type="search"
+              placeholder="Search by name or email"
+              value={search}
+              onChange={(event) => {
+                setLoading(true);
+                setSearch(event.target.value);
+                setPageNumber(1);
+              }}
+            />
+          </label>
+          <SelectMenu
+            label="Role"
+            value={roleFilter}
+            onChange={(value) => {
+              setLoading(true);
+              setRoleFilter(value as typeof roleFilter);
+              setPageNumber(1);
+            }}
+            options={[
+              { value: "", label: "All roles" },
+              { value: "instructor", label: "Instructor" },
+              { value: "adviser", label: "Adviser" },
+            ]}
+          />
+          <SelectMenu
+            label="Access status"
+            value={statusFilter}
+            onChange={(value) => {
+              setLoading(true);
+              setStatusFilter(value as typeof statusFilter);
+              setPageNumber(1);
+            }}
+            options={[
+              { value: "", label: "All statuses" },
+              ...accessStatuses.map((status) => ({
+                value: status,
+                label: label(status),
+              })),
+            ]}
+          />
+          <Button
+            variant="secondary"
+            className={`icon-button user-management-refresh${loading ? " is-loading" : ""}`}
+            aria-label="Refresh assignments"
+            title="Refresh assignments"
+            onClick={() => {
+              setLoading(true);
+              reload();
+            }}
+            disabled={loading}
+          >
+            <RefreshCw aria-hidden="true" />
+          </Button>
+        </div>
+        {error ? (
+          <InlineError message={error} retry={reload} />
+        ) : loading && page === null ? (
+          <Loading label="Loading research assignments" />
+        ) : page?.data.length === 0 ? (
+          <p className="admin-empty">
+            No instructors or advisers match these filters.
+          </p>
+        ) : (
+          <>
+            <div
+              className={
+                loading
+                  ? "user-management-table is-loading"
+                  : "user-management-table"
+              }
+            >
+              <table>
+                <caption className="sr-only">Research assignments</caption>
+                <thead>
+                  <tr>
+                    <SortableHeader
+                      sortKey="name"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={() => changeSort("name")}
+                    >
+                      User
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="role"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={() => changeSort("role")}
+                    >
+                      Role
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="access_status"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={() => changeSort("access_status")}
+                    >
+                      Access Status
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="created_at"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={() => changeSort("created_at")}
+                    >
+                      Date Created
+                    </SortableHeader>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {page?.data.map((user) => (
+                    <tr key={user.id}>
+                      <td data-label="User">
+                        <div className="user-management-identity">
+                          <strong>{user.name}</strong>
+                          <span>{user.email}</span>
+                        </div>
+                      </td>
+                      <td data-label="Role">{label(user.role)}</td>
+                      <td data-label="Access Status">
+                        <span
+                          className={`user-status user-status--${user.access_status}`}
+                        >
+                          {label(user.access_status)}
+                        </span>
+                      </td>
+                      <td data-label="Date Created">
+                        {user.created_at
+                          ? formatPhilippineDateTime(user.created_at)
+                          : "Not available"}
+                      </td>
+                      <td data-label="Actions">
+                        <button
+                          type="button"
+                          className="icon-button coordinator-view-assignment"
+                          aria-label={`View studies for ${user.name}`}
+                          title={`View studies for ${user.name}`}
+                          onClick={() => void openAssignments(user)}
+                        >
+                          <Eye aria-hidden="true" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {page && (
+              <Pagination
+                meta={page.meta}
+                noun="users"
+                onPage={(next) => {
+                  setLoading(true);
+                  setPageNumber(next);
+                }}
+              />
+            )}
+          </>
+        )}
+      </section>
+      {addInstructorOpen && (
+        <Modal
+          label="Add instructor"
+          onClose={() => setAddInstructorOpen(false)}
+          busy={adding}
+        >
+          <form
+            className="coordinator-add-instructor-form"
+            onSubmit={addInstructor}
+          >
+            <div>
+              <p className="eyebrow">Institute access</p>
+              <h2>Add Instructor</h2>
+              <p>
+                Invite an instructor to the coordinator's assigned institute.
+              </p>
+            </div>
+            <label>
+              Instructor email
+              <input
+                type="email"
+                required
+                autoComplete="email"
+                placeholder="name@example.edu"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+              />
+            </label>
+            {notice && (
+              <p
+                role="status"
+                className={
+                  notice === "Instructor account added."
+                    ? "admin-success"
+                    : "admin-error"
+                }
+              >
+                {notice}
+              </p>
+            )}
+            <footer>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setAddInstructorOpen(false)}
+                disabled={adding}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={adding}>
+                {adding ? "Adding…" : "Add Instructor"}
+              </Button>
+            </footer>
+          </form>
+        </Modal>
+      )}
+      {selectedUser && (
+        <Modal
+          label={`${name}'s assigned studies`}
+          onClose={() => {
+            setSelectedUser(null);
+            setStudies(null);
+            setSelectedStudy(null);
+          }}
+          size="large"
+          className="coordinator-assignment-modal"
+        >
+          <header className="coordinator-assignment-modal__header">
+            <span
+              className="coordinator-assignment-modal__avatar"
+              aria-hidden="true"
+            >
+              {initials}
+            </span>
+            <div>
+              <p>
+                {selectedUser.role === "adviser" ? "Adviser" : "Instructor"}
+              </p>
+              <h2>{name}</h2>
+              <span>
+                {studies === null
+                  ? "Loading assigned studies"
+                  : `${studies.length} assigned ${studies.length === 1 ? "study" : "studies"}`}
+              </span>
+            </div>
+          </header>
+          <div className="coordinator-study-list">
+            {studiesError && (
+              <p
+                className="admin-error coordinator-assignment-modal__state"
+                role="alert"
+              >
+                {studiesError}
+              </p>
+            )}
+            {studies === null && !studiesError ? (
+              <div className="coordinator-assignment-modal__state">
+                <Loading label="Loading assigned studies" />
+              </div>
+            ) : studies?.length === 0 ? (
+              <div className="coordinator-assignment-modal__state">
+                <strong>No assigned studies</strong>
+                <p>
+                  This {selectedUser.role} does not have an assigned study yet.
+                </p>
+              </div>
+            ) : (
+              studies?.map((study) => (
+                <article className="coordinator-study-card" key={study.id}>
+                  <div className="coordinator-study-card__content">
+                    <h3>{study.title || "Untitled research"}</h3>
+                    <div className="coordinator-study-card__meta">
+                      <span
+                        className={`coordinator-study-status coordinator-study-status--${study.status ?? "unknown"}`}
+                      >
+                        {label(study.status ?? "unknown")}
+                      </span>
+                      <span>
+                        {study.academic_year
+                          ? `Academic Year ${study.academic_year.replace("-", "–")}`
+                          : "Academic year unavailable"}
+                      </span>
+                    </div>
+                    <div className="coordinator-study-team">
+                      <span className="coordinator-study-team__label">
+                        Research team
+                      </span>
+                      <span>
+                        {study.researchers.length}{" "}
+                        {study.researchers.length === 1
+                          ? "researcher"
+                          : "researchers"}
+                      </span>
+                      <span
+                        className="coordinator-study-team__avatars"
+                        aria-label={`${study.researchers.length} ${study.researchers.length === 1 ? "researcher" : "researchers"}`}
+                      >
+                        {study.researchers.slice(0, 5).map((researcher, index) => (
+                          <span
+                            key={`${researcher}-${index}`}
+                            title={researcher}
+                            aria-label={researcher}
+                          >
+                            {researcher.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("")}
+                          </span>
+                        ))}
+                      </span>
+                    </div>
+                  </div>
+                  <Button
+                    className="coordinator-study-card__action"
+                    disabled={studyLoading}
+                    onClick={() => {
+                      setStudyLoading(true);
+                      void getCoordinatorResearchDetails(study.id)
+                        .then(setSelectedStudy)
+                        .catch((requestError) =>
+                          setStudiesError(
+                            friendlyError(
+                              requestError,
+                              "Research details are unavailable",
+                            ),
+                          ),
+                        )
+                        .finally(() => setStudyLoading(false));
+                    }}
+                  >
+                    View details <span aria-hidden="true">→</span>
+                  </Button>
+                </article>
+              ))
+            )}
+          </div>
+          {selectedStudy && (
+            <section className="panel-card coordinator-study-detail">
+              <h2>{selectedStudy.title || "Untitled research"}</h2>
+              <dl>
+                <dt>Institute</dt>
+                <dd>{selectedStudy.institute || "—"}</dd>
+                <dt>Program</dt>
+                <dd>{selectedStudy.degree_program || "—"}</dd>
+                <dt>Instructor</dt>
+                <dd>{selectedStudy.instructor?.name || "—"}</dd>
+                <dt>Adviser</dt>
+                <dd>{selectedStudy.adviser?.name || "—"}</dd>
+                <dt>Status</dt>
+                <dd>{label(selectedStudy.status ?? "unknown")}</dd>
+                <dt>Abstract</dt>
+                <dd>{selectedStudy.abstract || "No abstract available."}</dd>
+                <dt>Keywords</dt>
+                <dd>{selectedStudy.keywords || "—"}</dd>
+              </dl>
+            </section>
+          )}
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function CoordinatorRepository({
+  role,
+  navigate,
+}: {
+  role: Role;
+  navigate: (path: string) => void;
+}) {
+  type RepositoryView = "all" | "ongoing" | "archived" | "recycle";
+  const tabs: Array<{ value: RepositoryView; label: string }> = [
+    { value: "all", label: "All Studies" },
+    { value: "ongoing", label: "Ongoing" },
+    { value: "archived", label: "Archived" },
+    { value: "recycle", label: "Recycle Bin" },
+  ];
+  const [view, setView] = useState<RepositoryView>("all");
+  const [filters, setFilters] = useState({
+    search: "",
+    visibility: "",
+    year: "",
+  });
+  const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<
+    | "title"
+    | "submission_status"
+    | "visibility"
+    | "publication_year"
+    | "updated_at"
+  >("updated_at");
+  const [direction, setDirection] = useState<"asc" | "desc">("desc");
+  const [attempt, reload] = useAttempt();
+  const [result, setResult] = useState<Awaited<
+    ReturnType<typeof listCoordinatorRepository>
+  > | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<Awaited<
+    ReturnType<typeof getCoordinatorRepositoryDetail>
+  > | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
+  useEffect(() => {
+    const controller = new AbortController();
+    void listCoordinatorRepository(
+      {
+        bucket: view,
+        search: filters.search,
+        visibility: filters.visibility,
+        publication_year: filters.year ? Number(filters.year) : undefined,
+        sort,
+        direction,
+        page,
+        per_page: 10,
+      },
+      globalThis.fetch,
+      controller.signal,
+    )
+      .then((response) => {
+        setResult(response);
+        setError("");
+      })
+      .catch((requestError) => {
+        if (!controller.signal.aborted)
+          setError(
+            friendlyError(requestError, "Repository records are unavailable"),
+          );
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [attempt, direction, filters, page, sort, view]);
+  const summary = result?.summary ?? {
+    all: 0,
+    ongoing: 0,
+    archived: 0,
+    recycle: 0,
+  };
+  const institute = result?.institute;
+  const status = (row: NonNullable<typeof result>["data"][number]) =>
+    row.archive_status === "archived"
+      ? "Archived"
+      : label(row.submission_status ?? "ongoing");
+  const changeView = (next: RepositoryView) => {
+    setLoading(true);
+    setView(next);
+    setPage(1);
+  };
+  const changeSort = (next: typeof sort) => {
+    setLoading(true);
+    setPage(1);
+    if (sort === next)
+      setDirection((current) => (current === "asc" ? "desc" : "asc"));
+    else {
+      setSort(next);
+      setDirection("asc");
+    }
+  };
+  const closeDetail = () => {
+    setSelected(null);
+    setDetailError("");
+    setDetailLoading(false);
+  };
+  const metadataRecord: ResearchRecord | null = selected
+    ? {
+        id: String(selected.id),
+        title: selected.title,
+        authors:
+          selected.authors.map((author) => author.author_name).join(", ") ||
+          "No researchers listed",
+        authorNames: selected.authors.map((author) => author.author_name),
+        year: selected.publication_year ?? 0,
+        institutionName: selected.institute ?? "",
+        institute: selected.institute ?? "—",
+        degreeProgram: selected.degree_program ?? "",
+        program: selected.degree_program ?? "",
+        sdgs: selected.sdgs,
+        abstract: selected.abstract || "No abstract available.",
+        keywords:
+          selected.keywords
+            ?.split(/[,;]/)
+            .map((keyword) => keyword.trim())
+            .filter(Boolean) ?? [],
+        researchStage: selected.research_stage ?? "",
+        manuscriptDate: selected.manuscript_date_label ?? undefined,
+        hasDownloadableManuscript:
+          selected.archive_status === "archived" &&
+          selected.files.some(
+            (file) =>
+              file.is_current && file.document_type === "final_manuscript",
+          ),
+      }
+    : null;
+  return (
+    <div className="workspace-content admin-sidebar-page coordinator-repository-page">
+      <RolePageHeader
+        role={role}
+        title="Repository"
+        description={
+          institute
+            ? `Search and browse research records for the ${institute.name} (${institute.acronym}).`
+            : "Search and browse research records for your assigned institute."
+        }
+        action={
+          <Button variant="secondary" onClick={() => navigate("/catalog")}>
+            Open Public Catalog
+          </Button>
+        }
+      />
+      <div
+        className="coordinator-repository-tabs"
+        role="tablist"
+        aria-label="Repository views"
+      >
+        {tabs.map((tab) => (
+          <button
+            key={tab.value}
+            type="button"
+            role="tab"
+            aria-selected={view === tab.value}
+            className={view === tab.value ? "is-active" : ""}
+            onClick={() => changeView(tab.value)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      <section
+        className="coordinator-repository-summary"
+        aria-label="Repository statistics"
+      >
+        {[
+          ["all", "All Studies", <FileText key="all" />],
+          ["ongoing", "Ongoing", <FolderOpen key="ongoing" />],
+          ["archived", "Archived", <Archive key="archived" />],
+          ["recycle", "Recycle Bin", <Trash2 key="recycle" />],
+        ].map(([key, text, icon]) => (
+          <button
+            type="button"
+            key={String(key)}
+            className={view === key ? "is-active" : ""}
+            aria-pressed={view === key}
+            onClick={() => changeView(key as RepositoryView)}
+          >
+            <span aria-hidden="true">{icon}</span>
+            <div>
+              <p>{text}</p>
+              <strong>{summary[key as keyof typeof summary]}</strong>
+            </div>
+          </button>
+        ))}
+      </section>
+      <section
+        className="panel-card coordinator-repository-content"
+        aria-busy={loading}
+      >
+        <div className="coordinator-repository-filters">
+          <label>
+            Search
+            <input
+              value={filters.search}
+              placeholder="Search by title or author"
+              onChange={(event) => {
+                setLoading(true);
+                setPage(1);
+                setFilters((current) => ({
+                  ...current,
+                  search: event.target.value,
+                }));
+              }}
+            />
+          </label>
+          <label>
+            Visibility
+            <SelectMenu
+              label="Visibility"
+              value={filters.visibility}
+              onChange={(value) => {
+                setLoading(true);
+                setPage(1);
+                setFilters((current) => ({ ...current, visibility: value }));
+              }}
+              options={[
+                { value: "", label: "All visibility" },
+                { value: "public", label: "Public" },
+                { value: "private", label: "Private" },
+              ]}
+            />
+          </label>
+          <label>
+            Publication Year
+            <SelectMenu
+              label="Publication Year"
+              value={filters.year}
+              onChange={(value) => {
+                setLoading(true);
+                setPage(1);
+                setFilters((current) => ({ ...current, year: value }));
+              }}
+              options={[
+                { value: "", label: "All years" },
+                ...(result?.filters.years ?? []).map((year) => ({
+                  value: String(year),
+                  label: String(year),
+                })),
+              ]}
+            />
+          </label>
+        </div>
+        {error ? (
+          <InlineError
+            message={error}
+            retry={() => {
+              setLoading(true);
+              reload();
+            }}
+          />
+        ) : result === null ? (
+          <Loading label="Loading coordinator repository" />
+        ) : result.data.length === 0 ? (
+          <p className="admin-empty">
+            No repository records match these filters.
+          </p>
+        ) : (
+          <>
+            <div
+              className={
+                loading
+                  ? "admin-table-wrap coordinator-repository-table is-loading"
+                  : "admin-table-wrap coordinator-repository-table"
+              }
+            >
+              <table>
+                <caption className="sr-only">
+                  Institute repository records
+                </caption>
+                <thead>
+                  <tr>
+                    <SortableHeader
+                      sortKey="title"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={() => changeSort("title")}
+                    >
+                      Title
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="submission_status"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={() => changeSort("submission_status")}
+                    >
+                      Status
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="visibility"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={() => changeSort("visibility")}
+                    >
+                      Visibility
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="publication_year"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={() => changeSort("publication_year")}
+                    >
+                      Year
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="updated_at"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={() => changeSort("updated_at")}
+                    >
+                      Updated
+                    </SortableHeader>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.data.map((row) => (
+                    <tr key={row.id}>
+                      <td data-label="Title">
+                        <strong>{row.title}</strong>
+                      </td>
+                      <td data-label="Status">{status(row)}</td>
+                      <td data-label="Visibility">
+                        {row.visibility ? label(row.visibility) : "—"}
+                      </td>
+                      <td data-label="Year">{row.publication_year ?? "—"}</td>
+                      <td data-label="Updated">
+                        {displayDate(row.updated_at)}
+                      </td>
+                      <td data-label="Actions">
+                        <button
+                          type="button"
+                          className="icon-button coordinator-repository-view"
+                          aria-label={`View ${row.title}`}
+                          title="View details"
+                          onClick={() => {
+                            setDetailLoading(true);
+                            setDetailError("");
+                            void getCoordinatorRepositoryDetail(row.id)
+                              .then(setSelected)
+                              .catch((requestError) =>
+                                setDetailError(
+                                  friendlyError(
+                                    requestError,
+                                    "Repository details are unavailable",
+                                  ),
+                                ),
+                              )
+                              .finally(() => setDetailLoading(false));
+                          }}
+                        >
+                          <Eye aria-hidden="true" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="coordinator-repository-pagination">
+              <p>
+                {result.meta.from === null
+                  ? "Showing 0 records"
+                  : `Showing ${result.meta.from} to ${result.meta.to} of ${result.meta.total} records${institute ? ` (${institute.acronym})` : ""}`}
+              </p>
+              <Pagination
+                meta={result.meta}
+                noun="records"
+                onPage={(next) => {
+                  setLoading(true);
+                  setPage(next);
+                }}
+              />
+            </div>
+          </>
+        )}
+      </section>
+      {(detailLoading || detailError) && (
+        <Modal
+          label="Repository record details"
+          size="large"
+          onClose={closeDetail}
+        >
+          {detailLoading ? (
+            <Loading label="Loading repository details" />
+          ) : (
+            <InlineError
+              message={detailError}
+              retry={() => setDetailError("")}
+            />
+          )}
+        </Modal>
+      )}
+      {metadataRecord && !detailLoading && !detailError && (
+        <PublicResearchMetadataDialog
+          researchDocumentId={metadataRecord.id}
+          initialRecord={metadataRecord}
+          showFileAccess={selected?.archive_status === "archived"}
+          downloadUrl={coordinatorRepositoryDownloadUrl}
+          onClose={closeDetail}
+        />
+      )}
+    </div>
+  );
+}
+
 function CoordinatorReports({ role }: { role: Role }) {
   const [attempt, reload] = useAttempt();
-  const state = useLoad(() => getCoordinatorProgramReport(), attempt);
+  const [programFilter, setProgramFilter] = useState("");
+  const [reportSection, setReportSection] = useState<
+    "overview" | "instructors" | "sections" | "advisers"
+  >("overview");
+  const state = useLoad(
+    () => getCoordinatorProgramReport(programFilter),
+    attempt,
+  );
+  const appliedFilters = useRef({ program: "" });
+  const reloadRef = useRef(reload);
+  useEffect(() => {
+    reloadRef.current = reload;
+  });
+  useEffect(() => {
+    if (appliedFilters.current.program !== programFilter) {
+      appliedFilters.current = {
+        program: programFilter,
+      };
+      reloadRef.current();
+    }
+  }, [programFilter]);
+  const reportIsCurrent =
+    state.status === "ready" &&
+    (state.data.filters?.program ?? "") === programFilter;
+  const assignedInstitute =
+    state.status === "ready" ? (state.data.filters?.institute ?? "") : "";
+  const programOptions =
+    assignedInstitute &&
+    instituteNames.includes(
+      assignedInstitute as (typeof instituteNames)[number],
+    )
+      ? programsByInstitute[
+          assignedInstitute as keyof typeof programsByInstitute
+        ]
+      : [];
   return (
-    <div className="workspace-content admin-sidebar-page">
+    <div className="workspace-content admin-sidebar-page coordinator-report-page">
       <RolePageHeader
         role={role}
         title="Program reports"
         description="Live program counts, sections, and adviser workload."
         action={
-          <Button variant="secondary" onClick={reload}>
-            <RefreshCw /> Refresh
-          </Button>
+          <div className="row-actions">
+            <Button
+              variant="secondary"
+              disabled={!reportIsCurrent}
+              onClick={() => {
+                const params = new URLSearchParams();
+                if (programFilter) params.set("program", programFilter);
+                const query = params.toString();
+                window.open(
+                  `/api/coordinator/reports/${reportSection}/pdf${query ? `?${query}` : ""}`,
+                  "_blank",
+                  "noopener,noreferrer",
+                );
+              }}
+            >
+              <Printer aria-hidden="true" /> Print report
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                reload();
+              }}
+            >
+              <RefreshCw /> Refresh
+            </Button>
+          </div>
         }
       />
+      <section className="panel-card admin-data-card">
+        <div className="admin-card-heading">
+          <div>
+            <h2>Filters</h2>
+            <p>Reports are limited to your assigned institute.</p>
+          </div>
+        </div>
+        <div className="admin-filters coordinator-report-filters">
+          <div
+            className="coordinator-report-scope"
+            role="group"
+            aria-label="Assigned institute"
+          >
+            <span className="coordinator-report-filter-label">Institute</span>
+            <div className="coordinator-report-readonly">
+              {assignedInstitute || "Assigned institute"}
+            </div>
+          </div>
+          <label>
+            Program
+            <select
+              value={programFilter}
+              disabled={programOptions.length === 0}
+              onChange={(event) => {
+                setProgramFilter(event.target.value);
+              }}
+            >
+              <option value="">All programs</option>
+              {programOptions.map((program) => (
+                <option key={program} value={program}>
+                  {program}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </section>
       {state.status === "loading" ? (
         <Loading label="Loading program report" />
       ) : state.status === "error" ? (
         <InlineError message={state.message} retry={reload} />
       ) : (
         <>
-          <ProgramCounts report={state.data} />
-          <section className="panel-card admin-data-card">
-            <div className="admin-card-heading">
-              <div>
-                <h2>Class sections</h2>
-                <p>Document count per class section.</p>
-              </div>
-            </div>
-            {state.data.by_section.length === 0 ? (
-              <p className="admin-empty">No class sections exist.</p>
-            ) : (
-              <div className="admin-table-wrap">
-                <table>
-                  <caption className="sr-only">Class sections</caption>
-                  <thead>
-                    <tr>
-                      <th>Section</th>
-                      <th>Documents</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {state.data.by_section.map((section) => (
-                      <tr key={section.id}>
-                        <td>{section.name}</td>
-                        <td>{section.documents_count}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-          <section className="panel-card admin-data-card">
-            <div className="admin-card-heading">
-              <div>
-                <h2>Adviser load</h2>
-                <p>Active research assignments per adviser.</p>
-              </div>
-            </div>
-            {state.data.adviser_load.length === 0 ? (
-              <p className="admin-empty">
-                No advisers have active assignments.
-              </p>
-            ) : (
-              <div className="admin-table-wrap">
-                <table>
-                  <caption className="sr-only">Adviser load</caption>
-                  <thead>
-                    <tr>
-                      <th>Adviser</th>
-                      <th>Email</th>
-                      <th>Active assignments</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {state.data.adviser_load.map((item) => (
-                      <tr key={item.user_id}>
-                        <td>{item.name ?? "—"}</td>
-                        <td>{item.email ?? "—"}</td>
-                        <td>{item.active_assignments}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
+          <nav
+            className="project-workspace-tabs coordinator-report-switcher"
+            aria-label="Report sections"
+          >
+            {(
+              [
+                ["overview", "Overview", FileText],
+                ["instructors", "Research instructors", GraduationCap],
+                ["sections", "Class sections", Folder],
+                ["advisers", "Research advisers", Users],
+              ] as const
+            ).map(([section, title, Icon]) => (
+              <button
+                key={section}
+                type="button"
+                className={reportSection === section ? "is-active" : ""}
+                aria-pressed={reportSection === section}
+                onClick={() => {
+                  setReportSection(section);
+                }}
+              >
+                <Icon aria-hidden="true" />
+                <span>{title}</span>
+              </button>
+            ))}
+          </nav>
+          {reportSection === "overview" && (
+            <ProgramCounts report={state.data} />
+          )}
+          {reportSection === "instructors" && (
+            <CoordinatorInstructorDirectory instructors={state.data.instructors} />
+          )}
+          {reportSection === "sections" && (
+            <CoordinatorClassSections sections={state.data.by_section} />
+          )}
+          {reportSection === "advisers" && (
+            <CoordinatorAdviserDirectory advisers={state.data.adviser_load} />
+          )}
         </>
       )}
     </div>
@@ -5619,30 +6807,242 @@ function CoordinatorReports({ role }: { role: Role }) {
 
 function ProgramCounts({ report }: { report: CoordinatorProgramReport }) {
   const counts = report.counts;
+  const [selected, setSelected] = useState<{
+    value: string;
+    label: string;
+  } | null>(null);
+  const trigger = useRef<HTMLButtonElement | null>(null);
+  const workflow = [
+    ["draft", "Drafts", counts.draft],
+    ["submitted", "Submitted", counts.submitted],
+    ["under_review", "Under review", counts.under_review],
+    ["revision_required", "Revision required", counts.revision_required],
+    ["approved", "Approved", counts.approved],
+  ] as const;
   return (
-    <section className="admin-stat-grid" aria-label="Program counts">
-      <Stat label="Active instructors" value={counts.active_instructors} />
-      <Stat label="Active advisers" value={counts.active_advisers} />
-      <Stat label="Active researchers" value={counts.active_researchers} />
-      <Stat label="Drafts" value={counts.draft} />
-      <Stat label="Submitted" value={counts.submitted} />
-      <Stat label="Under review" value={counts.under_review} />
-      <Stat label="Revision required" value={counts.revision_required} />
-      <Stat label="Approved" value={counts.approved} />
-      <Stat label="Archived" value={counts.archived} />
-      <Stat label="Flagged similarity" value={counts.flagged_similarity} />
-      <Stat label="Defenses scheduled" value={counts.defenses_scheduled} />
-      <Stat label="Defenses completed" value={counts.defenses_completed} />
-      <Stat
-        label="Evaluations submitted"
-        value={counts.evaluations_submitted}
-      />
-      <Stat
-        label="Methodology signed off"
-        value={counts.methodology_signed_off}
-      />
-    </section>
+    <div className="coordinator-report-overview">
+      <section className="coordinator-report-kpis" aria-label="Program counts">
+        <DashboardKpiCard
+          icon={UserRound}
+          label="Active instructors"
+          value={counts.active_instructors}
+          description=""
+        />
+        <DashboardKpiCard
+          icon={UsersRound}
+          label="Active advisers"
+          value={counts.active_advisers}
+          description=""
+        />
+        <DashboardKpiCard
+          icon={Layers3}
+          label="Active studies"
+          value={
+            counts.draft +
+            counts.submitted +
+            counts.under_review +
+            counts.revision_required +
+            counts.approved
+          }
+          description=""
+        />
+        <DashboardKpiCard
+          icon={Archive}
+          label="Archived"
+          value={counts.archived}
+          description=""
+        />
+      </section>
+      <section
+        className="panel-card coordinator-workflow-card"
+        aria-labelledby="coordinator-workflow-title"
+      >
+        <header>
+          <div>
+            <h2 id="coordinator-workflow-title">Research workflow</h2>
+            <p>
+              Reporting only (read-only). Select a status to view its studies.
+            </p>
+          </div>
+          <strong>Active researchers: {counts.active_researchers}</strong>
+        </header>
+        <div className="coordinator-workflow-rows">
+          {workflow.map(([value, text, count]) => (
+            <button
+              key={value}
+              type="button"
+              className={selected?.value === value ? `status-${value} is-active` : `status-${value}`}
+              aria-pressed={selected?.value === value}
+              aria-label={`View ${text}`}
+              onClick={(event) => {
+                trigger.current = event.currentTarget;
+                setSelected({ value, label: text });
+              }}
+            >
+              <span className="coordinator-workflow-dot" aria-hidden="true" />
+              <span>{text}</span>
+              <strong>{count}</strong>
+              <ChevronRight aria-hidden="true" />
+            </button>
+          ))}
+        </div>
+      </section>
+      {selected && (
+        <CoordinatorWorkflowStudiesModal
+          key={`${selected.value}:${report.filters.program ?? ""}`}
+          status={selected}
+          report={report}
+          onClose={() => {
+            setSelected(null);
+            requestAnimationFrame(() => trigger.current?.focus());
+          }}
+        />
+      )}
+    </div>
   );
+}
+
+function reportInitials(name: string | null, fallback: string) {
+  return (name || fallback).split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("");
+}
+
+function CoordinatorInstructorDirectory({ instructors }: { instructors: CoordinatorProgramReport["instructors"] }) {
+  return <section className="panel-card coordinator-instructor-directory"><header><div><h2>Research instructors</h2><p>Instructors handling sections with research in the selected scope.</p></div><strong className="coordinator-instructor-count">{instructors.length} instructor{instructors.length === 1 ? "" : "s"}</strong></header>{instructors.length === 0 ? <p className="admin-empty">No instructors handle sections in this scope.</p> : <div className="coordinator-instructor-table"><table><caption className="sr-only">Research instructors</caption><thead><tr><th>Instructor</th><th>Contact</th><th>Assigned sections</th></tr></thead><tbody>{instructors.map((instructor) => <tr key={instructor.user_id}><td data-label="Instructor"><div className="coordinator-instructor-person"><span className="coordinator-instructor-avatar" aria-label={`${instructor.name || "Research instructor"} initials`}>{reportInitials(instructor.name, "Research Instructor")}</span><div><strong>{instructor.name || "—"}</strong><small>Research instructor</small></div></div></td><td data-label="Contact"><div className="coordinator-instructor-contact"><Mail aria-hidden="true" /><span>{instructor.email || "—"}</span></div></td><td data-label="Assigned sections"><div className="coordinator-instructor-sections">{instructor.sections.map((section) => <span key={section}>{section}</span>)}</div></td></tr>)}</tbody></table></div>}</section>;
+}
+
+function CoordinatorAdviserDirectory({ advisers }: { advisers: CoordinatorProgramReport["adviser_load"] }) {
+  return <section className="panel-card coordinator-instructor-directory"><header><div><h2>Research advisers</h2><p>Advisers with active research assignments in the selected scope.</p></div><strong className="coordinator-instructor-count">{advisers.length} adviser{advisers.length === 1 ? "" : "s"}</strong></header>{advisers.length === 0 ? <p className="admin-empty">No advisers have active assignments.</p> : <div className="coordinator-instructor-table"><table><caption className="sr-only">Research advisers</caption><thead><tr><th>Adviser</th><th>Contact</th><th>Active assignments</th></tr></thead><tbody>{advisers.map((adviser) => <tr key={adviser.user_id}><td data-label="Adviser"><div className="coordinator-instructor-person"><span className="coordinator-instructor-avatar" aria-label={`${adviser.name || "Research adviser"} initials`}>{reportInitials(adviser.name, "Research Adviser")}</span><div><strong>{adviser.name || "—"}</strong><small>Research adviser</small></div></div></td><td data-label="Contact"><div className="coordinator-instructor-contact"><Mail aria-hidden="true" /><span>{adviser.email || "—"}</span></div></td><td data-label="Active assignments"><span className="coordinator-assignment-count">{adviser.active_assignments}</span></td></tr>)}</tbody></table></div>}</section>;
+}
+
+function CoordinatorClassSections({ sections }: { sections: CoordinatorProgramReport["by_section"] }) {
+  const documents = sections.reduce((total, section) => total + section.documents_count, 0);
+  return <section className="panel-card coordinator-section-report"><header><div><h2>Class sections</h2><p>Document count per class section.</p></div><strong className="coordinator-section-summary">{sections.length} {sections.length === 1 ? "section" : "sections"} · {documents} {documents === 1 ? "document" : "documents"}</strong></header>{sections.length === 0 ? <p className="coordinator-section-empty">No class sections are available for the selected scope.</p> : <div className="coordinator-section-table"><table><caption className="sr-only">Class sections</caption><thead><tr><th>Section</th><th>Documents</th></tr></thead><tbody>{sections.map((section) => <tr key={section.id}><td data-label="Section"><div className="coordinator-section-name"><span aria-hidden="true"><Folder /></span><strong>{section.name}</strong></div></td><td data-label="Documents"><span className="coordinator-section-documents"><FileText aria-hidden="true" />{section.documents_count}</span></td></tr>)}</tbody></table></div>}</section>;
+}
+
+function CoordinatorWorkflowStudiesModal({
+  status,
+  report,
+  onClose,
+}: {
+  status: { value: string; label: string };
+  report: CoordinatorProgramReport;
+  onClose: () => void;
+}) {
+  const [page, setPage] = useState(1);
+  const [attempt, retry] = useAttempt();
+  const [state, setState] = useState<{
+    status: "loading" | "error" | "ready";
+    message?: string;
+    response?: Awaited<ReturnType<typeof listCoordinatorReportStudies>>;
+  }>({ status: "loading" });
+  useEffect(() => {
+    const controller = new AbortController();
+    void listCoordinatorReportStudies(
+      {
+        status: status.value,
+        program: report.filters.program || undefined,
+        page,
+        per_page: 10,
+      },
+      globalThis.fetch,
+      controller.signal,
+    )
+      .then((response) => setState({ status: "ready", response }))
+      .catch((error) => {
+        if (!controller.signal.aborted)
+          setState({
+            status: "error",
+            message: friendlyError(error, "Filtered studies are unavailable"),
+          });
+      });
+    return () => controller.abort();
+  }, [attempt, page, report.filters.program, status.value]);
+  const response = state.response;
+  const reload = () => {
+    setState({ status: "loading" });
+    retry();
+  };
+  const changePage = (nextPage: number) => {
+    setState({ status: "loading" });
+    setPage(nextPage);
+  };
+  return (
+    <Modal
+      label={`${status.label} studies`}
+      size="large"
+      className="coordinator-workflow-modal"
+      onClose={onClose}
+    >
+      <header>
+        <p className="eyebrow">Filtered studies</p>
+        <h2>{status.label} studies</h2>
+        <p>
+          {report.filters.institute || "Assigned institute"} ·{" "}
+          {report.filters.program || "All programs"}
+        </p>
+      </header>
+      <div className="coordinator-workflow-modal-body">
+        {state.status === "loading" ? (
+          <Loading label={`Loading ${status.label.toLowerCase()} studies`} />
+        ) : state.status === "error" ? (
+          <InlineError
+            message={state.message || "Filtered studies are unavailable"}
+            retry={reload}
+          />
+        ) : response && response.meta.total === 0 ? (
+          <p className="admin-empty">
+            No {status.label.toLowerCase()} studies found.
+          </p>
+        ) : (
+          <div className="admin-table-wrap">
+            <table>
+              <caption className="sr-only">{status.label} studies</caption>
+              <thead>
+                <tr>
+                  <th>Study</th>
+                  <th>Section</th>
+                  <th>Program</th>
+                  <th>Updated</th>
+                </tr>
+              </thead>
+              <tbody>
+                {response?.data.map((study) => (
+                  <tr key={study.id}>
+                    <td>{study.title || "Untitled study"}</td>
+                    <td>{study.section || "—"}</td>
+                    <td>{study.degree_program || "—"}</td>
+                    <td>{displayDate(study.updated_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      {state.status === "ready" && response && response.meta.total > 0 && (
+        <footer className="coordinator-workflow-modal-footer">
+          {response.meta.total.toLocaleString()} {status.label.toLowerCase()}{" "}
+          {response.meta.total === 1 ? "study" : "studies"}
+        </footer>
+      )}
+      {state.status === "ready" && response && response.meta.last_page > 1 && (
+        <Pagination meta={response.meta} noun="studies" onPage={changePage} />
+      )}
+    </Modal>
+  );
+}
+
+function adviserSpotlight(adviser: AdviserLoadItem): ReportSpotlight {
+  return {
+    title: adviser.name || "Research adviser",
+    description: `${adviser.active_assignments} active assignment${adviser.active_assignments === 1 ? "" : "s"} · ${adviser.email || "Email unavailable"}`,
+    columns: ["Study", "Stage", "Status"],
+    rows: (adviser.studies ?? []).map((study) => [
+      study.title || "—",
+      label(study.research_stage || "Unknown"),
+      label(study.submission_status || "Unknown"),
+    ]),
+  };
 }
 
 /* ---------------------------------- Librarian ---------------------------------- */
@@ -5890,7 +7290,7 @@ function EditorMonitoring({ role }: { role: Role }) {
               event.preventDefault();
               void saveEditorMonitoring(id, {
                 monitoring_stage: stage,
-                activity_date: new Date().toISOString().slice(0, 10),
+                activity_date: philippineDateToday(),
                 activity,
                 status: "completed",
                 signature_status: "signed",
@@ -5952,48 +7352,6 @@ function EditorMonitoring({ role }: { role: Role }) {
           {records.data.map((item) => (
             <p key={item.id}>
               {item.title} · {label(item.monitoring_stage)} · {item.activity}
-            </p>
-          ))}
-        </section>
-      )}
-    </div>
-  );
-}
-function EditorHistory({
-  role,
-  navigate,
-}: {
-  role: Role;
-  navigate: (path: string) => void;
-}) {
-  const [attempt, reload] = useAttempt();
-  const state = useLoad(() => listEditorHistory(), attempt);
-  return (
-    <div className="workspace-content admin-sidebar-page">
-      <RolePageHeader
-        role={role}
-        title="Review history"
-        description="Previous editorial comments, corrections, and completed reviews."
-      />
-      {state.status === "loading" ? (
-        <Loading label="Loading history" />
-      ) : state.status === "error" ? (
-        <InlineError message={state.message} retry={reload} />
-      ) : state.data.length === 0 ? (
-        <p className="admin-empty">No editorial review history.</p>
-      ) : (
-        <section className="panel-card admin-data-card">
-          {state.data.map((item) => (
-            <p key={item.id}>
-              {item.title} · {label(item.review_type)} · {item.remarks}{" "}
-              <Button
-                variant="secondary"
-                onClick={() =>
-                  navigate(`/research/${item.research_document_id}`)
-                }
-              >
-                Open
-              </Button>
             </p>
           ))}
         </section>
@@ -6216,7 +7574,7 @@ function LibrarianMonitoring({ role }: { role: Role }) {
     event.preventDefault();
     await saveLibrarianMonitoring(id, {
       monitoring_stage: stage,
-      activity_date: new Date().toISOString().slice(0, 10),
+      activity_date: philippineDateToday(),
       activity,
       remarks: remarks || null,
       status: "completed",
@@ -6320,61 +7678,6 @@ function LibrarianMonitoring({ role }: { role: Role }) {
   );
 }
 
-function LibrarianReviewHistory({
-  role,
-  navigate,
-}: {
-  role: Role;
-  navigate: (path: string) => void;
-}) {
-  const [attempt, reload] = useAttempt();
-  const state = useLoad(() => listLibrarianReviewHistory(), attempt);
-  return (
-    <div className="workspace-content admin-sidebar-page">
-      <RolePageHeader
-        role={role}
-        title="Review history"
-        description="Previous Librarian comments, correction requests, and reference clearances."
-      />
-      {state.status === "loading" ? (
-        <Loading label="Loading history" />
-      ) : state.status === "error" ? (
-        <InlineError message={state.message} retry={reload} />
-      ) : state.data.length === 0 ? (
-        <p className="admin-empty">No Librarian review history.</p>
-      ) : (
-        <section className="panel-card admin-data-card">
-          <div className="admin-table-wrap">
-            <table>
-              <tbody>
-                {state.data.map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.title}</td>
-                    <td>{label(item.review_type)}</td>
-                    <td>{item.remarks}</td>
-                    <td>{item.required_action ?? "—"}</td>
-                    <td>{label(item.status)}</td>
-                    <td>
-                      <Button
-                        variant="secondary"
-                        onClick={() =>
-                          navigate(`/research/${item.research_document_id}`)
-                        }
-                      >
-                        Open research
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
-    </div>
-  );
-}
-
 function LibrarianRepositoryCatalog({
   role,
   navigate,
@@ -6382,17 +7685,40 @@ function LibrarianRepositoryCatalog({
   role: Role;
   navigate: (path: string) => void;
 }) {
-  const [query, setQuery] = useState({ search: "", category: "" });
+  const [query, setQuery] = useState({
+    search: "",
+    visibility: "",
+    year: "",
+  });
   const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<
+    | "title"
+    | "submission_status"
+    | "visibility"
+    | "publication_year"
+    | "updated_at"
+    | null
+  >(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [result, setResult] = useState<Awaited<
     ReturnType<typeof listRepositoryCatalog>
   > | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [viewingFiles, setViewingFiles] = useState<{
+    id: number;
+    title: string;
+    authors: Array<{ id: number; author_name: string }>;
+    search: string;
+  } | null>(null);
+  const [repositoryFiles, setRepositoryFiles] = useState<
+    DocumentFileResource[]
+  >([]);
+  const [filesLoading, setFilesLoading] = useState(false);
+  const [filesError, setFilesError] = useState("");
   const [attempt, reload] = useAttempt();
-  const categories = useLoad(() => listCategories(), 0);
   const { filters, change } = useLiveFilters(
-    { search: "", category: "" },
+    { search: "", visibility: "", year: "" },
     (next) => {
       setPage(1);
       setQuery(next);
@@ -6404,7 +7730,15 @@ function LibrarianRepositoryCatalog({
     let cancelled = false;
     void listRepositoryCatalog({
       ...query,
-      category: query.category ? Number(query.category) : undefined,
+      visibility:
+        query.visibility === "private" ||
+        query.visibility === "public" ||
+        query.visibility === "registered_only"
+          ? query.visibility
+          : undefined,
+      year: query.year ? Number(query.year) : undefined,
+      sort: sort || undefined,
+      direction: sort ? sortDirection : undefined,
       page,
       per_page: 25,
     })
@@ -6424,7 +7758,17 @@ function LibrarianRepositoryCatalog({
     return () => {
       cancelled = true;
     };
-  }, [attempt, page, query]);
+  }, [attempt, page, query, sort, sortDirection]);
+
+  function changeSort(column: NonNullable<typeof sort>) {
+    setPage(1);
+    if (sort === column) {
+      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSort(column);
+    setSortDirection("asc");
+  }
 
   function applyFilters(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -6433,43 +7777,106 @@ function LibrarianRepositoryCatalog({
     reload();
   }
 
+  function openFiles(row: {
+    id: number;
+    title: string;
+    authors: Array<{ id: number; author_name: string }>;
+  }) {
+    setViewingFiles({ ...row, search: query.search });
+    setRepositoryFiles([]);
+    setFilesError("");
+    setFilesLoading(true);
+    void listLibrarianRepositoryFiles(row.id)
+      .then(setRepositoryFiles)
+      .catch((requestError) =>
+        setFilesError(
+          friendlyError(requestError, "Study files are unavailable"),
+        ),
+      )
+      .finally(() => setFilesLoading(false));
+  }
+
+  const visibleAuthors = viewingFiles
+    ? viewingFiles.authors.filter(
+        (author, index, authors) =>
+          author.author_name.trim() !== "" &&
+          authors.findIndex(
+            (candidate) =>
+              candidate.author_name.trim().toLocaleLowerCase() ===
+              author.author_name.trim().toLocaleLowerCase(),
+          ) === index,
+      )
+    : [];
+  const normalizedAuthorSearch = viewingFiles?.search
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLocaleLowerCase();
+  const authorSearchTokens =
+    normalizedAuthorSearch?.split(" ").filter(Boolean) ?? [];
+  const displayedAuthor =
+    visibleAuthors.find((author) => {
+      const normalizedName = author.author_name
+        .trim()
+        .replace(/\s+/g, " ")
+        .toLocaleLowerCase();
+      return (
+        authorSearchTokens.length > 0 &&
+        authorSearchTokens.every((token) => normalizedName.includes(token))
+      );
+    }) ?? visibleAuthors[0];
+
   return (
-    <div className="workspace-content admin-sidebar-page">
+    <div className="workspace-content admin-sidebar-page librarian-repository-page">
       <RolePageHeader
         role={role}
-        title="Repository catalog"
-        description="Approved and archived research records."
+        title="Repository"
+        description="Search and browse repository records."
         action={
           <Button variant="secondary" onClick={() => navigate("/catalog")}>
             Open public catalog
           </Button>
         }
       />
-      <section className="panel-card admin-data-card">
-        <form className="admin-filters" onSubmit={applyFilters}>
+      <section className="panel-card admin-data-card manage-repository-card librarian-repository-card">
+        <form
+          className="manage-repository-filter-row librarian-repository-filters"
+          onSubmit={applyFilters}
+        >
           <label>
             Search
             <input
               value={filters.search}
               onChange={(event) => change("search", event.target.value)}
-              placeholder="Title keyword"
+              placeholder="Search by title or author"
             />
           </label>
           <label>
-            Category
-            <select
-              value={filters.category}
-              onChange={(event) => change("category", event.target.value)}
-            >
-              <option value="">All categories</option>
-              {(categories.status === "ready" ? categories.data : []).map(
-                (category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.name}
-                  </option>
-                ),
-              )}
-            </select>
+            Visibility
+            <SelectMenu
+              label="Visibility"
+              value={filters.visibility}
+              onChange={(value) => change("visibility", value)}
+              options={[
+                { value: "", label: "All visibility" },
+                { value: "public", label: "Public" },
+                { value: "private", label: "Private" },
+              ]}
+            />
+          </label>
+          <label>
+            Publication year
+            <SelectMenu
+              label="Publication year"
+              value={filters.year}
+              onChange={(value) => change("year", value)}
+              options={[
+                { value: "", label: "All years" },
+                ...(result?.filters.years ?? []).map((year) => ({
+                  value: String(year),
+                  label: String(year),
+                })),
+              ]}
+            />
           </label>
         </form>
         {error ? (
@@ -6484,30 +7891,83 @@ function LibrarianRepositoryCatalog({
           </p>
         ) : (
           <>
-            <div className="admin-table-wrap">
+            <div className="admin-table-wrap librarian-repository-table-wrap">
               <table>
                 <caption className="sr-only">Repository catalog</caption>
                 <thead>
                   <tr>
-                    <th>Title</th>
-                    <th>Category</th>
-                    <th>Status</th>
-                    <th>Archive</th>
-                    <th>Visibility</th>
-                    <th>Year</th>
-                    <th>Submitted</th>
+                    <SortableHeader
+                      sortKey="title"
+                      activeSort={sort}
+                      direction={sortDirection}
+                      onSort={(key) =>
+                        changeSort(key as NonNullable<typeof sort>)
+                      }
+                    >
+                      Title
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="submission_status"
+                      activeSort={sort}
+                      direction={sortDirection}
+                      onSort={(key) =>
+                        changeSort(key as NonNullable<typeof sort>)
+                      }
+                    >
+                      Status
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="visibility"
+                      activeSort={sort}
+                      direction={sortDirection}
+                      onSort={(key) =>
+                        changeSort(key as NonNullable<typeof sort>)
+                      }
+                    >
+                      Visibility
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="publication_year"
+                      activeSort={sort}
+                      direction={sortDirection}
+                      onSort={(key) =>
+                        changeSort(key as NonNullable<typeof sort>)
+                      }
+                    >
+                      Year
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="updated_at"
+                      activeSort={sort}
+                      direction={sortDirection}
+                      onSort={(key) =>
+                        changeSort(key as NonNullable<typeof sort>)
+                      }
+                    >
+                      Updated
+                    </SortableHeader>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {result.data.map((row) => (
                     <tr key={row.id}>
                       <td>{row.title}</td>
-                      <td>{row.category?.name ?? "—"}</td>
                       <td>{label(row.submission_status)}</td>
-                      <td>{label(row.archive_status)}</td>
                       <td>{label(row.visibility)}</td>
                       <td>{row.publication_year ?? "—"}</td>
                       <td>{displayDate(row.updated_at)}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="icon-button librarian-repository-view"
+                          aria-label={`View files for ${row.title}`}
+                          title="View study files"
+                          onClick={() => openFiles(row)}
+                        >
+                          <Eye aria-hidden="true" />
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -6515,6 +7975,7 @@ function LibrarianRepositoryCatalog({
             </div>
             <Pagination
               meta={result.meta}
+              noun="records"
               onPage={(nextPage) => {
                 setPage(nextPage);
                 reload();
@@ -6523,6 +7984,252 @@ function LibrarianRepositoryCatalog({
           </>
         )}
       </section>
+      {viewingFiles && (
+        <Modal
+          label={`Files for ${viewingFiles.title}`}
+          className="librarian-files-modal"
+          onClose={() => setViewingFiles(null)}
+        >
+          <div className="librarian-files-dialog">
+            <header className="librarian-files-header">
+              <span className="librarian-files-header-icon" aria-hidden="true">
+                <FolderOpen />
+              </span>
+              <p className="eyebrow">Repository files</p>
+            </header>
+            <h2 className="librarian-files-title">{viewingFiles.title}</h2>
+            <div className="librarian-files-authors">
+              <Users aria-hidden="true" />
+              <p>
+                <strong>Authors:</strong>{" "}
+                {displayedAuthor
+                  ? `${displayedAuthor.author_name.trim()}${visibleAuthors.length > 1 ? " et al." : ""}`
+                  : "Authors not available."}
+              </p>
+            </div>
+            {filesLoading ? (
+              <Loading label="Loading study files" />
+            ) : filesError ? (
+              <InlineError
+                message={filesError}
+                retry={() => openFiles(viewingFiles)}
+              />
+            ) : repositoryFiles.length === 0 ? (
+              <p className="admin-empty">
+                No files are available for this study.
+              </p>
+            ) : (
+              <ul className="librarian-files-list">
+                {repositoryFiles.map((file) => (
+                  <li key={file.id}>
+                    <div className="librarian-file-details">
+                      <span className="librarian-file-icon" aria-hidden="true">
+                        <FileText />
+                      </span>
+                      <span className="librarian-file-copy">
+                        <strong title={file.original_filename}>
+                          {file.original_filename}
+                        </strong>
+                        <small>
+                          {label(file.document_type)} · Version{" "}
+                          {file.version_number}
+                        </small>
+                      </span>
+                    </div>
+                    <span className="row-actions">
+                      {file.mime_type === "application/pdf" && (
+                        <a
+                          className="icon-button"
+                          href={librarianRepositoryFilePreviewUrl(
+                            viewingFiles.id,
+                            file.id,
+                          )}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-label={`View ${file.original_filename}`}
+                          title="Preview file"
+                        >
+                          <Eye aria-hidden="true" />
+                        </a>
+                      )}
+                      <a
+                        className="icon-button"
+                        href={librarianRepositoryFileDownloadUrl(
+                          viewingFiles.id,
+                          file.id,
+                        )}
+                        aria-label={`Download ${file.original_filename}`}
+                        title="Download file"
+                      >
+                        <Download aria-hidden="true" />
+                      </a>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function ArchivedRoleRepository({ role }: { role: Role }) {
+  const [search, setSearch] = useState("");
+  const [year, setYear] = useState("");
+  const [query, setQuery] = useState({ search: "", year: "" });
+  const [result, setResult] = useState<Awaited<
+    ReturnType<typeof searchArchivedRoleRepository>
+  > | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [attempt, reload] = useAttempt();
+  const [metadataResearchId, setMetadataResearchId] = useState<
+    string | number | null
+  >(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void searchArchivedRoleRepository(
+      {
+        q: query.search,
+        year: query.year || undefined,
+        perPage: 100,
+      },
+      globalThis.fetch,
+      controller.signal,
+    )
+      .then((response) => {
+        setResult(response);
+        setError("");
+      })
+      .catch((requestError) => {
+        if (controller.signal.aborted) return;
+        setError(
+          friendlyError(requestError, "Archived repository is unavailable"),
+        );
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [attempt, query]);
+
+  const years = result?.years ?? [];
+
+  return (
+    <div className="workspace-content admin-sidebar-page archived-role-repository-page">
+      <RolePageHeader
+        role={role}
+        title="Repository"
+        description="Browse archived studies available as institutional references."
+      />
+      <section className="panel-card archived-role-repository-card">
+        <header className="archived-role-repository-intro">
+          <div>
+            <p className="eyebrow">Archived collection</p>
+            <h2>Repository references</h2>
+          </div>
+          <span>{result?.meta.total ?? 0} archived studies</span>
+        </header>
+        <form
+          className="archived-role-repository-filters"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setLoading(true);
+            setQuery({ search: search.trim(), year });
+          }}
+        >
+          <label>
+            Search archived studies
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search by title, author, or keyword"
+            />
+          </label>
+          <label>
+            Publication year
+            <SelectMenu
+              label="Archived publication year"
+              value={year}
+              onChange={(value) => {
+                setYear(value);
+                setLoading(true);
+                setQuery((current) => ({ ...current, year: value }));
+              }}
+              options={[
+                { value: "", label: "All years" },
+                ...years.map((value) => ({
+                  value: String(value),
+                  label: String(value),
+                })),
+              ]}
+            />
+          </label>
+          <Button type="submit">Search</Button>
+        </form>
+        {error ? (
+          <InlineError message={error} retry={reload} />
+        ) : loading || result === null ? (
+          <Loading label="Loading archived repository" />
+        ) : result.data.length === 0 ? (
+          <p className="admin-empty">
+            {query.search || query.year
+              ? "No archived studies match these filters."
+              : "No archived studies are available."}
+          </p>
+        ) : (
+          <div className="admin-table-wrap archived-role-repository-table-wrap">
+            <table>
+              <caption className="sr-only">Archived repository studies</caption>
+              <thead>
+                <tr>
+                  <th>Study</th>
+                  <th>Researchers</th>
+                  <th>Institute / Program</th>
+                  <th>Year</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.data.map((record) => (
+                  <tr key={record.id}>
+                    <td>
+                      <strong>{record.title}</strong>
+                      <small>{record.keywords.slice(0, 3).join(" · ")}</small>
+                    </td>
+                    <td>{record.authors || "Not available"}</td>
+                    <td>
+                      <span>{record.institute}</span>
+                      <small>{record.program}</small>
+                    </td>
+                    <td>{record.year}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="icon-button archived-role-repository-view"
+                        aria-label={`View metadata for ${record.title}`}
+                        onClick={() => setMetadataResearchId(record.id)}
+                      >
+                        <Eye aria-hidden="true" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+      {metadataResearchId !== null && (
+        <PublicResearchMetadataDialog
+          researchDocumentId={metadataResearchId}
+          onClose={() => setMetadataResearchId(null)}
+          authenticated
+        />
+      )}
     </div>
   );
 }
@@ -6536,12 +8243,23 @@ function LibrarianMetadataStandards({ role }: { role: Role }) {
     abstract_complete: false,
     authors_complete: false,
     keywords_complete: false,
-    category_complete: false,
     notes: "",
     review_status: "complete",
   });
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState("");
+  const { sortedRows, sort, direction, changeSort } = useClientSorting(
+    state.status === "ready" ? state.data : [],
+    {
+      title: (item) => item.title,
+      year: (item) => item.publication_year,
+      title_complete: (item) => item.metadata_completeness.title,
+      abstract: (item) => item.metadata_completeness.abstract,
+      keywords: (item) => item.metadata_completeness.keywords,
+      authors: (item) => item.metadata_completeness.authors,
+      review: (item) => item.metadata_review?.review_status,
+    },
+  );
 
   function openReview(item: MetadataStandardsItem) {
     setSelected(item);
@@ -6550,7 +8268,6 @@ function LibrarianMetadataStandards({ role }: { role: Role }) {
       abstract_complete: item.metadata_review?.abstract_complete ?? false,
       authors_complete: item.metadata_review?.authors_complete ?? false,
       keywords_complete: item.metadata_review?.keywords_complete ?? false,
-      category_complete: item.metadata_review?.category_complete ?? false,
       notes: item.metadata_review?.notes ?? "",
       review_status: item.metadata_review?.review_status ?? "complete",
     });
@@ -6604,29 +8321,151 @@ function LibrarianMetadataStandards({ role }: { role: Role }) {
                 <caption className="sr-only">Metadata standards</caption>
                 <thead>
                   <tr>
-                    <th>Title</th>
-                    <th>Category</th>
-                    <th>Year</th>
-                    <th>Title</th>
-                    <th>Abstract</th>
-                    <th>Keywords</th>
-                    <th>Authors</th>
-                    <th>Category set</th>
-                    <th>Review</th>
+                    <SortableHeader
+                      sortKey="title"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={(key) =>
+                        changeSort(
+                          key as
+                            | "title"
+                            | "year"
+                            | "title_complete"
+                            | "abstract"
+                            | "keywords"
+                            | "authors"
+                            | "review",
+                        )
+                      }
+                    >
+                      Title
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="year"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={(key) =>
+                        changeSort(
+                          key as
+                            | "title"
+                            | "year"
+                            | "title_complete"
+                            | "abstract"
+                            | "keywords"
+                            | "authors"
+                            | "review",
+                        )
+                      }
+                    >
+                      Year
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="title_complete"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={(key) =>
+                        changeSort(
+                          key as
+                            | "title"
+                            | "year"
+                            | "title_complete"
+                            | "abstract"
+                            | "keywords"
+                            | "authors"
+                            | "review",
+                        )
+                      }
+                    >
+                      Title
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="abstract"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={(key) =>
+                        changeSort(
+                          key as
+                            | "title"
+                            | "year"
+                            | "title_complete"
+                            | "abstract"
+                            | "keywords"
+                            | "authors"
+                            | "review",
+                        )
+                      }
+                    >
+                      Abstract
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="keywords"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={(key) =>
+                        changeSort(
+                          key as
+                            | "title"
+                            | "year"
+                            | "title_complete"
+                            | "abstract"
+                            | "keywords"
+                            | "authors"
+                            | "review",
+                        )
+                      }
+                    >
+                      Keywords
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="authors"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={(key) =>
+                        changeSort(
+                          key as
+                            | "title"
+                            | "year"
+                            | "title_complete"
+                            | "abstract"
+                            | "keywords"
+                            | "authors"
+                            | "review",
+                        )
+                      }
+                    >
+                      Authors
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="review"
+                      activeSort={sort}
+                      direction={direction}
+                      onSort={(key) =>
+                        changeSort(
+                          key as
+                            | "title"
+                            | "year"
+                            | "title_complete"
+                            | "abstract"
+                            | "keywords"
+                            | "authors"
+                            | "review",
+                        )
+                      }
+                    >
+                      Review
+                    </SortableHeader>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {state.data.map((item) => (
+                  {sortedRows.map((item) => (
                     <tr key={item.research_document_id}>
                       <td>{item.title}</td>
-                      <td>{item.category ?? "—"}</td>
                       <td>{item.publication_year ?? "—"}</td>
                       <td>{yesNo(item.metadata_completeness.title)}</td>
                       <td>{yesNo(item.metadata_completeness.abstract)}</td>
                       <td>{yesNo(item.metadata_completeness.keywords)}</td>
                       <td>{yesNo(item.metadata_completeness.authors)}</td>
-                      <td>{yesNo(item.metadata_completeness.category)}</td>
                       <td>
                         {item.metadata_review
                           ? label(item.metadata_review.review_status)
@@ -6668,7 +8507,6 @@ function LibrarianMetadataStandards({ role }: { role: Role }) {
                       ["abstract_complete", "Abstract complete"],
                       ["authors_complete", "Authors complete"],
                       ["keywords_complete", "Keywords complete"],
-                      ["category_complete", "Category complete"],
                     ] as const
                   ).map(([field, fieldLabel]) => (
                     <label key={field} className="checklist-toggle">
@@ -6752,6 +8590,15 @@ function LibrarianRetentionLogs({ role }: { role: Role }) {
   const [remarks, setRemarks] = useState("");
   const [recording, setRecording] = useState(false);
   const [notice, setNotice] = useState("");
+  const { sortedRows, sort, direction, changeSort } = useClientSorting(
+    state.status === "ready" ? state.data : [],
+    {
+      action: (log) => log.action,
+      document: (log) => log.title,
+      recorded_by: (log) => log.performed_by,
+      date: (log) => (log.activity_date ? Date.parse(log.activity_date) : null),
+    },
+  );
 
   async function record(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -6861,15 +8708,59 @@ function LibrarianRetentionLogs({ role }: { role: Role }) {
               <caption className="sr-only">Retention logs</caption>
               <thead>
                 <tr>
-                  <th>Action</th>
-                  <th>Document</th>
+                  <SortableHeader
+                    sortKey="action"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as "action" | "document" | "recorded_by" | "date",
+                      )
+                    }
+                  >
+                    Action
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="document"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as "action" | "document" | "recorded_by" | "date",
+                      )
+                    }
+                  >
+                    Document
+                  </SortableHeader>
                   <th>Remarks</th>
-                  <th>Recorded by</th>
-                  <th>Date</th>
+                  <SortableHeader
+                    sortKey="recorded_by"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as "action" | "document" | "recorded_by" | "date",
+                      )
+                    }
+                  >
+                    Recorded by
+                  </SortableHeader>
+                  <SortableHeader
+                    sortKey="date"
+                    activeSort={sort}
+                    direction={direction}
+                    onSort={(key) =>
+                      changeSort(
+                        key as "action" | "document" | "recorded_by" | "date",
+                      )
+                    }
+                  >
+                    Date
+                  </SortableHeader>
                 </tr>
               </thead>
               <tbody>
-                {state.data.map((log) => (
+                {sortedRows.map((log) => (
                   <tr key={log.id}>
                     <td>{label(log.action)}</td>
                     <td>{log.title ?? "—"}</td>
@@ -6890,289 +8781,68 @@ function LibrarianRetentionLogs({ role }: { role: Role }) {
 /* ---------------------------------- Research office ---------------------------------- */
 
 function OfficeUsers({ role }: { role: Role }) {
-  const [query, setQuery] = useState({
-    search: "",
-    role: "",
-    access_status: "",
-  });
-  const [page, setPage] = useState(1);
-  const [result, setResult] = useState<LaravelPaginatedResponse<
-    Awaited<ReturnType<typeof listOfficeUsers>>["data"][number]
-  > | null>(null);
-  const [drafts, setDrafts] = useState<Record<string, AccessStatus>>({});
-  const [saving, setSaving] = useState<string | null>(null);
-  const [editingUser, setEditingUser] = useState<OfficeUserRow | null>(null);
-  const [saveMessage, setSaveMessage] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [attempt, reload] = useAttempt();
-
-  function changeFilter(name: keyof typeof query, value: string) {
-    setPage(1);
-    setLoading(true);
-    setError("");
-    setQuery((current) => ({ ...current, [name]: value }));
-  }
-
-  useEffect(() => {
-    let cancelled = false;
-    void listOfficeUsers({
-      ...query,
-      role: (query.role as AdminRole) || undefined,
-      access_status: (query.access_status as AccessStatus) || undefined,
-      page,
-      per_page: 25,
-    })
-      .then((response) => {
-        if (cancelled) return;
-        setResult(response);
-        setError("");
-        setLoading(false);
-      })
-      .catch((requestError) => {
-        if (cancelled) return;
-        setError(friendlyError(requestError, "User records are unavailable"));
-        setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [attempt, page, query]);
-
-  async function save(
-    user: Awaited<ReturnType<typeof listOfficeUsers>>["data"][number],
-  ) {
-    const status = drafts[user.id] ?? user.access_status;
-    setSaveMessage("");
-    setSaving(user.id);
-    try {
-      await updateOfficeUserAccess(user.id, status);
-      setDrafts((current) => {
-        const remaining = { ...current };
-        delete remaining[user.id];
-        return remaining;
-      });
-      setSaveMessage(`Updated ${user.email}.`);
-      setEditingUser(null);
-      reload();
-    } catch (requestError) {
-      setSaveMessage(
-        friendlyError(
-          requestError,
-          "The user access change could not be saved",
-        ),
-      );
-    } finally {
-      setSaving(null);
-    }
-  }
-
-  const visibleUsers = filterUserRows(
-    result?.data ?? [],
-    query,
-    officeUserName,
-  );
-
   return (
     <div className="workspace-content admin-sidebar-page">
-      <RolePageHeader
-        role={role}
-        title="User & role management"
-        description="Review account access across the program. Roles are assigned by coordinators."
+      <UserRoleManagementWorkspace
+        contextLabel={label(role)}
+        loadUsers={loadOfficeManagedUsers}
+        saveUser={saveOfficeManagedUser}
+        roles={roles}
+        accessStatuses={accessStatuses}
+        errorMessage={(requestError) =>
+          friendlyError(requestError, "User records are unavailable")
+        }
       />
-      <section className="panel-card admin-data-card">
-        <div className="admin-card-heading">
-          <div>
-            <h2>Users</h2>
-            <p>Search users and update their account access.</p>
-          </div>
-          <div className="row-actions">
-            <Button
-              variant="secondary"
-              onClick={reload}
-              aria-label="Refresh users"
-              title="Refresh users"
-            >
-              <RefreshCw aria-hidden="true" />
-            </Button>
-          </div>
-        </div>
-        <div className="admin-filters">
-          <label>
-            Search
-            <input
-              type="search"
-              value={query.search}
-              onChange={(event) => changeFilter("search", event.target.value)}
-              placeholder="Name or email"
-            />
-          </label>
-          <label>
-            Role
-            <select
-              value={query.role}
-              onChange={(event) => changeFilter("role", event.target.value)}
-            >
-              <option value="">All roles</option>
-              {roles.map((roleOption) => (
-                <option key={roleOption} value={roleOption}>
-                  {label(roleOption)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Access status
-            <select
-              value={query.access_status}
-              onChange={(event) =>
-                changeFilter("access_status", event.target.value)
-              }
-            >
-              <option value="">All statuses</option>
-              {accessStatuses.map((status) => (
-                <option key={status} value={status}>
-                  {label(status)}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        {saveMessage && (
-          <p
-            role="status"
-            className={
-              saveMessage.startsWith("Updated")
-                ? "admin-success"
-                : "admin-error"
-            }
-          >
-            {saveMessage}
-          </p>
-        )}
-        {error ? (
-          <InlineError message={error} retry={reload} />
-        ) : loading || result === null ? (
-          <Loading label="Loading users" />
-        ) : visibleUsers.length === 0 ? (
-          <p className="admin-empty">
-            {hasFilters(query)
-              ? "No users match these filters."
-              : "No user accounts are available."}
-          </p>
-        ) : (
-          <>
-            <div className="admin-table-wrap">
-              <table>
-                <caption className="sr-only">User accounts</caption>
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Email</th>
-                    <th>Role</th>
-                    <th>Access</th>
-                    <th>Created</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleUsers.map((user) => (
-                    <tr key={user.id}>
-                      <td>{officeUserName(user) || "—"}</td>
-                      <td>{user.email}</td>
-                      <td>{label(user.role)}</td>
-                      <td>{label(user.access_status)}</td>
-                      <td>{displayDate(user.created_at)}</td>
-                      <td>
-                        <Button
-                          variant="secondary"
-                          className="icon-button"
-                          aria-label={`Edit ${user.email}`}
-                          title="Edit user"
-                          onClick={() => {
-                            setDrafts((current) => ({
-                              ...current,
-                              [user.id]: user.access_status,
-                            }));
-                            setEditingUser(user);
-                          }}
-                          disabled={saving === user.id}
-                        >
-                          <Pencil />
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <Pagination
-              meta={result.meta}
-              onPage={(nextPage) => {
-                setPage(nextPage);
-                reload();
-              }}
-            />
-          </>
-        )}
-      </section>
-      {editingUser && (
-        <Modal
-          label={`Edit ${editingUser.email}`}
-          onClose={() => setEditingUser(null)}
-          busy={saving === editingUser.id}
-        >
-          <form
-            className="admin-user-edit-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void save(editingUser);
-            }}
-          >
-            <header className="admin-user-edit-header">
-              <p className="eyebrow">User management</p>
-              <h2>Edit user</h2>
-              <p>{editingUser.email}</p>
-            </header>
-            <label>
-              Access status
-              <select
-                value={drafts[editingUser.id] ?? editingUser.access_status}
-                onChange={(event) =>
-                  setDrafts((current) => ({
-                    ...current,
-                    [editingUser.id]: event.target.value as AccessStatus,
-                  }))
-                }
-              >
-                {accessStatuses.map((status) => (
-                  <option key={status} value={status}>
-                    {label(status)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="modal-actions admin-user-edit-actions">
-              <Button type="submit" disabled={saving === editingUser.id}>
-                {saving === editingUser.id ? "Saving…" : "Save changes"}
-              </Button>
-            </div>
-          </form>
-        </Modal>
-      )}
     </div>
   );
 }
 
 function OfficeReports({ role }: { role: Role }) {
   const [attempt, reload] = useAttempt();
+  const [activeReport, setActiveReport] =
+    useState<OfficeReportSection>("academic_units");
   const state = useLoad(() => getInstitutionalReport(), attempt);
+
+  function openCurrentPdf() {
+    window.open(
+      `/api/office/reports/${activeReport.replaceAll("_", "-")}/pdf`,
+      "_blank",
+      "noopener,noreferrer",
+    );
+  }
+
+  function exportCurrentCsv() {
+    if (state.status !== "ready") return;
+    const csv = buildOfficeReportCsv(state.data, new Set([activeReport]));
+    const url = URL.createObjectURL(
+      new Blob([csv], { type: "text/csv;charset=utf-8" }),
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `researchnav-${activeReport.replaceAll("_", "-")}-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  const reportActions = (
+    <div className="row-actions office-report-actions">
+      <Button type="button" onClick={openCurrentPdf}>
+        <Printer aria-hidden="true" /> Print report
+      </Button>
+      <Button type="button" variant="secondary" onClick={exportCurrentCsv}>
+        <Download aria-hidden="true" /> Export CSV
+      </Button>
+    </div>
+  );
+
   return (
-    <div className="workspace-content admin-sidebar-page">
+    <div className="workspace-content admin-sidebar-page office-report-page">
       <RolePageHeader
         role={role}
         title="Reports & exports"
-        description="Institutional breakdowns by academic unit and submission status."
+        description="Institutional breakdowns by academic unit, submission status, and development goal."
         action={
           <Button variant="secondary" onClick={reload}>
             <RefreshCw /> Refresh
@@ -7185,64 +8855,132 @@ function OfficeReports({ role }: { role: Role }) {
         <InlineError message={state.message} retry={reload} />
       ) : (
         <>
-          <section className="panel-card admin-data-card">
-            <div className="admin-card-heading">
-              <div>
-                <h2>By academic unit</h2>
-                <p>Research records per academic unit.</p>
+          <nav
+            className="project-workspace-tabs office-report-switcher"
+            aria-label="Report sections"
+          >
+            {officeReportOptions.map((option) => {
+              const Icon = {
+                academic_units: Building2,
+                submission_status: ClipboardList,
+                sdgs: Globe2,
+              }[option.key];
+              return (
+                <button
+                  key={option.key}
+                  type="button"
+                  className={activeReport === option.key ? "is-active" : ""}
+                  aria-pressed={activeReport === option.key}
+                  onClick={() => setActiveReport(option.key)}
+                >
+                  <Icon aria-hidden="true" />
+                  <span>{option.label}</span>
+                </button>
+              );
+            })}
+          </nav>
+          {activeReport === "academic_units" && (
+            <section className="panel-card admin-data-card">
+              <div className="admin-card-heading">
+                <div>
+                  <h2>By academic unit</h2>
+                  <p>Research records per academic unit.</p>
+                </div>
+                {reportActions}
               </div>
-            </div>
-            {state.data.by_institute.length === 0 ? (
-              <p className="admin-empty">No academic units are recorded.</p>
-            ) : (
+              {state.data.by_institute.length === 0 ? (
+                <p className="admin-empty">No academic units are recorded.</p>
+              ) : (
+                <div className="admin-table-wrap">
+                  <table>
+                    <caption className="sr-only">By academic unit</caption>
+                    <thead>
+                      <tr>
+                        <th>Academic unit</th>
+                        <th>Records</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {state.data.by_institute.map((unit) => (
+                        <tr key={unit.institute}>
+                          <td>{unit.institute}</td>
+                          <td>{unit.total}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          )}
+          {activeReport === "submission_status" && (
+            <section className="panel-card admin-data-card">
+              <div className="admin-card-heading">
+                <div>
+                  <h2>By submission status</h2>
+                  <p>Research records per submission status.</p>
+                </div>
+                {reportActions}
+              </div>
               <div className="admin-table-wrap">
                 <table>
-                  <caption className="sr-only">By academic unit</caption>
+                  <caption className="sr-only">By submission status</caption>
                   <thead>
                     <tr>
-                      <th>Academic unit</th>
+                      <th>Status</th>
                       <th>Records</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {state.data.by_institute.map((unit) => (
-                      <tr key={unit.institute}>
-                        <td>{unit.institute}</td>
-                        <td>{unit.total}</td>
+                    {state.data.by_status.map((row) => (
+                      <tr key={row.status}>
+                        <td>{label(row.status)}</td>
+                        <td>{row.total}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-            )}
-          </section>
-          <section className="panel-card admin-data-card">
-            <div className="admin-card-heading">
-              <div>
-                <h2>By submission status</h2>
-                <p>Research records per submission status.</p>
+            </section>
+          )}
+          {activeReport === "sdgs" && (
+            <section className="panel-card admin-data-card">
+              <div className="admin-card-heading">
+                <div>
+                  <h2>By Sustainable Development Goal</h2>
+                  <p>Research alignments across the 17 UN goals.</p>
+                </div>
+                {reportActions}
               </div>
-            </div>
-            <div className="admin-table-wrap">
-              <table>
-                <caption className="sr-only">By submission status</caption>
-                <thead>
-                  <tr>
-                    <th>Status</th>
-                    <th>Records</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {state.data.by_status.map((row) => (
-                    <tr key={row.status}>
-                      <td>{label(row.status)}</td>
-                      <td>{row.total}</td>
+              <div className="admin-table-wrap">
+                <table>
+                  <caption className="sr-only">
+                    By Sustainable Development Goal
+                  </caption>
+                  <thead>
+                    <tr>
+                      <th>Goal</th>
+                      <th>Records</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
+                  </thead>
+                  <tbody>
+                    {(state.data.by_sdg ?? []).map((row) => (
+                      <tr key={row.id}>
+                        <td>
+                          <span className="report-sdg-icon">
+                            <SdgIcon id={row.id} />
+                            <span className="sr-only">SDG {row.id}: </span>
+                          </span>{" "}
+                          {row.title}
+                        </td>
+                        <td>{row.total}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
         </>
       )}
     </div>
@@ -7250,68 +8988,6 @@ function OfficeReports({ role }: { role: Role }) {
 }
 
 /* ---------------------------------- Researcher ---------------------------------- */
-
-function ResearcherWorkflowGuide() {
-  return (
-    <section
-      className="researcher-workflow-guide"
-      aria-labelledby="researcher-workflow-title"
-    >
-      <div className="researcher-workflow-intro">
-        <p className="eyebrow">How My Research works</p>
-        <h2 id="researcher-workflow-title">One folder, two kinds of updates</h2>
-        <p>
-          Use the research folder for the manuscript workflow. Research Progress
-          Updates are separate informal updates inside that same folder and do
-          not submit your manuscript for review or complete an official defense
-          form.
-        </p>
-      </div>
-      <ol className="researcher-workflow-steps">
-        <li>
-          <span>1</span>
-          <div>
-            <strong>Open your assigned folder</strong>
-            <small>
-              Select Manage folder to view files, revisions, Research Progress
-              Updates, and feedback.
-            </small>
-          </div>
-        </li>
-        <li>
-          <span>2</span>
-          <div>
-            <strong>Prepare and submit research</strong>
-            <small>
-              Edit the details, upload the manuscript, then submit the draft for
-              review.
-            </small>
-          </div>
-        </li>
-        <li>
-          <span>3</span>
-          <div>
-            <strong>Report Research Progress Updates</strong>
-            <small>
-              Use Research Progress Updates inside the folder to report
-              accomplishments or blockers without changing submission status.
-            </small>
-          </div>
-        </li>
-        <li>
-          <span>4</span>
-          <div>
-            <strong>Respond to review</strong>
-            <small>
-              When revision is required, update the record and upload the
-              revised manuscript.
-            </small>
-          </div>
-        </li>
-      </ol>
-    </section>
-  );
-}
 
 function ResearcherSubmissions({
   role,
@@ -7321,9 +8997,6 @@ function ResearcherSubmissions({
   navigate: (path: string) => void;
 }) {
   const [page, setPage] = useState(1);
-  const [statusFilter, setStatusFilter] = useState<
-    ResearchDocumentSummaryResource["submission_status"] | ""
-  >("");
   const [result, setResult] =
     useState<LaravelPaginatedResponse<ResearchDocumentSummaryResource> | null>(
       null,
@@ -7333,6 +9006,9 @@ function ResearcherSubmissions({
   const [error, setError] = useState("");
   const [editing, setEditing] =
     useState<ResearchDocumentSummaryResource | null>(null);
+  const editingMetadataOnly =
+    editing !== null &&
+    ["submitted", "under_review"].includes(editing.submission_status);
   const [activityFor, setActivityFor] =
     useState<ResearchDocumentSummaryResource | null>(null);
   const [editDirty, setEditDirty] = useState(false);
@@ -7355,7 +9031,6 @@ function ResearcherSubmissions({
     let cancelled = false;
     void listResearchDocuments({
       mine: true,
-      submission_status: statusFilter || undefined,
       page,
       per_page: 25,
     })
@@ -7378,7 +9053,7 @@ function ResearcherSubmissions({
     return () => {
       cancelled = true;
     };
-  }, [attempt, page, statusFilter]);
+  }, [attempt, page]);
 
   async function submit(document: ResearchDocumentSummaryResource) {
     setNotice("");
@@ -7399,16 +9074,9 @@ function ResearcherSubmissions({
   return (
     <div className="workspace-content admin-sidebar-page">
       <RolePageHeader
-        role={role}
         title="My research"
         description="Research folders assigned to you by your Research Instructor."
-        action={
-          <Button variant="secondary" onClick={refresh}>
-            <RefreshCw /> Refresh
-          </Button>
-        }
       />
-      <ResearcherWorkflowGuide />
       {notice && (
         <p
           role="status"
@@ -7433,37 +9101,6 @@ function ResearcherSubmissions({
           </Button>
         </section>
       )}
-      <div className="admin-filters">
-        <label>
-          Research status
-          <select
-            aria-label="Research status"
-            value={statusFilter}
-            onChange={(event) => {
-              beginLoad();
-              setStatusFilter(
-                event.target.value as
-                  ResearchDocumentSummaryResource["submission_status"] | "",
-              );
-              setPage(1);
-            }}
-          >
-            <option value="">All statuses</option>
-            {[
-              "draft",
-              "submitted",
-              "under_review",
-              "revision_required",
-              "approved",
-              "archived",
-            ].map((status) => (
-              <option key={status} value={status}>
-                {label(status)}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
       {error ? (
         <InlineError message={error} retry={refresh} />
       ) : loading || result === null ? (
@@ -7478,8 +9115,8 @@ function ResearcherSubmissions({
           </p>
         </section>
       ) : (
-        <section className="panel-card research-folder-collection">
-          <div className="research-title-folders">
+        <section className="panel-card research-folder-collection research-folder-surface">
+          <div className="research-title-folders research-folder-list">
             {result.data.map((document) => (
               <ResearchFolderRow
                 key={document.id}
@@ -7509,41 +9146,55 @@ function ResearcherSubmissions({
                         <MessageSquareText size={17} aria-hidden="true" />
                       </button>
                     )}
-                    {source === "live" && !loading && (
-                      <Button
-                        variant="secondary"
-                        onClick={() => navigate(`/research/${document.id}`)}
-                      >
-                        <ExternalLink size={16} aria-hidden="true" /> Manage
-                        folder
-                      </Button>
-                    )}
                     {source === "live" &&
                       !loading &&
-                      ["draft", "revision_required"].includes(
-                        document.submission_status,
-                      ) && (
+                      [
+                        "draft",
+                        "revision_required",
+                        "submitted",
+                        "under_review",
+                      ].includes(document.submission_status) && (
                         <>
-                          <Button
-                            variant="secondary"
-                            onClick={() => {
-                              setEditDirty(false);
-                              setEditing(document);
-                            }}
-                            disabled={submitting === String(document.id)}
-                          >
-                            <Pencil size={16} aria-hidden="true" /> Edit
-                          </Button>
+                          {["submitted", "under_review"].includes(
+                            document.submission_status,
+                          ) ? (
+                            <button
+                              className="icon-button"
+                              aria-label="Edit metadata"
+                              title="Edit metadata"
+                              onClick={() => {
+                                setEditDirty(false);
+                                setEditing(document);
+                              }}
+                              disabled={submitting === String(document.id)}
+                            >
+                              <Pencil size={17} aria-hidden="true" />
+                            </button>
+                          ) : (
+                            <button
+                              className="icon-button"
+                              aria-label="Edit submission"
+                              title="Edit submission"
+                              onClick={() => {
+                                setEditDirty(false);
+                                setEditing(document);
+                              }}
+                              disabled={submitting === String(document.id)}
+                            >
+                              <Pencil size={17} aria-hidden="true" />
+                            </button>
+                          )}
+
                           {document.submission_status === "draft" && (
-                            <Button
+                            <button
+                              className="icon-button"
+                              aria-label="Submit research"
+                              title="Submit research"
                               onClick={() => void submit(document)}
                               disabled={submitting === String(document.id)}
                             >
-                              <Send size={16} aria-hidden="true" />
-                              {submitting === String(document.id)
-                                ? "Submitting…"
-                                : "Submit"}
-                            </Button>
+                              <Send size={17} aria-hidden="true" />
+                            </button>
                           )}
                         </>
                       )}
@@ -7554,6 +9205,7 @@ function ResearcherSubmissions({
           </div>
           <Pagination
             meta={result.meta}
+            noun="manuscripts"
             onPage={(nextPage) => {
               beginLoad();
               setPage(nextPage);
@@ -7576,7 +9228,11 @@ function ResearcherSubmissions({
       )}
       {editing && source === "live" && !loading && (
         <Modal
-          label={`Edit ${editing.title}`}
+          label={
+            editingMetadataOnly
+              ? `Edit metadata for ${editing.title}`
+              : `Edit ${editing.title}`
+          }
           onClose={() => setEditing(null)}
           dirty={editDirty}
           size="large"
@@ -7586,13 +9242,16 @@ function ResearcherSubmissions({
             role={role}
             draft={editing}
             embedded
+            metadataOnly={editingMetadataOnly}
             onDirtyChange={setEditDirty}
             onCancel={() => setEditing(null)}
             onSaved={(document, submitted) => {
               setNotice(
                 submitted
                   ? `"${document.title}" has been submitted.`
-                  : `Draft "${document.title}" has been updated.`,
+                  : editingMetadataOnly
+                    ? `Metadata for "${document.title}" has been updated.`
+                    : `Draft "${document.title}" has been updated.`,
               );
               setEditing(null);
               refresh();
@@ -7611,7 +9270,7 @@ type AuthorDraft = {
 };
 
 const MAX_SUBMISSION_FILE_BYTES = 25 * 1024 * 1024;
-const submissionFileExtensions = new Set(["pdf", "docx"]);
+const submissionFileExtensions = new Set(["pdf"]);
 const submissionDocumentTypes: Array<{
   value: DocumentFileResource["document_type"];
   label: string;
@@ -7626,6 +9285,7 @@ export function ResearcherNewSubmission({
   role,
   draft,
   embedded = false,
+  metadataOnly = false,
   onSaved,
   onCancel,
   onDirtyChange,
@@ -7633,6 +9293,7 @@ export function ResearcherNewSubmission({
   role: Role;
   draft: ResearchDocumentSummaryResource;
   embedded?: boolean;
+  metadataOnly?: boolean;
   onSaved?: (
     document: ResearchDocumentSummaryResource,
     submitted: boolean,
@@ -7661,6 +9322,9 @@ export function ResearcherNewSubmission({
   const [degreeProgram, setDegreeProgram] = useState(
     draft?.degree_program ?? "",
   );
+  const [sdgIds, setSdgIds] = useState(
+    () => draft.sdgs?.map((sdg) => sdg.id) ?? [],
+  );
   const [authors, setAuthors] = useState<AuthorDraft[]>(initialAuthors);
   const [documentType, setDocumentType] = useState<
     DocumentFileResource["document_type"]
@@ -7683,6 +9347,7 @@ export function ResearcherNewSubmission({
     researchStage: draft?.research_stage ?? "title_proposal",
     institute: draft?.institute ?? "",
     degreeProgram: draft?.degree_program ?? "",
+    sdgIds: draft.sdgs?.map((sdg) => sdg.id) ?? [],
     authors: initialAuthors,
   });
   const currentSnapshot = JSON.stringify({
@@ -7693,6 +9358,7 @@ export function ResearcherNewSubmission({
     researchStage,
     institute,
     degreeProgram,
+    sdgIds,
     authors,
   });
   const dirty = manuscript !== null || currentSnapshot !== initialSnapshot;
@@ -7737,6 +9403,7 @@ export function ResearcherNewSubmission({
     setResearchStage("title_proposal");
     setInstitute("");
     setDegreeProgram("");
+    setSdgIds([]);
     setAuthors([
       { author_name: "", user_id: "", is_corresponding_author: false },
     ]);
@@ -7752,7 +9419,7 @@ export function ResearcherNewSubmission({
     if (file === null) return null;
     const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
     if (!submissionFileExtensions.has(extension)) {
-      return "The manuscript must be a PDF or DOCX file.";
+      return "The manuscript must be a PDF file.";
     }
     if (file.size > MAX_SUBMISSION_FILE_BYTES) {
       return "The manuscript must not exceed 25 MB.";
@@ -7767,7 +9434,7 @@ export function ResearcherNewSubmission({
     const submitter = (event.nativeEvent as SubmitEvent)
       .submitter as HTMLButtonElement | null;
     const submitAfterSave =
-      !isRevisionRequired && submitter?.value === "submit";
+      !metadataOnly && !isRevisionRequired && submitter?.value === "submit";
     if (authors.some((author) => !author.author_name.trim())) {
       setError("Every author must have a name.");
       return;
@@ -7798,13 +9465,18 @@ export function ResearcherNewSubmission({
         abstract: abstract.trim() || null,
         keywords: keywords.trim() || null,
         publication_year: publicationYear ? Number(publicationYear) : null,
+        sdg_ids: sdgIds,
         research_stage: researchStage as
           "title_proposal" | "ongoing" | "completed",
-        authors: authors.map((author) => ({
-          author_name: author.author_name.trim(),
-          user_id: author.user_id.trim() || null,
-          is_corresponding_author: author.is_corresponding_author,
-        })),
+        ...(!metadataOnly
+          ? {
+              authors: authors.map((author) => ({
+                author_name: author.author_name.trim(),
+                user_id: author.user_id.trim() || null,
+                is_corresponding_author: author.is_corresponding_author,
+              })),
+            }
+          : {}),
       };
       if (!saved) throw new Error("An assigned research folder is required.");
       saved = await updateResearchDraft(saved.id, input);
@@ -7865,14 +9537,26 @@ export function ResearcherNewSubmission({
       {embedded ? (
         <header className="workspace-header">
           <div>
-            <p className="eyebrow">Researcher / Draft</p>
-            <h2>{draft ? "Edit submission" : "New submission"}</h2>
+            <p className="eyebrow">
+              {metadataOnly ? "Researcher / Metadata" : "Researcher / Draft"}
+            </p>
+
+            <h2>
+              {metadataOnly
+                ? "Edit metadata"
+                : draft
+                  ? "Edit submission"
+                  : "New submission"}
+            </h2>
+
             <p>
-              {draft
-                ? isRevisionRequired
-                  ? "Update metadata, authors, and revised manuscript files before resubmitting the requested revision."
-                  : "Update metadata, authors, and manuscript files before submission."
-                : "Create a research draft, add its authors, and optionally attach a manuscript."}
+              {metadataOnly
+                ? "Update the research details associated with this manuscript."
+                : draft
+                  ? isRevisionRequired
+                    ? "Update metadata, authors, and revised manuscript files before resubmitting the requested revision."
+                    : "Update metadata, authors, and manuscript files before submission."
+                  : "Create a research draft, add its authors, and optionally attach a manuscript."}
             </p>
           </div>
         </header>
@@ -7886,18 +9570,42 @@ export function ResearcherNewSubmission({
       <section className="panel-card admin-provision-card">
         <form
           onSubmit={saveSubmission}
-          className="admin-inline-form submission-form"
+          className={`admin-inline-form submission-form ${
+            metadataOnly ? "metadata-edit-form" : ""
+          }`}
           aria-label="Research submission"
         >
-          <label className="submission-title-field">
-            Title
-            <input
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              required
-              maxLength={500}
-            />
-          </label>
+          <div className="metadata-primary-row">
+            <label className="submission-title-field">
+              Title
+              <input
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                required
+                maxLength={500}
+              />
+            </label>
+            {metadataOnly && (
+              <label className="metadata-year-field">
+                Publication year
+                <select
+                  value={publicationYear}
+                  onChange={(event) => setPublicationYear(event.target.value)}
+                >
+                  <option value="">Select year</option>
+                  {Array.from(
+                    { length: new Date().getFullYear() - 1900 },
+                    (_, index) => new Date().getFullYear() - index,
+                  ).map((year) => (
+                    <option key={year} value={year}>
+                      {year}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
+
           <label className="submission-abstract-field">
             Abstract
             <textarea
@@ -7907,6 +9615,7 @@ export function ResearcherNewSubmission({
               maxLength={50000}
             />
           </label>
+
           <label className="submission-keywords-field">
             Keywords
             <input
@@ -7916,14 +9625,111 @@ export function ResearcherNewSubmission({
               placeholder="Comma separated"
             />
           </label>
+
           <div className="score-grid submission-metadata-fields">
-            <label>
-              Publication year
-              <PublicationYearInput
-                value={publicationYear}
-                onChange={(event) => setPublicationYear(event.target.value)}
-              />
-            </label>
+            {!metadataOnly && (
+              <label>
+                Publication year
+                <PublicationYearInput
+                  value={publicationYear}
+                  onChange={(event) => setPublicationYear(event.target.value)}
+                />
+              </label>
+            )}
+
+            {metadataOnly ? (
+              <>
+                <label>
+                  Institute
+                  <select
+                    value={institute}
+                    onChange={(event) => {
+                      setInstitute(event.target.value);
+                      setDegreeProgram("");
+                    }}
+                  >
+                    <option value="">Select institute</option>
+                    {instituteNames.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label>
+                  Program
+                  <select
+                    value={degreeProgram}
+                    disabled={!institute}
+                    onChange={(event) => setDegreeProgram(event.target.value)}
+                  >
+                    <option value="">
+                      {institute ? "Select program" : "Select institute first"}
+                    </option>
+
+                    {(
+                      programsByInstitute[
+                        institute as keyof typeof programsByInstitute
+                      ] ?? []
+                    ).map((program) => (
+                      <option key={program} value={program}>
+                        {program}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </>
+            ) : (
+              <>
+                <label>
+                  Institute
+                  <input
+                    list="submission-institutes"
+                    value={institute}
+                    placeholder="Search institutes"
+                    onChange={(event) => {
+                      setInstitute(event.target.value);
+                      setDegreeProgram("");
+                    }}
+                  />
+                  <datalist id="submission-institutes">
+                    {instituteNames.map((name) => (
+                      <option key={name} value={name} />
+                    ))}
+                  </datalist>
+                </label>
+
+                <label>
+                  Program
+                  <input
+                    list="submission-programs"
+                    value={degreeProgram}
+                    placeholder={
+                      institute
+                        ? "Search programs"
+                        : "Choose an institute first"
+                    }
+                    disabled={
+                      !instituteNames.includes(
+                        institute as (typeof instituteNames)[number],
+                      )
+                    }
+                    onChange={(event) => setDegreeProgram(event.target.value)}
+                  />
+                  <datalist id="submission-programs">
+                    {(
+                      programsByInstitute[
+                        institute as keyof typeof programsByInstitute
+                      ] ?? []
+                    ).map((program) => (
+                      <option key={program} value={program} />
+                    ))}
+                  </datalist>
+                </label>
+              </>
+            )}
+
             <label>
               Research stage
               <select
@@ -7942,119 +9748,91 @@ export function ResearcherNewSubmission({
                 ))}
               </select>
             </label>
-            <label>
-              Institute
-              <input
-                list="submission-institutes"
-                value={institute}
-                placeholder="Search institutes"
-                onChange={(event) => {
-                  setInstitute(event.target.value);
-                  setDegreeProgram("");
-                }}
-              />
-              <datalist id="submission-institutes">
-                {instituteNames.map((name) => (
-                  <option key={name} value={name} />
-                ))}
-              </datalist>
-            </label>
-            <label>
-              Program
-              <input
-                list="submission-programs"
-                value={degreeProgram}
-                placeholder={
-                  institute ? "Search programs" : "Choose an institute first"
-                }
-                disabled={
-                  !instituteNames.includes(
-                    institute as (typeof instituteNames)[number],
-                  )
-                }
-                onChange={(event) => setDegreeProgram(event.target.value)}
-              />
-              <datalist id="submission-programs">
-                {(
-                  programsByInstitute[
-                    institute as keyof typeof programsByInstitute
-                  ] ?? []
-                ).map((program) => (
-                  <option key={program} value={program} />
-                ))}
-              </datalist>
-            </label>
           </div>
-          <fieldset className="author-editor submission-authors">
-            <legend>Authors</legend>
-            {authors.map((author, index) => (
-              <div className="author-row" key={index}>
-                <label>
-                  Author name
-                  <input
-                    value={author.author_name}
-                    onChange={(event) =>
-                      changeAuthor(index, { author_name: event.target.value })
-                    }
-                    maxLength={255}
-                  />
-                </label>
-                {authors.length > 1 && (
-                  <Button
-                    variant="secondary"
-                    onClick={() => removeAuthor(index)}
-                  >
-                    Remove
-                  </Button>
-                )}
-              </div>
-            ))}
-            <Button variant="secondary" onClick={addAuthor}>
-              Add author
-            </Button>
-          </fieldset>
-          <fieldset className="author-editor submission-file">
-            <legend>Manuscript file (optional)</legend>
-            <div className="score-grid">
-              <label>
-                Document type
-                <select
-                  value={documentType}
-                  onChange={(event) =>
-                    setDocumentType(
-                      event.target
-                        .value as DocumentFileResource["document_type"],
-                    )
-                  }
-                >
-                  {(isRevisionRequired
-                    ? [
-                        {
-                          value: "revised_manuscript",
-                          label: "Revised manuscript",
-                        },
-                        ...submissionDocumentTypes,
-                      ]
-                    : submissionDocumentTypes
-                  ).map((type) => (
-                    <option key={type.value} value={type.value}>
-                      {type.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <ManuscriptFilePicker
-                label="PDF or DOCX (maximum 25 MB)"
-                help="PDF or DOCX, maximum 25 MB"
-                inputRef={fileInput}
-                accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                file={manuscript}
-                onChange={(event) =>
-                  setManuscript(event.target.files?.[0] ?? null)
-                }
-              />
+
+          {metadataOnly ? (
+            <div className="metadata-sdg">
+              <SdgSelector selectedIds={sdgIds} onChange={setSdgIds} />
             </div>
-          </fieldset>
+          ) : (
+            <SdgSelector selectedIds={sdgIds} onChange={setSdgIds} />
+          )}
+
+          {!metadataOnly && (
+            <fieldset className="author-editor submission-authors">
+              <legend>Authors</legend>
+              {authors.map((author, index) => (
+                <div className="author-row" key={index}>
+                  <label>
+                    Author name
+                    <input
+                      value={author.author_name}
+                      onChange={(event) =>
+                        changeAuthor(index, { author_name: event.target.value })
+                      }
+                      maxLength={255}
+                    />
+                  </label>
+                  {authors.length > 1 && (
+                    <Button
+                      variant="secondary"
+                      onClick={() => removeAuthor(index)}
+                    >
+                      Remove
+                    </Button>
+                  )}
+                </div>
+              ))}
+              <Button variant="secondary" onClick={addAuthor}>
+                Add author
+              </Button>
+            </fieldset>
+          )}
+          {!metadataOnly && (
+            <fieldset className="author-editor submission-file">
+              <legend>Manuscript file (optional)</legend>
+              <div className="score-grid">
+                <label>
+                  Document type
+                  <select
+                    value={documentType}
+                    onChange={(event) =>
+                      setDocumentType(
+                        event.target
+                          .value as DocumentFileResource["document_type"],
+                      )
+                    }
+                  >
+                    {(isRevisionRequired
+                      ? [
+                          {
+                            value: "revised_manuscript",
+                            label: "Revised manuscript",
+                          },
+                          ...submissionDocumentTypes,
+                        ]
+                      : submissionDocumentTypes
+                    ).map((type) => (
+                      <option key={type.value} value={type.value}>
+                        {type.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <ManuscriptFilePicker
+                  label="PDF (maximum 25 MB)"
+                  help="PDF only, maximum 25 MB"
+                  inputRef={fileInput}
+                  accept=".pdf,application/pdf"
+                  file={manuscript}
+                  onChange={(event) =>
+                    setManuscript(event.target.files?.[0] ?? null)
+                  }
+                />
+              </div>
+            </fieldset>
+          )}
+
           <div className="modal-actions submission-actions">
             <Button
               type="button"
@@ -8073,13 +9851,15 @@ export function ResearcherNewSubmission({
             <Button type="submit" value="draft" disabled={saving}>
               {saving
                 ? "Saving…"
-                : isRevisionRequired
-                  ? "Save changes"
-                  : draft
-                    ? "Update draft"
-                    : "Save draft"}
+                : metadataOnly
+                  ? "Save metadata"
+                  : isRevisionRequired
+                    ? "Save changes"
+                    : draft
+                      ? "Update draft"
+                      : "Save draft"}
             </Button>
-            {!isRevisionRequired && (
+            {!metadataOnly && !isRevisionRequired && (
               <Button type="submit" value="submit" disabled={saving}>
                 {saving ? "Working…" : "Save and submit"}
               </Button>
@@ -8111,6 +9891,8 @@ export function ResearcherNewSubmission({
 }
 
 const MAX_SIMILARITY_QUERY_LENGTH = 200;
+const MAX_CONTENT_UPLOAD_BYTES = 30 * 1024 * 1024;
+const CONTENT_UPLOAD_ACCEPT = ".pdf,application/pdf";
 
 /**
  * Pre-submission duplicate check.
@@ -8122,19 +9904,34 @@ const MAX_SIMILARITY_QUERY_LENGTH = 200;
 function ResearcherSimilarityCheck({
   role,
   initialMode = "title",
-  showModePicker = false,
 }: {
   role: Role;
   initialMode?: "title" | "content";
-  showModePicker?: boolean;
 }) {
-  const [mode, setMode] = useState(initialMode);
+  const mode = initialMode;
   const [draft, setDraft] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const folderInput = useRef<HTMLInputElement>(null);
+  const [fileError, setFileError] = useState("");
+  const [checkProgress, setCheckProgress] = useState(0);
   const [submitted, setSubmitted] = useState("");
+  const [selectedExtractedFile, setSelectedExtractedFile] = useState<
+    number | null
+  >(null);
+  const [openFileDetails, setOpenFileDetails] = useState<number | null>(null);
   const [state, setState] = useState<
     | { status: "idle" }
     | { status: "checking" }
-    | { status: "ready"; matches: ResearchRecord[] }
+    | {
+        status: "ready";
+        matches: ResearchRecord[];
+        fileName: string;
+        diagnostics: Awaited<
+          ReturnType<typeof checkContentUploadSimilarity>
+        >["diagnostics"];
+        extractedText: string;
+      }
     | { status: "error"; message: string }
   >({ status: "idle" });
   const [metadataResearchId, setMetadataResearchId] = useState<
@@ -8142,26 +9939,73 @@ function ResearcherSimilarityCheck({
   >(null);
 
   const trimmed = draft.trim();
+
+  useEffect(() => {
+    if (state.status !== "checking") return;
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      setCheckProgress(processingProgress(Date.now() - startedAt));
+    }, 1_000);
+    return () => window.clearInterval(timer);
+  }, [state.status]);
   const tooShort = trimmed.length > 0 && trimmed.length < 2;
   const canCheck =
-    trimmed.length >= 2 &&
-    trimmed.length <= MAX_SIMILARITY_QUERY_LENGTH &&
-    state.status !== "checking";
+    state.status !== "checking" &&
+    (mode === "title"
+      ? trimmed.length >= 2 && trimmed.length <= MAX_SIMILARITY_QUERY_LENGTH
+      : files.length > 0 && fileError === "");
 
   function runCheck() {
     if (!canCheck) return;
-    setSubmitted(trimmed);
+    setSelectedExtractedFile(null);
+    setOpenFileDetails(null);
+    setSubmitted(mode === "title" ? trimmed : (file?.name ?? "manuscript"));
+    setCheckProgress(processingProgress(0));
     setState({ status: "checking" });
     const request =
       mode === "title"
         ? checkTitleQuerySimilarity(trimmed)
-        : checkContentQuerySimilarity(trimmed);
+        : checkContentUploadSimilarity(files);
     void request
-      .then((matches) => setState({ status: "ready", matches }))
+      .then((result) =>
+        setState(
+          mode === "title"
+            ? {
+                status: "ready",
+                matches: result as ResearchRecord[],
+                fileName: "",
+                diagnostics: [],
+                extractedText: "",
+              }
+            : {
+                status: "ready",
+                matches: (
+                  result as Awaited<
+                    ReturnType<typeof checkContentUploadSimilarity>
+                  >
+                ).matches,
+                fileName: (
+                  result as Awaited<
+                    ReturnType<typeof checkContentUploadSimilarity>
+                  >
+                ).fileName,
+                diagnostics: (
+                  result as Awaited<
+                    ReturnType<typeof checkContentUploadSimilarity>
+                  >
+                ).diagnostics,
+                extractedText: (
+                  result as Awaited<
+                    ReturnType<typeof checkContentUploadSimilarity>
+                  >
+                ).extractedText,
+              },
+        ),
+      )
       .catch((requestError: unknown) =>
         setState({
           status: "error",
-          message: similarityQueryError(requestError),
+          message: similarityQueryError(requestError, mode),
         }),
       );
   }
@@ -8176,6 +10020,18 @@ function ResearcherSimilarityCheck({
           return percentage === null || Number(percentage) > 0;
         })
       : [];
+  const selectedDiagnostic =
+    state.status === "ready" && selectedExtractedFile !== null
+      ? state.diagnostics.find(
+          (diagnostic) => diagnostic.index === selectedExtractedFile,
+        )
+      : undefined;
+  const displayedExtractedText =
+    selectedDiagnostic?.extractedText ??
+    (state.status === "ready" ? state.extractedText : "");
+  const displayedExtractedFile = selectedDiagnostic
+    ? files[selectedDiagnostic.index]
+    : undefined;
   const reviewRequired = scored.filter(
     (match) => match.adviserReviewRequired === true,
   );
@@ -8189,34 +10045,11 @@ function ResearcherSimilarityCheck({
         description={
           mode === "title"
             ? "Compare a proposed title or keywords only with archived research titles."
-            : "Search your keywords only against cached archived manuscript content."
+            : "Upload a manuscript to compare its extracted text with archived research."
         }
       />
 
-      {showModePicker && (
-        <div className="similarity-mode-picker" aria-label="Similarity mode">
-          <Button
-            variant={mode === "title" ? "primary" : "secondary"}
-            onClick={() => {
-              setMode("title");
-              setState({ status: "idle" });
-            }}
-          >
-            Title checker
-          </Button>
-          <Button
-            variant={mode === "content" ? "primary" : "secondary"}
-            onClick={() => {
-              setMode("content");
-              setState({ status: "idle" });
-            }}
-          >
-            Content checker
-          </Button>
-        </div>
-      )}
-
-      <section className="panel-card admin-provision-card">
+      <section className="panel-card admin-provision-card similarity-query-panel">
         <form
           className="similarity-query-form"
           role="search"
@@ -8225,196 +10058,568 @@ function ResearcherSimilarityCheck({
             runCheck();
           }}
         >
-          <label className="full-field" htmlFor="similarity-query">
-            {mode === "title"
-              ? "Proposed title or keywords"
-              : "Content keywords"}
-            <input
-              id="similarity-query"
-              type="search"
-              value={draft}
-              maxLength={MAX_SIMILARITY_QUERY_LENGTH}
-              placeholder={
-                mode === "title"
-                  ? "e.g. web-based inventory management system for small business"
-                  : "e.g. machine learning student performance prediction"
-              }
-              onChange={(event) => setDraft(event.target.value)}
-            />
-          </label>
+          {mode === "title" ? (
+            <label className="full-field" htmlFor="similarity-query">
+              Research title or keywords
+              <input
+                id="similarity-query"
+                type="search"
+                value={draft}
+                maxLength={MAX_SIMILARITY_QUERY_LENGTH}
+                placeholder="Enter your proposed research title..."
+                onChange={(event) => {
+                  setDraft(event.target.value);
+                  const input = event.currentTarget;
+                  window.requestAnimationFrame(() => {
+                    const end = input.value.length;
+                    input.setSelectionRange(end, end);
+                  });
+                }}
+              />
+            </label>
+          ) : (
+            <>
+              <ManuscriptFilePicker
+                label="Manuscript file"
+                help="Choose one PDF, or select a folder containing PDF parts"
+                accept={CONTENT_UPLOAD_ACCEPT}
+                file={file}
+                disabled={state.status === "checking"}
+                onChooseFolder={() => {
+                  const input = folderInput.current;
+                  if (!input) return;
+                  Object.assign(input, {
+                    webkitdirectory: true,
+                    directory: true,
+                  });
+                  input.click();
+                }}
+                onDropFiles={(selected) => {
+                  setState({ status: "idle" });
+                  setSubmitted("");
+                  const actualFiles = selected.filter(
+                    (item) =>
+                      item.name !== "" || item.type !== "" || item.size > 0,
+                  );
+                  if (
+                    actualFiles.some(
+                      (item) =>
+                        !item.name.toLowerCase().endsWith(".pdf") &&
+                        item.type.toLowerCase() !== "application/pdf",
+                    )
+                  ) {
+                    setFile(null);
+                    setFiles([]);
+                    setFileError(
+                      "Folder uploads are accepted only when every file is a PDF.",
+                    );
+                    return;
+                  }
+                  selected = actualFiles;
+                  if (!selected.length) {
+                    setFile(null);
+                    setFiles([]);
+                    setFileError(
+                      "No PDF files were found. Use Select PDF folder if your browser cannot read a dropped folder.",
+                    );
+                    return;
+                  }
+                  if (selected.length > 20) {
+                    setFile(null);
+                    setFiles([]);
+                    setFileError("Choose no more than 20 PDF files.");
+                    return;
+                  }
+                  if (
+                    selected.some(
+                      (item) => item.size > MAX_CONTENT_UPLOAD_BYTES,
+                    )
+                  ) {
+                    setFile(null);
+                    setFiles([]);
+                    setFileError("Each PDF must be no larger than 30 MiB.");
+                    return;
+                  }
+                  if (
+                    selected.reduce((total, item) => total + item.size, 0) >
+                    100 * 1024 * 1024
+                  ) {
+                    setFile(null);
+                    setFiles([]);
+                    setFileError(
+                      "The selected PDFs may not exceed 100 MiB together.",
+                    );
+                    return;
+                  }
+                  setFile(selected.length === 1 ? selected[0] : null);
+                  setFiles(selected);
+                  setFileError("");
+                }}
+                onChange={(event) => {
+                  const selected = event.target.files?.[0] ?? null;
+                  setState({ status: "idle" });
+                  setSubmitted("");
+                  if (!selected) {
+                    setFile(null);
+                    setFiles([]);
+                    setFileError("");
+                    return;
+                  }
+                  const extension = selected.name
+                    .split(".")
+                    .pop()
+                    ?.toLowerCase();
+                  if (extension !== "pdf") {
+                    setFile(null);
+                    setFiles([]);
+                    setFileError("Choose one PDF file.");
+                    return;
+                  }
+                  if (selected.size > MAX_CONTENT_UPLOAD_BYTES) {
+                    setFile(null);
+                    setFiles([]);
+                    setFileError("Choose a file no larger than 30 MiB.");
+                    return;
+                  }
+                  setFile(selected);
+                  setFiles([selected]);
+                  setFileError("");
+                }}
+              />
+              <input
+                ref={folderInput}
+                className="manuscript-folder-input"
+                aria-label="Manuscript folder"
+                type="file"
+                accept="application/pdf,.pdf"
+                multiple
+                {...({
+                  webkitdirectory: "",
+                  directory: "",
+                } as React.InputHTMLAttributes<HTMLInputElement>)}
+                disabled={state.status === "checking"}
+                onChange={(event) => {
+                  const selected = Array.from(event.target.files ?? []);
+                  setState({ status: "idle" });
+                  setSubmitted("");
+                  if (!selected.length) return;
+                  if (selected.length > 20) {
+                    setFile(null);
+                    setFiles([]);
+                    setFileError("Choose no more than 20 PDF files.");
+                    return;
+                  }
+                  if (
+                    selected.some(
+                      (item) => !item.name.toLowerCase().endsWith(".pdf"),
+                    )
+                  ) {
+                    setFile(null);
+                    setFiles([]);
+                    setFileError("Folder uploads may contain PDF files only.");
+                    return;
+                  }
+                  if (
+                    selected.some(
+                      (item) => item.size > MAX_CONTENT_UPLOAD_BYTES,
+                    )
+                  ) {
+                    setFile(null);
+                    setFiles([]);
+                    setFileError("Each PDF must be no larger than 30 MiB.");
+                    return;
+                  }
+                  if (
+                    selected.reduce((total, item) => total + item.size, 0) >
+                    100 * 1024 * 1024
+                  ) {
+                    setFile(null);
+                    setFiles([]);
+                    setFileError(
+                      "The selected PDFs may not exceed 100 MiB together.",
+                    );
+                    return;
+                  }
+                  setFile(null);
+                  setFiles(selected);
+                  setFileError("");
+                }}
+              />
+              {files.length > 0 && !file && (
+                <p className="content-folder-summary">
+                  {files.length} PDF {files.length === 1 ? "file" : "files"}{" "}
+                  selected
+                </p>
+              )}
+              <div className="content-upload-guidance" id="content-upload-help">
+                <p>
+                  Scanned or image-only PDFs are not supported because this
+                  checker can only read selectable text.
+                </p>
+                <p>
+                  Your uploaded file is used only for this check and is not
+                  retained.
+                </p>
+              </div>
+              {fileError && (
+                <p className="admin-error" role="alert">
+                  {fileError}
+                </p>
+              )}
+            </>
+          )}
           <div className="similarity-query-actions">
-            <span className="similarity-query-count">
-              {trimmed.length}/{MAX_SIMILARITY_QUERY_LENGTH}
-            </span>
+            {mode === "title" && (
+              <span className="similarity-query-count">
+                {trimmed.length}/{MAX_SIMILARITY_QUERY_LENGTH}
+              </span>
+            )}
             <Button type="submit" disabled={!canCheck}>
               {state.status === "checking"
-                ? "Checking…"
+                ? "Checking"
                 : mode === "title"
                   ? "Check Title"
                   : "Check content"}
             </Button>
           </div>
+          {mode === "title" && (
+            <p className="similarity-query-note">
+              <span aria-hidden="true">i</span>
+              Compares research titles only. Full manuscript checking is
+              available in Content Checker.
+            </p>
+          )}
         </form>
-        {tooShort && (
+        {mode === "title" && tooShort && (
           <p className="admin-empty">Enter at least two characters to check.</p>
         )}
       </section>
 
       {state.status === "checking" ? (
-        <Loading
-          label={
-            mode === "title"
-              ? "Comparing title with the repository"
-              : "Comparing manuscript content with the repository"
-          }
-        />
+        <div className="content-check-loading-backdrop">
+          <section
+            className={`content-check-loading${mode === "content" ? " content-check-loading-manuscript" : ""}`}
+            role="status"
+            aria-live="polite"
+            aria-busy="true"
+          >
+            <div className="content-check-loading-copy">
+              {mode === "content" && (
+                <span className="content-check-loading-icon" aria-hidden="true">
+                  <FileText />
+                </span>
+              )}
+              <div>
+                <span>
+                  {mode === "title"
+                    ? "Title similarity check"
+                    : "Content similarity check"}
+                </span>
+                <h2>
+                  {mode === "title"
+                    ? "Checking your proposed title"
+                    : "Processing your manuscript"}
+                </h2>
+              </div>
+            </div>
+            <p>
+              {mode === "title"
+                ? "Comparing the title with archived research titles. This may take a moment."
+                : "Extracting text and comparing it with archived research. This may take a moment."}
+            </p>
+            <div
+              className="content-check-loading-track"
+              role="progressbar"
+              aria-label={`${mode === "title" ? "Title" : "Content"} similarity progress`}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={checkProgress}
+            >
+              <i style={{ width: `${checkProgress}%` }} />
+            </div>
+            <div className="content-check-loading-meta">
+              <div>
+                {mode === "content" && (
+                  <i
+                    className="content-check-loading-spinner"
+                    aria-hidden="true"
+                  />
+                )}
+                <p>
+                  {mode === "title"
+                    ? "Ranking matching research titles"
+                    : "Extracting and comparing files"}
+                </p>
+              </div>
+              <strong>{checkProgress}%</strong>
+            </div>
+          </section>
+        </div>
       ) : state.status === "error" ? (
         <InlineError message={state.message} retry={runCheck} />
       ) : state.status === "ready" ? (
-        <section className="panel-card admin-data-card">
-          <div className="admin-card-heading">
-            <div>
-              <h2>
-                {mode === "title"
-                  ? `Title results for “${submitted}”`
-                  : `Content results for “${submitted}”`}
-              </h2>
-              <p>
-                {scored.length === 0
-                  ? "No archived study shares any terms with these keywords."
-                  : reviewRequired.length > 0
-                    ? `${reviewRequired.length} archived ${reviewRequired.length === 1 ? "study requires" : "studies require"} adviser review. Discuss these results with your adviser before proceeding.`
-                    : "No archived study requires adviser review."}
-              </p>
-            </div>
-            {reviewRequired.length > 0 && (
-              <span className="pending-invite-count">
-                {reviewRequired.length} require review
-              </span>
-            )}
-          </div>
-          {scored.length > 0 && (
-            <>
-              <div
-                className="checker-legend"
-                aria-label="Similarity classification legend"
-              >
-                <span>
-                  <strong>Low</strong> Below 40%
-                </span>
-                <span>
-                  <strong>Moderate</strong> 40% to 69.99%
-                </span>
-                <span>
-                  <strong>High</strong> 70% and above
-                </span>
+        <div className={mode === "content" ? "content-check-results-grid" : ""}>
+          <section className="panel-card admin-data-card content-check-ranking">
+            <div className="admin-card-heading">
+              <div>
+                <h2>
+                  {mode === "title"
+                    ? `Title results for “${submitted}”`
+                    : "Top Repository Matches"}
+                </h2>
+                <p>
+                  {mode === "content" && scored.length > 0
+                    ? `Ranked content similarity results for “${submitted}”.`
+                    : scored.length === 0
+                      ? mode === "title"
+                        ? "No archived study shares any terms with these keywords."
+                        : `No archived study shares extracted terms with “${submitted}”.`
+                      : reviewRequired.length > 0
+                        ? `${reviewRequired.length} archived ${reviewRequired.length === 1 ? "study requires" : "studies require"} adviser review. Discuss these results with your adviser before proceeding.`
+                        : "No archived study requires adviser review."}
+                </p>
               </div>
-              <div
-                className={`admin-table-wrap checker-results-scroll${mode === "content" && scored.length > 6 ? " is-scrollable" : ""}`}
-              >
-                <table>
-                  <caption className="sr-only">
-                    Archived studies ranked by similarity to your keywords
-                  </caption>
-                  <thead>
-                    <tr>
-                      <th scope="col">Archived title</th>
-                      <th scope="col">Year</th>
-                      <th scope="col">Shared terms</th>
-                      <th scope="col">Similarity</th>
-                      <th scope="col">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {scored.map((match) => {
-                      const overall = formatSimilarityPercentage(
-                        mode === "title"
-                          ? match.titleSimilarityPercentage
-                          : match.contentSimilarityPercentage,
-                      );
-                      const classification = classificationLabel(
-                        match.classification,
-                      );
-                      const content = formatSimilarityPercentage(
-                        match.contentSimilarityPercentage,
-                      );
-                      const contentUnavailable =
-                        match.scoreStatus === "content_unavailable" || !content;
-                      return (
-                        <tr key={match.id}>
-                          <td className="serif-cell checker-title-cell">
-                            {match.title}
-                          </td>
-                          <td className="checker-year-cell">{match.year}</td>
-                          <td className="checker-terms-cell">
-                            {match.matchedTerms && match.matchedTerms.length > 0
-                              ? match.matchedTerms.map((term) => (
-                                  <span className="checker-term" key={term}>
-                                    {term}
-                                  </span>
-                                ))
-                              : "—"}
-                          </td>
-                          <td className="checker-similarity-cell">
-                            <span className="score-cell checker-score-cell">
-                              <strong>
-                                {overall ??
-                                  `${mode === "title" ? "Title" : "Content"} similarity unavailable`}
-                              </strong>
-                              <span className="sr-only">
-                                {mode === "title" ? "Title" : "Content"}{" "}
-                                similarity
-                              </span>
-                              <span
+              {reviewRequired.length > 0 && (
+                <span className="pending-invite-count">
+                  {reviewRequired.length} require review
+                </span>
+              )}
+              {mode === "content" && scored.length > 0 && (
+                <span className="checker-result-total">
+                  {scored.length} results
+                </span>
+              )}
+            </div>
+            {scored.length > 0 && (
+              <>
+                <div
+                  className="checker-legend"
+                  aria-label="Similarity classification legend"
+                >
+                  <span>
+                    <strong>Low</strong> Below 40%
+                  </span>
+                  <span>
+                    <strong>Moderate</strong> 40% to 69.99%
+                  </span>
+                  <span>
+                    <strong>High</strong> 70% and above
+                  </span>
+                </div>
+                <ol
+                  className={`checker-match-list${scored.length > 6 ? " is-scrollable" : ""}`}
+                  aria-label="Archived studies ranked by similarity"
+                >
+                  {scored.map((match, index) => {
+                    const overall = formatSimilarityPercentage(
+                      mode === "title"
+                        ? match.titleSimilarityPercentage
+                        : match.contentSimilarityPercentage,
+                    );
+                    const classification = classificationLabel(
+                      match.classification,
+                    );
+                    const content = formatSimilarityPercentage(
+                      match.contentSimilarityPercentage,
+                    );
+                    const contentUnavailable =
+                      match.scoreStatus === "content_unavailable" || !content;
+                    return (
+                      <li key={match.id}>
+                        <span
+                          className="checker-match-rank"
+                          aria-label={`Rank ${index + 1}`}
+                        >
+                          {String(index + 1).padStart(2, "0")}
+                        </span>
+                        <div className="checker-match-copy">
+                          <h3>{match.title}</h3>
+                          <div className="checker-match-details">
+                            <span>
+                              Study ID <strong>{match.id}</strong>
+                            </span>
+                            <span>
+                              Year <strong>{match.year}</strong>
+                            </span>
+                            <span>
+                              Classification{" "}
+                              <strong
                                 className={
-                                  match.classification === "low"
-                                    ? "sr-only"
-                                    : "checker-score-classification"
+                                  match.classification
+                                    ? `checker-classification-${match.classification}`
+                                    : undefined
                                 }
                               >
                                 {classification ?? "Unavailable"}
-                              </span>
-                              {match.adviserReviewRequired && (
-                                <span>
-                                  This result has been flagged for adviser
-                                  review. The system does not automatically
-                                  reject the research.
-                                </span>
-                              )}
-                              {match.titleMatchAlert && (
-                                <span>Near-exact title match alert</span>
-                              )}
-                              {mode === "content" && contentUnavailable && (
-                                <span>Content similarity unavailable</span>
-                              )}
+                              </strong>
                             </span>
-                          </td>
-                          <td>
-                            <button
-                              className="icon-button"
-                              aria-label={`Open metadata for ${match.title}`}
-                              title="Open metadata"
-                              onClick={() => setMetadataResearchId(match.id)}
-                            >
-                              <ExternalLink size={17} aria-hidden="true" />
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                          </div>
+                          {match.adviserReviewRequired && (
+                            <p>
+                              This result has been flagged for adviser review.
+                              The system does not automatically reject the
+                              research.
+                            </p>
+                          )}
+                          {match.titleMatchAlert && (
+                            <p>Near-exact title match alert</p>
+                          )}
+                          {mode === "content" && contentUnavailable && (
+                            <p>Content similarity unavailable</p>
+                          )}
+                        </div>
+                        <div
+                          className={`checker-match-score${match.classification ? ` is-${match.classification}` : ""}`}
+                        >
+                          <span>
+                            {mode === "title" ? "Title" : "Content"} similarity
+                          </span>
+                          <strong>{overall ?? "Unavailable"}</strong>
+                        </div>
+                        <button
+                          className="icon-button checker-match-action"
+                          aria-label={`Open metadata for ${match.title}`}
+                          title="Open metadata"
+                          onClick={() => setMetadataResearchId(match.id)}
+                        >
+                          <ExternalLink size={17} aria-hidden="true" />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ol>
+                {hasLowResult && (
+                  <p className="admin-empty">
+                    <strong>Note:</strong> The system detected low similarity
+                    based on the configured comparison method. Low similarity
+                    does not prove originality.
+                  </p>
+                )}
+              </>
+            )}
+          </section>
+          {mode === "content" && (
+            <section
+              className="panel-card content-check-extraction"
+              aria-labelledby="content-extraction-title"
+            >
+              <div className="content-check-extraction-heading">
+                <span aria-hidden="true">PDF</span>
+                <div>
+                  <h2 id="content-extraction-title">Files processed</h2>
+                  <p>{state.fileName}</p>
+                </div>
               </div>
-              {hasLowResult && (
-                <p className="admin-empty">
-                  <strong>Note:</strong> The system detected low similarity
-                  based on the configured comparison method. Low similarity does
-                  not prove originality.
-                </p>
-              )}
-            </>
+              <ul className="content-check-file-results">
+                {state.diagnostics.map((diagnostic) => {
+                  const selectedFile = files[diagnostic.index];
+                  return (
+                    <li
+                      key={`${diagnostic.index}-${selectedFile?.name ?? "file"}`}
+                    >
+                      <details open={openFileDetails === diagnostic.index}>
+                        <summary
+                          onClick={(event) => {
+                            event.preventDefault();
+                            setOpenFileDetails((current) =>
+                              current === diagnostic.index
+                                ? null
+                                : diagnostic.index,
+                            );
+                          }}
+                        >
+                          <button
+                            type="button"
+                            className="content-check-file-select"
+                            disabled={!diagnostic.extractedText}
+                            aria-pressed={
+                              selectedExtractedFile === diagnostic.index
+                            }
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              setSelectedExtractedFile(diagnostic.index);
+                            }}
+                          >
+                            {selectedFile?.name ??
+                              `File ${diagnostic.index + 1}`}
+                          </button>
+                          <strong>
+                            {diagnosticLabel(
+                              diagnostic.status,
+                              diagnostic.kind,
+                            )}
+                          </strong>
+                        </summary>
+                        <dl>
+                          <div>
+                            <dt>Extraction</dt>
+                            <dd>
+                              {diagnostic.extractionSuccess
+                                ? "Successful"
+                                : "Failed"}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Text length</dt>
+                            <dd>
+                              {diagnostic.textLength.toLocaleString()}{" "}
+                              characters
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Chapters</dt>
+                            <dd>
+                              {diagnostic.detectedChapters.length
+                                ? diagnostic.detectedChapters.join(", ")
+                                : "None detected"}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Similarity eligibility</dt>
+                            <dd>
+                              {diagnostic.eligible ? "Included" : "Excluded"}
+                            </dd>
+                          </div>
+                          {diagnostic.reason && (
+                            <div>
+                              <dt>Reason</dt>
+                              <dd>{label(diagnostic.reason)}</dd>
+                            </div>
+                          )}
+                        </dl>
+                      </details>
+                    </li>
+                  );
+                })}
+              </ul>
+              <p className="content-check-extraction-note">
+                Eligible manuscript files are assembled once in chapter order
+                before the overall repository comparison.
+              </p>
+            </section>
           )}
-        </section>
+          {mode === "content" && displayedExtractedText && (
+            <section
+              className="panel-card content-check-full-text"
+              aria-labelledby="content-full-text-title"
+            >
+              <div className="admin-card-heading">
+                <div>
+                  <h2 id="content-full-text-title">
+                    Extracted manuscript text
+                  </h2>
+                  <p>
+                    {displayedExtractedFile
+                      ? `Extracted text from ${displayedExtractedFile.name}.`
+                      : "Full text assembled from the eligible files used in this comparison."}
+                  </p>
+                </div>
+              </div>
+              <pre>{displayedExtractedText}</pre>
+            </section>
+          )}
+        </div>
       ) : null}
       {metadataResearchId !== null && (
         <PublicResearchMetadataDialog
@@ -8426,12 +10631,36 @@ function ResearcherSimilarityCheck({
   );
 }
 
-function similarityQueryError(error: unknown) {
+function diagnosticLabel(status: string, kind: string) {
+  if (status === "error") return "Extraction failed";
+  if (status === "duplicate") return "Duplicate file";
+  if (kind === "supporting_document") return "Supporting document";
+  if (status === "excluded") return "Excluded";
+  return "Manuscript content";
+}
+
+function similarityQueryError(error: unknown, mode: "title" | "content") {
   if (error instanceof ApiError) {
+    if (
+      error.code === "CONTENT_UPLOAD_PDF_TEXT_UNREADABLE" ||
+      error.code === "CONTENT_UPLOAD_UNREADABLE"
+    )
+      return "We could not extract readable text from this PDF. Scanned or image-only PDFs are not currently supported.";
+    if (
+      error.code === "CONTENT_UPLOAD_CHAPTER_ONE_NOT_FOUND" ||
+      error.code === "CONTENT_UPLOAD_INVALID_SCOPE"
+    )
+      return "We could not find the beginning of Chapter 1 in the extracted text. Confirm that the PDF contains selectable text and a clearly labeled Chapter 1, Kabanata 1, or supported equivalent.";
+    if (error.code === "CONTENT_UPLOAD_CHAPTER_ORDER_INVALID")
+      return "The manuscript chapters were detected in an invalid order. Confirm that the main Chapter 1 appears before the succeeding chapters.";
+    if (error.code === "CONTENT_UPLOAD_CHAPTER_SCOPE_EMPTY")
+      return "Chapter 1 was detected, but no readable manuscript content was found within the supported checking scope.";
     if (error.status === 429)
       return "Too many checks in a short time. Wait a moment and try again.";
     if (error.status === 422)
-      return "Enter between 2 and 200 characters to check a title.";
+      return mode === "title"
+        ? "Enter between 2 and 200 characters to check a title."
+        : "Choose one PDF file no larger than 30 MiB.";
     if (error.code === "SIMILARITY_UNAVAILABLE")
       return "The similarity engine is not available right now.";
     if (error.code === "SIMILARITY_PROCESS_FAILED")
@@ -8453,13 +10682,33 @@ function ResearcherRelatedStudies({
   const [attempt, reload] = useAttempt();
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [sort, setSort] = useState<
+    "title" | "submission_status" | "updated_at" | null
+  >(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const state = useLoad(
     () =>
-      listResearchDocuments({ mine: true, page, per_page: 10 }).then(
-        requireResearcherPage,
-      ),
+      listResearchDocuments({
+        mine: true,
+        sort: sort || undefined,
+        direction: sort ? sortDirection : undefined,
+        page,
+        per_page: 10,
+      }).then(requireResearcherPage),
     attempt,
   );
+
+  function changeSort(column: NonNullable<typeof sort>) {
+    setPage(1);
+    setSelectedId(null);
+    reload();
+    if (sort === column) {
+      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSort(column);
+    setSortDirection("asc");
+  }
   const selected =
     state.status === "ready"
       ? (state.data.data.find((document) => document.id === selectedId) ??
@@ -8506,9 +10755,36 @@ function ResearcherRelatedStudies({
                 <caption className="sr-only">Your submissions</caption>
                 <thead>
                   <tr>
-                    <th>Title</th>
-                    <th>Status</th>
-                    <th>Updated</th>
+                    <SortableHeader
+                      sortKey="title"
+                      activeSort={sort}
+                      direction={sortDirection}
+                      onSort={(key) =>
+                        changeSort(key as NonNullable<typeof sort>)
+                      }
+                    >
+                      Title
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="submission_status"
+                      activeSort={sort}
+                      direction={sortDirection}
+                      onSort={(key) =>
+                        changeSort(key as NonNullable<typeof sort>)
+                      }
+                    >
+                      Status
+                    </SortableHeader>
+                    <SortableHeader
+                      sortKey="updated_at"
+                      activeSort={sort}
+                      direction={sortDirection}
+                      onSort={(key) =>
+                        changeSort(key as NonNullable<typeof sort>)
+                      }
+                    >
+                      Updated
+                    </SortableHeader>
                   </tr>
                 </thead>
                 <tbody>
@@ -8526,7 +10802,7 @@ function ResearcherRelatedStudies({
                         </label>
                       </td>
                       <td>{label(record.submission_status)}</td>
-                      <td>{displayDate(record.submitted_at)}</td>
+                      <td>{displayDate(record.updated_at)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -8534,6 +10810,7 @@ function ResearcherRelatedStudies({
             </div>
             <Pagination
               meta={state.data.meta}
+              noun="manuscripts"
               onPage={(nextPage) => {
                 setSelectedId(null);
                 setPage(nextPage);

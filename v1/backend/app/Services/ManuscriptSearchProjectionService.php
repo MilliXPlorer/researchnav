@@ -7,7 +7,6 @@ use App\Models\ManuscriptSearchDocument;
 use App\Models\ResearchDocument;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
 
 class ManuscriptSearchProjectionService
 {
@@ -15,9 +14,14 @@ class ManuscriptSearchProjectionService
 
     private const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
+    private const DOC_MIME = 'application/msword';
+
+    private const MAX_FINAL_SOURCE_FILES = 20;
+
+    private const MAX_FINAL_SOURCE_BYTES = 400 * 1024 * 1024;
+
     public function __construct(
         private readonly ManuscriptTextExtractor $extractor,
-        private readonly SupabaseStorageService $storage,
     ) {}
 
     /** @return 'indexed'|'skipped'|'failed'|'no_source'|'unsupported'|'ineligible' */
@@ -30,24 +34,37 @@ class ManuscriptSearchProjectionService
             return 'ineligible';
         }
 
-        $source = $this->resolveSource($document);
+        $resolution = $this->resolveSource($document);
+        $source = $resolution['source'];
         $projection = ManuscriptSearchDocument::query()->where('research_document_id', $documentId)->first();
-        if (! $force && $this->isCurrentReadyProjection($projection, $source)) {
+        if (! $force && $this->isCurrentReadyProjectionForSource($projection, $source)) {
             return 'skipped';
         }
-        if (! $force && ! $retryFailed && $this->isCurrentFailedProjection($projection, $source)) {
+        if (! $force && $this->isCurrentResolutionFailure($projection, $resolution)) {
+            return 'skipped';
+        }
+        if (! $force && $this->isCurrentTerminalProjection($projection, $source)
+            && ($projection->extraction_status === 'unsupported' || ! $retryFailed)) {
             return 'skipped';
         }
 
-        if ($source === null) {
+        if ($resolution['state'] === 'no_source') {
             return $this->persistNoSource($documentId);
         }
-        if ($source['extension'] === 'doc') {
+        if ($resolution['state'] === 'invalid') {
+            return $this->persistResolutionFailure($documentId, 'invalid', 'INVALID_SOURCE');
+        }
+        if ($resolution['state'] === 'limit') {
+            return $this->persistResolutionFailure($documentId, 'limit', 'SOURCE_LIMIT_EXCEEDED');
+        }
+        if ($source['has_doc']) {
             return $this->persistFailure($documentId, $source, 'UNSUPPORTED_SOURCE', 'unsupported');
         }
 
         try {
             [$bodyText, $source] = $this->extractSource($source);
+        } catch (\LengthException) {
+            return $this->persistFailure($documentId, $source, 'AGGREGATE_OUTPUT_LIMIT_EXCEEDED', 'failed');
         } catch (\Throwable) {
             return $this->persistFailure($documentId, $source, 'EXTRACTION_FAILED', 'failed');
         }
@@ -64,6 +81,48 @@ class ManuscriptSearchProjectionService
             ['research_document_id' => $documentId],
             $this->clearedValues(null, 'pending', null),
         );
+    }
+
+    public function isCurrentReadyProjection(ResearchDocument $document, ?ManuscriptSearchDocument $projection): bool
+    {
+        return $this->isCurrentReadyProjectionForSource($projection, $this->resolveSource($document)['source']);
+    }
+
+    public function currentCanonicalText(ResearchDocument $document): ?string
+    {
+        $resolution = $this->resolveSource($document);
+        if ($resolution['state'] !== 'source' || $resolution['source']['has_doc']) {
+            return null;
+        }
+
+        try {
+            $source = $resolution['source'];
+            $files = isset($source['files']) ? $source['files'] : [$source];
+            $parts = [];
+            foreach ($files as $index => $file) {
+                $parts[] = ['index' => $index, 'text' => $this->extractor->extractRaw($file['path'])];
+            }
+
+            return app(UploadedContentSimilarityService::class)->canonicalText($parts);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /** @param list<string> $hashes */
+    public function hasCurrentSourceHash(ResearchDocument $document, array $hashes): bool
+    {
+        if ($hashes === []) {
+            return false;
+        }
+        $resolution = $this->resolveSource($document);
+        if ($resolution['state'] !== 'source') {
+            return false;
+        }
+        $source = $resolution['source'];
+        $files = isset($source['files']) ? $source['files'] : [$source];
+
+        return collect($files)->contains(fn (array $file): bool => in_array($file['sha256'], $hashes, true));
     }
 
     public function purgeIneligible(): int
@@ -85,7 +144,8 @@ class ManuscriptSearchProjectionService
 
                 return 'ineligible';
             }
-            if (! $this->sameSource($source, $this->resolveSource($document, true))) {
+            $resolution = $this->resolveSource($document, true);
+            if ($resolution['state'] !== 'source' || ! $this->sameSource($source, $resolution['source'])) {
                 $this->invalidate($documentId);
 
                 return 'skipped';
@@ -118,7 +178,8 @@ class ManuscriptSearchProjectionService
 
                 return 'ineligible';
             }
-            if (! $this->sameSource($source, $this->resolveSource($document, true))) {
+            $resolution = $this->resolveSource($document, true);
+            if ($resolution['state'] !== 'source' || ! $this->sameSource($source, $resolution['source'])) {
                 $this->invalidate($documentId);
 
                 return 'skipped';
@@ -141,7 +202,7 @@ class ManuscriptSearchProjectionService
 
                 return 'ineligible';
             }
-            if ($this->resolveSource($document, true) !== null) {
+            if ($this->resolveSource($document, true)['state'] !== 'no_source') {
                 $this->invalidate($documentId);
 
                 return 'skipped';
@@ -155,23 +216,69 @@ class ManuscriptSearchProjectionService
         });
     }
 
-    /** @return array{kind: string, file_id: int, path: string, extension: string, sha256: string, size: int, updated_at: ?string}|null */
-    private function resolveSource(ResearchDocument $document, bool $lock = false): ?array
+    private function persistResolutionFailure(int $documentId, string $state, string $errorCode): string
     {
-        $files = $document->files();
+        return DB::transaction(function () use ($documentId, $state, $errorCode): string {
+            $document = ResearchDocument::query()->lockForUpdate()->find($documentId);
+            if ($document === null || ! $this->isEligible($document)) {
+                $this->purge($documentId);
+
+                return 'ineligible';
+            }
+            if ($this->resolveSource($document, true)['state'] !== $state) {
+                $this->invalidate($documentId);
+
+                return 'skipped';
+            }
+            ManuscriptSearchDocument::query()->updateOrCreate(
+                ['research_document_id' => $documentId],
+                $this->clearedValues(null, 'failed', $errorCode),
+            );
+
+            return 'failed';
+        });
+    }
+
+    /** @return array{state: 'source'|'no_source'|'invalid'|'limit', source: ?array} */
+    private function resolveSource(ResearchDocument $document, bool $lock = false): array
+    {
+        $finalQuery = $document->files()
+            ->where('document_type', 'final_manuscript')
+            ->where('is_current', true);
         if ($lock) {
-            $files->lockForUpdate();
+            $finalQuery->lockForUpdate();
         }
-        $final = $files->where('document_type', 'final_manuscript')->where('is_current', true)
-            ->orderByDesc('version_number')->orderByDesc('uploaded_at')->orderByDesc('id')->first();
-        if ($final !== null) {
-            return $this->verifiedSource($document, $final, 'final_manuscript');
+        $finalLimits = (clone $finalQuery)
+            ->selectRaw('COUNT(*) as file_count, COALESCE(SUM(file_size), 0) as total_size')
+            ->first();
+        if ((int) $finalLimits->file_count > self::MAX_FINAL_SOURCE_FILES
+            || (int) $finalLimits->total_size > self::MAX_FINAL_SOURCE_BYTES) {
+            return ['state' => 'limit', 'source' => null];
+        }
+        if ($finalLimits->file_count > 0) {
+            $final = $finalQuery->orderBy('file_order')->orderBy('original_filename')->orderBy('id')->get();
+            if ($final->isEmpty()) {
+                return ['state' => 'no_source', 'source' => null];
+            }
+            if ($final->count() > self::MAX_FINAL_SOURCE_FILES || $final->sum('file_size') > self::MAX_FINAL_SOURCE_BYTES) {
+                return ['state' => 'limit', 'source' => null];
+            }
+            $sources = [];
+            foreach ($final as $file) {
+                $source = $this->verifiedSource($document, $file, 'final_manuscript');
+                if ($source === null) {
+                    return ['state' => 'invalid', 'source' => null];
+                }
+                $sources[] = $source;
+            }
+
+            return ['state' => 'source', 'source' => $this->aggregateFinalSource($sources)];
         }
 
         if (! is_string($document->import_source_sha256) || preg_match('/\A[a-f0-9]{64}\z/', $document->import_source_sha256) !== 1
             || ! is_string($document->import_source_filename) || basename($document->import_source_filename) !== $document->import_source_filename
             || strtolower(pathinfo($document->import_source_filename, PATHINFO_EXTENSION)) !== 'docx') {
-            return null;
+            return ['state' => 'no_source', 'source' => null];
         }
 
         $canonicalQuery = $document->files();
@@ -190,41 +297,27 @@ class ManuscriptSearchProjectionService
             ->get();
 
         if ($canonical->count() !== 1) {
-            return null;
+            return ['state' => 'no_source', 'source' => null];
         }
         $source = $this->verifiedSource($document, $canonical->sole(), 'canonical_import');
 
-        return $source !== null && hash_equals($document->import_source_sha256, $source['sha256']) ? $source : null;
+        return $source !== null && hash_equals($document->import_source_sha256, $source['sha256'])
+            ? ['state' => 'source', 'source' => $source]
+            : ['state' => 'no_source', 'source' => null];
     }
 
-    /** @return array{kind: string, file_id: int, path: string, extension: string, sha256: string, size: int, updated_at: ?string}|null */
+    /** @return array{kind: string, file_id: int, path: string, source_path: string, file_order: int, original_filename: string, extension: string, sha256: string, size: int, updated_at: ?string, has_doc: bool}|null */
     private function verifiedSource(ResearchDocument $document, DocumentFile $file, string $kind): ?array
     {
         $extension = strtolower((string) $file->file_extension);
-        $isSupabase = $this->storage->isSupabasePath($file->file_path);
         if (! in_array($extension, ManuscriptSearchDocument::SOURCE_EXTENSIONS, true)
             || ! $this->matchesMime($extension, $file->mime_type)
             || $file->file_size === null
-            || ($kind === 'final_manuscript' && ! $isSupabase && ! str_starts_with($file->file_path, 'research/'.$document->id.'/'))
-            || basename($file->file_path) !== $file->stored_filename) {
+            || ! is_string($file->file_path)
+            || $file->file_path === ''
+            || basename($file->file_path) !== $file->stored_filename
+            || ($document->import_source_sha256 === null && ! str_starts_with($file->file_path, 'research/'.$document->id.'/'))) {
             return null;
-        }
-        if ($isSupabase) {
-            if ((int) $file->file_size < 1 || ($file->content_sha256 !== null
-                && (! is_string($file->content_sha256) || preg_match('/\A[a-f0-9]{64}\z/', $file->content_sha256) !== 1))) {
-                return null;
-            }
-
-            return [
-                'kind' => $kind,
-                'file_id' => (int) $file->id,
-                'path' => $file->file_path,
-                'extension' => $extension,
-                'sha256' => $file->content_sha256 ?? '',
-                'size' => (int) $file->file_size,
-                'updated_at' => $file->updated_at?->format('Y-m-d H:i:s.u'),
-                'remote' => true,
-            ];
         }
         $path = $this->privatePath($file->file_path);
         if ($path === null) {
@@ -240,42 +333,91 @@ class ManuscriptSearchProjectionService
             'kind' => $kind,
             'file_id' => (int) $file->id,
             'path' => $path,
+            'source_path' => $file->file_path,
+            'file_order' => (int) $file->file_order,
+            'original_filename' => (string) $file->original_filename,
             'extension' => $extension,
             'sha256' => $hash,
             'size' => $size,
             'updated_at' => $file->updated_at?->format('Y-m-d H:i:s.u'),
+            'has_doc' => $extension === 'doc',
             'remote' => false,
+        ];
+    }
+
+    /** @param array<int, array{file_id: int, path: string, source_path: string, file_order: int, original_filename: string, extension: string, sha256: string, size: int, updated_at: ?string, has_doc: bool}> $files */
+    private function aggregateFinalSource(array $files): array
+    {
+        if (count($files) === 1) {
+            return $files[0];
+        }
+
+        $manifest = [];
+        $extensions = [];
+        $size = 0;
+        $updatedAt = null;
+        $hasDoc = false;
+        foreach ($files as $file) {
+            $manifest[] = [
+                'id' => $file['file_id'],
+                'file_order' => $file['file_order'],
+                'original_filename' => $file['original_filename'],
+                'path' => $file['source_path'],
+                'extension' => $file['extension'],
+                'sha256' => $file['sha256'],
+                'size' => $file['size'],
+                'updated_at' => $file['updated_at'],
+            ];
+            $extensions[$file['extension']] = true;
+            $size += $file['size'];
+            $updatedAt = $file['updated_at'] !== null && ($updatedAt === null || $file['updated_at'] > $updatedAt)
+                ? $file['updated_at']
+                : $updatedAt;
+            $hasDoc = $hasDoc || $file['has_doc'];
+        }
+
+        return [
+            'kind' => 'final_manuscript',
+            'file_id' => null,
+            'path' => null,
+            'extension' => count($extensions) === 1 ? array_key_first($extensions) : null,
+            'sha256' => hash('sha256', json_encode($manifest, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)),
+            'size' => $size,
+            'updated_at' => $updatedAt,
+            'has_doc' => $hasDoc,
+            'files' => $files,
         ];
     }
 
     /** @return array{string, array} */
     private function extractSource(array $source): array
     {
-        if (! ($source['remote'] ?? false)) {
-            return [$this->extractor->extract($source['path']), $source];
+        if (! isset($source['files'])) {
+            return [$this->extractor->extractRaw($source['path']), $source];
         }
 
-        $temporaryPath = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR)
-            .DIRECTORY_SEPARATOR.'researchnav-projection-'.Str::uuid().'.'.$source['extension'];
-        try {
-            $this->storage->downloadTo($source['path'], $temporaryPath);
-            $size = filesize($temporaryPath);
-            $hash = hash_file('sha256', $temporaryPath);
-            if ($size === false || $hash === false || $size !== $source['size']
-                || ($source['sha256'] !== '' && ! hash_equals($source['sha256'], $hash))) {
-                throw new ManuscriptTextExtractionException('Downloaded manuscript identity does not match its stored metadata.');
+        $bodyText = '';
+        $bodyTextBytes = 0;
+        $bodyTextChars = 0;
+        $maximumOutputBytes = (int) config('researchnav.manuscript_search.maximum_output_bytes');
+        $maximumTextCharacters = (int) config('researchnav.manuscript_search.maximum_text_characters');
+        foreach ($source['files'] as $file) {
+            $text = $this->extractor->extractRaw($file['path']);
+            if ($text === '') {
+                return ['', $source];
             }
-            if ($source['sha256'] === '') {
-                DocumentFile::query()->whereKey($source['file_id'])->whereNull('content_sha256')->update(['content_sha256' => $hash]);
-                $source['sha256'] = $hash;
+            $separator = $bodyText === '' ? '' : "\n\n";
+            $nextBytes = $bodyTextBytes + strlen($separator) + strlen($text);
+            $nextChars = $bodyTextChars + mb_strlen($separator) + mb_strlen($text);
+            if ($nextBytes > $maximumOutputBytes || $nextChars > $maximumTextCharacters) {
+                throw new \LengthException('Aggregate manuscript output exceeds its limit.');
             }
-
-            return [$this->extractor->extract($temporaryPath), $source];
-        } finally {
-            if (is_file($temporaryPath)) {
-                @unlink($temporaryPath);
-            }
+            $bodyText .= $separator.$text;
+            $bodyTextBytes = $nextBytes;
+            $bodyTextChars = $nextChars;
         }
+
+        return [$bodyText, $source];
     }
 
     private function privatePath(string $relativePath): ?string
@@ -305,7 +447,7 @@ class ManuscriptSearchProjectionService
     {
         return ($extension === 'pdf' && $mime === self::PDF_MIME)
             || ($extension === 'docx' && $mime === self::DOCX_MIME)
-            || ($extension === 'doc' && $mime === 'application/msword');
+            || ($extension === 'doc' && $mime === self::DOC_MIME);
     }
 
     private function isEligible(ResearchDocument $document): bool
@@ -316,7 +458,7 @@ class ManuscriptSearchProjectionService
             && ! $document->trashed();
     }
 
-    private function isCurrentReadyProjection(?ManuscriptSearchDocument $projection, ?array $source): bool
+    private function isCurrentReadyProjectionForSource(?ManuscriptSearchDocument $projection, ?array $source): bool
     {
         return $projection !== null && $projection->extraction_status === 'ready' && $source !== null
             && $projection->extractor_version === (string) config('researchnav.manuscript_search.extractor_version')
@@ -328,12 +470,13 @@ class ManuscriptSearchProjectionService
                 'sha256' => $projection->source_sha256,
                 'size' => $projection->source_size_bytes,
                 'updated_at' => $projection->source_file_updated_at?->format('Y-m-d H:i:s.u'),
+                'has_doc' => false,
             ], false);
     }
 
-    private function isCurrentFailedProjection(?ManuscriptSearchDocument $projection, ?array $source): bool
+    private function isCurrentTerminalProjection(?ManuscriptSearchDocument $projection, ?array $source): bool
     {
-        return $projection !== null && $projection->extraction_status === 'failed' && $source !== null
+        return $projection !== null && in_array($projection->extraction_status, ['failed', 'unsupported'], true) && $source !== null
             && $projection->extractor_version === (string) config('researchnav.manuscript_search.extractor_version')
             && $this->sameSource($source, [
                 'kind' => $projection->source_kind,
@@ -343,7 +486,18 @@ class ManuscriptSearchProjectionService
                 'sha256' => $projection->source_sha256,
                 'size' => $projection->source_size_bytes,
                 'updated_at' => $projection->source_file_updated_at?->format('Y-m-d H:i:s.u'),
+                'has_doc' => false,
             ], false);
+    }
+
+    /** @param array{state: 'source'|'no_source'|'invalid'|'limit', source: ?array} $resolution */
+    private function isCurrentResolutionFailure(?ManuscriptSearchDocument $projection, array $resolution): bool
+    {
+        return $projection !== null
+            && $projection->extraction_status === 'failed'
+            && $projection->extractor_version === (string) config('researchnav.manuscript_search.extractor_version')
+            && (($resolution['state'] === 'invalid' && $projection->error_code === 'INVALID_SOURCE')
+                || ($resolution['state'] === 'limit' && $projection->error_code === 'SOURCE_LIMIT_EXCEEDED'));
     }
 
     private function sameSource(array $left, ?array $right, bool $includePath = true): bool

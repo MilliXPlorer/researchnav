@@ -4,17 +4,19 @@ use App\Http\Controllers\AccessRequestController;
 use App\Http\Controllers\AdminController;
 use App\Http\Controllers\AdviserController;
 use App\Http\Controllers\ApiController;
-use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\CoordinatorWorkspaceController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DocumentFileController;
 use App\Http\Controllers\EditorController;
 use App\Http\Controllers\FeedbackController;
+use App\Http\Controllers\InstituteController;
 use App\Http\Controllers\InstructorController;
 use App\Http\Controllers\LibrarianController;
 use App\Http\Controllers\MonitoringController;
 use App\Http\Controllers\NotificationController;
+use App\Http\Controllers\OfficeRepositoryController;
 use App\Http\Controllers\PanelController;
+use App\Http\Controllers\PdfAnnotationController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PublicRepositoryController;
 use App\Http\Controllers\ResearchController;
@@ -22,11 +24,13 @@ use App\Http\Controllers\ResearchOfficeBulkImportController;
 use App\Http\Controllers\ResearchOfficeController;
 use App\Http\Controllers\ReviewAssignmentController;
 use App\Http\Controllers\RevisionController;
+use App\Http\Controllers\SdgController;
 use App\Http\Controllers\SharedMonitoringController;
 use App\Http\Controllers\SimilarityController;
 use App\Http\Controllers\StatisticianController;
 use App\Http\Controllers\SupportAssignmentController;
 use App\Http\Controllers\TitleValidationController;
+use App\Http\Controllers\UserLogController;
 use App\Http\Middleware\AddApiSecurityHeaders;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Session\Middleware\StartSession;
@@ -56,7 +60,27 @@ Route::prefix('api')
             Route::get('photo/{version}', [ProfileController::class, 'photo'])->whereUuid('version');
         });
 
+        Route::get('user-logs', [UserLogController::class, 'index'])
+            ->middleware([
+                'current.user',
+                'account.active',
+                'role:instructor,adviser,panel,statistician,librarian,research_editor',
+            ]);
+        Route::post('user-logs/clear', [UserLogController::class, 'clear'])
+            ->middleware([
+                'current.user',
+                'account.active',
+                'role:instructor,adviser,panel,statistician,librarian,research_editor',
+                'origin.allowed',
+                'throttle:domain-mutations',
+            ]);
+
         Route::prefix('admin')->middleware(['current.user', 'account.active', 'active.admin'])->group(function (): void {
+            Route::get('institutes', [InstituteController::class, 'index']);
+            Route::post('institutes', [InstituteController::class, 'store'])
+                ->middleware(['origin.allowed', 'throttle:domain-mutations']);
+            Route::delete('institutes/{institute}', [InstituteController::class, 'destroy'])
+                ->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('accounts', [ApiController::class, 'accounts']);
             Route::post('accounts', [ApiController::class, 'provisionAccount'])
                 ->middleware(['origin.allowed', 'throttle:provision-coordinators']);
@@ -80,6 +104,7 @@ Route::prefix('api')
         // An applicant is authenticated by Google but has no role yet, so these
         // two routes deliberately omit the active-account requirement.
         Route::middleware('current.user')->group(function (): void {
+            Route::get('institutes', [InstituteController::class, 'index']);
             Route::get('access-requests/mine', [AccessRequestController::class, 'mine']);
             Route::post('access-requests', [AccessRequestController::class, 'store'])
                 ->middleware(['origin.allowed', 'throttle:domain-mutations']);
@@ -132,7 +157,6 @@ Route::prefix('api')
         });
 
         Route::prefix('panel')->middleware(['current.user', 'account.active', 'role:panel'])->group(function (): void {
-            Route::get('schedule', [PanelController::class, 'schedule']);
             Route::get('assignments', [PanelController::class, 'assignments']);
             Route::post('evaluations', [PanelController::class, 'submitEvaluation'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('history', [PanelController::class, 'history']);
@@ -151,13 +175,24 @@ Route::prefix('api')
             Route::put('research/{researchDocument}/monitoring', [StatisticianController::class, 'saveMonitoring'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
         });
 
-        Route::prefix('coordinator')->middleware(['current.user', 'account.active', 'role:coordinator,admin'])->group(function (): void {
+        Route::prefix('coordinator')->middleware(['current.user', 'account.active', 'coordinator.authority'])->group(function (): void {
+            Route::get('program-overview', [CoordinatorWorkspaceController::class, 'programOverview']);
+            Route::get('sections', [CoordinatorWorkspaceController::class, 'sections']);
+            Route::get('sections/{classSection}', [CoordinatorWorkspaceController::class, 'section'])->whereNumber('classSection');
+            Route::get('research-assignments', [CoordinatorWorkspaceController::class, 'researchAssignments']);
+            Route::get('research-assignments/{user}', [CoordinatorWorkspaceController::class, 'researchAssignmentStudies']);
+            Route::get('research-details/{researchDocument}', [CoordinatorWorkspaceController::class, 'researchDetails'])->whereNumber('researchDocument');
             Route::get('schedules', [CoordinatorWorkspaceController::class, 'schedules']);
             Route::post('schedules', [CoordinatorWorkspaceController::class, 'storeSchedule'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::patch('schedules/{defenseSchedule}', [CoordinatorWorkspaceController::class, 'updateSchedule'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('duplicate-flags', [CoordinatorWorkspaceController::class, 'duplicateFlags']);
             Route::get('adviser-load', [CoordinatorWorkspaceController::class, 'adviserLoad']);
             Route::get('reports', [CoordinatorWorkspaceController::class, 'reports']);
+            Route::get('reports/studies', [CoordinatorWorkspaceController::class, 'reportStudies']);
+            Route::get('repository', [CoordinatorWorkspaceController::class, 'repository']);
+            Route::get('repository/{researchDocument}/download', [CoordinatorWorkspaceController::class, 'repositoryDownload'])->whereNumber('researchDocument')->middleware('throttle:catalog-download')->name('coordinator.repository.download');
+            Route::get('repository/{researchDocument}', [CoordinatorWorkspaceController::class, 'repositoryDetail'])->whereNumber('researchDocument');
+            Route::get('reports/{section}/pdf', [CoordinatorWorkspaceController::class, 'reportPdf']);
         });
 
         Route::prefix('librarian')->middleware(['current.user', 'account.active', 'role:librarian'])->group(function (): void {
@@ -168,6 +203,9 @@ Route::prefix('api')
             Route::put('research/{researchDocument}/monitoring', [LibrarianController::class, 'saveMonitoring'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('archiving-queue', [LibrarianController::class, 'archivingQueue']);
             Route::get('catalog', [LibrarianController::class, 'repositoryCatalog']);
+            Route::get('catalog/{researchDocument}/files', [LibrarianController::class, 'repositoryFiles'])->whereNumber('researchDocument');
+            Route::get('catalog/{researchDocument}/files/{documentFile}/preview', [LibrarianController::class, 'previewRepositoryFile'])->middleware('throttle:research-file-access')->whereNumber(['researchDocument', 'documentFile']);
+            Route::get('catalog/{researchDocument}/files/{documentFile}/download', [LibrarianController::class, 'downloadRepositoryFile'])->middleware('throttle:research-file-access')->whereNumber(['researchDocument', 'documentFile']);
             Route::get('metadata-standards', [LibrarianController::class, 'metadataStandards']);
             Route::put('metadata/{researchDocument}', [LibrarianController::class, 'saveMetadataReview'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('retention-logs', [LibrarianController::class, 'retentionLogs']);
@@ -182,12 +220,31 @@ Route::prefix('api')
             Route::put('research/{researchDocument}/monitoring', [EditorController::class, 'saveMonitoring'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
         });
 
+        Route::get('archived-repository', [PublicRepositoryController::class, 'archivedIndex'])
+            ->middleware(['current.user', 'account.active', 'role:panel,statistician,research_editor', 'throttle:public-search']);
+
         Route::prefix('office')->middleware(['current.user', 'account.active', 'office.authority'])->group(function (): void {
+            Route::get('author-accounts', [ResearchOfficeController::class, 'authorAccounts'])
+                ->middleware('throttle:office-author-account-search');
+            Route::get('repository', [OfficeRepositoryController::class, 'index']);
+            Route::get('repository/{researchDocument}', [OfficeRepositoryController::class, 'show'])
+                ->whereNumber('researchDocument');
+            Route::patch('repository/{researchDocument}', [OfficeRepositoryController::class, 'update'])
+                ->middleware(['origin.allowed', 'throttle:domain-mutations'])
+                ->whereNumber('researchDocument');
+            Route::delete('repository/{researchDocument}', [OfficeRepositoryController::class, 'destroy'])
+                ->middleware(['origin.allowed', 'throttle:domain-mutations'])
+                ->whereNumber('researchDocument');
+            Route::post('repository/{researchDocument}/restore', [OfficeRepositoryController::class, 'restore'])
+                ->middleware(['origin.allowed', 'throttle:domain-mutations'])
+                ->whereNumber('researchDocument');
             Route::get('compliance', [ResearchOfficeController::class, 'compliance']);
             Route::put('compliance/{researchDocument}', [ResearchOfficeController::class, 'decideCompliance'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('users', [ResearchOfficeController::class, 'users']);
             Route::patch('users/{user}', [ResearchOfficeController::class, 'updateUser'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('reports', [ResearchOfficeController::class, 'reports']);
+            Route::get('reports/{section}/pdf', [ResearchOfficeController::class, 'reportPdf']);
+            Route::get('reports/logos/{logo}', [ResearchOfficeController::class, 'reportLogo']);
             Route::get('research/{researchDocument}/team', [ResearchOfficeController::class, 'projectTeam']);
             Route::get('research/{researchDocument}/representative-candidates', [ResearchOfficeController::class, 'representativeCandidates']);
             Route::put('research/{researchDocument}/representative', [ResearchOfficeController::class, 'assignRepresentative'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
@@ -201,7 +258,7 @@ Route::prefix('api')
         // Public repository reads remain sessionless and never initialize a
         // browser session for repository visitors.
         Route::middleware([])->withoutMiddleware([StartSession::class, ShareErrorsFromSession::class, PreventRequestForgery::class])->group(function (): void {
-            Route::get('categories', [CategoryController::class, 'index']);
+            Route::get('sdgs', [SdgController::class, 'index']);
             Route::get('repository', [PublicRepositoryController::class, 'index'])->middleware('throttle:public-search');
             Route::get('repository/{researchDocument}', [PublicRepositoryController::class, 'show']);
         });
@@ -212,12 +269,13 @@ Route::prefix('api')
             Route::get('monitoring/research', [SharedMonitoringController::class, 'research']);
             Route::get('monitoring/progress-updates', [SharedMonitoringController::class, 'progressUpdates'])->middleware('role:adviser,instructor');
             Route::get('research/{researchDocument}/shared-monitoring', [SharedMonitoringController::class, 'show']);
+            Route::get('research/{researchDocument}/team', [SharedMonitoringController::class, 'team']);
             Route::put('research/{researchDocument}/shared-monitoring', [SharedMonitoringController::class, 'update'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::delete('research/{researchDocument}/shared-monitoring', [SharedMonitoringController::class, 'destroy'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::post('research/{researchDocument}/shared-monitoring/signature', [SharedMonitoringController::class, 'storeSignature'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('research/{researchDocument}/shared-monitoring/signature/{stage}/{reviewer}', [SharedMonitoringController::class, 'signature']);
             Route::post('research/{researchDocument}/shared-monitoring/verify', [SharedMonitoringController::class, 'verify'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
-            Route::get('support-assignments/eligible', [SupportAssignmentController::class, 'eligible']);
+            Route::get('support-assignments/eligible', [SupportAssignmentController::class, 'eligible'])->middleware('throttle:support-assignment-search');
             Route::get('support-assignments/inbox', [SupportAssignmentController::class, 'inbox']);
             Route::get('research/{researchDocument}/support-assignments', [SupportAssignmentController::class, 'index']);
             Route::post('research/{researchDocument}/support-assignments', [SupportAssignmentController::class, 'store'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
@@ -243,6 +301,8 @@ Route::prefix('api')
             Route::post('research/{researchDocument}/files', [DocumentFileController::class, 'store'])->middleware(['origin.allowed', 'throttle:research-upload']);
             Route::get('research/{researchDocument}/files/{documentFile}/download', [DocumentFileController::class, 'download'])->middleware('throttle:research-file-access');
             Route::get('research/{researchDocument}/files/{documentFile}/preview', [DocumentFileController::class, 'preview'])->middleware('throttle:research-file-access');
+            Route::get('research/{researchDocument}/files/{documentFile}/annotations', [PdfAnnotationController::class, 'index'])->middleware('throttle:research-file-access');
+            Route::post('research/{researchDocument}/files/{documentFile}/annotations', [PdfAnnotationController::class, 'store'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::patch('research/{researchDocument}/files/{documentFile}', [DocumentFileController::class, 'update'])->middleware(['origin.allowed', 'throttle:researcher-file-mutations']);
             Route::delete('research/{researchDocument}/files/{documentFile}', [DocumentFileController::class, 'destroy'])->middleware(['origin.allowed', 'throttle:researcher-file-mutations']);
 
@@ -252,9 +312,11 @@ Route::prefix('api')
             // needs no research record and writes nothing.
             Route::post('similarity/query', [SimilarityController::class, 'query'])->middleware(['origin.allowed', 'throttle:similarity-query']);
             Route::post('similarity/content-query', [SimilarityController::class, 'contentQuery'])->middleware(['origin.allowed', 'throttle:similarity-query']);
+            Route::post('similarity/content-upload', [SimilarityController::class, 'contentUpload'])->middleware(['origin.allowed', 'throttle:similarity-content-upload']);
 
             Route::get('research/{researchDocument}/feedback', [FeedbackController::class, 'index']);
             Route::post('research/{researchDocument}/feedback', [FeedbackController::class, 'store'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
+            Route::get('research/{researchDocument}/feedback/{feedback}/attachment', [FeedbackController::class, 'downloadAttachment']);
             Route::patch('research/{researchDocument}/feedback/{feedback}', [FeedbackController::class, 'update'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::patch('research/{researchDocument}/feedback/{feedback}/researcher-action', [FeedbackController::class, 'researcherAction'])->middleware(['origin.allowed', 'throttle:researcher-mutations']);
             Route::get('research/{researchDocument}/revisions', [RevisionController::class, 'index']);
@@ -267,10 +329,10 @@ Route::prefix('api')
             Route::post('research/{researchDocument}/recommendation', [TitleValidationController::class, 'recommend'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::patch('research/{researchDocument}/validation/{titleValidation}', [TitleValidationController::class, 'update'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('notifications', [NotificationController::class, 'index']);
+            Route::get('notifications/unread-count', [NotificationController::class, 'unreadCount']);
             Route::patch('notifications/{notification}/read', [NotificationController::class, 'read'])->middleware('origin.allowed');
+            Route::delete('notifications/{notification}', [NotificationController::class, 'destroy'])->middleware('origin.allowed');
 
-            Route::post('categories', [CategoryController::class, 'store'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
-            Route::patch('categories/{category}', [CategoryController::class, 'update'])->middleware(['origin.allowed', 'throttle:domain-mutations']);
             Route::get('repository/{researchDocument}/download', [PublicRepositoryController::class, 'download'])->name('repository.download')->middleware('throttle:catalog-download');
         });
     });

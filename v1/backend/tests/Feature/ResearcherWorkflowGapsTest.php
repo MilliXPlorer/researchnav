@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Models\Category;
 use App\Models\ClassSection;
 use App\Models\DocumentFile;
 use App\Models\FeedbackComment;
@@ -36,7 +35,8 @@ class ResearcherWorkflowGapsTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.section.name', 'ICS 4A')
             ->assertJsonPath('data.section.instructor_name', 'Ina Structor')
-            ->assertJsonPath('data.reviewers.0.name', 'Ada Viser');
+            ->assertJsonPath('data.reviewers.0.name', 'Ada Viser')
+            ->assertJsonPath('data.reviewers.0.designation', null);
 
         $this->as(User::factory()->create())->getJson('/api/research/'.$research->id.'/people')->assertForbidden();
     }
@@ -105,12 +105,17 @@ class ResearcherWorkflowGapsTest extends TestCase
             'assignment_role' => 'research_editor',
         ], $this->origin())->assertCreated()->json('data');
 
-        ReviewAssignment::query()->findOrFail($first['id'])->update(['status' => 'accepted', 'is_active' => true]);
+        ReviewAssignment::query()->findOrFail($first['id'])->update([
+            'status' => 'accepted',
+            'is_active' => true,
+            'support_pending_slot' => null,
+        ]);
 
         $this->as($owner)->postJson('/api/research/'.$research->id.'/support-assignments', [
             'user_id' => $editorB->id,
             'assignment_role' => 'research_editor',
             'replace_current' => true,
+            'expected_current_assignment_id' => $first['id'],
         ], $this->origin())->assertCreated()
             ->assertJsonPath('data.user_id', $editorB->id)
             ->assertJsonPath('data.status', 'requested');
@@ -118,8 +123,8 @@ class ResearcherWorkflowGapsTest extends TestCase
         $this->assertDatabaseHas('research_review_assignments', [
             'id' => $first['id'],
             'reviewer_id' => $editorA->id,
-            'status' => 'replaced',
-            'is_active' => false,
+            'status' => 'accepted',
+            'is_active' => true,
         ]);
         $this->assertDatabaseHas('research_review_assignments', [
             'research_document_id' => $research->id,
@@ -127,9 +132,18 @@ class ResearcherWorkflowGapsTest extends TestCase
             'review_role' => 'research_editor',
             'status' => 'requested',
         ]);
+
+        $pending = ReviewAssignment::query()->where('research_document_id', $research->id)->where('reviewer_id', $editorB->id)->firstOrFail();
+        $this->as($editorB)->patchJson('/api/support-assignments/'.$pending->id.'/respond', ['decision' => 'accept'], $this->origin())->assertOk();
+
+        $this->assertDatabaseHas('research_review_assignments', [
+            'id' => $first['id'],
+            'status' => 'replaced',
+            'is_active' => false,
+        ]);
     }
 
-    public function test_owner_can_preview_an_owned_pdf_but_not_a_docx(): void
+    public function test_owner_can_preview_an_owned_pdf_but_legacy_docx_has_no_preview_route(): void
     {
         Storage::fake('researchnav_private');
         $owner = User::factory()->create(['role' => 'researcher']);
@@ -137,16 +151,17 @@ class ResearcherWorkflowGapsTest extends TestCase
         $pdf = $this->file($research, $owner, 'application/pdf', 'pdf');
         $docx = $this->file($research, $owner, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'docx', 'attachment');
         Storage::disk('researchnav_private')->put($pdf->file_path, "%PDF-1.4\n");
-        Storage::disk('researchnav_private')->put($docx->file_path, 'docx');
+        Storage::disk('researchnav_private')->put($docx->file_path, 'legacy-docx-bytes');
 
         $this->as($owner)->get('/api/research/'.$research->id.'/files/'.$pdf->id.'/preview')->assertOk()->assertHeader('content-type', 'application/pdf');
         $this->as($owner)->get('/api/research/'.$research->id.'/files/'.$docx->id.'/preview')->assertNotFound();
+        $this->as($owner)->getJson('/api/research/'.$research->id.'/files/'.$docx->id.'/preview-content')
+            ->assertNotFound();
     }
 
     private function research(User $owner, array $attributes = []): ResearchDocument
     {
-        $category = Category::query()->create(['name' => 'Education '.fake()->unique()->word(), 'slug' => 'education-'.fake()->unique()->numberBetween(1, 999999)]);
-        $research = ResearchDocument::factory()->create(array_merge(['submitted_by' => $owner->id, 'category_id' => $category->id], $attributes));
+        $research = ResearchDocument::factory()->create(array_merge(['submitted_by' => $owner->id], $attributes));
         $this->assignResearcherToDocument($owner, $research);
         ResearchAuthor::factory()->create(['research_document_id' => $research->id, 'user_id' => $owner->id]);
 

@@ -8,10 +8,14 @@ use Illuminate\Support\Facades\Schema;
 
 class PublicRepositoryService
 {
+    public function __construct(
+        private readonly PublicManuscriptAvailability $manuscripts,
+    ) {}
+
     /** @param array<string, mixed> $filters */
     public function search(array $filters)
     {
-        $query = $this->publicScope()->select('research_documents.*')->with(['authors', 'category'])->withExists(['files as has_downloadable_manuscript' => fn ($files) => $files->current()->where('document_type', 'final_manuscript')]);
+        $query = $this->publicScope()->select('research_documents.*')->with(['authors', 'sdgs', 'files' => fn ($files) => $files->select(['id', 'research_document_id', 'document_type', 'is_current', 'stored_filename', 'file_path'])->current()->where('document_type', 'final_manuscript')]);
         if ($term = $filters['q'] ?? null) {
             $like = $this->like($term);
             $metadataMatch = fn (Builder $q) => $q->whereRaw("research_documents.title LIKE ? ESCAPE '!'", [$like])
@@ -46,14 +50,11 @@ class PublicRepositoryService
         if ($keywords = $filters['keywords'] ?? null) {
             $query->whereRaw("keywords LIKE ? ESCAPE '!'", [$this->like($keywords)]);
         }
-        if (isset($filters['category_id'])) {
-            $query->where('category_id', $filters['category_id']);
-        }
-        if ($category = $filters['category'] ?? null) {
-            $query->whereHas('category', fn (Builder $categories) => $categories->where('slug', $category)->orWhere('name', $category));
-        }
         if ($institute = $filters['institute'] ?? null) {
             $query->where('institute', $institute);
+        }
+        foreach ($filters['sdg_ids'] ?? [] as $sdgId) {
+            $query->whereHas('sdgs', fn (Builder $sdgs) => $sdgs->where('sdgs.id', $sdgId));
         }
         if ($year = $filters['publication_year'] ?? $filters['year'] ?? null) {
             $query->where('publication_year', $year);
@@ -66,17 +67,44 @@ class PublicRepositoryService
             }
         }
 
-        return $query
+        $results = $query
             ->orderByDesc('research_documents.publication_year')
             ->orderBy('research_documents.title')
             ->orderBy('research_documents.id')
             ->paginate(min((int) ($filters['per_page'] ?? 15), 1000))
             ->appends($filters);
+        $results->getCollection()->each(fn (ResearchDocument $research) => $this->setDownloadAvailability($research));
+
+        return $results;
     }
 
     public function find(int $id): ResearchDocument
     {
-        return $this->publicScope()->select('research_documents.*')->with(['authors', 'category'])->withExists(['files as has_downloadable_manuscript' => fn ($files) => $files->current()->where('document_type', 'final_manuscript')])->findOrFail($id);
+        $research = $this->publicScope()->select('research_documents.*')->with(['authors', 'sdgs', 'files'])->findOrFail($id);
+        $this->setDownloadAvailability($research);
+
+        return $research;
+    }
+
+    /** @return list<int> */
+    public function years(): array
+    {
+        return $this->publicScope()
+            ->whereNotNull('publication_year')
+            ->distinct()
+            ->orderByDesc('publication_year')
+            ->pluck('publication_year')
+            ->map(fn ($year): int => (int) $year)
+            ->values()
+            ->all();
+    }
+
+    private function setDownloadAvailability(ResearchDocument $research): void
+    {
+        if (! $research->relationLoaded('files')) {
+            $research->load('files');
+        }
+        $research->has_downloadable_manuscript = $this->manuscripts->hasAvailableFile($research);
     }
 
     private function publicScope(): Builder

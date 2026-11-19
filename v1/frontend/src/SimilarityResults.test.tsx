@@ -151,7 +151,7 @@ describe("SimilarityResults", () => {
 
     expect(
       await screen.findByText(
-        "The manuscript similarity check could not be completed. Confirm that a current text-based PDF or DOCX is available, then try again.",
+        "The manuscript similarity check could not be completed. Confirm that a current text-based PDF is available, then try again.",
       ),
     ).toHaveAttribute("role", "alert");
     expect(screen.queryByText("0%")).not.toBeInTheDocument();

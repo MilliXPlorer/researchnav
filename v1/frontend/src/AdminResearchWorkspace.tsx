@@ -1,4 +1,5 @@
 import { ArrowLeft, Pencil, Trash2 } from "lucide-react";
+import { formatPhilippineDateTime } from "./dateTime";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   archiveInternalResearch,
@@ -42,6 +43,9 @@ import ManuscriptFilePicker from "./ManuscriptFilePicker";
 import { PublicationYearInput } from "./dateControls";
 import { Button } from "./components";
 import { instituteNames } from "./data";
+import PdfAnnotationWorkspace from "./PdfAnnotationWorkspace";
+import { SdgBadges, SdgSelector } from "./SdgMetadata";
+import { ConfirmDialog } from "./Modal";
 
 type FormState = {
   title: string;
@@ -52,6 +56,7 @@ type FormState = {
   degreeProgram: string;
   manuscriptDateLabel: string;
   researchStage: ResearchMetadataInput["research_stage"];
+  sdgIds: number[];
 };
 type ValidationChoice = Exclude<
   TitleValidationResource["validation_status"],
@@ -98,6 +103,7 @@ function formFor(research: InternalResearchResource): FormState {
     degreeProgram: research.degree_program ?? "",
     manuscriptDateLabel: research.manuscript_date_label ?? "",
     researchStage: research.research_stage,
+    sdgIds: research.sdgs?.map((sdg) => sdg.id) ?? [],
   };
 }
 
@@ -144,6 +150,8 @@ export default function AdminResearchWorkspace({
   const [authors, setAuthors] = useState<ResearchAuthorResource[]>([]);
   const [reviewers, setReviewers] = useState<ReviewAssignmentResource[]>([]);
   const [files, setFiles] = useState<DocumentFileResource[]>([]);
+  const [annotationFile, setAnnotationFile] =
+    useState<DocumentFileResource | null>(null);
   const [feedback, setFeedback] = useState<FeedbackResource[]>([]);
   const [monitoring, setMonitoring] = useState<MonitoringLogResource[]>([]);
   const [form, setForm] = useState<FormState | null>(null);
@@ -156,6 +164,7 @@ export default function AdminResearchWorkspace({
   } | null>(null);
   const [archiveVisibility, setArchiveVisibility] =
     useState<InternalResearchResource["visibility"]>("private");
+  const [confirmArchive, setConfirmArchive] = useState(false);
   const [validationChoices, setValidationChoices] = useState<
     Record<number, ValidationChoice | "">
   >({});
@@ -461,6 +470,7 @@ export default function AdminResearchWorkspace({
         abstract: form.abstract || null,
         keywords: form.keywords || null,
         publication_year,
+        sdg_ids: form.sdgIds,
         institute: form.institute || null,
         degree_program: form.degreeProgram || null,
         manuscript_date_label: form.manuscriptDateLabel || null,
@@ -586,6 +596,9 @@ export default function AdminResearchWorkspace({
             </div>
           ))}
         </dl>
+        {(research.sdgs?.length ?? 0) > 0 && (
+          <SdgBadges sdgs={research.sdgs ?? []} />
+        )}
       </section>
 
       {editable && (
@@ -702,6 +715,11 @@ export default function AdminResearchWorkspace({
               />
             </label>
           </div>
+          <SdgSelector
+            selectedIds={form.sdgIds}
+            onChange={(sdgIds) => setForm({ ...form, sdgIds })}
+            disabled={isMutating}
+          />
           <Button
             disabled={isMutating || !form.title.trim()}
             onClick={saveMetadata}
@@ -781,14 +799,7 @@ export default function AdminResearchWorkspace({
               </label>
               <Button
                 disabled={isMutating}
-                onClick={() =>
-                  void runMutation(
-                    "archive",
-                    "Research archived and refreshed.",
-                    () =>
-                      archiveInternalResearch(research.id, archiveVisibility),
-                  )
-                }
+                onClick={() => setConfirmArchive(true)}
               >
                 {mutation === "archive" ? "Archiving…" : "Archive research"}
               </Button>
@@ -1011,7 +1022,8 @@ export default function AdminResearchWorkspace({
             files.map((file) => (
               <li key={file.id}>
                 <span>
-                  {file.original_filename} — {humanize(file.document_type)} v
+                  {file.original_filename} — {humanize(file.document_type)} ·{" "}
+                  {humanize(file.upload_purpose ?? "initial_submission")} · v
                   {file.version_number}
                   {file.is_current ? " (current)" : ""}
                 </span>
@@ -1078,18 +1090,35 @@ export default function AdminResearchWorkspace({
                 >
                   Download {file.original_filename}
                 </a>
+                {file.mime_type === "application/pdf" && (
+                  <Button
+                    variant="quiet"
+                    onClick={() => setAnnotationFile(file)}
+                  >
+                    Open annotations
+                  </Button>
+                )}
               </li>
             ))
           ) : (
             <li>No files are available.</li>
           )}
         </ul>
+        {annotationFile && (
+          <PdfAnnotationWorkspace
+            key={annotationFile.id}
+            researchDocumentId={research.id}
+            file={annotationFile}
+            canAnnotate
+            onClose={() => setAnnotationFile(null)}
+          />
+        )}
         {canUpload && (
           <div className="admin-inline-form">
             <ManuscriptFilePicker
               label="File"
-              help="PDF, DOC, or DOCX"
-              accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              help="PDF only"
+              accept=".pdf,application/pdf"
               file={uploadFile}
               disabled={isMutating}
               onChange={(event) =>
@@ -1141,48 +1170,30 @@ export default function AdminResearchWorkspace({
                   <strong>{humanize(item.feedback_type)}</strong>:{" "}
                   {item.comment} — {humanize(item.feedback_status)}
                 </span>
-                {item.feedback_status !== "resolved" && (
-                  <span className="admin-button-group">
-                    {item.feedback_status === "open" && (
-                      <Button
-                        variant="quiet"
-                        disabled={isMutating}
-                        onClick={() =>
-                          void runMutation(
-                            `feedback-${item.id}-acknowledged`,
-                            "Feedback acknowledged and refreshed.",
-                            () =>
-                              updateFeedbackStatus(
-                                research.id,
-                                item.id,
-                                "acknowledged",
-                              ),
-                          )
-                        }
-                      >
-                        Acknowledge
-                      </Button>
-                    )}
-                    <Button
-                      variant="quiet"
-                      disabled={isMutating}
-                      onClick={() =>
-                        void runMutation(
-                          `feedback-${item.id}-resolved`,
-                          "Feedback resolved and refreshed.",
-                          () =>
-                            updateFeedbackStatus(
-                              research.id,
-                              item.id,
-                              "resolved",
-                            ),
-                        )
-                      }
-                    >
-                      Resolve
-                    </Button>
-                  </span>
-                )}
+                <span className="admin-button-group">
+                  <Button
+                    variant="quiet"
+                    disabled={isMutating}
+                    onClick={() =>
+                      void runMutation(
+                        `feedback-${item.id}-${item.feedback_status === "resolved" ? "open" : "resolved"}`,
+                        item.feedback_status === "resolved"
+                          ? "Feedback reopened and refreshed."
+                          : "Feedback resolved and refreshed.",
+                        () =>
+                          updateFeedbackStatus(
+                            research.id,
+                            item.id,
+                            item.feedback_status === "resolved"
+                              ? "open"
+                              : "resolved",
+                          ),
+                      )
+                    }
+                  >
+                    {item.feedback_status === "resolved" ? "Reopen" : "Resolve"}
+                  </Button>
+                </span>
               </li>
             ))
           ) : (
@@ -1238,7 +1249,7 @@ export default function AdminResearchWorkspace({
                   <strong>{humanize(item.activity_type)}</strong>
                   {item.remarks ? ` — ${item.remarks}` : ""}
                   {item.activity_date
-                    ? ` (${new Date(item.activity_date).toLocaleString()})`
+                    ? ` (${formatPhilippineDateTime(item.activity_date)})`
                     : ""}
                 </span>
               </li>
@@ -1408,7 +1419,7 @@ export default function AdminResearchWorkspace({
                       <dt>Validated at</dt>
                       <dd>
                         {validation.validated_at
-                          ? new Date(validation.validated_at).toLocaleString()
+                          ? formatPhilippineDateTime(validation.validated_at)
                           : "Not recorded"}
                       </dd>
                     </div>
@@ -1418,6 +1429,22 @@ export default function AdminResearchWorkspace({
             })}
           </ul>
         </section>
+      )}
+      {confirmArchive && (
+        <ConfirmDialog
+          title="Archive research?"
+          message={`Archive ${research.title} with ${archiveVisibility.replaceAll("_", " ")} visibility?`}
+          confirmLabel="Archive research"
+          busy={mutation === "archive"}
+          onConfirm={() =>
+            void runMutation(
+              "archive",
+              "Research archived and refreshed.",
+              () => archiveInternalResearch(research.id, archiveVisibility),
+            ).finally(() => setConfirmArchive(false))
+          }
+          onCancel={() => setConfirmArchive(false)}
+        />
       )}
     </div>
   );

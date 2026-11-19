@@ -3,17 +3,22 @@
 namespace App\Http\Controllers;
 
 use App\Exceptions\ApiValidationException;
+use App\Http\Requests\OfficeAuthorAccountIndexRequest;
+use App\Http\Requests\OfficeUserIndexRequest;
 use App\Models\ComplianceReview;
+use App\Models\DocumentFile;
 use App\Models\ResearchDocument;
 use App\Models\User;
 use App\Services\ComplianceService;
+use App\Services\InstitutionalPdfService;
+use App\Services\PrivateDocumentFileResolver;
 use App\Services\ReportingService;
 use App\Services\ResearchProjectTeamService;
-use App\Services\SupabaseStorageException;
-use App\Services\SupabaseStorageService;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Throwable;
 use ZipArchive;
@@ -45,18 +50,16 @@ class ResearchOfficeController extends DomainController
         return response()->json(['data' => $this->payload($review)]);
     }
 
-    public function users(Request $request): JsonResponse
+    public function users(OfficeUserIndexRequest $request): JsonResponse
     {
-        $input = $this->validated($request, [
-            'search' => ['nullable', 'string', 'max:200'],
-            'role' => ['nullable', 'string', 'max:50'],
-            'access_status' => ['nullable', 'string', 'max:20'],
-            'per_page' => ['nullable', 'integer', 'between:1,100'],
-        ]);
+        $input = $request->validated();
+        $summary = [
+            'total' => User::query()->count(),
+            'active' => User::query()->where('access_status', 'active')->count(),
+            'inactive' => User::query()->where('access_status', '!=', 'active')->count(),
+        ];
         $query = User::query()
-            ->select(['id', 'email', 'first_name', 'middle_name', 'last_name', 'role', 'access_status', 'created_at', 'updated_at'])
-            ->orderByDesc('created_at')
-            ->orderByDesc('id');
+            ->select(['id', 'email', 'first_name', 'middle_name', 'last_name', 'role', 'access_status', 'created_at', 'updated_at']);
 
         if (isset($input['role']) && $input['role'] !== '') {
             $query->where('role', $input['role']);
@@ -73,9 +76,19 @@ class ResearchOfficeController extends DomainController
             });
         }
 
+        $sort = $input['sort'] ?? null;
+        $direction = $input['direction'] ?? 'asc';
+        if ($sort !== null) {
+            $query->orderBy($sort, $direction);
+        } else {
+            $query->orderByDesc('created_at');
+        }
+        $query->orderBy('id', $sort === null ? 'desc' : $direction);
+
         return response()
             ->json([
                 'data' => $query->paginate($input['per_page'] ?? 25)->appends($request->query()),
+                'summary' => $summary,
                 'schema_version' => 1,
             ])
             ->header('Cache-Control', 'private, no-store');
@@ -109,11 +122,91 @@ class ResearchOfficeController extends DomainController
             ->header('Cache-Control', 'private, no-store');
     }
 
+    public function authorAccounts(OfficeAuthorAccountIndexRequest $request): JsonResponse
+    {
+        $search = $request->validated('search');
+        $tokens = preg_split('/\s+/u', $search, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $accounts = User::query()
+            ->select(['id', 'email', 'first_name', 'middle_name', 'last_name'])
+            ->where('access_status', 'active')
+            ->where('account_status', 'active')
+            ->where(function (Builder $query) use ($tokens): void {
+                // Match every typed name part independently, so "Ada Byron
+                // Lovelace" finds a natural full name without relying on a
+                // database-specific concatenation function.
+                foreach ($tokens as $token) {
+                    $like = '%'.$this->escapedLike($token).'%';
+                    $query->where(function (Builder $fields) use ($like): void {
+                        foreach (['email', 'first_name', 'middle_name', 'last_name'] as $column) {
+                            $fields->orWhereRaw("{$column} LIKE ? ESCAPE '!'", [$like]);
+                        }
+                    });
+                }
+            })
+            ->orderBy('last_name')
+            ->orderBy('first_name')
+            ->orderBy('middle_name')
+            ->orderBy('email')
+            ->orderBy('id')
+            ->limit(10)
+            ->get()
+            ->map(fn (User $user): array => [
+                'id' => $user->id,
+                'name' => $user->displayName(),
+                'email' => $user->email,
+                'is_available' => true,
+            ])
+            ->values();
+
+        return response()
+            ->json(['data' => $accounts, 'schema_version' => 1])
+            ->header('Cache-Control', 'private, no-store');
+    }
+
     public function reports(ReportingService $reports): JsonResponse
     {
         return response()
             ->json(['data' => $reports->officeInstitutional()])
             ->header('Cache-Control', 'private, no-store');
+    }
+
+    public function reportPdf(string $section, ReportingService $reports, InstitutionalPdfService $pdf)
+    {
+        $report = $reports->officeInstitutional();
+        [$title, $columns, $rows] = match ($section) {
+            'academic-units' => ['By academic unit', ['Academic unit', 'Records'], collect($report['by_institute'])->map(fn (array $row) => [$row['institute'], $row['total']])->all()],
+            'submission-status' => ['By submission status', ['Status', 'Records'], collect($report['by_status'])->map(fn (array $row) => [str($row['status'])->replace('_', ' ')->title()->toString(), $row['total']])->all()],
+            'sdgs' => ['By Sustainable Development Goal', ['Goal', 'Records'], collect($report['by_sdg'])->map(fn (array $row) => [$row['code'].' · '.$row['title'], $row['total']])->all()],
+            default => abort(404),
+        };
+        $total = collect($rows)->sum(fn (array $row) => (int) $row[1]);
+
+        return response($pdf->render($title, $columns, $rows, $total), 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'inline; filename="researchnav-'.$section.'-'.now()->format('Y-m-d').'.pdf"',
+            'Cache-Control' => 'private, no-store',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+    }
+
+    public function reportLogo(string $logo)
+    {
+        $filename = match ($logo) {
+            'college' => 'tcgc_logo.jpg',
+            'research-publications' => 'research_publications_logo.jpg',
+            default => null,
+        };
+
+        abort_if($filename === null, 404);
+
+        $path = 'logo/'.$filename;
+        abort_unless(Storage::disk('local')->exists($path), 404);
+
+        return response(Storage::disk('local')->get($path), 200, [
+            'Content-Type' => 'image/jpeg',
+            'Cache-Control' => 'private, max-age=3600',
+            'Content-Disposition' => 'inline; filename="'.$filename.'"',
+        ]);
     }
 
     public function projectTeam(ResearchDocument $researchDocument, ResearchProjectTeamService $teams): JsonResponse
@@ -136,12 +229,14 @@ class ResearchOfficeController extends DomainController
     {
         $input = $this->validated($request, [
             'user_id' => ['nullable', 'string', 'exists:users,id'],
+            'defense_type' => ['nullable', 'in:proposal,final'],
         ]);
         $section = $researchDocument->section()->firstOrFail();
         $team = $teams->replaceRole(
             $this->actor($request),
             $section,
             $researchDocument,
+            $input['defense_type'] ?? 'proposal',
             'research_office_representative',
             $input['user_id'] ?? null,
             $request,
@@ -151,36 +246,67 @@ class ResearchOfficeController extends DomainController
             ->header('Cache-Control', 'private, no-store');
     }
 
-    public function instituteStudies(string $institute, SupabaseStorageService $storage): JsonResponse
+    private const INSTITUTE_CODES = [
+        'IHS' => 'Institute of Health Sciences',
+        'ICS' => 'Institute of Computer Studies',
+        'IBFS' => 'Institute of Business and Financial Management',
+        'ICJE' => 'Institute of Criminal Justice Education',
+        'ITE' => 'Institute of Teacher Education',
+        'IAS' => 'Institute of Arts and Sciences',
+    ];
+
+    public function instituteStudies(string $institute): JsonResponse
     {
-        try {
-            return response()->json(['data' => $storage->studiesForInstitute($institute)])
-                ->header('Cache-Control', 'private, no-store');
-        } catch (SupabaseStorageException) {
-            return response()->json(['error' => 'INSTITUTE_STUDIES_UNAVAILABLE'], 503);
-        }
+        $fullName = self::INSTITUTE_CODES[strtoupper($institute)] ?? $institute;
+
+        $documents = ResearchDocument::query()
+            ->with('sdgs')
+            ->inRepository()
+            ->where('institute', $fullName)
+            ->orderByDesc('publication_year')
+            ->orderByDesc('title')
+            ->get(['id', 'title', 'publication_year']);
+
+        $studies = $documents->map(fn (ResearchDocument $d) => [
+            'year' => (string) $d->publication_year,
+            'title' => $d->title,
+            'id' => $d->id,
+            'sdgs' => $d->sdgs->map(fn ($sdg) => ['id' => $sdg->id, 'code' => $sdg->code, 'title' => $sdg->title, 'short_title' => $sdg->short_title, 'color_hex' => $sdg->color_hex])->all(),
+        ])->all();
+
+        return response()->json(['data' => $studies])
+            ->header('Cache-Control', 'private, no-store');
     }
 
-    public function openInstituteStudy(Request $request, string $institute, string $year, string $title, SupabaseStorageService $storage)
+    public function openInstituteStudy(Request $request, string $institute, string $year, string $title)
     {
-        try {
-            $files = $storage->filesForStudy($institute, $year, $title);
-            if ($files === []) {
-                return response()->json(['error' => 'MANUSCRIPT_NOT_FOUND'], 404);
-            }
-            $selected = $request->query('file');
-            if ($selected === null) {
-                return $this->studyFileChooser($institute, $year, $title, $files);
-            }
-            $file = collect($files)->firstWhere('name', $selected);
-            if ($file === null) {
-                return response()->json(['error' => 'MANUSCRIPT_NOT_FOUND'], 404);
-            }
-            $contents = $storage->download($file['path']);
-        } catch (SupabaseStorageException) {
-            return response()->json(['error' => 'MANUSCRIPT_UNAVAILABLE'], 503);
+        $research = ResearchDocument::query()
+            ->where('id', $request->query('id'))
+            ->first();
+
+        if ($research === null) {
+            return response()->json(['error' => 'MANUSCRIPT_NOT_FOUND'], 404);
         }
-        $filename = preg_replace('/[^A-Za-z0-9._ -]/', '_', $file['name']) ?: 'manuscript';
+
+        $groupedFiles = $research->files()->current()->where('document_type', 'final_manuscript')->orderBy('file_order')->get();
+        if ($groupedFiles->isEmpty()) {
+            return response()->json(['error' => 'MANUSCRIPT_NOT_FOUND'], 404);
+        }
+
+        $selected = $request->query('file');
+        if ($selected === null) {
+            return $this->studyFileChooser($research, $groupedFiles);
+        }
+
+        $file = $groupedFiles->firstWhere('original_filename', $selected);
+        if ($file === null) {
+            return response()->json(['error' => 'MANUSCRIPT_NOT_FOUND'], 404);
+        }
+
+        $files = app(PrivateDocumentFileResolver::class);
+        $resolved = $files->resolve($research, $file);
+        $contents = file_get_contents($files->resolve($research, $file)['absolute_path']);
+        $filename = preg_replace('/[^A-Za-z0-9._ -]/', '_', $file->original_filename) ?: 'manuscript';
         $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
         $mimeType = match ($extension) {
             'pdf' => 'application/pdf',
@@ -197,28 +323,36 @@ class ResearchOfficeController extends DomainController
         ]);
     }
 
-    public function downloadInstituteStudy(string $institute, string $year, string $title, SupabaseStorageService $storage)
+    public function downloadInstituteStudy(string $institute, string $year, string $title, Request $request)
     {
         $zipPath = false;
         try {
-            $files = $storage->filesForStudy($institute, $year, $title);
-            if ($files === []) {
+            $research = ResearchDocument::query()->where('id', $request->query('id'))->first();
+            if ($research === null) {
                 return response()->json(['error' => 'MANUSCRIPT_NOT_FOUND'], 404);
             }
+
+            $groupedFiles = $research->files()->current()->where('document_type', 'final_manuscript')->orderBy('file_order')->get();
+            if ($groupedFiles->isEmpty()) {
+                return response()->json(['error' => 'MANUSCRIPT_NOT_FOUND'], 404);
+            }
+
             $zipPath = tempnam(sys_get_temp_dir(), 'researchnav-study-');
             $zip = new ZipArchive;
             if ($zipPath === false || $zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
-                throw new SupabaseStorageException('The manuscript archive could not be created.');
+                throw new \RuntimeException('The manuscript archive could not be created.');
             }
+            $files = app(PrivateDocumentFileResolver::class);
             $folder = $this->safeDownloadName($title, 'Study');
-            foreach ($files as $file) {
-                if (! $zip->addFromString($folder.'/'.$this->safeDownloadName($file['name'], 'manuscript'), $storage->download($file['path']))) {
+            foreach ($groupedFiles as $groupedFile) {
+                $resolved = $files->resolve($research, $groupedFile);
+                if (! $zip->addFromString($folder.'/'.$this->safeDownloadName($groupedFile->original_filename, 'manuscript'), file_get_contents($resolved['absolute_path']))) {
                     $zip->close();
-                    throw new SupabaseStorageException('The manuscript archive could not be created.');
+                    throw new \RuntimeException('The manuscript archive could not be created.');
                 }
             }
             if (! $zip->close()) {
-                throw new SupabaseStorageException('The manuscript archive could not be created.');
+                throw new \RuntimeException('The manuscript archive could not be created.');
             }
 
             return response()->download($zipPath, $folder.'.zip', [
@@ -235,15 +369,15 @@ class ResearchOfficeController extends DomainController
         }
     }
 
-    /** @param list<array{name:string,path:string,extension:string}> $files */
-    private function studyFileChooser(string $institute, string $year, string $title, array $files)
+    /** @param Collection<int, DocumentFile> $files */
+    private function studyFileChooser(ResearchDocument $research, $files)
     {
-        $heading = htmlspecialchars($title, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-        $openUrl = route('office.institute-study.open', compact('institute', 'year', 'title'));
-        $downloadUrl = htmlspecialchars(route('office.institute-study.download', compact('institute', 'year', 'title')), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-        $links = collect($files)->map(function (array $file) use ($openUrl): string {
-            $url = htmlspecialchars($openUrl.'?'.http_build_query(['file' => $file['name']]), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-            $name = htmlspecialchars($file['name'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $heading = htmlspecialchars($research->title, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $openUrl = route('office.institute-study.open', ['institute' => $research->institute ?? $research->academic_unit, 'year' => $research->publication_year, 'title' => $research->title, 'id' => $research->id]);
+        $downloadUrl = htmlspecialchars(route('office.institute-study.download', ['institute' => $research->institute ?? $research->academic_unit, 'year' => $research->publication_year, 'title' => $research->title, 'id' => $research->id]), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $links = $files->map(function (DocumentFile $file) use ($openUrl): string {
+            $url = htmlspecialchars($openUrl.'&'.http_build_query(['file' => $file->original_filename]), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+            $name = htmlspecialchars($file->original_filename, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 
             return '<li><a href="'.$url.'">'.$name.'</a></li>';
         })->implode('');

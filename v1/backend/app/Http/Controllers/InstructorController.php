@@ -10,6 +10,7 @@ use App\Models\SimilarityResult;
 use App\Models\User;
 use App\Notifications\ResearchActivityNotification;
 use App\Services\ClassSectionService;
+use App\Services\DefenseMonitoringAuthorization;
 use App\Services\DomainAuthorization;
 use App\Services\MonitoringService;
 use App\Services\ReportingService;
@@ -73,6 +74,7 @@ class InstructorController extends DomainController
             'name' => ['required', 'string', 'max:150'],
             'section_code' => ['required', 'string', 'max:100'],
             'academic_year' => ['nullable', 'string', 'max:50'],
+            'institute' => ['required', 'string', 'max:180'],
         ]);
         $section = $sections->create($this->actor($request), $input, $request);
 
@@ -86,6 +88,7 @@ class InstructorController extends DomainController
             'section_code' => ['sometimes', 'required', 'string', 'max:100'],
             'academic_year' => ['nullable', 'string', 'max:50'],
             'is_active' => ['sometimes', 'boolean'],
+            'institute' => ['sometimes', 'required', 'string', 'max:180'],
         ]);
 
         return response()->json(['data' => $this->sectionPayload($sections->update($this->actor($request), $classSection, $input, $request))]);
@@ -182,8 +185,16 @@ class InstructorController extends DomainController
             return $denied;
         }
 
-        return response()->json(['data' => $teams->get($classSection, $researchDocument), 'schema_version' => 1])
-            ->header('Cache-Control', 'private, no-store');
+        $input = $this->validated($request, [
+            'defense_type' => ['nullable', 'in:proposal,final'],
+        ], true);
+
+        $defenseType = $input['defense_type'] ?? 'proposal';
+
+        return response()->json([
+            'data' => $teams->get($classSection, $researchDocument, $defenseType),
+            'schema_version' => 1,
+        ])->header('Cache-Control', 'private, no-store');
     }
 
     public function documentTeamCandidates(Request $request, ClassSection $classSection, ResearchDocument $researchDocument, ResearchProjectTeamService $teams): JsonResponse
@@ -192,7 +203,7 @@ class InstructorController extends DomainController
             return $denied;
         }
         $input = $this->validated($request, [
-            'team_role' => ['required', 'in:adviser,research_office_representative,chair,panel_member'],
+            'team_role' => ['required', 'in:researcher,adviser,research_office_representative,chair,panel_member'],
             'search' => ['nullable', 'string', 'max:100'],
         ], true);
 
@@ -205,7 +216,11 @@ class InstructorController extends DomainController
         if ($denied = $this->authorizeSectionAccess($request, $classSection)) {
             return $denied;
         }
+
         $input = $this->validated($request, [
+            'defense_type' => ['required', 'in:proposal,final'],
+            'researcher_ids' => ['nullable', 'array'],
+            'researcher_ids.*' => ['string', 'distinct', 'exists:users,id'],
             'adviser_id' => ['nullable', 'string', 'exists:users,id'],
             'research_office_representative_id' => ['nullable', 'string', 'exists:users,id'],
             'chair_id' => ['nullable', 'string', 'exists:users,id'],
@@ -213,8 +228,17 @@ class InstructorController extends DomainController
             'panel_member_ids.*' => ['string', 'distinct', 'exists:users,id'],
         ]);
 
-        return response()->json(['data' => $teams->replace($this->actor($request), $classSection, $researchDocument, $input, $request), 'schema_version' => 1])
-            ->header('Cache-Control', 'private, no-store');
+        return response()->json([
+            'data' => $teams->replace(
+                $this->actor($request),
+                $classSection,
+                $researchDocument,
+                $input['defense_type'],
+                $input,
+                $request
+            ),
+            'schema_version' => 1,
+        ])->header('Cache-Control', 'private, no-store');
     }
 
     public function replaceDocumentTeamRole(Request $request, ClassSection $classSection, ResearchDocument $researchDocument, ResearchProjectTeamService $teams): JsonResponse
@@ -222,13 +246,25 @@ class InstructorController extends DomainController
         if ($denied = $this->authorizeSectionAccess($request, $classSection)) {
             return $denied;
         }
+
         $input = $this->validated($request, [
-            'team_role' => ['required', 'in:adviser,research_office_representative,chair,panel_member'],
+            'defense_type' => ['required', 'in:proposal,final'],
+            'team_role' => ['required', 'in:researcher,adviser,research_office_representative,chair,panel_member'],
             'user_id' => ['nullable', 'string', 'exists:users,id'],
         ]);
 
-        return response()->json(['data' => $teams->replaceRole($this->actor($request), $classSection, $researchDocument, $input['team_role'], $input['user_id'] ?? null, $request), 'schema_version' => 1])
-            ->header('Cache-Control', 'private, no-store');
+        return response()->json([
+            'data' => $teams->replaceRole(
+                $this->actor($request),
+                $classSection,
+                $researchDocument,
+                $input['defense_type'],
+                $input['team_role'],
+                $input['user_id'] ?? null,
+                $request
+            ),
+            'schema_version' => 1,
+        ])->header('Cache-Control', 'private, no-store');
     }
 
     public function createSectionProject(Request $request, ClassSection $classSection, ClassSectionService $sections): JsonResponse
@@ -476,6 +512,7 @@ class InstructorController extends DomainController
             'signature_status' => ['required', 'in:unsigned,signed'],
         ]);
 
+        app(DefenseMonitoringAuthorization::class)->authorizeSection($actor, $researchDocument, $input['monitoring_stage']);
         $entry = DB::transaction(function () use ($actor, $researchDocument, $input, $activity) {
             DB::table('monitoring_entries')->updateOrInsert([
                 'research_document_id' => $researchDocument->id,
@@ -512,6 +549,7 @@ class InstructorController extends DomainController
         $input = $this->validated($request, [
             'monitoring_stage' => ['required', 'in:before_proposal_defense,after_proposal_defense'],
         ]);
+        app(DefenseMonitoringAuthorization::class)->authorizeSection($actor, $researchDocument, $input['monitoring_stage']);
         $entries = DB::table('monitoring_entries')
             ->where('research_document_id', $researchDocument->id)
             ->where('monitoring_stage', $input['monitoring_stage'])
@@ -555,6 +593,7 @@ class InstructorController extends DomainController
         return [
             'id' => $section->id,
             'name' => $section->name,
+            'institute' => $section->institute,
             'section_code' => $section->section_code,
             'academic_year' => $section->academic_year,
             'is_active' => $section->is_active,

@@ -4,9 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Contracts\GoogleIdTokenVerifier;
 use App\Exceptions\ApiValidationException;
+use App\Models\ResearchDocument;
 use App\Models\User;
 use App\Services\AccountService;
 use App\Services\AuditService;
+use App\Services\CoordinatorInstituteScope;
 use App\Services\InvitationMailer;
 use App\Services\UserSessionMapper;
 use Illuminate\Http\Request;
@@ -72,7 +74,7 @@ class ApiController extends Controller
 
     public function provisionCoordinator(Request $request, AccountService $accounts, InvitationMailer $mailer): Response
     {
-        return $this->provision($request, $accounts, $mailer, 'coordinator', 'Research Coordinator');
+        return $this->provision($request, $accounts, $mailer, 'coordinator', 'Research Coordinator', null, true);
     }
 
     public function accounts(AccountService $accounts): Response
@@ -96,26 +98,38 @@ class ApiController extends Controller
             $mailer,
             $input['role'],
             ucwords(str_replace('-', ' ', $input['role'])),
+            null,
+            $input['role'] === 'coordinator',
         );
     }
 
-    public function instructors(Request $request, AccountService $accounts): Response
+    public function instructors(Request $request, AccountService $accounts, CoordinatorInstituteScope $scope): Response
     {
+        $actor = $this->currentUser($request);
+
         return response()
-            ->json(['users' => array_map(UserSessionMapper::map(...), $accounts->listProvisionedUsers('instructor'))])
+            ->json(['users' => array_map(UserSessionMapper::map(...), $accounts->listProvisionedUsers('instructor', $scope->institute($actor)))])
             ->header('Cache-Control', 'private, no-store');
     }
 
     public function provisionInstructor(Request $request, AccountService $accounts, InvitationMailer $mailer): Response
     {
-        return $this->provision($request, $accounts, $mailer, 'instructor', 'Research Instructor');
+        $actor = $this->currentUser($request);
+
+        return $this->provision($request, $accounts, $mailer, 'instructor', 'Research Instructor', app(CoordinatorInstituteScope::class)->institute($actor));
     }
 
-    private function provision(Request $request, AccountService $accounts, InvitationMailer $mailer, string $role, string $roleLabel): Response
+    private function provision(Request $request, AccountService $accounts, InvitationMailer $mailer, string $role, string $roleLabel, ?string $institute = null, bool $requireInstitute = false): Response
     {
-        $input = $this->validated($request, ['email' => ['required', 'string', 'email', 'max:254']]);
+        $input = $this->validated($request, [
+            'email' => ['required', 'string', 'email', 'max:254'],
+            'institute' => $requireInstitute
+                ? ['required', 'string', 'in:'.implode(',', ResearchDocument::INSTITUTES)]
+                : ['prohibited'],
+        ]);
+        $institute ??= $input['institute'] ?? null;
         try {
-            $user = $accounts->provisionUser($input['email'], $role, $this->currentUser($request)->id);
+            $user = $accounts->provisionUser($input['email'], $role, $this->currentUser($request)->id, $institute);
         } catch (\RuntimeException) {
             return response()->json(['error' => 'ACCOUNT_ROLE_CONFLICT'], 409);
         }

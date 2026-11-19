@@ -1,0 +1,397 @@
+import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import StudyWorkspace from "./StudyWorkspace";
+
+vi.mock("./SharedMonitoring", () => ({
+  default: ({
+    defenseType,
+    readOnly,
+  }: {
+    defenseType: string;
+    readOnly?: boolean;
+  }) => (
+    <div data-testid="shared-monitoring">
+      {defenseType}:{readOnly ? "read-only" : "editable"}
+    </div>
+  ),
+}));
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe("StudyWorkspace", () => {
+  it("disables the header review action and hides it without an authorized handler", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ data: [] }))),
+    );
+    const onAction = vi.fn();
+    const props = {
+      role: "research-office" as const,
+      researchDocumentId: 17,
+      title: "Coastal Resilience Study",
+      context: [
+        "Institute of Science",
+        "Environmental Science",
+        "Title Proposal",
+        "Submitted",
+      ],
+      researchers: [],
+      status: {
+        submissionStatus: "submitted",
+        researchStage: "title_proposal",
+        archiveStatus: "not_archived",
+        visibility: "private",
+        actionLabel: "Move to under review",
+        actionDisabled: true,
+        onAction,
+      },
+    };
+    const view = render(<StudyWorkspace {...props} />);
+    const trigger = screen.getByRole("button", {
+      name: "Move to Under Review",
+    });
+    expect(trigger).toBeDisabled();
+    fireEvent.click(trigger);
+    expect(onAction).not.toHaveBeenCalled();
+    view.rerender(
+      <StudyWorkspace
+        {...props}
+        status={{ ...props.status, onAction: undefined }}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "Move to Under Review" }),
+    ).not.toBeInTheDocument();
+    view.rerender(<StudyWorkspace {...props} role="adviser" />);
+    expect(
+      screen.queryByRole("button", { name: "Move to Under Review" }),
+    ).not.toBeInTheDocument();
+    expect(
+      await screen.findByText("No manuscript files uploaded yet."),
+    ).toBeInTheDocument();
+  });
+
+  it("opens a notification destination at the exact file feedback panel", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/files")) {
+          return new Response(
+            JSON.stringify({
+              data: [
+                {
+                  id: 31,
+                  original_filename: "chapter-one.pdf",
+                  mime_type: "application/pdf",
+                  relative_path: "Chapter 1",
+                  version_number: 1,
+                  is_current: true,
+                  upload_purpose: "initial_submission",
+                  uploaded_at: "2026-09-21T08:00:00Z",
+                },
+              ],
+            }),
+          );
+        }
+        if (url.endsWith("/folders")) {
+          return new Response(JSON.stringify({ data: ["Chapter 1"] }));
+        }
+        if (url.endsWith("/feedback")) {
+          return new Response(JSON.stringify({ data: [] }));
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+
+    const { container } = render(
+      <StudyWorkspace
+        role="adviser"
+        researchDocumentId={17}
+        title="Coastal Resilience Study"
+        context={["Institute of Science"]}
+        researchers={[]}
+        canPostFeedback
+        destination={{
+          tab: "documents",
+          folder: "Chapter 1",
+          fileId: 31,
+          panel: "feedback",
+        }}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "chapter-one.pdf" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Documents" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(
+      container.querySelector(".project-document-row.is-targeted"),
+    ).toHaveTextContent("chapter-one.pdf");
+    expect(await screen.findByText("No feedback yet.")).toBeInTheDocument();
+  });
+
+  it("renders the canonical navigation and keeps assigned actors read-only", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/files")) {
+          return new Response(
+            JSON.stringify({
+              data: [
+                {
+                  id: 31,
+                  original_filename: "chapter-one.pdf",
+                  mime_type: "application/pdf",
+                  relative_path: "Chapter 1",
+                  version_number: 1,
+                  is_current: true,
+                  upload_purpose: "initial_submission",
+                  uploaded_at: "2026-09-21T08:00:00Z",
+                },
+              ],
+            }),
+          );
+        }
+        if (url.endsWith("/feedback")) {
+          return new Response(JSON.stringify({ data: [] }));
+        }
+        if (url.endsWith("/folders")) {
+          return new Response(JSON.stringify({ data: ["Manuscript"] }));
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+
+    render(
+      <StudyWorkspace
+        role="statistician"
+        researchDocumentId={17}
+        title="Coastal Resilience Study"
+        context={["Institute of Science", "Proposal", "Approved", "Read only"]}
+        researchers={[{ id: "4", name: "Ari Santos" }]}
+        people={{
+          section: {
+            id: 2,
+            name: "ENV-401",
+            academic_year: "2026-2027",
+            instructor_name: "Dr. Lina Cruz",
+          },
+          reviewers: [{ review_role: "adviser", name: "Prof. Mara Lim" }],
+        }}
+        badgeLabel="Read-only record"
+        monitoringReadOnly
+      />,
+    );
+
+    expect(await screen.findByTestId("study-workspace")).toBeInTheDocument();
+    for (const item of [
+      "Overview",
+      "Research Team",
+      "Documents",
+      "Defense Monitoring Forms",
+    ]) {
+      expect(screen.getByRole("button", { name: item })).toBeInTheDocument();
+    }
+    expect(
+      screen.queryByRole("button", { name: "Feedback" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Read-only record")).toBeInTheDocument();
+    expect(screen.getByText("Dr. Lina Cruz")).toBeInTheDocument();
+    expect(screen.getByText("Prof. Mara Lim")).toBeInTheDocument();
+    expect(screen.getByText("1 members")).toBeInTheDocument();
+    expect(screen.getByText("Approved")).toHaveClass("project-status-badge");
+    expect(screen.getByTitle("chapter-one.pdf")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: /edit research title|delete research project|manage assignments|remove/i,
+      }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Proposal Defense")).not.toBeInTheDocument();
+    expect(screen.queryByText("Final Defense")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Documents" }));
+
+    expect(await screen.findByText("chapter-one.pdf")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "File feedback" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Open annotations" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Defense Monitoring Forms" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Final Defense" }));
+
+    expect(screen.getByTestId("shared-monitoring")).toHaveTextContent(
+      "final:read-only",
+    );
+    expect(screen.queryByText("Proposal Defense")).not.toBeInTheDocument();
+    expect(screen.queryByText("Final Defense")).not.toBeInTheDocument();
+  });
+
+  it("keeps the final defense team unassigned until it is managed separately", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/files")) {
+          return new Response(JSON.stringify({ data: [] }));
+        }
+        if (url.endsWith("/folders")) {
+          return new Response(JSON.stringify({ data: [] }));
+        }
+        if (url.endsWith("/feedback")) {
+          return new Response(JSON.stringify({ data: [] }));
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+
+    const emptyTeam = {
+      section_id: 5,
+      research_document_id: 793,
+      defense_type: "proposal" as const,
+      instructor: null,
+      researchers: [],
+      adviser: null,
+      research_office_representative: null,
+      chair: null,
+      panel_members: [],
+      support_assignments: {
+        editor: null,
+        statistician: null,
+        librarian: null,
+      },
+      pre_defense_ready: false,
+      post_defense_ready: false,
+      complete: false,
+    };
+
+    render(
+      <StudyWorkspace
+        role="instructor"
+        researchDocumentId={793}
+        title="Section project"
+        context={["Thesis 2"]}
+        researchers={[]}
+        projectTeam={emptyTeam}
+        people={{
+          section: {
+            id: 5,
+            name: "Thesis 2",
+            academic_year: "2026-2027",
+            instructor_name: "Jun Rey Sta. Rita",
+          },
+          reviewers: [{ review_role: "adviser", name: "Genevieve Hilot" }],
+        }}
+      />,
+    );
+
+    expect(await screen.findByTestId("study-workspace")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Research Team" }));
+
+    // Proposal view still falls back to the assigned contacts.
+    expect(await screen.findAllByText("Genevieve Hilot")).not.toHaveLength(0);
+
+    // Final view must not mirror the proposal contacts.
+    fireEvent.change(screen.getByLabelText("Defense stage"), {
+      target: { value: "final" },
+    });
+    expect(screen.queryByText("Genevieve Hilot")).not.toBeInTheDocument();
+    expect(screen.queryByText("Jun Rey Sta. Rita")).not.toBeInTheDocument();
+  });
+
+  it("shows all proposal assignment roles when the stage team is empty", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/files") || url.endsWith("/feedback")) {
+          return new Response(JSON.stringify({ data: [] }));
+        }
+        if (url.endsWith("/folders")) {
+          return new Response(JSON.stringify({ data: [] }));
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+
+    render(
+      <StudyWorkspace
+        role="instructor"
+        researchDocumentId={794}
+        title="Section project"
+        context={["Thesis 2"]}
+        researchers={[]}
+        projectTeam={{
+          section_id: 5,
+          research_document_id: 794,
+          defense_type: "proposal",
+          instructor: null,
+          researchers: [],
+          adviser: null,
+          research_office_representative: null,
+          chair: null,
+          panel_members: [],
+          support_assignments: {
+            editor: null,
+            statistician: null,
+            librarian: null,
+          },
+          pre_defense_ready: false,
+          post_defense_ready: false,
+          complete: false,
+        }}
+        people={{
+          section: {
+            id: 5,
+            name: "Thesis 2",
+            academic_year: "2026-2027",
+            instructor_name: "Instructor One",
+          },
+          reviewers: [
+            { review_role: "adviser", name: "Adviser One" },
+            { review_role: "research-office", name: "Representative One" },
+            {
+              review_role: "panel",
+              designation: "panel_chair",
+              name: "Chair One",
+            },
+            {
+              review_role: "panel",
+              designation: "panel_1",
+              name: "Panelist One",
+            },
+            { review_role: "research_editor", name: "Editor One" },
+            { review_role: "statistician", name: "Statistician One" },
+            { review_role: "librarian", name: "Librarian One" },
+          ],
+        }}
+      />,
+    );
+
+    expect(await screen.findByTestId("study-workspace")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Research Team" }));
+
+    for (const name of [
+      "Instructor One",
+      "Adviser One",
+      "Editor One",
+      "Statistician One",
+      "Librarian One",
+    ]) {
+      expect(screen.getAllByText(name).length).toBeGreaterThan(0);
+    }
+    fireEvent.click(screen.getByRole("tab", { name: "After defense" }));
+    for (const name of ["Representative One", "Chair One", "Panelist One"]) {
+      expect(screen.getAllByText(name).length).toBeGreaterThan(0);
+    }
+  });
+});

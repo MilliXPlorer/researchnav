@@ -1,5 +1,11 @@
-import type { CSSProperties, ReactNode } from "react";
-import { ArrowRight, Search, X } from "lucide-react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
+import { ArrowRight, CircleAlert, CircleCheck, Search, X } from "lucide-react";
 import {
   classificationLabel,
   type SimilarityClassification,
@@ -23,6 +29,80 @@ export function Logo({ compact = false }: { compact?: boolean }) {
   );
 }
 
+export function AnimatedStat({
+  value,
+  placeholder,
+  variant = "count",
+}: {
+  value: number | null;
+  placeholder?: ReactNode;
+  variant?: "count" | "year";
+}) {
+  const target = value ?? 0;
+  const [display, setDisplay] = useState<number | ReactNode>(
+    value ?? placeholder ?? 0,
+  );
+  const elementRef = useRef<HTMLElement>(null);
+  const previousTarget = useRef<number | null>(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const element = elementRef.current;
+    if (!element) return;
+    if (!("IntersectionObserver" in window)) {
+      const frame = requestAnimationFrame(() => setVisible(true));
+      return () => cancelAnimationFrame(frame);
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting) return;
+        setVisible(true);
+        observer.disconnect();
+      },
+      { threshold: 0.35 },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!visible || value === null || target === previousTarget.current) return;
+    previousTarget.current = target;
+    if (
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true
+    ) {
+      const frame = requestAnimationFrame(() => setDisplay(target));
+      return () => cancelAnimationFrame(frame);
+    }
+
+    const duration = 900;
+    const startedAt = performance.now();
+    let frame = 0;
+    const animate = (now: number) => {
+      const progress = Math.min((now - startedAt) / duration, 1);
+      if (variant === "year" && progress < 0.82) {
+        const cycle = Math.floor(progress * 24);
+        setDisplay(target + ((cycle * 7) % 15));
+      } else {
+        setDisplay(
+          variant === "year"
+            ? target
+            : Math.round(target * (1 - Math.pow(1 - progress, 3))),
+        );
+      }
+      if (progress < 1) frame = requestAnimationFrame(animate);
+    };
+    frame = requestAnimationFrame(() => {
+      setDisplay(variant === "year" ? target + 9 : 0);
+      frame = requestAnimationFrame(animate);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [target, value, variant, visible]);
+
+  return <strong ref={elementRef}>{display}</strong>;
+}
+
 export function Button({
   children,
   variant = "primary",
@@ -38,6 +118,51 @@ export function Button({
   );
 }
 
+export function ToastNotification({
+  message,
+  type = "success",
+  duration = 3000,
+  onDismiss,
+}: {
+  message: string;
+  type?: "success" | "error";
+  duration?: number;
+  onDismiss: () => void;
+}) {
+  const dismissRef = useRef(onDismiss);
+
+  useEffect(() => {
+    dismissRef.current = onDismiss;
+  }, [onDismiss]);
+
+  useEffect(() => {
+    if (duration <= 0) return;
+    const timeoutId = window.setTimeout(() => dismissRef.current(), duration);
+    return () => window.clearTimeout(timeoutId);
+  }, [duration, message]);
+
+  return (
+    <div
+      className={`toast toast-notification${type === "error" ? " is-error" : ""}`}
+      role={type === "error" ? "alert" : "status"}
+      aria-live={type === "error" ? "assertive" : "polite"}
+    >
+      <span className="toast-status-icon" aria-hidden="true">
+        {type === "error" ? <CircleAlert /> : <CircleCheck />}
+      </span>
+      <p>{message}</p>
+      <button
+        type="button"
+        className="toast-dismiss"
+        aria-label="Dismiss notification"
+        onClick={onDismiss}
+      >
+        <X />
+      </button>
+    </div>
+  );
+}
+
 export function StatusChip({ status }: { status: Status }) {
   return (
     <span
@@ -45,6 +170,47 @@ export function StatusChip({ status }: { status: Status }) {
     >
       {status}
     </span>
+  );
+}
+
+export type SortDirection = "asc" | "desc";
+
+/** A table header that keeps sorting controls inside the existing header styling. */
+export function SortableHeader({
+  sortKey,
+  activeSort,
+  direction = "asc",
+  onSort,
+  children,
+  label,
+}: {
+  sortKey: string;
+  activeSort: string | null;
+  direction?: SortDirection;
+  onSort: (sortKey: string) => void;
+  children: ReactNode;
+  label?: string;
+}) {
+  const active = activeSort === sortKey;
+  const indicator = active ? (direction === "asc" ? "↑" : "↓") : "↕";
+  const accessibleLabel =
+    label ?? (typeof children === "string" ? children : sortKey);
+
+  return (
+    <th
+      aria-sort={
+        active ? (direction === "asc" ? "ascending" : "descending") : "none"
+      }
+    >
+      <button
+        type="button"
+        className="sortable-header-button"
+        onClick={() => onSort(sortKey)}
+        aria-label={`Sort by ${accessibleLabel}`}
+      >
+        {children} <span aria-hidden="true">{indicator}</span>
+      </button>
+    </th>
   );
 }
 
@@ -62,7 +228,7 @@ export function SimilarityBadge({
   );
 }
 
-/** Explains the service-provided categories without duplicating policy thresholds. */
+/** Explains the service-provided score bands without duplicating policy thresholds. */
 export function SimilarityLegend() {
   return (
     <ul className="similarity-legend" aria-label="Similarity score bands">
@@ -116,6 +282,100 @@ export function SimilarityRing({
   );
 }
 
+export function Pagination({
+  meta,
+  onPage,
+  noun = "records",
+}: {
+  meta: {
+    current_page: number;
+    from: number | null;
+    last_page: number;
+    per_page: number;
+    to: number | null;
+    total: number;
+  };
+  onPage: (page: number) => void;
+  noun?: string;
+}) {
+  const { current_page: page, last_page: lastPage } = meta;
+  const pages = paginationItems(page, lastPage);
+
+  return (
+    <nav className="admin-pagination" aria-label="Pagination">
+      <span className="pagination-summary">
+        Showing {(meta.from ?? 0).toLocaleString()}–
+        {(meta.to ?? 0).toLocaleString()} of {meta.total.toLocaleString()}{" "}
+        {noun}
+      </span>
+      <Button
+        variant="secondary"
+        disabled={page <= 1}
+        onClick={() => onPage(Math.max(1, page - 1))}
+        aria-label="Previous"
+      >
+        ← Previous
+      </Button>
+      <span className="pagination-pages">
+        {pages.map((item, index) =>
+          item === "ellipsis" ? (
+            <span
+              key={`ellipsis-${index}`}
+              className="pagination-ellipsis"
+              aria-hidden="true"
+            >
+              …
+            </span>
+          ) : (
+            <Button
+              key={item}
+              variant={item === page ? "primary" : "secondary"}
+              className="pagination-page"
+              aria-label={`Page ${item}`}
+              aria-current={item === page ? "page" : undefined}
+              onClick={() => onPage(item)}
+            >
+              {item}
+            </Button>
+          ),
+        )}
+      </span>
+      <Button
+        variant="secondary"
+        disabled={page >= lastPage}
+        onClick={() => onPage(Math.min(lastPage, page + 1))}
+        aria-label="Next"
+      >
+        Next →
+      </Button>
+    </nav>
+  );
+}
+
+function paginationItems(page: number, lastPage: number) {
+  if (lastPage <= 7) {
+    return Array.from({ length: lastPage }, (_, index) => index + 1);
+  }
+
+  const visible = new Set([1, lastPage, page - 1, page, page + 1]);
+  if (page <= 2) visible.add(2);
+  if (page >= lastPage - 1) visible.add(lastPage - 1);
+
+  const pageNumbers = [...visible]
+    .filter((item) => item >= 1 && item <= lastPage)
+    .sort((first, second) => first - second);
+  const items: Array<number | "ellipsis"> = [];
+
+  pageNumbers.forEach((item, index) => {
+    if (index > 0 && item - pageNumbers[index - 1] > 1) {
+      items.push("ellipsis");
+    }
+    items.push(item);
+  });
+
+  return items;
+}
+
 export function SectionHeading({
   eyebrow,
   title,
@@ -159,6 +419,7 @@ export function SearchBox({
   placeholder = "Search titles, authors, or keywords",
   label = "Search the repository",
   large = false,
+  submitIcon = "arrow",
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -166,17 +427,18 @@ export function SearchBox({
   placeholder?: string;
   label?: string;
   large?: boolean;
+  submitIcon?: "arrow" | "search";
 }) {
   return (
     <form
-      className={`search-box ${large ? "search-box-large" : ""}`}
+      className={`search-box ${large ? "search-box-large" : ""}${submitIcon === "search" ? " search-box-submit-icon" : ""}`}
       role="search"
       onSubmit={(event) => {
         event.preventDefault();
         onSubmit();
       }}
     >
-      <Search aria-hidden="true" />
+      {submitIcon !== "search" && <Search aria-hidden="true" />}
       <label
         className="sr-only"
         htmlFor={large ? "hero-search" : "catalog-search"}
@@ -200,7 +462,16 @@ export function SearchBox({
         </button>
       )}
       <Button type="submit">
-        Search <ArrowRight aria-hidden="true" />
+        {submitIcon === "search" ? (
+          <>
+            <span className="sr-only">Search</span>
+            <Search aria-hidden="true" />
+          </>
+        ) : (
+          <>
+            Search <ArrowRight aria-hidden="true" />
+          </>
+        )}
       </Button>
     </form>
   );

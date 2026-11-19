@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\ResearchDocument;
 use App\Models\User;
 use App\Models\UserRole;
 use Illuminate\Database\QueryException;
@@ -68,9 +69,11 @@ class AccountService
     }
 
     /** @return list<User> */
-    public function listProvisionedUsers(string $role): array
+    public function listProvisionedUsers(string $role, ?string $institute = null): array
     {
-        return User::query()->where('role', $role)->latest('created_at')->get()->all();
+        return User::query()->where('role', $role)
+            ->when($institute !== null, fn ($query) => $query->where('institute', $institute))
+            ->latest('created_at')->get()->all();
     }
 
     /** @return list<User> */
@@ -83,15 +86,21 @@ class AccountService
             ->all();
     }
 
-    public function provisionUser(string $emailInput, string $role, string $invitedBy): User
+    public function provisionUser(string $emailInput, string $role, string $invitedBy, ?string $institute = null): User
     {
         $email = $this->normalizeEmail($emailInput);
+        if ($role === 'coordinator' && ! in_array($institute, ResearchDocument::INSTITUTES, true)) {
+            throw new RuntimeException('A valid institute is required for coordinator accounts.');
+        }
 
-        return $this->retryAfterDuplicateInsert(function () use ($email, $role, $invitedBy): User {
-            return DB::transaction(function () use ($email, $role, $invitedBy): User {
+        return $this->retryAfterDuplicateInsert(function () use ($email, $role, $invitedBy, $institute): User {
+            return DB::transaction(function () use ($email, $role, $invitedBy, $institute): User {
                 $existing = User::query()->where('email', $email)->lockForUpdate()->first();
 
                 if ($existing !== null) {
+                    if ($institute !== null && $existing->institute !== null && trim($existing->institute) !== $institute) {
+                        throw new RuntimeException('Existing account belongs to another institute.');
+                    }
                     $existingRole = $existing->roleDefinition?->slug === UserRole::RESEARCH_EDITOR
                         ? UserRole::RESEARCH_EDITOR
                         : $existing->role;
@@ -111,6 +120,7 @@ class AccountService
                         'confirmed_at' => $isActive ? ($existing->confirmed_at ?? now()) : $existing->confirmed_at,
                         'invited_by' => $invitedBy,
                         'invitation_sent_at' => now(),
+                        'institute' => $institute ?? $existing->institute,
                     ])->save();
 
                     if ($role === UserRole::RESEARCH_EDITOR) {
@@ -131,6 +141,7 @@ class AccountService
                     'is_admin' => false,
                     'invited_by' => $invitedBy,
                     'invitation_sent_at' => now(),
+                    'institute' => $institute,
                 ]);
 
                 return $user->fresh();

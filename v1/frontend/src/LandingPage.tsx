@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowRight,
   BookOpen,
@@ -6,13 +6,25 @@ import {
   ChevronDown,
   FileText,
   GraduationCap,
+  History,
+  Info,
+  ChartNoAxesColumnIncreasing,
+  Layers3,
   LockKeyhole,
   Search,
+  Share2,
+  Upload,
+  Users,
 } from "lucide-react";
-import { Button, Logo, SearchBox } from "./components";
+import { AnimatedStat, Button, Logo, SearchBox } from "./components";
+import SdgPickerModal from "./SdgPickerModal";
 import ProfileDialog, { ProfileAvatar } from "./ProfileDialog";
+import PublicResearchMetadataDialog from "./PublicResearchMetadataDialog";
+import { Modal } from "./Modal";
+import ConsentNotice from "./ConsentNotice";
 import { instituteNames, roleConfigs } from "./data";
 import type { ResearchRecord, UserSession } from "./types";
+import SelectMenu from "./SelectMenu";
 
 export default function LandingPage({
   onSignIn,
@@ -35,7 +47,39 @@ export default function LandingPage({
 }) {
   const [query, setQuery] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
-  const recent = records.slice(0, 3);
+  const [sdgPickerOpen, setSdgPickerOpen] = useState(false);
+  const [contactOpen, setContactOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [privacyOpen, setPrivacyOpen] = useState(false);
+
+  useEffect(() => {
+    const handleHashChange = () =>
+      setPrivacyOpen(window.location.hash === "#privacy");
+    handleHashChange();
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
+
+  function openPrivacy() {
+    window.history.pushState({}, "", "#privacy");
+    setPrivacyOpen(true);
+  }
+
+  function closePrivacy() {
+    window.history.replaceState(
+      {},
+      "",
+      `${window.location.pathname}${window.location.search}`,
+    );
+    setPrivacyOpen(false);
+  }
+
+  const [metadataResearchId, setMetadataResearchId] = useState<
+    string | number | null
+  >(null);
+  const recent = [...records]
+    .sort((a, b) => b.year - a.year || Number(b.id) - Number(a.id))
+    .slice(0, 3);
   const instituteCount = instituteNames.length;
   const earliestYear = records.length
     ? Math.min(...records.map((record) => record.year))
@@ -114,67 +158,56 @@ export default function LandingPage({
               onChange={setQuery}
               onSubmit={search}
               large
+              submitIcon="search"
             />
             <div className="hero-filters" aria-label="Search filters">
               <label>
                 <span className="sr-only">Browse by year</span>
-                <select
-                  defaultValue=""
-                  onChange={(event) =>
-                    event.target.value &&
-                    navigate(
-                      `/catalog?year_from=${event.target.value}&year_to=${event.target.value}`,
-                    )
+                <SelectMenu
+                  label="Browse by year"
+                  className="hero-year-select"
+                  value=""
+                  onChange={(value) =>
+                    value &&
+                    navigate(`/catalog?year_from=${value}&year_to=${value}`)
                   }
-                >
-                  <option value="">All years</option>
-                  {[...new Set(records.map((record) => record.year))]
-                    .sort((a, b) => b - a)
-                    .map((year) => (
-                      <option key={year} value={year}>
-                        {year}
-                      </option>
-                    ))}
-                </select>
-                <ChevronDown />
+                  options={[
+                    { value: "", label: "All years" },
+                    ...[...new Set(records.map((record) => record.year))]
+                      .sort((a, b) => b - a)
+                      .map((year) => ({
+                        value: String(year),
+                        label: String(year),
+                      })),
+                  ]}
+                />
               </label>
-              <label>
-                <span className="sr-only">Browse by category</span>
-                <select
-                  defaultValue=""
-                  onChange={(event) =>
-                    event.target.value &&
-                    navigate(
-                      `/catalog?category=${encodeURIComponent(event.target.value)}`,
-                    )
-                  }
-                >
-                  <option value="">All categories</option>
-                  {[...new Set(records.map((record) => record.category))].map(
-                    (category) => (
-                      <option key={category}>{category}</option>
-                    ),
-                  )}
-                </select>
+              <button
+                type="button"
+                className="hero-filter-trigger"
+                onClick={() => setSdgPickerOpen(true)}
+              >
+                All SDGs
                 <ChevronDown />
-              </label>
+              </button>
               <label>
                 <span className="sr-only">Browse by institute</span>
-                <select
-                  defaultValue=""
-                  onChange={(event) =>
-                    event.target.value &&
-                    navigate(
-                      `/catalog?institute=${encodeURIComponent(event.target.value)}`,
-                    )
+                <SelectMenu
+                  label="Browse by institute"
+                  className="hero-institute-select"
+                  value=""
+                  onChange={(value) =>
+                    value &&
+                    navigate(`/catalog?institute=${encodeURIComponent(value)}`)
                   }
-                >
-                  <option value="">All institutes</option>
-                  {instituteNames.map((institute) => (
-                    <option key={institute}>{institute}</option>
-                  ))}
-                </select>
-                <ChevronDown />
+                  options={[
+                    { value: "", label: "All institutes" },
+                    ...instituteNames.map((institute) => ({
+                      value: institute,
+                      label: institute,
+                    })),
+                  ]}
+                />
               </label>
             </div>
             {session === null && (
@@ -186,17 +219,32 @@ export default function LandingPage({
               </div>
             )}
           </div>
+          {sdgPickerOpen && (
+            <SdgPickerModal
+              onClose={() => setSdgPickerOpen(false)}
+              onApply={(ids) => {
+                setSdgPickerOpen(false);
+                if (ids.length > 0) {
+                  navigate(`/catalog?sdgs=${ids.join(",")}`);
+                }
+              }}
+            />
+          )}
           <div className="hero-index" aria-label="Repository statistics">
             <div>
-              <strong>{records.length}</strong>
+              <AnimatedStat value={records.length} />
               <span>public studies</span>
             </div>
             <div>
-              <strong>{instituteCount}</strong>
+              <AnimatedStat value={instituteCount} />
               <span>institutes represented</span>
             </div>
             <div>
-              <strong>{earliestYear ?? "—"}</strong>
+              <AnimatedStat
+                value={earliestYear}
+                placeholder="—"
+                variant="year"
+              />
               <span>earliest catalog year</span>
             </div>
           </div>
@@ -232,11 +280,7 @@ export default function LandingPage({
                       {record.year} · {record.program}
                     </span>
                   </div>
-                  <button
-                    onClick={() =>
-                      navigate(`/catalog?q=${encodeURIComponent(record.title)}`)
-                    }
-                  >
+                  <button onClick={() => setMetadataResearchId(record.id)}>
                     View metadata <ArrowRight />
                   </button>
                 </article>
@@ -254,6 +298,15 @@ export default function LandingPage({
           </div>
         </section>
 
+        {metadataResearchId !== null && (
+          <PublicResearchMetadataDialog
+            researchDocumentId={metadataResearchId}
+            onClose={() => setMetadataResearchId(null)}
+            authenticated={Boolean(session)}
+            onSignIn={onSignIn}
+          />
+        )}
+
         <section className="trust-section" id="about">
           <div>
             <p className="eyebrow">Built for responsible discovery</p>
@@ -263,10 +316,7 @@ export default function LandingPage({
             <article>
               <Search />
               <strong>Discover</strong>
-              <p>
-                Search across titles, authors, years, categories, and
-                institutes.
-              </p>
+              <p>Search across titles, authors, years, and institutes.</p>
             </article>
             <article>
               <GraduationCap />
@@ -291,17 +341,13 @@ export default function LandingPage({
           session={session}
           onSessionChange={onSessionChange}
           onClose={() => setProfileOpen(false)}
-          onOpenWorkspace={() => {
-            setProfileOpen(false);
-            navigate("/app");
-          }}
           onLogout={onLogout}
         />
       )}
 
       <footer className="public-footer">
         <Logo />
-        <p id="privacy">
+        <p id="privacy" tabIndex={-1}>
           Tangub City Global College · Institute of Computer Studies
           <br />
           Public records provide cataloged public metadata and abstract
@@ -309,12 +355,197 @@ export default function LandingPage({
           by institutional privacy controls and the Data Privacy Act of 2012.
         </p>
         <nav aria-label="Footer navigation">
-          <a href="#about">About</a>
-          <a href="mailto:research@tcgc.edu.ph">Contact</a>
-          <a href="#privacy">Data privacy</a>
+          <button type="button" onClick={() => setAboutOpen(true)}>
+            About
+          </button>
+          <button type="button" onClick={() => setContactOpen(true)}>
+            Contact
+          </button>
+          <button type="button" onClick={openPrivacy}>
+            Data privacy
+          </button>
         </nav>
         <span>© 2026 ResearchNAV</span>
       </footer>
+      {aboutOpen && (
+        <Modal
+          label="About ResearchNAV"
+          onClose={() => setAboutOpen(false)}
+          className="public-about-dialog"
+        >
+          <article
+            className="public-about-content"
+            aria-describedby="public-about-subtitle"
+          >
+            <header className="public-about-header">
+              <div className="public-about-title-group">
+                <Logo compact />
+                <div>
+                  <h2>About ResearchNAV</h2>
+                  <p
+                    id="public-about-subtitle"
+                    className="public-about-tagline"
+                  >
+                    Organizing research. Connecting knowledge.
+                  </p>
+                </div>
+              </div>
+            </header>
+            <div className="public-about-body">
+              <section className="public-about-band public-about-intro">
+                <span className="public-about-icon">
+                  <BookOpen aria-hidden="true" />
+                </span>
+                <p>
+                  <strong>ResearchNAV</strong> is a web-based research
+                  repository and management system developed for Tangub City
+                  Global College. It brings institutional research into one
+                  centralized platform.
+                </p>
+              </section>
+              <div className="public-about-columns">
+                <div className="public-about-left">
+                  <section className="public-about-capabilities">
+                    <h3>Built for better research management</h3>
+                    <p>
+                      A centralized platform to discover research, manage
+                      submissions, track revisions, and check content
+                      similarity—all in one place.
+                    </p>
+                    <ul>
+                      <li>
+                        <span>
+                          <Search aria-hidden="true" />
+                        </span>
+                        <div>
+                          <strong>Explore research</strong>
+                          <p>
+                            Find studies through keyword searches, filters, and
+                            similarity-based retrieval.
+                          </p>
+                        </div>
+                      </li>
+                      <li>
+                        <span>
+                          <Upload aria-hidden="true" />
+                        </span>
+                        <div>
+                          <strong>Manage submissions</strong>
+                          <p>
+                            Submit research documents and keep track of their
+                            status.
+                          </p>
+                        </div>
+                      </li>
+                      <li>
+                        <span>
+                          <History aria-hidden="true" />
+                        </span>
+                        <div>
+                          <strong>Follow revisions</strong>
+                          <p>
+                            Access adviser feedback and maintain a record of
+                            document revisions.
+                          </p>
+                        </div>
+                      </li>
+                      <li>
+                        <span>
+                          <Layers3 aria-hidden="true" />
+                        </span>
+                        <div>
+                          <strong>Check research similarity</strong>
+                          <p>
+                            Compare research titles and manuscript content with
+                            records available in the repository.
+                          </p>
+                        </div>
+                      </li>
+                    </ul>
+                  </section>
+                </div>
+                <section className="public-about-similarity">
+                  <h3>Similarity technology</h3>
+                  <p>
+                    ResearchNAV uses TF-IDF to represent textual importance,
+                    Cosine Similarity to measure how closely records match, and
+                    FastText to support contextual analysis. Together, these
+                    methods help identify related research for further review.
+                  </p>
+                  <div
+                    className="public-about-process"
+                    aria-label="Similarity technologies"
+                  >
+                    <span>
+                      <ChartNoAxesColumnIncreasing aria-hidden="true" /> TF-IDF
+                    </span>
+                    <span>
+                      <Share2 aria-hidden="true" /> Cosine Similarity
+                    </span>
+                    <span>
+                      <Layers3 aria-hidden="true" /> FastText
+                    </span>
+                  </div>
+                  <div className="public-about-notice">
+                    <Info aria-hidden="true" />
+                    <p>
+                      Similarity scores support review; they do not
+                      independently determine plagiarism, originality, or
+                      research quality.
+                    </p>
+                  </div>
+                </section>
+              </div>
+              <section className="public-about-band public-about-community">
+                <span className="public-about-icon">
+                  <Users aria-hidden="true" />
+                </span>
+                <div>
+                  <h3>Supporting Our Research Community</h3>
+                  <p>
+                    A centralized, accessible, and reliable platform for
+                    managing, discovering, and preserving the college’s research
+                    work.
+                  </p>
+                </div>
+              </section>
+            </div>
+          </article>
+        </Modal>
+      )}
+      {contactOpen && (
+        <Modal
+          label="Contact Research Office"
+          onClose={() => setContactOpen(false)}
+          className="public-contact-modal"
+        >
+          <div className="public-contact-dialog">
+            <p className="eyebrow">Tangub City Global College</p>
+            <h2>Contact Research Office</h2>
+            <p>
+              For repository access, corrections, or privacy requests, contact
+              the Research Office.
+            </p>
+            <div className="public-contact-action">
+              <a
+                className="button button-primary"
+                href="mailto:researchnavtech@gmail.com"
+              >
+                researchnavtech@gmail.com
+              </a>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {privacyOpen && (
+        <Modal
+          label="Terms and Data Privacy"
+          onClose={closePrivacy}
+          className="public-privacy-dialog"
+        >
+          <ConsentNotice readOnly onDecline={closePrivacy} />
+        </Modal>
+      )}
     </div>
   );
 }

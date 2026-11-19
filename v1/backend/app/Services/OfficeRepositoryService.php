@@ -1,0 +1,250 @@
+<?php
+
+namespace App\Services;
+
+use App\Models\ResearchAuthor;
+use App\Models\ResearchDocument;
+use App\Models\User;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
+use Throwable;
+
+class OfficeRepositoryService
+{
+    public function __construct(
+        private readonly AuditService $audit,
+        private readonly MonitoringService $monitoring,
+        private readonly ManuscriptSearchProjectionService $manuscriptSearch,
+    ) {}
+
+    /** @param array<string, mixed> $data */
+    public function update(User $actor, int $documentId, array $data, ?Request $request = null): ?ResearchDocument
+    {
+        return DB::transaction(function () use ($actor, $documentId, $data, $request): ?ResearchDocument {
+            $document = ResearchDocument::withTrashed()->whereKey($documentId)->lockForUpdate()->firstOrFail();
+            $actor = $this->currentOfficeActor($actor);
+            if ($document->trashed()) {
+                return null;
+            }
+            if ($document->updated_at?->equalTo($data['expected_updated_at']) !== true) {
+                throw new OfficeRepositoryConflictException;
+            }
+
+            $this->ensureInstituteProgramPair($document, $data);
+            $metadata = $this->metadata($data);
+            if (array_key_exists('abstract', $metadata)
+                && $document->import_source_sha256 !== null
+                && (string) $metadata['abstract'] !== (string) $document->abstract) {
+                $metadata['abstract_provenance'] = 'Manually corrected by authorized Research Office personnel.';
+            }
+
+            $document->fill($metadata);
+            $document->save();
+            if (array_key_exists('sdg_ids', $data)) {
+                $document->sdgs()->sync($data['sdg_ids']);
+            }
+            if (array_key_exists('authors', $data)) {
+                $this->syncAuthors($document, $data['authors']);
+            }
+
+            $description = "Updated repository metadata for {$document->submission_reference}.";
+            $this->monitoring->log($document, 'OFFICE_REPOSITORY_UPDATED', $actor, $description, $document->submission_status, $document->submission_status, 'open');
+            $this->audit->log($actor, 'OFFICE_REPOSITORY_UPDATED', $document, $description, $request);
+
+            return $document;
+        });
+    }
+
+    public function delete(User $actor, int $documentId, ?Request $request = null): bool
+    {
+        return DB::transaction(function () use ($actor, $documentId, $request): bool {
+            $document = ResearchDocument::withTrashed()->whereKey($documentId)->lockForUpdate()->firstOrFail();
+            $actor = $this->currentOfficeActor($actor);
+            if ($document->trashed()) {
+                return false;
+            }
+
+            $description = "Moved {$document->submission_reference} to the repository recycle bin.";
+            $this->monitoring->log($document, 'OFFICE_REPOSITORY_DELETED', $actor, $description, $document->submission_status, $document->submission_status, 'open');
+            $this->audit->log($actor, 'OFFICE_REPOSITORY_DELETED', $document, $description, $request);
+            ResearchDocument::withoutTimestamps(fn () => $document->delete());
+
+            return true;
+        });
+    }
+
+    public function restore(User $actor, int $documentId, ?Request $request = null): ?ResearchDocument
+    {
+        return DB::transaction(function () use ($actor, $documentId, $request): ?ResearchDocument {
+            $document = ResearchDocument::onlyTrashed()->whereKey($documentId)->lockForUpdate()->first();
+            $actor = $this->currentOfficeActor($actor);
+            if ($document === null) {
+                return null;
+            }
+
+            $description = "Restored {$document->submission_reference} from the repository recycle bin.";
+            ResearchDocument::withoutTimestamps(fn () => $document->restore());
+            $this->monitoring->log($document, 'OFFICE_REPOSITORY_RESTORED', $actor, $description, $document->submission_status, $document->submission_status, 'open');
+            $this->audit->log($actor, 'OFFICE_REPOSITORY_RESTORED', $document, $description, $request);
+
+            if ($this->isEligibleForReindex($document)) {
+                DB::afterCommit(function () use ($document): void {
+                    try {
+                        $this->manuscriptSearch->reindex((int) $document->id, true, true);
+                    } catch (Throwable $exception) {
+                        Log::warning('Office repository restore projection reindex failed.', [
+                            'research_document_id' => (int) $document->id,
+                            'exception' => $exception::class,
+                        ]);
+                    }
+                });
+            }
+
+            return $document;
+        });
+    }
+
+    /** @param array<string, mixed> $data @return array<string, mixed> */
+    private function metadata(array $data): array
+    {
+        $metadata = array_intersect_key($data, array_flip([
+            'title', 'abstract', 'keywords', 'publication_year', 'institute',
+            'degree_program', 'manuscript_date_label', 'research_stage',
+        ]));
+        if (array_key_exists('title', $metadata)) {
+            $metadata['normalized_title'] = str($metadata['title'])->lower()->replaceMatches('/[^a-z0-9]+/', ' ')->trim()->toString();
+        }
+
+        return $metadata;
+    }
+
+    private function currentOfficeActor(User $actor): User
+    {
+        $current = User::query()->with('roleDefinition')->lockForUpdate()->find($actor->id);
+        if ($current === null || ! DomainAuthorization::isOffice($current)) {
+            throw new AccessDeniedHttpException('Office authority is required.');
+        }
+
+        return $current;
+    }
+
+    /** @param array<string, mixed> $data */
+    private function ensureInstituteProgramPair(ResearchDocument $document, array $data): void
+    {
+        if (! array_key_exists('institute', $data) && ! array_key_exists('degree_program', $data)) {
+            return;
+        }
+
+        $institute = array_key_exists('institute', $data) ? $data['institute'] : $document->institute;
+        $program = array_key_exists('degree_program', $data) ? $data['degree_program'] : $document->degree_program;
+        if ($program !== null && ! in_array($program, ResearchDocument::PROGRAMS_BY_INSTITUTE[$institute] ?? [], true)) {
+            throw ValidationException::withMessages([
+                'degree_program' => ['Select a program offered by the chosen institute.'],
+            ]);
+        }
+    }
+
+    private function isEligibleForReindex(ResearchDocument $document): bool
+    {
+        return in_array($document->submission_status, ['approved', 'archived'], true)
+            && $document->archive_status === 'archived'
+            && $document->visibility === 'public';
+    }
+
+    /** @param array<int, array{id?: int|null, user_id?: string|null, author_name: string, is_corresponding_author: bool}> $authors */
+    private function syncAuthors(ResearchDocument $document, array $authors): void
+    {
+        $authors = array_values($authors);
+        $existingAuthors = $document->authors()
+            ->orderBy('author_order')
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get()
+            ->values();
+        $existingById = $existingAuthors->keyBy('id');
+        $retainedIds = [];
+
+        foreach ($authors as $index => $author) {
+            if (($author['id'] ?? null) === null) {
+                continue;
+            }
+
+            $row = $existingById->get((int) $author['id']);
+            if ($row === null) {
+                throw ValidationException::withMessages([
+                    "authors.{$index}.id" => ['The selected author does not belong to this record.'],
+                ]);
+            }
+            $retainedIds[] = (int) $row->id;
+        }
+
+        $activeUserIds = collect($authors)
+            ->pluck('user_id')
+            ->filter(fn ($userId): bool => is_string($userId) && $userId !== '')
+            ->unique()
+            ->values();
+        $availableUserIds = User::query()
+            ->where('access_status', 'active')
+            ->where('account_status', 'active')
+            ->whereIn('id', $activeUserIds)
+            ->lockForUpdate()
+            ->pluck('id')
+            ->flip();
+
+        foreach ($authors as $index => $author) {
+            $userId = $author['user_id'] ?? null;
+            if ($userId === null || $availableUserIds->has($userId)) {
+                continue;
+            }
+
+            $existing = ($author['id'] ?? null) === null ? null : $existingById->get((int) $author['id']);
+            if ($existing !== null && $existing->user_id === $userId) {
+                continue;
+            }
+            throw ValidationException::withMessages([
+                "authors.{$index}.user_id" => ['The selected account is unavailable.'],
+            ]);
+        }
+
+        $removedAuthors = ResearchAuthor::query()->where('research_document_id', $document->id);
+        if ($retainedIds !== []) {
+            $removedAuthors->whereNotIn('id', $retainedIds);
+        }
+        $removedAuthors->delete();
+
+        $temporaryOrder = ((int) $existingAuthors->max('author_order')) + $existingAuthors->count() + 1;
+        $temporaryPrefix = '__office_repository_author_'.Str::uuid().'_';
+        foreach ($existingAuthors->whereIn('id', $retainedIds) as $index => $author) {
+            $author->update([
+                'author_name' => $temporaryPrefix.$author->id,
+                'author_order' => $temporaryOrder + $index,
+            ]);
+        }
+
+        foreach ($authors as $index => $author) {
+            $existing = ($author['id'] ?? null) === null ? null : $existingById->get((int) $author['id']);
+            if ($existing !== null) {
+                $existing->update([
+                    'user_id' => $author['user_id'] ?? null,
+                    'author_name' => $author['author_name'],
+                    'author_order' => $index + 1,
+                    'is_corresponding_author' => $author['is_corresponding_author'],
+                ]);
+
+                continue;
+            }
+
+            ResearchAuthor::query()->create([
+                'research_document_id' => $document->id,
+                'user_id' => $author['user_id'] ?? null,
+                'author_name' => $author['author_name'],
+                'author_order' => $index + 1,
+                'is_corresponding_author' => $author['is_corresponding_author'],
+            ]);
+        }
+    }
+}

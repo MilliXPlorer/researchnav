@@ -3,14 +3,20 @@
 namespace App\Http\Controllers;
 
 use App\Exceptions\ApiValidationException;
+use App\Http\Requests\LibrarianCatalogIndexRequest;
 use App\Models\MetadataReview;
+use App\Http\Resources\DocumentFileResource;
+use App\Models\DocumentFile;
 use App\Models\ResearchDocument;
 use App\Models\RetentionLog;
 use App\Models\ReviewAssignment;
 use App\Notifications\ResearchActivityNotification;
+use App\Services\DefenseMonitoringAuthorization;
 use App\Services\MetadataReviewService;
 use App\Services\MonitoringService;
+use App\Services\PrivateDocumentFileResolver;
 use App\Services\RetentionLogService;
+use App\Services\AuditService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -21,9 +27,9 @@ class LibrarianController extends DomainController
     public function assigned(Request $request): JsonResponse
     {
         $actor = $this->actor($request);
-        $documents = $this->assignedQuery($actor->id)->with(['authors', 'category', 'files' => fn ($query) => $query->orderByDesc('version_number')])->latest()->get();
+        $documents = $this->assignedQuery($actor->id)->with(['authors', 'files' => fn ($query) => $query->orderByDesc('version_number')])->latest()->get();
 
-        return response()->json(['data' => $documents->map(fn ($document) => ['research_document_id' => $document->id, 'title' => $document->title, 'researchers' => $document->authors->pluck('author_name')->all(), 'program' => $document->degree_program, 'category' => $document->category?->name, 'academic_year' => $document->publication_year, 'research_stage' => $document->research_stage, 'submission_status' => $document->submission_status, 'latest_manuscript' => $document->files->first()?->original_filename, 'updated_at' => $document->updated_at?->toISOString()])]);
+        return response()->json(['data' => $documents->map(fn ($document) => ['research_document_id' => $document->id, 'title' => $document->title, 'researchers' => $document->authors->pluck('author_name')->all(), 'program' => $document->degree_program, 'academic_year' => $document->publication_year, 'research_stage' => $document->research_stage, 'submission_status' => $document->submission_status, 'latest_manuscript' => $document->files->first()?->original_filename, 'updated_at' => $document->updated_at?->toISOString()])]);
     }
 
     public function saveReferenceReview(Request $request, ResearchDocument $researchDocument, MonitoringService $activity): JsonResponse
@@ -66,6 +72,7 @@ class LibrarianController extends DomainController
         $actor = $this->actor($request);
         $this->ensureAssigned($actor->id, $researchDocument);
         $input = $this->validated($request, ['monitoring_stage' => ['required', 'in:before_proposal_defense,after_proposal_defense'], 'activity_date' => ['required', 'date'], 'activity' => ['required', 'string', 'max:10000'], 'remarks' => ['nullable', 'string', 'max:10000'], 'status' => ['required', 'in:pending,completed'], 'signature_status' => ['required', 'in:unsigned,signed']]);
+        app(DefenseMonitoringAuthorization::class)->authorizeSection($actor, $researchDocument, $input['monitoring_stage']);
         DB::table('monitoring_entries')->updateOrInsert(['research_document_id' => $researchDocument->id, 'reviewer_id' => $actor->id, 'monitoring_stage' => $input['monitoring_stage'], 'designation' => 'Librarian'], ['reviewer_role' => 'librarian', 'activity_date' => $input['activity_date'], 'activity' => $input['activity'], 'remarks' => $input['remarks'] ?? null, 'status' => $input['status'], 'signature_status' => $input['signature_status'], 'created_at' => now(), 'updated_at' => now()]);
         $activity->log($researchDocument, 'LIBRARIAN_MONITORING_UPDATED', $actor, 'Librarian monitoring entry updated.', null, $input['status'], $input['status']);
 
@@ -91,9 +98,8 @@ class LibrarianController extends DomainController
         $documents = ResearchDocument::query()
             ->where('archive_status', '!=', 'archived')
             ->whereIn('submission_status', ['approved', 'archived'])
-            ->with('category:id,name')
             ->orderByDesc('updated_at')
-            ->get(['id', 'title', 'abstract', 'keywords', 'publication_year', 'category_id', 'submission_status', 'archive_status', 'visibility', 'updated_at'])
+            ->get(['id', 'title', 'abstract', 'keywords', 'publication_year', 'submission_status', 'archive_status', 'visibility', 'updated_at'])
             ->map(fn (ResearchDocument $document) => [
                 'research_document_id' => $document->id,
                 'title' => $document->title,
@@ -101,13 +107,11 @@ class LibrarianController extends DomainController
                 'archive_status' => $document->archive_status,
                 'visibility' => $document->visibility,
                 'publication_year' => $document->publication_year,
-                'category' => $document->category?->name,
                 'metadata_completeness' => [
                     'title' => $document->title !== null && $document->title !== '',
                     'abstract' => $document->abstract !== null && $document->abstract !== '',
                     'keywords' => $document->keywords !== null && $document->keywords !== '',
                     'authors' => $document->authors()->exists(),
-                    'category' => $document->category_id !== null,
                 ],
                 'updated_at' => $document->updated_at?->toISOString(),
             ])
@@ -119,26 +123,105 @@ class LibrarianController extends DomainController
             ->header('Cache-Control', 'private, no-store');
     }
 
-    public function repositoryCatalog(Request $request): JsonResponse
+    public function repositoryCatalog(LibrarianCatalogIndexRequest $request): JsonResponse
     {
-        $query = ResearchDocument::query()
-            ->whereIn('submission_status', ['approved', 'archived'])
-            ->with('category:id,name')
-            ->orderByDesc('updated_at');
+        $input = $request->validated();
+        $baseQuery = ResearchDocument::query()->with('authors')
+            ->whereIn('submission_status', ['approved', 'archived']);
+        $years = (clone $baseQuery)
+            ->whereNotNull('publication_year')
+            ->distinct()
+            ->orderByDesc('publication_year')
+            ->pluck('publication_year')
+            ->map(fn ($year) => (int) $year)
+            ->values();
+        $query = clone $baseQuery;
 
-        if (($search = $request->query('search')) !== null && $search !== '') {
-            $query->where('title', 'like', '%'.$this->escapedLike($search).'%');
+        if (($search = $input['search'] ?? null) !== null && $search !== '') {
+            $normalizedSearch = trim((string) preg_replace('/\s+/u', ' ', $search));
+            $term = '%'.$this->escapedLike($normalizedSearch).'%';
+            $tokens = preg_split('/\s+/u', $normalizedSearch, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            $query->where(function ($searchQuery) use ($term, $tokens) {
+                $searchQuery->where('title', 'like', $term)
+                    ->orWhereHas('authors', function ($authors) use ($tokens) {
+                        foreach ($tokens as $token) {
+                            $authors->where('author_name', 'like', '%'.$this->escapedLike($token).'%');
+                        }
+                    });
+            });
         }
-        if (($category = $request->query('category')) !== null && $category !== '') {
-            $query->where('category_id', $category);
+        if (($visibility = $input['visibility'] ?? null) !== null && $visibility !== '') {
+            $query->where('visibility', $visibility);
         }
+        if (($year = $input['year'] ?? null) !== null) {
+            $query->where('publication_year', $year);
+        }
+
+        $sort = $input['sort'] ?? null;
+        $direction = $input['direction'] ?? 'asc';
+        if ($sort !== null) {
+            $query->orderBy($sort, $direction);
+        } else {
+            $query->orderByDesc('updated_at');
+        }
+        $query->orderBy('id', $sort === null ? 'desc' : $direction);
 
         return response()
             ->json([
                 'data' => $query->paginate(25)->appends($request->query()),
+                'filters' => ['years' => $years],
                 'schema_version' => 1,
             ])
             ->header('Cache-Control', 'private, no-store');
+    }
+
+    public function repositoryFiles(ResearchDocument $researchDocument)
+    {
+        abort_unless(in_array($researchDocument->submission_status, ['approved', 'archived'], true), 404);
+
+        return DocumentFileResource::collection(
+            $researchDocument->files()->with('uploader')->orderBy('relative_path')->orderBy('file_order')->orderByDesc('uploaded_at')->get()
+        );
+    }
+
+    public function previewRepositoryFile(Request $request, ResearchDocument $researchDocument, DocumentFile $documentFile, PrivateDocumentFileResolver $files)
+    {
+        $this->ensureCatalogFile($researchDocument, $documentFile);
+        abort_unless($documentFile->mime_type === 'application/pdf', 404);
+        app(AuditService::class)->log($this->actor($request), 'DOCUMENT_PREVIEWED', $documentFile, 'Librarian previewed a repository PDF.', $request);
+        $resolved = $files->resolve($researchDocument, $documentFile);
+        abort_unless($files->isPdf($resolved), 404);
+
+        return response()->stream(function () use ($files, $resolved): void {
+            $handle = $files->open($resolved);
+            try {
+                fpassthru($handle);
+            } finally {
+                fclose($handle);
+            }
+        }, 200, ['Content-Type' => 'application/pdf', 'Content-Disposition' => 'inline; filename="'.$documentFile->original_filename.'"', 'Cache-Control' => 'private, no-store', 'X-Content-Type-Options' => 'nosniff']);
+    }
+
+    public function downloadRepositoryFile(Request $request, ResearchDocument $researchDocument, DocumentFile $documentFile, PrivateDocumentFileResolver $files)
+    {
+        $this->ensureCatalogFile($researchDocument, $documentFile);
+        app(AuditService::class)->log($this->actor($request), 'DOCUMENT_DOWNLOADED', $documentFile, 'Librarian downloaded a repository document.', $request);
+        $resolved = $files->resolve($researchDocument, $documentFile);
+
+        return response()->streamDownload(function () use ($files, $resolved): void {
+            $handle = $files->open($resolved);
+            try {
+                fpassthru($handle);
+            } finally {
+                fclose($handle);
+            }
+        }, $documentFile->original_filename, ['Content-Type' => $documentFile->mime_type, 'Cache-Control' => 'private, no-store']);
+    }
+
+    private function ensureCatalogFile(ResearchDocument $researchDocument, DocumentFile $documentFile): void
+    {
+        abort_unless(in_array($researchDocument->submission_status, ['approved', 'archived'], true), 404);
+        abort_unless($documentFile->research_document_id === $researchDocument->id, 404);
     }
 
     public function metadataStandards(MetadataReviewService $reviews): JsonResponse
@@ -155,7 +238,6 @@ class LibrarianController extends DomainController
             'abstract_complete' => ['nullable', 'boolean'],
             'authors_complete' => ['nullable', 'boolean'],
             'keywords_complete' => ['nullable', 'boolean'],
-            'category_complete' => ['nullable', 'boolean'],
             'notes' => ['nullable', 'string', 'max:5000'],
             'review_status' => ['sometimes', 'string'],
         ]);
@@ -198,7 +280,6 @@ class LibrarianController extends DomainController
             'abstract_complete' => $review->abstract_complete,
             'authors_complete' => $review->authors_complete,
             'keywords_complete' => $review->keywords_complete,
-            'category_complete' => $review->category_complete,
             'notes' => $review->notes,
             'review_status' => $review->review_status,
         ];

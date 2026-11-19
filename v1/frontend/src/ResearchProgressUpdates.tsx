@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { formatPhilippineDateTime } from "./dateTime";
 import { Folder, RefreshCw } from "lucide-react";
 import {
   ApiError,
@@ -23,8 +24,7 @@ function humanize(value: string | null) {
 
 function displayDate(value: string | null) {
   if (!value) return "Date not recorded";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  return formatPhilippineDateTime(value);
 }
 
 function errorMessage(error: unknown) {
@@ -66,9 +66,11 @@ export default function ResearchProgressUpdates({ role }: { role: Role }) {
     <div className="workspace-content admin-sidebar-page research-progress-updates">
       <header className="workspace-header">
         <div>
-          <p className="eyebrow">
-            {roleConfigs.find((config) => config.id === role)?.label}
-          </p>
+          {role !== "researcher" && (
+            <p className="eyebrow">
+              {roleConfigs.find((config) => config.id === role)?.label}
+            </p>
+          )}
           <h1>Research Progress Updates</h1>
           <p>
             Researcher-reported accomplishments and blockers by assigned folder.
@@ -82,9 +84,14 @@ export default function ResearchProgressUpdates({ role }: { role: Role }) {
       </header>
 
       {state.status === "loading" ? (
-        <p className="admin-empty" aria-busy="true">
-          Loading research progress updates…
-        </p>
+        <section
+          className="panel-card dashboard-loading"
+          role="region"
+          aria-label="Loading research progress updates"
+          aria-busy="true"
+        >
+          <p>Loading research progress updates…</p>
+        </section>
       ) : state.status === "error" ? (
         <section className="panel-card dashboard-error" role="alert">
           <p>{state.message}</p>

@@ -10,17 +10,18 @@ use App\Models\ResearchDocument;
 use App\Policies\DocumentFilePolicy;
 use App\Services\AuditService;
 use App\Services\DomainAuthorization;
+use App\Services\GroupedManuscriptArchiveBuilder;
+use App\Services\GroupedManuscriptArchiveException;
 use App\Services\PrivateDocumentFileResolver;
+use App\Services\PublicManuscriptAvailability;
 use App\Services\PublicRepositoryService;
 use App\Services\PublicRepositorySimilarityCapacityException;
 use App\Services\PublicRepositorySimilarityCatalogChangedException;
 use App\Services\PublicRepositorySimilarityService;
 use App\Services\SimilarityProcessException;
-use App\Services\SupabaseStorageService;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
-use ZipArchive;
 
 class PublicRepositoryController extends Controller
 {
@@ -30,9 +31,9 @@ class PublicRepositoryController extends Controller
             'q' => ['nullable', 'string', 'max:200'],
             'author' => ['nullable', 'string', 'max:200'],
             'keywords' => ['nullable', 'string', 'max:200'],
-            'category_id' => ['nullable', 'integer', 'exists:categories,id'],
-            'category' => ['nullable', 'string', 'max:180'],
             'institute' => ['nullable', 'string', 'max:255'],
+            'sdg_ids' => ['nullable', 'array', 'max:17'],
+            'sdg_ids.*' => ['integer', 'distinct', 'exists:sdgs,id'],
             'publication_year' => ['nullable', 'integer', 'between:1901,2155'],
             'year' => ['nullable', 'integer', 'between:1901,2155'],
             'year_from' => ['nullable', 'integer', 'between:1901,2155'],
@@ -49,6 +50,14 @@ class PublicRepositoryController extends Controller
         return PublicResearchDocumentResource::collection($service->search($filters));
     }
 
+    public function archivedIndex(Request $request, PublicRepositoryService $service)
+    {
+        $response = $this->index($request, $service)->response()->getData(true);
+
+        return response()->json([...$response, 'filters' => ['years' => $service->years()]])
+            ->header('Cache-Control', 'private, no-store');
+    }
+
     public function show(ResearchDocument $researchDocument, PublicRepositoryService $service)
     {
         return new PublicResearchDocumentResource($service->find($researchDocument->id));
@@ -57,7 +66,15 @@ class PublicRepositoryController extends Controller
     public function similarity(PublicRepositorySimilarityRequest $request, PublicRepositorySimilarityService $service)
     {
         try {
-            return PublicRepositorySimilarityResource::collection($service->compare($request->string('q')->toString()));
+            $filters = $request->validated();
+            if (isset($filters['year_from'], $filters['year_to']) && $filters['year_from'] > $filters['year_to']) {
+                throw ValidationException::withMessages([
+                    'year_from' => ['The from year must not be later than the to year.'],
+                    'year_to' => ['The to year must not be earlier than the from year.'],
+                ]);
+            }
+
+            return PublicRepositorySimilarityResource::collection($service->compare($filters));
         } catch (PublicRepositorySimilarityCapacityException) {
             return response()->json(['error' => 'SIMILARITY_CAPACITY_EXCEEDED'], 503);
         } catch (PublicRepositorySimilarityCatalogChangedException) {
@@ -67,13 +84,21 @@ class PublicRepositoryController extends Controller
         }
     }
 
-    public function download(Request $request, ResearchDocument $researchDocument, PublicRepositoryService $service, PrivateDocumentFileResolver $files, SupabaseStorageService $supabase)
+    public function download(Request $request, ResearchDocument $researchDocument, PublicRepositoryService $service, PrivateDocumentFileResolver $files, PublicManuscriptAvailability $manuscripts, GroupedManuscriptArchiveBuilder $archives)
     {
         $actor = $request->attributes->get('current_user');
         abort_unless($actor !== null && DomainAuthorization::isActiveAccount($actor), 403);
         $research = $service->find($researchDocument->id);
-        $groupedFiles = $research->files()->current()->where('document_type', 'final_manuscript')->orderBy('file_order')->orderBy('original_filename')->get();
-        $file = $groupedFiles->firstOrFail();
+        $groupedFiles = $manuscripts->availableFiles($research)
+            ->filter(function (DocumentFile $file) use ($actor, $research): bool {
+                $file->setRelation('researchDocument', $research);
+
+                return (new DocumentFilePolicy)->view($actor, $file);
+            })
+            ->sortBy(fn ($file): string => sprintf('%010d:%s', $file->file_order ?? PHP_INT_MAX, $file->original_filename))
+            ->values();
+        abort_if($groupedFiles->isEmpty(), 404);
+        $file = $groupedFiles->first();
         $file->setRelation('researchDocument', $research);
         abort_unless((new DocumentFilePolicy)->view($actor, $file), 403);
 
@@ -82,18 +107,23 @@ class PublicRepositoryController extends Controller
         }
 
         if ($request->boolean('all')) {
-            app(AuditService::class)->log($actor, 'CATALOG_DOCUMENT_DOWNLOADED', $file, 'Downloaded an archived catalog manuscript.', $request);
-            $zipPath = tempnam(sys_get_temp_dir(), 'researchnav-zip-');
-            $zip = new ZipArchive;
-            abort_unless($zipPath !== false && $zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) === true, 500);
-            $folder = preg_replace('/[^A-Za-z0-9._ -]+/', ' ', $research->import_group_name ?: $research->title) ?: 'Manuscript';
-            foreach ($groupedFiles as $groupedFile) {
-                $contents = $supabase->isSupabasePath($groupedFile->file_path) ? $supabase->download($groupedFile->file_path) : file_get_contents($files->resolve($research, $groupedFile)['absolute_path']);
-                $zip->addFromString($folder.'/'.$groupedFile->original_filename, $contents);
+            try {
+                $archive = $archives->build($research, $groupedFiles);
+            } catch (GroupedManuscriptArchiveException) {
+                return response()->json(['error' => 'MANUSCRIPT_ARCHIVE_UNAVAILABLE'], 503);
             }
-            $zip->close();
+            app(AuditService::class)->log($actor, 'CATALOG_DOCUMENT_DOWNLOADED', $file, 'Downloaded an archived catalog manuscript.', $request);
+            try {
+                return response()->download($archive->path, $archive->downloadName, [
+                    'Cache-Control' => 'private, no-store',
+                    'Content-Type' => 'application/zip',
+                    'X-Content-Type-Options' => 'nosniff',
+                ])->deleteFileAfterSend(true);
+            } catch (\Throwable $exception) {
+                $archive->cleanup();
 
-            return response()->download($zipPath, $folder.'.zip', ['Content-Type' => 'application/zip'])->deleteFileAfterSend(true);
+                throw $exception;
+            }
         }
 
         $selectedId = filter_var($request->query('file'), FILTER_VALIDATE_INT);
@@ -102,19 +132,6 @@ class PublicRepositoryController extends Controller
         $file->setRelation('researchDocument', $research);
         abort_unless((new DocumentFilePolicy)->view($actor, $file), 403);
         app(AuditService::class)->log($actor, 'CATALOG_DOCUMENT_DOWNLOADED', $file, 'Downloaded an archived catalog manuscript.', $request);
-
-        if ($supabase->isSupabasePath($file->file_path)) {
-            $contents = $supabase->download($file->file_path);
-            $disposition = strtolower((string) $file->file_extension) === 'pdf' ? 'inline' : 'attachment';
-            $filename = str_replace(['"', "\r", "\n"], '_', $file->original_filename);
-
-            return response($contents, 200, [
-                'Content-Type' => $file->mime_type,
-                'Content-Disposition' => $disposition.'; filename="'.$filename.'"',
-                'Cache-Control' => 'private, no-store',
-                'X-Content-Type-Options' => 'nosniff',
-            ]);
-        }
 
         $resolved = $files->resolve($research, $file);
         $disposition = strtolower((string) $file->file_extension) === 'pdf' ? 'inline' : 'attachment';

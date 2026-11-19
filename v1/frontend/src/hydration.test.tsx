@@ -23,7 +23,6 @@ describe("SSR hydration", () => {
             degreeProgram: "Computer Science",
             institute: "Institute of Computing",
             program: "Computer Science",
-            category: "Repositories",
             abstract: "Server-rendered and hydrated.",
             keywords: ["hydration"],
             researchStage: "Completed",

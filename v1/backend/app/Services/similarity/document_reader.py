@@ -1,4 +1,4 @@
-"""Safe, bounded local PDF/DOCX text extraction."""
+"""Safe, bounded local PDF text extraction."""
 
 from __future__ import annotations
 
@@ -7,8 +7,6 @@ from pathlib import Path
 from typing import BinaryIO
 import logging
 import warnings
-from xml.etree import ElementTree
-from zipfile import ZIP_DEFLATED, ZipFile
 
 import pymupdf  # type: ignore[import-untyped]
 
@@ -16,9 +14,6 @@ import pymupdf  # type: ignore[import-untyped]
 MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
 MAX_EXTRACTED_CHARACTERS = 1_000_000
 MAX_PDF_PAGES = 500
-MAX_DOCX_ENTRIES = 2_000
-MAX_DOCX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
-MAX_DOCX_COMPRESSION_RATIO = 100
 
 
 class DocumentReadError(ValueError):
@@ -26,7 +21,7 @@ class DocumentReadError(ValueError):
 
 
 def extract_text(document_path: str | Path) -> str:
-    """Extract PDF/DOCX text without logging paths, filenames, or content.
+    """Extract PDF text without logging paths, filenames, or content.
 
     Callers receive a generic error for absent, malformed, oversized, or
     unsupported documents so private storage details cannot cross a process/API
@@ -43,8 +38,6 @@ def extract_text(document_path: str | Path) -> str:
         with path.open("rb") as stream:
             if path.suffix.casefold() == ".pdf":
                 text = _pdf_text(stream)
-            elif path.suffix.casefold() == ".docx":
-                text = _docx_text(stream)
             else:
                 raise DocumentReadError("Document type is not supported.")
     except DocumentReadError:
@@ -69,8 +62,6 @@ def extract_parts(document_path: str | Path, maximum_part_characters: int) -> li
         with path.open("rb") as stream:
             if path.suffix.casefold() == ".pdf":
                 units = _pdf_units(stream)
-            elif path.suffix.casefold() == ".docx":
-                units = _docx_units(stream)
             else:
                 raise DocumentReadError("Document type is not supported.")
             return _parts_from_units(units, maximum_part_characters)
@@ -103,25 +94,6 @@ def _pdf_units(stream: BinaryIO) -> Iterator[str]:
                     yield document.load_page(index).get_text("text", sort=True)
     finally:
         logging.disable(previous_disable_level)
-
-
-def _docx_text(stream: BinaryIO) -> str:
-    return _join_text(_docx_units(stream))
-
-
-def _docx_units(stream: BinaryIO) -> Iterator[str]:
-    _validate_docx_zip(stream)
-    stream.seek(0)
-    with ZipFile(stream) as archive:
-        try:
-            document_xml = archive.read("word/document.xml")
-        except KeyError:
-            raise DocumentReadError("Document could not be read.") from None
-
-    root = ElementTree.fromstring(document_xml)
-    word_namespace = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
-    for paragraph in root.iter(f"{word_namespace}p"):
-        yield "".join(node.text or "" for node in paragraph.iter(f"{word_namespace}t"))
 
 
 def _parts_from_units(units: Iterable[object], limit: int) -> list[str]:
@@ -157,30 +129,3 @@ def _join_text(parts: Iterable[object]) -> str:
             raise DocumentReadError("Document could not be read.")
         text.append(cleaned)
     return "\n".join(text)
-
-
-def _validate_docx_zip(stream: BinaryIO) -> None:
-    """Reject ZIP bombs before python-docx expands OOXML entries."""
-    with ZipFile(stream) as archive:
-        entries = archive.infolist()
-        if len(entries) > MAX_DOCX_ENTRIES:
-            raise DocumentReadError("Document could not be read.")
-
-        total_uncompressed = 0
-        for entry in entries:
-            if entry.is_dir() or entry.filename.endswith("/"):
-                continue
-            if entry.flag_bits & 0x1 or entry.compress_type not in (0, ZIP_DEFLATED):
-                raise DocumentReadError("Document could not be read.")
-            if entry.file_size < 0 or entry.compress_size < 0:
-                raise DocumentReadError("Document could not be read.")
-            total_uncompressed += entry.file_size
-            if total_uncompressed > MAX_DOCX_UNCOMPRESSED_BYTES:
-                raise DocumentReadError("Document could not be read.")
-            if entry.file_size > 0 and entry.compress_size == 0:
-                raise DocumentReadError("Document could not be read.")
-            if (
-                entry.compress_size > 0
-                and entry.file_size / entry.compress_size > MAX_DOCX_COMPRESSION_RATIO
-            ):
-                raise DocumentReadError("Document could not be read.")

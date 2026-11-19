@@ -19,6 +19,7 @@ class AdminUserResource extends JsonResource
                 'last_name' => $this->last_name,
             ],
             'role' => $this->roleDefinition?->slug === 'research_editor' ? 'research_editor' : $this->role,
+            'institute' => $this->institute,
             'access_status' => $this->access_status,
             'is_admin' => $this->is_admin,
             'invitation_sent_at' => $this->invitation_sent_at?->toISOString(),

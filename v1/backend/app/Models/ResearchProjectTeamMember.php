@@ -9,7 +9,14 @@ class ResearchProjectTeamMember extends Model
 {
     public const ROLES = ['adviser', 'research_office_representative', 'chair', 'panel_member'];
 
-    protected $fillable = ['research_document_id', 'user_id', 'team_role', 'position', 'assigned_by'];
+    protected $fillable = [
+        'research_document_id',
+        'defense_type',
+        'user_id',
+        'team_role',
+        'position',
+        'assigned_by',
+    ];
 
     protected function casts(): array
     {

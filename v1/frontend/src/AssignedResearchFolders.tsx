@@ -1,25 +1,23 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
-  ClipboardCheck,
-  Download,
-  Eye,
-  FileText,
+  ArrowLeft,
+  Check,
+  ChevronDown,
   Folder,
-  MessageSquareText,
+  LoaderCircle,
   RefreshCw,
-  UsersRound,
+  X,
 } from "lucide-react";
 import {
   assignOfficeRepresentative,
+  archiveInternalResearch,
   getInternalResearch,
   getOfficeProjectTeam,
   getResearchPeople,
-  listResearchFiles,
   listOfficeRepresentativeCandidates,
   listSharedMonitoringResearch,
-  researchFileDownloadUrl,
-  researchFilePreviewUrl,
-  type DocumentFileResource,
+  respondToSupportAssignment,
+  transitionInternalResearch,
   type InstructorProjectTeam,
   type ProjectTeamPerson,
   type ResearchDocumentSummaryResource,
@@ -27,10 +25,13 @@ import {
   type SharedMonitoringResearch,
 } from "./api";
 import { Button } from "./components";
-import ResearchActivity from "./ResearchActivity";
+import { ConfirmDialog } from "./Modal";
 import ResearchFolderRow from "./ResearchFolderRow";
-import SharedMonitoring from "./SharedMonitoring";
+import StudyWorkspace from "./StudyWorkspace";
+import { matchesStudySearch } from "./studySearch";
+import type { ResearchWorkspaceDestination } from "./researchWorkspaceRoute";
 import type { Role } from "./types";
+import SelectMenu from "./SelectMenu";
 
 function label(value: string) {
   return value
@@ -38,13 +39,77 @@ function label(value: string) {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-export default function AssignedResearchFolders({ role }: { role: Role }) {
+function FoldersLoading({ label }: { label: string }) {
+  return (
+    <section
+      className="panel-card dashboard-loading"
+      role="region"
+      aria-label={label}
+      aria-busy="true"
+    >
+      <p>{label}…</p>
+    </section>
+  );
+}
+
+function FoldersError({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <section className="panel-card dashboard-error" role="alert">
+      <p>{message}</p>
+      <Button variant="secondary" onClick={onRetry}>
+        Retry
+      </Button>
+    </section>
+  );
+}
+
+export default function AssignedResearchFolders(props: {
+  role: Role;
+  actorKey?: string;
+  initialResearchDocumentId?: string | number;
+  destination?: ResearchWorkspaceDestination;
+  navigate?: (path: string) => void;
+  onResearchChanged?: () => void;
+}) {
+  return (
+    <AssignedResearchFoldersContent
+      key={`${props.role}:${props.actorKey ?? ""}`}
+      {...props}
+    />
+  );
+}
+
+function AssignedResearchFoldersContent({
+  role,
+  actorKey,
+  initialResearchDocumentId,
+  destination,
+  navigate,
+  onResearchChanged,
+}: {
+  role: Role;
+  actorKey?: string;
+  initialResearchDocumentId?: string | number;
+  destination?: ResearchWorkspaceDestination;
+  navigate?: (path: string) => void;
+  onResearchChanged?: () => void;
+}) {
   const [folders, setFolders] = useState<SharedMonitoringResearch[]>([]);
-  const [selected, setSelected] = useState("");
+  const [selected, setSelected] = useState(
+    initialResearchDocumentId === undefined
+      ? ""
+      : String(initialResearchDocumentId),
+  );
+  const selectedRef = useRef(selected);
   const [research, setResearch] =
     useState<ResearchDocumentSummaryResource | null>(null);
   const [loadedId, setLoadedId] = useState("");
-  const [files, setFiles] = useState<DocumentFileResource[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
@@ -54,70 +119,192 @@ export default function AssignedResearchFolders({ role }: { role: Role }) {
     [],
   );
   const [representativeId, setRepresentativeId] = useState("");
+  const [representativeMenuOpen, setRepresentativeMenuOpen] = useState(false);
+  const representativeMenuId = useId();
+  const representativeMenuRef = useRef<HTMLDivElement>(null);
+  const representativeTriggerRef = useRef<HTMLButtonElement>(null);
   const [representativeBusy, setRepresentativeBusy] = useState(false);
+  const [representativeLoading, setRepresentativeLoading] = useState(false);
+  const [representativeError, setRepresentativeError] = useState("");
+  const [representativeFeedback, setRepresentativeFeedback] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
   const [folderSearch, setFolderSearch] = useState("");
   const [instituteFilter, setInstituteFilter] = useState("");
-  const [projectTab, setProjectTab] = useState<
-    "overview" | "team" | "documents" | "feedback" | "monitoring"
-  >("overview");
+  const [stageFilter, setStageFilter] = useState("");
+  const [respondingAssignmentId, setRespondingAssignmentId] = useState<
+    number | null
+  >(null);
+  const [workflowAction, setWorkflowAction] = useState<
+    "under_review" | "approved" | "archive" | null
+  >(null);
+  const [workflowBusy, setWorkflowBusy] = useState(false);
+  const workflowPendingRef = useRef(false);
+  const [workflowFeedback, setWorkflowFeedback] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
+  const [archiveVisibility, setArchiveVisibility] = useState<
+    "private" | "registered_only" | "public"
+  >("private");
+
+  useEffect(() => {
+    selectedRef.current = selected;
+  }, [selected]);
+
+  useEffect(() => {
+    if (!representativeMenuOpen) return;
+
+    function closeRepresentativeMenu(event: MouseEvent) {
+      if (!representativeMenuRef.current?.contains(event.target as Node)) {
+        setRepresentativeMenuOpen(false);
+      }
+    }
+
+    function closeRepresentativeMenuOnEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setRepresentativeMenuOpen(false);
+      representativeTriggerRef.current?.focus();
+    }
+
+    document.addEventListener("mousedown", closeRepresentativeMenu);
+    document.addEventListener("keydown", closeRepresentativeMenuOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeRepresentativeMenu);
+      document.removeEventListener("keydown", closeRepresentativeMenuOnEscape);
+    };
+  }, [representativeMenuOpen]);
+
+  function clearSelectedStudy() {
+    setSelected("");
+    setResearch(null);
+    setPeople(null);
+    setTeam(null);
+    setRepresentatives([]);
+    setRepresentativeId("");
+    setRepresentativeMenuOpen(false);
+    setRepresentativeBusy(false);
+    setRepresentativeLoading(false);
+    setRepresentativeError("");
+    setRepresentativeFeedback(null);
+    setLoadedId("");
+    if (initialResearchDocumentId !== undefined) {
+      navigate?.("/app/research-office/assigned-research");
+    }
+  }
+
+  async function respondToAssignment(
+    assignmentId: number,
+    decision: "accept" | "decline",
+  ) {
+    setRespondingAssignmentId(assignmentId);
+    setError("");
+    try {
+      await respondToSupportAssignment(assignmentId, decision);
+      setAttempt((value) => value + 1);
+    } catch {
+      setError("The assignment request could not be updated.");
+    } finally {
+      setRespondingAssignmentId(null);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
+
     void listSharedMonitoringResearch()
       .then((items) => {
         if (cancelled) return;
+        if (initialResearchDocumentId === undefined) {
+          setSelected("");
+          setResearch(null);
+          setPeople(null);
+          setTeam(null);
+          setLoadedId("");
+        }
         setFolders(items);
-        setSelected((current) =>
-          items.some((item) => String(item.id) === current) ? current : "",
-        );
         setError("");
       })
-      .catch(
-        () =>
-          !cancelled &&
-          setError("Assigned research folders could not be loaded."),
-      )
+      .catch(() => {
+        if (cancelled) return;
+        if (initialResearchDocumentId === undefined) {
+          setSelected("");
+          setResearch(null);
+          setPeople(null);
+          setTeam(null);
+          setLoadedId("");
+        }
+        setFolders([]);
+        setError("Assigned research folders could not be loaded.");
+      })
       .finally(() => !cancelled && setLoading(false));
+
     return () => {
       cancelled = true;
     };
-  }, [attempt]);
+  }, [attempt, actorKey, initialResearchDocumentId]);
 
   useEffect(() => {
     if (!selected) return;
     let cancelled = false;
+
     void Promise.all([
       getInternalResearch(selected),
-      listResearchFiles(selected),
       getResearchPeople(selected),
     ])
-      .then(async ([record, documents, researchPeople]) => {
-        const officeData =
-          role === "research-office" && record.section_id != null
-            ? await Promise.all([
-                getOfficeProjectTeam(selected),
-                listOfficeRepresentativeCandidates(selected),
-              ])
-            : null;
-        if (!cancelled) {
-          setResearch(record);
-          setFiles(documents);
-          setPeople(researchPeople);
-          if (officeData) {
-            const [loadedTeam, officeRepresentatives] = officeData;
+      .then(async ([record, researchPeople]) => {
+        if (cancelled) return;
+        setResearch(record);
+        setArchiveVisibility(record.visibility);
+        setPeople(researchPeople);
+
+        if (role === "research-office" && record.section_id != null) {
+          setRepresentativeFeedback(null);
+          setRepresentativeLoading(true);
+          setRepresentativeError("");
+          try {
+            const loadedTeam = await getOfficeProjectTeam(selected);
+            if (cancelled) return;
             setTeam(loadedTeam);
-            setRepresentatives(officeRepresentatives);
             setRepresentativeId(
               loadedTeam.research_office_representative?.user_id ?? "",
             );
-          } else {
+          } catch {
+            if (cancelled) return;
             setTeam(null);
-            setRepresentatives([]);
             setRepresentativeId("");
+            setRepresentatives([]);
+            setRepresentativeLoading(false);
+            setLoadedId(selected);
+            setError("");
+            return;
           }
-          setLoadedId(selected);
-          setError("");
+
+          try {
+            const officeRepresentatives =
+              await listOfficeRepresentativeCandidates(selected);
+            if (cancelled) return;
+            setRepresentatives(officeRepresentatives);
+            setRepresentativeError("");
+          } catch {
+            if (cancelled) return;
+            setRepresentatives([]);
+            setRepresentativeError(
+              "Active Research Office personnel could not be loaded. Retry opening this folder.",
+            );
+          } finally {
+            if (!cancelled) setRepresentativeLoading(false);
+          }
+        } else {
+          setTeam(null);
+          setRepresentatives([]);
+          setRepresentativeId("");
+          setRepresentativeError("");
+          setRepresentativeLoading(false);
         }
+        setLoadedId(selected);
+        setError("");
       })
       .catch(
         () =>
@@ -126,503 +313,608 @@ export default function AssignedResearchFolders({ role }: { role: Role }) {
             "This folder is unavailable or is no longer assigned to you.",
           ),
       );
+
     return () => {
       cancelled = true;
     };
   }, [selected, attempt, role]);
 
   async function saveRepresentative() {
-    if (!research) return;
+    if (
+      !research ||
+      !team ||
+      representativeBusy ||
+      representativeLoading ||
+      representativeId === (team.research_office_representative?.user_id ?? "")
+    )
+      return;
+    const researchId = String(research.id);
     setRepresentativeBusy(true);
+    setRepresentativeFeedback(null);
     try {
       const updated = await assignOfficeRepresentative(
         research.id,
         representativeId || null,
       );
+      if (selectedRef.current !== researchId) return;
       setTeam(updated);
+      setRepresentativeId(
+        updated.research_office_representative?.user_id ?? "",
+      );
+      setRepresentativeFeedback({
+        type: "success",
+        text: "Research Representative assignment saved.",
+      });
       setError("");
     } catch {
-      setError("The Research Representative assignment could not be saved.");
+      if (selectedRef.current !== researchId) return;
+      setRepresentativeFeedback({
+        type: "error",
+        text: "The Research Representative assignment could not be saved. Please try again.",
+      });
     } finally {
-      setRepresentativeBusy(false);
+      if (selectedRef.current === researchId) setRepresentativeBusy(false);
     }
   }
 
-  const fileFolders = Array.from(
-    new Set(files.map((file) => file.relative_path || "Unfiled")),
-  );
+  async function applyWorkflowAction() {
+    if (!research || !workflowAction || workflowPendingRef.current) return;
+    workflowPendingRef.current = true;
+    setWorkflowBusy(true);
+    setWorkflowFeedback(null);
+    try {
+      const updated =
+        workflowAction === "archive"
+          ? await archiveInternalResearch(research.id, archiveVisibility)
+          : await transitionInternalResearch(research.id, workflowAction);
+      setResearch((current) =>
+        current
+          ? { ...current, ...updated, authors: current.authors }
+          : current,
+      );
+      setWorkflowFeedback({
+        type: "success",
+        text:
+          workflowAction === "under_review"
+            ? "Research moved to under review."
+            : workflowAction === "approved"
+              ? "Research approved."
+              : "Research archived.",
+      });
+      setFolders((current) =>
+        workflowAction === "archive"
+          ? current.filter((folder) => folder.id !== research.id)
+          : current.map((folder) =>
+              folder.id === research.id ? { ...folder, ...updated } : folder,
+            ),
+      );
+      onResearchChanged?.();
+      setWorkflowAction(null);
+    } catch {
+      setWorkflowFeedback({
+        type: "error",
+        text: "The research status could not be updated. Refresh and try again.",
+      });
+      setWorkflowAction(null);
+    } finally {
+      workflowPendingRef.current = false;
+      setWorkflowBusy(false);
+    }
+  }
+
+  const nextWorkflowAction =
+    role !== "research-office" || !research
+      ? null
+      : research.submission_status === "submitted"
+        ? { key: "under_review" as const, label: "Move to under review" }
+        : research.submission_status === "under_review"
+          ? { key: "approved" as const, label: "Approve research" }
+          : research.submission_status === "approved" &&
+              research.archive_status !== "archived"
+            ? { key: "archive" as const, label: "Archive research" }
+            : null;
+
+  function refreshFolders() {
+    setLoading(true);
+    setAttempt((value) => value + 1);
+  }
+
   const institutes = Array.from(
     new Set(folders.map((folder) => folder.institute).filter(Boolean)),
   ).sort() as string[];
-  const normalizedFolderSearch = folderSearch.trim().toLocaleLowerCase();
-  const visibleFolders =
-    role === "research-office"
-      ? folders
-          .filter(
-            (folder) =>
-              (!instituteFilter || folder.institute === instituteFilter) &&
-              (!normalizedFolderSearch ||
-                `${folder.title} ${folder.researchers.join(" ")}`
-                  .toLocaleLowerCase()
-                  .includes(normalizedFolderSearch)),
-          )
-          .sort(
-            (left, right) =>
-              (left.institute || "").localeCompare(right.institute || "") ||
-              left.title.localeCompare(right.title),
-          )
-      : folders;
+  const stages = Array.from(
+    new Set(folders.map((folder) => folder.research_stage).filter(Boolean)),
+  ).sort();
+  const visibleFolders = folders
+    .filter(
+      (folder) =>
+        (!stageFilter || folder.research_stage === stageFilter) &&
+        (role !== "research-office" ||
+          !instituteFilter ||
+          folder.institute === instituteFilter) &&
+        matchesStudySearch(folderSearch, [
+          folder.title,
+          folder.researchers.join(" "),
+          folder.institute,
+          folder.research_stage,
+        ]),
+    )
+    .sort((left, right) =>
+      role === "research-office"
+        ? (left.institute || "").localeCompare(right.institute || "") ||
+          left.title.localeCompare(right.title)
+        : 0,
+    );
+
+  const currentRepresentative = team?.research_office_representative ?? null;
+  const representativeOptions =
+    currentRepresentative &&
+    !representatives.some(
+      (person) => person.user_id === currentRepresentative.user_id,
+    )
+      ? [...representatives, currentRepresentative]
+      : representatives;
+  const selectedRepresentative = representativeOptions.find(
+    (person) => person.user_id === representativeId,
+  );
+
+  const actorExtension =
+    role !== "research-office" || !research ? undefined : research.section_id !=
+      null ? (
+      <section className="project-team-block office-representative-assignment">
+        <div className="project-team-block-heading">
+          <div>
+            <p className="eyebrow">Defense monitoring forms</p>
+            <h4>Research Representative</h4>
+            <p>
+              Assign active Research Office personnel to participate in this
+              project&apos;s official defense forms.
+            </p>
+          </div>
+        </div>
+        <div className="office-representative-control">
+          <div className="office-representative-field">
+            <span id={`${representativeMenuId}-label`}>Representative</span>
+            <div
+              className="office-representative-select"
+              ref={representativeMenuRef}
+            >
+              <button
+                ref={representativeTriggerRef}
+                type="button"
+                aria-labelledby={`${representativeMenuId}-label`}
+                aria-haspopup="listbox"
+                aria-expanded={representativeMenuOpen}
+                aria-controls={representativeMenuId}
+                disabled={representativeLoading || representativeBusy || !team}
+                onClick={() => setRepresentativeMenuOpen((open) => !open)}
+              >
+                <span>
+                  {selectedRepresentative
+                    ? `${selectedRepresentative.name} (${selectedRepresentative.email})`
+                    : "No representative assigned"}
+                </span>
+                <ChevronDown aria-hidden="true" />
+              </button>
+              {representativeMenuOpen && (
+                <div
+                  className="office-representative-options"
+                  id={representativeMenuId}
+                  role="listbox"
+                  aria-labelledby={`${representativeMenuId}-label`}
+                >
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={representativeId === ""}
+                    onClick={() => {
+                      setRepresentativeId("");
+                      setRepresentativeFeedback(null);
+                      setRepresentativeMenuOpen(false);
+                    }}
+                  >
+                    <span>No representative assigned</span>
+                    {representativeId === "" && <Check aria-hidden="true" />}
+                  </button>
+                  {representativeOptions.map((person) => (
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={representativeId === person.user_id}
+                      key={person.user_id}
+                      onClick={() => {
+                        setRepresentativeId(person.user_id);
+                        setRepresentativeFeedback(null);
+                        setRepresentativeMenuOpen(false);
+                      }}
+                    >
+                      <span>
+                        {person.name} ({person.email})
+                      </span>
+                      {representativeId === person.user_id && (
+                        <Check aria-hidden="true" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+          <Button
+            title={
+              representativeBusy
+                ? "Saving assignment"
+                : representativeLoading
+                  ? "Loading assignment"
+                  : !team
+                    ? "Assignment unavailable"
+                    : representativeId ===
+                        (currentRepresentative?.user_id ?? "")
+                      ? "No changes to save"
+                      : "Save assignment"
+            }
+            onClick={() => void saveRepresentative()}
+            disabled={
+              representativeBusy ||
+              representativeLoading ||
+              !team ||
+              representativeId === (currentRepresentative?.user_id ?? "")
+            }
+          >
+            {representativeBusy ? "Saving..." : "Save assignment"}
+          </Button>
+        </div>
+        {representativeFeedback && (
+          <p
+            className={`form-message is-${representativeFeedback.type}`}
+            role={representativeFeedback.type === "error" ? "alert" : "status"}
+          >
+            {representativeFeedback.text}
+          </p>
+        )}
+        {representativeLoading && (
+          <p className="project-empty-copy">
+            Loading Research Office personnel…
+          </p>
+        )}
+        {!representativeLoading && representativeError && (
+          <p className="project-empty-copy" role="alert">
+            {representativeError}
+          </p>
+        )}
+        {!representativeLoading &&
+          !representativeError &&
+          representativeOptions.length === 0 && (
+            <p className="project-empty-copy">
+              No active Research Office personnel found. Ask an administrator to
+              activate a research-office account before assigning a
+              representative.
+            </p>
+          )}
+      </section>
+    ) : (
+      <p className="project-empty-copy">
+        Research Representative assignment is available for section research
+        projects. This imported folder remains available for Research Office
+        review.
+      </p>
+    );
 
   return (
     <div className="workspace-content admin-sidebar-page">
-      <header className="role-page-heading">
-        <div>
-          <p className="eyebrow">Assigned research</p>
-          <h1>Research folders</h1>
-          <p>
-            Track student documents, revisions, feedback, and defense monitoring
-            forms in one read-only workspace.
-          </p>
-        </div>
-        <Button
-          variant="secondary"
-          onClick={() => setAttempt((value) => value + 1)}
-        >
-          <RefreshCw /> Refresh
-        </Button>
-      </header>
-      {error && (
-        <p className="admin-error" role="alert">
-          {error}
-        </p>
-      )}
-      {loading ? (
-        <p className="admin-empty" aria-busy="true">
-          Loading assigned folders…
-        </p>
-      ) : folders.length === 0 ? (
-        <section className="panel-card submissions-empty-state">
-          <Folder />
-          <h2>No assigned research folders</h2>
-          <p>Only research where you have an active assignment appears here.</p>
-        </section>
-      ) : (
-        <div
-          className={`project-documents-layout assigned-research-folders${selected ? " has-selection" : ""}`}
-        >
-          <aside
-            className="project-folder-sidebar"
-            aria-label="Assigned research folders"
-          >
-            <div className="project-folder-sidebar-heading">
-              <div>
-                <p className="eyebrow">Studies</p>
-                <h4>Folders</h4>
-              </div>
+      {!selected && (
+        <>
+          <header className="workspace-header">
+            <div>
+              <p className="eyebrow">Assigned research</p>
+              <h1>Assigned Research</h1>
+              <p>
+                Open a study to review its documents, feedback, and defense
+                monitoring forms.
+              </p>
             </div>
-            {role === "research-office" && (
-              <div className="office-folder-filters">
-                <label>
-                  <span>Search folders</span>
+            <Button variant="secondary" onClick={refreshFolders}>
+              <RefreshCw /> Refresh
+            </Button>
+          </header>
+          {error && <FoldersError message={error} onRetry={refreshFolders} />}
+          {loading ? (
+            <FoldersLoading label="Loading assigned studies" />
+          ) : folders.length === 0 ? (
+            <section className="panel-card submissions-empty-state">
+              <Folder />
+              <h2>No assigned research folders</h2>
+              <p>
+                Only research where you have an active assignment appears here.
+              </p>
+            </section>
+          ) : (
+            <aside
+              className="project-folder-sidebar assigned-research-folders research-folder-surface"
+              aria-label="Assigned research folders"
+            >
+              <div className="project-folder-sidebar-heading">
+                <div>
+                  <p className="eyebrow">Studies</p>
+                  <h4>Folders</h4>
+                </div>
+              </div>
+              <div className="study-list-controls assigned-research-controls">
+                <label className="study-list-search">
+                  <span>Search assigned studies</span>
                   <input
                     type="search"
                     value={folderSearch}
-                    placeholder="Title or researcher"
+                    placeholder="Search assigned studies..."
                     onChange={(event) => setFolderSearch(event.target.value)}
                   />
                 </label>
                 <label>
-                  <span>Institute</span>
-                  <select
-                    value={instituteFilter}
-                    onChange={(event) => setInstituteFilter(event.target.value)}
-                  >
-                    <option value="">All institutes</option>
-                    {institutes.map((institute) => (
-                      <option key={institute} value={institute}>
-                        {institute}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-            )}
-            <div className="project-folder-nav research-folder-list">
-              {visibleFolders.length === 0 && (
-                <p className="project-empty-copy">
-                  No ongoing research folders match these filters.
-                </p>
-              )}
-              {visibleFolders.map((item, index) => (
-                <div key={item.id}>
-                  {role === "research-office" &&
-                    (index === 0 ||
-                      visibleFolders[index - 1]?.institute !==
-                        item.institute) && (
-                      <p className="project-folder-institute">
-                        {item.institute || "Institute not set"}
-                      </p>
-                    )}
-                  <ResearchFolderRow
-                    title={item.title}
-                    metadata={
-                      item.research_stage
-                        ? label(item.research_stage)
-                        : "Research project"
-                    }
-                    detail={item.researchers.join(", ") || "Researchers"}
-                    selected={selected === String(item.id)}
-                    onOpen={() => {
-                      setSelected(String(item.id));
-                      setProjectTab("overview");
-                    }}
+                  <span>Research stage</span>
+                  <SelectMenu
+                    label="Research stage filter"
+                    value={stageFilter}
+                    onChange={setStageFilter}
+                    options={[
+                      { value: "", label: "All stages" },
+                      ...stages.map((stage) => ({
+                        value: stage,
+                        label: label(stage),
+                      })),
+                    ]}
                   />
-                </div>
-              ))}
-            </div>
-          </aside>
-          {selected && (
-            <main className="project-folder-content">
-              {!research || loadedId !== selected ? (
-                <p className="admin-empty" aria-busy="true">
-                  Loading folder details…
-                </p>
-              ) : (
-                <>
-                  <div className="project-workspace-context">
-                    <span>{research.institute || "Institute not set"}</span>
-                    <span>{research.degree_program || "Program not set"}</span>
-                    <span>{label(research.research_stage)}</span>
-                    <span>{label(research.submission_status)}</span>
-                    <span>Read only</span>
-                  </div>
-                  <nav
-                    className="project-workspace-tabs"
-                    aria-label="Research study workspace"
+                </label>
+                {role === "research-office" && (
+                  <label>
+                    <span>Institute</span>
+                    <SelectMenu
+                      label="Institute filter"
+                      value={instituteFilter}
+                      onChange={setInstituteFilter}
+                      options={[
+                        { value: "", label: "All institutes" },
+                        ...institutes.map((institute) => ({
+                          value: institute,
+                          label: institute,
+                        })),
+                      ]}
+                    />
+                  </label>
+                )}
+                {(stageFilter || instituteFilter) && (
+                  <Button
+                    type="button"
+                    variant="quiet"
+                    onClick={() => {
+                      setStageFilter("");
+                      setInstituteFilter("");
+                    }}
                   >
-                    {(
-                      [
-                        ["overview", "Overview", FileText],
-                        ["team", "Research actors", UsersRound],
-                        ["documents", "Documents", Folder],
-                        ["feedback", "Feedback", MessageSquareText],
-                        [
-                          "monitoring",
-                          "Defense Monitoring Forms",
-                          ClipboardCheck,
-                        ],
-                      ] as const
-                    ).map(([tab, tabLabel, Icon]) => (
-                      <button
-                        type="button"
-                        key={tab}
-                        className={projectTab === tab ? "is-active" : ""}
-                        aria-current={projectTab === tab ? "page" : undefined}
-                        onClick={() => setProjectTab(tab)}
-                      >
-                        <Icon aria-hidden="true" />
-                        <span>{tabLabel}</span>
-                      </button>
-                    ))}
-                  </nav>
+                    Clear filters
+                  </Button>
+                )}
+              </div>
+              <div className="project-folder-nav research-folder-list">
+                {visibleFolders.length === 0 && (
+                  <p className="project-empty-copy">
+                    No assigned studies match your search.
+                  </p>
+                )}
+                {visibleFolders.map((item, index) => {
+                  const pendingAssignment = ["requested", "pending"].includes(
+                    item.assignment_status ?? "",
+                  );
 
-                  {projectTab === "overview" && (
-                    <div className="project-workspace-section project-overview-grid">
-                      <section className="project-overview-card project-overview-card-wide">
-                        <div className="project-card-heading">
-                          <div>
-                            <p className="eyebrow">Study summary</p>
-                            <h4>{research.title}</h4>
-                          </div>
-                          <span className="badge badge-active">
-                            Read-only record
-                          </span>
-                        </div>
-                        <dl className="project-overview-stats">
-                          <div>
-                            <dt>Researchers</dt>
-                            <dd>{research.authors.length}</dd>
-                          </div>
-                          <div>
-                            <dt>Documents</dt>
-                            <dd>{files.length}</dd>
-                          </div>
-                          <div>
-                            <dt>Folders</dt>
-                            <dd>{fileFolders.length}</dd>
-                          </div>
-                          <div>
-                            <dt>Status</dt>
-                            <dd>{label(research.submission_status)}</dd>
-                          </div>
-                        </dl>
-                        <p>
-                          {research.abstract ||
-                            "No abstract has been provided yet."}
-                        </p>
-                      </section>
-                      <section className="project-overview-card">
-                        <div className="project-card-heading">
-                          <div>
-                            <p className="eyebrow">Researchers</p>
-                            <h4>Study members</h4>
-                          </div>
-                        </div>
-                        <ul className="project-compact-list">
-                          {research.authors.map((author) => (
-                            <li key={author.id}>
-                              <span
-                                className="project-person-avatar"
-                                aria-hidden="true"
-                              >
-                                {author.author_name.slice(0, 1).toUpperCase()}
-                              </span>
-                              <span>
-                                <strong>{author.author_name}</strong>
-                                <small>Student researcher</small>
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      </section>
-                    </div>
-                  )}
-
-                  {projectTab === "team" && (
-                    <div className="project-workspace-section">
-                      <div className="project-section-heading">
-                        <div>
-                          <p className="eyebrow">Research actors</p>
-                          <h4>People connected to this study</h4>
-                          <p>
-                            Assignments are managed by the Research Instructor.
-                            This view does not permit amendments.
-                          </p>
-                        </div>
-                      </div>
-                      <section className="project-team-block">
-                        <div className="project-team-block-heading">
-                          <div>
-                            <h5>Student researchers</h5>
-                            <span>{research.authors.length} listed</span>
-                          </div>
-                        </div>
-                        <ul className="title-member-list">
-                          {research.authors.map((author) => (
-                            <li key={author.id}>
-                              <span>
-                                <strong>{author.author_name}</strong>
-                                <small>Researcher</small>
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      </section>
-                      {people?.section?.instructor_name && (
-                        <section className="project-team-block">
-                          <div className="project-team-block-heading">
-                            <div>
-                              <h5>Research Instructor</h5>
-                              <span>{people.section.name}</span>
-                            </div>
-                          </div>
-                          <ul className="title-member-list">
-                            <li>
-                              <span>
-                                <strong>
-                                  {people.section.instructor_name}
-                                </strong>
-                                <small>Research Instructor</small>
-                              </span>
-                            </li>
-                          </ul>
-                        </section>
-                      )}
-                      {people && people.reviewers.length > 0 && (
-                        <section className="project-team-block">
-                          <div className="project-team-block-heading">
-                            <div>
-                              <h5>Assigned reviewers</h5>
-                              <span>{people.reviewers.length} active</span>
-                            </div>
-                          </div>
-                          <ul className="title-member-list">
-                            {people.reviewers.map((reviewer, index) => (
-                              <li key={`${reviewer.review_role}-${index}`}>
-                                <span>
-                                  <strong>
-                                    {reviewer.name || "Assigned reviewer"}
-                                  </strong>
-                                  <small>{label(reviewer.review_role)}</small>
-                                </span>
-                              </li>
-                            ))}
-                          </ul>
-                        </section>
-                      )}
+                  return (
+                    <div key={item.id}>
                       {role === "research-office" &&
-                        research.section_id != null && (
-                          <section className="project-team-block office-representative-assignment">
-                            <div className="project-team-block-heading">
-                              <div>
-                                <p className="eyebrow">
-                                  Defense monitoring forms
-                                </p>
-                                <h4>Research Representative</h4>
-                                <p>
-                                  Assign active Research Office personnel to
-                                  participate in this project&apos;s official
-                                  defense forms.
-                                </p>
-                              </div>
-                            </div>
-                            <div className="office-representative-control">
-                              <label>
-                                <span>Representative</span>
-                                <select
-                                  value={representativeId}
-                                  onChange={(event) =>
-                                    setRepresentativeId(event.target.value)
-                                  }
-                                >
-                                  <option value="">
-                                    No representative assigned
-                                  </option>
-                                  {representatives.map((person) => (
-                                    <option
-                                      key={person.user_id}
-                                      value={person.user_id}
-                                    >
-                                      {person.name} ({person.email})
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
+                        (index === 0 ||
+                          visibleFolders[index - 1]?.institute !==
+                            item.institute) && (
+                          <p className="project-folder-institute">
+                            {item.institute || "Institute not set"}
+                          </p>
+                        )}
+                      <ResearchFolderRow
+                        title={item.title}
+                        metadata={
+                          pendingAssignment
+                            ? `Assignment request pending · ${item.researchers.join(", ") || "Researcher"}`
+                            : item.research_stage
+                              ? label(item.research_stage)
+                              : "Research project"
+                        }
+                        detail={
+                          pendingAssignment
+                            ? undefined
+                            : item.researchers.join(", ") || "Researchers"
+                        }
+                        selected={selected === String(item.id)}
+                        onOpen={() => {
+                          if (pendingAssignment) return;
+                          setRepresentativeBusy(false);
+                          setRepresentativeLoading(false);
+                          setRepresentativeError("");
+                          setSelected(String(item.id));
+                        }}
+                        openLabel={
+                          pendingAssignment
+                            ? `Assignment request for ${item.title}`
+                            : undefined
+                        }
+                        actions={
+                          item.assignment_id && pendingAssignment ? (
+                            <div className="support-assignment-actions">
                               <Button
-                                onClick={() => void saveRepresentative()}
-                                disabled={
-                                  representativeBusy ||
-                                  representativeId ===
-                                    (team?.research_office_representative
-                                      ?.user_id ?? "")
+                                className="support-assignment-action support-assignment-accept"
+                                disabled={respondingAssignmentId !== null}
+                                aria-label={`Accept assignment request for ${item.title}`}
+                                title={`Accept assignment request for ${item.title}`}
+                                onClick={() =>
+                                  void respondToAssignment(
+                                    item.assignment_id!,
+                                    "accept",
+                                  )
                                 }
                               >
-                                {representativeBusy
-                                  ? "Saving..."
-                                  : "Save assignment"}
+                                {respondingAssignmentId === item.assignment_id ? (
+                                  <LoaderCircle
+                                    className="support-assignment-action-icon support-assignment-action-spinner"
+                                    aria-hidden="true"
+                                  />
+                                ) : (
+                                  <Check
+                                    className="support-assignment-action-icon"
+                                    aria-hidden="true"
+                                  />
+                                )}
+                                <span>Accept</span>
+                              </Button>
+                              <Button
+                                variant="secondary"
+                                className="support-assignment-action support-assignment-decline"
+                                disabled={respondingAssignmentId !== null}
+                                aria-label={`Decline assignment request for ${item.title}`}
+                                title={`Decline assignment request for ${item.title}`}
+                                onClick={() =>
+                                  void respondToAssignment(
+                                    item.assignment_id!,
+                                    "decline",
+                                  )
+                                }
+                              >
+                                <X
+                                  className="support-assignment-action-icon"
+                                  aria-hidden="true"
+                                />
+                                <span>Decline</span>
                               </Button>
                             </div>
-                          </section>
-                        )}
-                      {role === "research-office" &&
-                        research.section_id == null && (
-                          <p className="project-empty-copy">
-                            Research Representative assignment is available for
-                            section research projects. This imported folder
-                            remains available for Research Office review.
-                          </p>
-                        )}
-                    </div>
-                  )}
-
-                  {projectTab === "documents" && (
-                    <div className="project-workspace-section">
-                      <section className="project-team-block">
-                        <div className="project-team-block-heading">
-                          <div>
-                            <p className="eyebrow">Documents</p>
-                            <h4>Files and versions</h4>
-                          </div>
-                        </div>
-                        {fileFolders.length === 0 ? (
-                          <p className="project-empty-copy">
-                            No documents uploaded yet.
-                          </p>
-                        ) : (
-                          fileFolders.map((folder) => (
-                            <div className="project-document-list" key={folder}>
-                              <h5>
-                                <Folder /> {folder}
-                              </h5>
-                              {files
-                                .filter(
-                                  (file) =>
-                                    (file.relative_path || "Unfiled") ===
-                                    folder,
-                                )
-                                .map((file) => (
-                                  <article
-                                    className="project-document-row"
-                                    key={file.id}
-                                  >
-                                    <FileText />
-                                    <div className="project-document-copy">
-                                      <strong>{file.original_filename}</strong>
-                                      <small>
-                                        {label(file.document_type)} · Version{" "}
-                                        {file.version_number} ·{" "}
-                                        {file.is_current
-                                          ? "Current"
-                                          : "Previous"}
-                                      </small>
-                                    </div>
-                                    <div className="project-document-actions">
-                                      {file.mime_type === "application/pdf" && (
-                                        <a
-                                          className="icon-link-button"
-                                          href={researchFilePreviewUrl(
-                                            research.id,
-                                            file.id,
-                                          )}
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          aria-label={`Preview ${file.original_filename}`}
-                                        >
-                                          <Eye />
-                                        </a>
-                                      )}
-                                      <a
-                                        className="icon-link-button"
-                                        href={researchFileDownloadUrl(
-                                          research.id,
-                                          file.id,
-                                        )}
-                                        aria-label={`Download ${file.original_filename}`}
-                                      >
-                                        <Download />
-                                      </a>
-                                    </div>
-                                  </article>
-                                ))}
-                            </div>
-                          ))
-                        )}
-                      </section>
-                    </div>
-                  )}
-                  {projectTab === "feedback" && (
-                    <div className="project-workspace-section">
-                      <ResearchActivity
-                        researchDocumentId={research.id}
-                        title={research.title}
+                          ) : undefined
+                        }
                       />
                     </div>
-                  )}
-                  {projectTab === "monitoring" && (
-                    <div className="project-workspace-section">
-                      <SharedMonitoring
-                        role={role}
-                        researchDocumentId={research.id}
-                        embedded
-                        readOnly
-                      />
-                    </div>
-                  )}
-                </>
-              )}
-            </main>
+                  );
+                })}
+              </div>
+            </aside>
           )}
-        </div>
+        </>
+      )}
+      {selected && (
+        <section
+          className="section-page-view"
+          aria-label={
+            research && loadedId === selected
+              ? `Assigned research study: ${research.title}`
+              : "Assigned research study"
+          }
+        >
+          <div className="section-page-toolbar">
+            <Button variant="quiet" onClick={clearSelectedStudy}>
+              <ArrowLeft aria-hidden="true" /> Back to Assigned Research
+            </Button>
+          </div>
+          {!research || loadedId !== selected ? (
+            <FoldersLoading label="Loading study details" />
+          ) : (
+            <StudyWorkspace
+              key={research.id}
+              role={role}
+              researchDocumentId={research.id}
+              title={research.title}
+              context={[
+                research.institute || "Institute not set",
+                research.degree_program || "Program not set",
+                label(research.research_stage),
+                label(research.submission_status),
+              ]}
+              researchers={research.authors.map((author) => ({
+                id: String(author.id),
+                name: author.author_name,
+              }))}
+              people={people}
+              projectTeam={team ?? undefined}
+              badgeLabel="Assigned record"
+              summary={research.abstract}
+              sdgs={research.sdgs}
+              actorExtension={actorExtension}
+              canPostFeedback={
+                role === "adviser" ||
+                role === "instructor" ||
+                role === "panel" ||
+                role === "statistician" ||
+                role === "research_editor" ||
+                role === "librarian" ||
+                role === "research-office" ||
+                role === "admin"
+              }
+              destination={destination}
+              status={
+                role === "research-office"
+                  ? {
+                      submissionStatus: research.submission_status,
+                      researchStage: research.research_stage,
+                      archiveStatus: research.archive_status,
+                      visibility: research.visibility,
+                      publicationYear: research.publication_year,
+                      actionLabel: nextWorkflowAction?.label,
+                      actionBusy: workflowBusy,
+                      feedback: workflowFeedback,
+                      onAction: nextWorkflowAction
+                        ? () => setWorkflowAction(nextWorkflowAction.key)
+                        : undefined,
+                    }
+                  : undefined
+              }
+            />
+          )}
+        </section>
+      )}
+      {workflowAction && research && (
+        <ConfirmDialog
+          title={
+            workflowAction === "under_review"
+              ? "Move to Under Review?"
+              : workflowAction === "approved"
+                ? "Approve this research?"
+                : "Archive this research?"
+          }
+          message={
+            workflowAction === "archive"
+              ? `This will archive the record with ${label(archiveVisibility)} visibility.`
+              : workflowAction === "under_review"
+                ? "Are you sure you want to change this research status from Submitted to Under Review?"
+                : "The current workflow status will be updated for all authorized users."
+          }
+          confirmLabel={
+            workflowAction === "under_review"
+              ? "Confirm"
+              : (nextWorkflowAction?.label ?? "Update status")
+          }
+          busy={workflowBusy}
+          onConfirm={() => void applyWorkflowAction()}
+          onCancel={() => !workflowBusy && setWorkflowAction(null)}
+        >
+          {workflowAction === "archive" ? (
+            <label>
+              Archive visibility
+              <select
+                value={archiveVisibility}
+                disabled={workflowBusy}
+                onChange={(event) =>
+                  setArchiveVisibility(
+                    event.target.value as typeof archiveVisibility,
+                  )
+                }
+              >
+                <option value="private">Private</option>
+                <option value="registered_only">Registered only</option>
+                <option value="public">Public</option>
+              </select>
+            </label>
+          ) : undefined}
+        </ConfirmDialog>
       )}
     </div>
   );

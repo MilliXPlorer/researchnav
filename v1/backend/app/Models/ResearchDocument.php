@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -44,7 +45,7 @@ class ResearchDocument extends Model
     ];
 
     protected $fillable = [
-        'submitted_by', 'submission_reference', 'category_id', 'section_id', 'title', 'normalized_title', 'abstract', 'keywords', 'publication_year',
+        'submitted_by', 'submission_reference', 'section_id', 'title', 'normalized_title', 'abstract', 'keywords', 'publication_year',
         'institution_name', 'institution_location', 'institute', 'degree_program', 'manuscript_date_label', 'abstract_provenance',
         'research_stage', 'submission_status', 'archive_status', 'visibility', 'submitted_at', 'approved_at', 'archived_at',
         'import_source_sha256', 'import_source_filename', 'import_group_name',
@@ -88,14 +89,22 @@ class ResearchDocument extends Model
         });
     }
 
+    public function scopeInRepository(Builder $query): Builder
+    {
+        return $query
+            ->whereIn('submission_status', ['approved', 'archived'])
+            ->where('archive_status', 'archived')
+            ->whereIn('visibility', ['registered_only', 'public']);
+    }
+
     public function submitter(): BelongsTo
     {
         return $this->belongsTo(User::class, 'submitted_by');
     }
 
-    public function category(): BelongsTo
+    public function sdgs(): BelongsToMany
     {
-        return $this->belongsTo(Category::class);
+        return $this->belongsToMany(Sdg::class, 'research_document_sdgs')->orderBy('sdgs.id');
     }
 
     public function section(): BelongsTo
@@ -121,6 +130,11 @@ class ResearchDocument extends Model
     public function feedbackComments(): HasMany
     {
         return $this->hasMany(FeedbackComment::class);
+    }
+
+    public function pdfAnnotations(): HasMany
+    {
+        return $this->hasMany(PdfAnnotation::class);
     }
 
     public function revisions(): HasMany

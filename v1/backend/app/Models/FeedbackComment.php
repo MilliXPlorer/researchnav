@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class FeedbackComment extends ConsolidatedReviewModel
 {
@@ -11,7 +12,7 @@ class FeedbackComment extends ConsolidatedReviewModel
 
     protected static string $reviewType = 'feedback';
 
-    protected static array $finalReviewTypes = ['comment', 'suggestion', 'approval_remark', 'general_feedback'];
+    protected static array $finalReviewTypes = ['comment', 'suggestion', 'revision_request', 'approval_remark', 'general_feedback'];
 
     protected static array $consolidatedAliases = [
         'user_id' => 'actor_id',
@@ -19,6 +20,22 @@ class FeedbackComment extends ConsolidatedReviewModel
         'comment' => 'remarks',
         'feedback_status' => 'status',
     ];
+
+    protected static function booted(): void
+    {
+        parent::booted();
+
+        static::addGlobalScope('feedback_lifecycle', function (Builder $query): void {
+            if ($query->getModel()->usesFinalStorage()) {
+                // Historical revision notes share a type with formal requests.
+                // Only their feedback lifecycle belongs in a conversation.
+                $query->where(function (Builder $records): void {
+                    $records->where($records->getModel()->qualifyColumn('review_type'), '!=', 'revision_request')
+                        ->orWhereIn($records->getModel()->qualifyColumn('status'), self::FEEDBACK_STATUSES);
+                });
+            }
+        });
+    }
 
     public static function column(string $legacyColumn): string
     {
@@ -37,6 +54,10 @@ class FeedbackComment extends ConsolidatedReviewModel
 
     public function getAttribute($key): mixed
     {
+        if ($this->usesFinalStorage() && $key === 'document_file_id') {
+            return $this->getAttributeValue('document_file_id');
+        }
+
         if ($this->usesFinalStorage()) {
             $key = static::column((string) $key);
         }
@@ -48,16 +69,22 @@ class FeedbackComment extends ConsolidatedReviewModel
 
     public const FEEDBACK_STATUSES = ['open', 'acknowledged', 'resolved'];
 
-    protected $fillable = ['research_document_id', 'user_id', 'reviewer_role', 'document_file_id', 'comment', 'feedback_type', 'review_type', 'feedback_status', 'reviewed_at', 'researcher_acknowledged_at', 'researcher_addressed_at', 'researcher_action_remarks'];
+    protected $fillable = ['research_document_id', 'user_id', 'reviewer_role', 'document_file_id', 'comment', 'feedback_type', 'review_type', 'required_action', 'feedback_status', 'reviewed_at', 'resolved_at', 'researcher_acknowledged_at', 'researcher_addressed_at', 'researcher_action_remarks'];
 
     public function setAttribute($key, $value): static
     {
+        if ($this->usesFinalStorage() && $key === 'document_file_id') {
+            $this->attributes['document_file_id'] = $value;
+
+            return $this;
+        }
+
         return parent::setAttribute($this->usesFinalStorage() ? static::column((string) $key) : $key, $value);
     }
 
     protected function casts(): array
     {
-        return ['researcher_acknowledged_at' => 'datetime', 'researcher_addressed_at' => 'datetime'];
+        return ['resolved_at' => 'datetime', 'researcher_acknowledged_at' => 'datetime', 'researcher_addressed_at' => 'datetime'];
     }
 
     public function researchDocument(): BelongsTo
@@ -73,6 +100,11 @@ class FeedbackComment extends ConsolidatedReviewModel
     public function documentFile(): BelongsTo
     {
         return $this->belongsTo(DocumentFile::class, static::column('document_file_id'));
+    }
+
+    public function attachment(): HasOne
+    {
+        return $this->hasOne(FeedbackAttachment::class, 'feedback_comment_id');
     }
 
     public function scopeOpen(Builder $query): Builder

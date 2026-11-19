@@ -43,6 +43,12 @@ return [
     'bootstrap_admin_email' => env('BOOTSTRAP_ADMIN_EMAIL'),
     'frontend_url' => $canonicalOrigin((string) env('FRONTEND_URL', env('APP_URL', 'http://localhost'))),
     'research_study_import_source' => storage_path('app/private/research_studies/ics'),
+    'grouped_downloads' => [
+        // Source files are individually constrained by PrivateDocumentFileResolver.
+        // These caps also bound the aggregate work requested by a ZIP download.
+        'maximum_files' => (int) env('GROUPED_DOWNLOAD_MAXIMUM_FILES', 100),
+        'maximum_source_bytes' => (int) env('GROUPED_DOWNLOAD_MAXIMUM_SOURCE_BYTES', 104_857_600),
+    ],
     'similarity' => [
         // Policy names and values are versioned application configuration, not
         // deploy-time environment tuning. A version therefore always names its
@@ -59,13 +65,14 @@ return [
         'php_memory_limit' => env('SIMILARITY_PHP_MEMORY_LIMIT', '512M'),
         'maximum_input_bytes' => (int) env('SIMILARITY_MAXIMUM_INPUT_BYTES', 268435456),
         'maximum_output_bytes' => (int) env('SIMILARITY_MAXIMUM_OUTPUT_BYTES', 2097152),
+        'upload_text_cache_ttl_seconds' => (int) env('SIMILARITY_UPLOAD_TEXT_CACHE_TTL_SECONDS', 900),
     ],
     'manuscript_search' => [
         // The worker receives one verified canonical private-disk path by argv.
         'python_binary' => env('MANUSCRIPT_SEARCH_PYTHON_BINARY', 'python'),
         'cli_path' => env('MANUSCRIPT_SEARCH_CLI_PATH', app_path('Services/manuscript_text_cli.py')),
         'timeout_seconds' => (int) env('MANUSCRIPT_SEARCH_TIMEOUT_SECONDS', 30),
-        'maximum_input_bytes' => (int) env('MANUSCRIPT_SEARCH_MAXIMUM_INPUT_BYTES', 26214400),
+        'maximum_input_bytes' => (int) env('MANUSCRIPT_SEARCH_MAXIMUM_INPUT_BYTES', 31457280),
         'maximum_output_bytes' => (int) env('MANUSCRIPT_SEARCH_MAXIMUM_OUTPUT_BYTES', 8388608),
         'maximum_text_characters' => (int) env('MANUSCRIPT_SEARCH_MAXIMUM_TEXT_CHARACTERS', 1000000),
         'part_characters' => (int) env('MANUSCRIPT_SEARCH_PART_CHARACTERS', 100000),

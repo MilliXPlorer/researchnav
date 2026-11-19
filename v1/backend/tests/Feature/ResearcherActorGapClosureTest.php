@@ -38,6 +38,37 @@ class ResearcherActorGapClosureTest extends TestCase
         $this->assertDatabaseCount('document_files', 1);
     }
 
+    public function test_researcher_can_upload_and_manage_folder_inferred_files_during_active_research(): void
+    {
+        Storage::fake('researchnav_private');
+        $researcher = User::factory()->create(['role' => 'researcher']);
+        $service = app(DocumentService::class);
+
+        foreach (['submitted', 'under_review', 'approved'] as $status) {
+            $research = $this->research($researcher, $status);
+            $chapter = $service->upload($researcher, $research, $this->pdf("{$status}-chapter.pdf"), 'chapter', 'Chapter 1', 'revision');
+            $attachment = $service->upload($researcher, $research, $this->pdf("{$status}-survey.pdf"), 'attachment', 'Chapter 1');
+            $manuscript = $service->upload($researcher, $research, $this->pdf("{$status}-manuscript.pdf"), 'chapter', 'Full Manuscript');
+            $service->rename($researcher, $chapter, "{$status}-chapter-revised.pdf");
+            $service->delete($researcher, $attachment);
+
+            $this->assertDatabaseHas('document_files', [
+                'id' => $chapter->id,
+                'original_filename' => "{$status}-chapter-revised.pdf",
+                'relative_path' => 'Chapter 1',
+                'upload_purpose' => 'revision',
+            ]);
+            $this->assertDatabaseHas('document_files', [
+                'id' => $manuscript->id,
+                'document_type' => 'chapter',
+                'relative_path' => 'Full Manuscript',
+            ]);
+            $this->assertDatabaseMissing('document_files', ['id' => $attachment->id]);
+            $this->expectValidationException(fn () => $service->upload($researcher, $research, $this->pdf("{$status}-final.pdf"), 'final_manuscript'));
+            $this->expectValidationException(fn () => $service->upload($researcher, $research, $this->pdf("{$status}-invalid-purpose.pdf"), 'chapter', 'Chapter 1', 'unrecognized'));
+        }
+    }
+
     public function test_active_admin_can_only_upload_final_manuscripts_after_approval_and_office_can_upload_them_when_approved(): void
     {
         Storage::fake('researchnav_private');

@@ -9,6 +9,7 @@ use App\Models\ReviewAssignment;
 use App\Models\Revision;
 use App\Models\SimilarityResult;
 use App\Models\TitleValidation;
+use App\Services\DefenseMonitoringAuthorization;
 use App\Services\DomainAuthorization;
 use App\Services\MonitoringService;
 use Illuminate\Http\JsonResponse;
@@ -191,6 +192,7 @@ class AdviserController extends DomainController
             'status' => ['required', 'in:pending,completed'],
             'signature_status' => ['required', 'in:unsigned,signed'],
         ]);
+        app(DefenseMonitoringAuthorization::class)->authorizeSection($actor, $researchDocument, $input['monitoring_stage']);
         DB::transaction(function () use ($actor, $researchDocument, $input, $activity): void {
             DB::table('monitoring_entries')->updateOrInsert([
                 'research_document_id' => $researchDocument->id,

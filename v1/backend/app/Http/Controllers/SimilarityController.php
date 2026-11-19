@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\ContentUploadSimilarityRequest;
 use App\Http\Requests\PublicRepositorySimilarityRequest;
 use App\Http\Requests\RunSimilarityCheckRequest;
 use App\Http\Resources\PublicRepositorySimilarityResource;
@@ -14,6 +15,12 @@ use App\Services\PublicRepositorySimilarityService;
 use App\Services\SimilarityProcessException;
 use App\Services\SimilarityService;
 use App\Services\SimilarityUnavailableException;
+use App\Services\UploadedContentChapterOneNotFoundException;
+use App\Services\UploadedContentChapterOrderException;
+use App\Services\UploadedContentEmptyScopeException;
+use App\Services\UploadedContentInvalidScopeException;
+use App\Services\UploadedContentSimilarityService;
+use App\Services\UploadedContentUnreadableException;
 use Illuminate\Http\Request;
 
 class SimilarityController extends DomainController
@@ -33,6 +40,8 @@ class SimilarityController extends DomainController
             return SimilarityResultResource::collection($service->check($this->actor($request), $researchDocument, $request))
                 ->response()
                 ->setStatusCode(201);
+        } catch (PublicRepositorySimilarityCapacityException) {
+            return response()->json(['error' => 'SIMILARITY_CAPACITY_EXCEEDED'], 503);
         } catch (SimilarityUnavailableException) {
             return response()->json(['error' => 'SIMILARITY_UNAVAILABLE'], 503);
         } catch (SimilarityProcessException) {
@@ -74,6 +83,44 @@ class SimilarityController extends DomainController
             return PublicRepositorySimilarityResource::collection(
                 $service->compareContent($request->string('q')->toString())
             );
+        } catch (PublicRepositorySimilarityCapacityException) {
+            return response()->json(['error' => 'SIMILARITY_CAPACITY_EXCEEDED'], 503);
+        } catch (SimilarityUnavailableException) {
+            return response()->json(['error' => 'SIMILARITY_UNAVAILABLE'], 503);
+        } catch (SimilarityProcessException) {
+            return response()->json(['error' => 'SIMILARITY_PROCESS_FAILED'], 502);
+        }
+    }
+
+    public function contentUpload(ContentUploadSimilarityRequest $request, UploadedContentSimilarityService $service)
+    {
+        set_time_limit((int) config('researchnav.similarity.timeout_seconds') + 30);
+
+        try {
+            $uploads = $request->hasFile('files') ? $request->file('files') : [$request->file('file')];
+            $result = $service->compare($uploads);
+
+            return response()->json([
+                'contract_version' => 'content-upload.v2',
+                'data' => PublicRepositorySimilarityResource::collection($result['matches'])->resolve($request),
+                'file_name' => count($uploads) === 1 ? $uploads[0]->getClientOriginalName() : count($uploads).' PDF files',
+                'file_diagnostics' => $result['diagnostics'],
+                'extracted_text' => $result['extracted_text'],
+            ]);
+        } catch (UploadedContentUnreadableException) {
+            return response()->json(['error' => 'CONTENT_UPLOAD_PDF_TEXT_UNREADABLE'], 422);
+        } catch (UploadedContentChapterOneNotFoundException) {
+            return response()->json(['error' => 'CONTENT_UPLOAD_CHAPTER_ONE_NOT_FOUND'], 422);
+        } catch (UploadedContentChapterOrderException) {
+            return response()->json(['error' => 'CONTENT_UPLOAD_CHAPTER_ORDER_INVALID'], 422);
+        } catch (UploadedContentEmptyScopeException) {
+            return response()->json(['error' => 'CONTENT_UPLOAD_CHAPTER_SCOPE_EMPTY'], 422);
+        } catch (UploadedContentInvalidScopeException) {
+            return response()->json(['error' => 'CONTENT_UPLOAD_INVALID_SCOPE'], 422);
+        } catch (PublicRepositorySimilarityCapacityException) {
+            return response()->json(['error' => 'SIMILARITY_CAPACITY_EXCEEDED'], 503);
+        } catch (PublicRepositorySimilarityCatalogChangedException) {
+            return response()->json(['error' => 'SIMILARITY_CATALOG_CHANGED'], 409);
         } catch (SimilarityUnavailableException) {
             return response()->json(['error' => 'SIMILARITY_UNAVAILABLE'], 503);
         } catch (SimilarityProcessException) {

@@ -49,7 +49,6 @@ const listData = (data: unknown[]) => new Response(JSON.stringify({ data }));
 const draftResource = (overrides: Record<string, unknown> = {}) => ({
   id: 7,
   submitted_by: "member@example.test",
-  category_id: 2,
   title: "My study title",
   normalized_title: null,
   abstract: "A study about learning.",
@@ -66,6 +65,7 @@ const draftResource = (overrides: Record<string, unknown> = {}) => ({
   archive_status: "not_archived",
   visibility: "private",
   submitted_at: null,
+  updated_at: "2026-09-18T10:00:00.000Z",
   approved_at: null,
   archived_at: null,
   authors: [
@@ -77,13 +77,6 @@ const draftResource = (overrides: Record<string, unknown> = {}) => ({
       is_corresponding_author: true,
     },
   ],
-  category: {
-    id: 2,
-    name: "Education",
-    slug: "education",
-    description: null,
-    is_active: true,
-  },
   ...overrides,
 });
 
@@ -113,6 +106,7 @@ const programReport = () =>
     JSON.stringify({
       data: {
         schema_version: 1,
+        filters: { institute: null, program: null },
         counts: {
           active_instructors: 0,
           active_advisers: 0,
@@ -130,6 +124,7 @@ const programReport = () =>
           methodology_signed_off: 0,
         },
         by_section: [],
+        instructors: [],
         adviser_load: [],
       },
     }),
@@ -148,9 +143,8 @@ function roleRoutes(): Array<[RegExp, Handler]> {
     [/\/api\/panel\/(schedule|assignments|history)$/, emptyData],
     [/\/api\/statistician\/(queue|signoffs)$/, emptyData],
     [/\/api\/coordinator\/schedules(\?|$)/, emptyData],
-    [/\/api\/coordinator\/duplicate-flags$/, emptyData],
     [/\/api\/coordinator\/adviser-load$/, emptyData],
-    [/\/api\/coordinator\/reports$/, programReport],
+    [/\/api\/coordinator\/reports(\?|$)/, programReport],
     [
       /\/api\/coordinator\/instructors$/,
       () => new Response(JSON.stringify({ users: [] })),
@@ -168,6 +162,288 @@ function roleRoutes(): Array<[RegExp, Handler]> {
 }
 
 describe("role workspace pages", () => {
+  it("switches Research Office report tabs and opens the active report PDF", async () => {
+    stubFetch([
+      [
+        /\/api\/office\/reports$/,
+        () =>
+          new Response(
+            JSON.stringify({
+              data: {
+                schema_version: 1,
+                counts: {},
+                by_institute: [
+                  { institute: "Institute of Computer Studies", total: 5 },
+                ],
+                by_status: [{ status: "under_review", total: 2 }],
+                by_sdg: [
+                  {
+                    id: 4,
+                    code: "SDG 4",
+                    title: "Quality Education",
+                    color_hex: "#006e52",
+                    total: 3,
+                  },
+                ],
+              },
+            }),
+          ),
+      ],
+    ]);
+    const open = vi.fn();
+    vi.stubGlobal("open", open);
+
+    render(
+      <RoleSidebarPage
+        role="research-office"
+        selectedNav="Reports & Exports"
+        navigate={vi.fn()}
+      />,
+    );
+    await screen.findByRole("heading", { name: "By academic unit" });
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Print report" }));
+    expect(open).toHaveBeenLastCalledWith(
+      "/api/office/reports/academic-units/pdf",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "By submission status" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "By submission status" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(
+      screen.queryByRole("heading", { name: "By academic unit" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Print report" }));
+    expect(open).toHaveBeenLastCalledWith(
+      "/api/office/reports/submission-status/pdf",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "By Sustainable Development Goal" }),
+    );
+    expect(
+      screen.queryByRole("heading", { name: "By submission status" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Print report" }));
+    expect(open).toHaveBeenLastCalledWith(
+      "/api/office/reports/sdgs/pdf",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(open).toHaveBeenCalledTimes(3);
+  });
+
+  it("opens a coordinator PDF for only the selected report section", async () => {
+    stubFetch([[/\/api\/coordinator\/reports(\?|$)/, programReport]]);
+    const open = vi.fn();
+    vi.stubGlobal("open", open);
+
+    render(
+      <RoleSidebarPage
+        role="coordinator"
+        selectedNav="Reports"
+        navigate={vi.fn()}
+      />,
+    );
+    const printButton = await screen.findByRole("button", {
+      name: "Print report",
+    });
+    await waitFor(() => expect(printButton).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Class sections" }));
+    fireEvent.click(printButton);
+    expect(open).toHaveBeenCalledWith(
+      "/api/coordinator/reports/sections/pdf",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Research instructors" }),
+    );
+    fireEvent.click(printButton);
+    expect(open).toHaveBeenLastCalledWith(
+      "/api/coordinator/reports/instructors/pdf",
+      "_blank",
+      "noopener,noreferrer",
+    );
+  });
+
+  it("opens a coordinator report count and adviser row as read-only details", async () => {
+    stubFetch([
+      [
+        /\/api\/coordinator\/reports\/studies(\?|$)/,
+        () =>
+          new Response(
+            JSON.stringify({
+              data: [
+                {
+                  id: 42,
+                  title: "Sample Study",
+                  section: "Class A",
+                  degree_program: "Computer Science",
+                  updated_at: "2026-09-21T08:00:00Z",
+                },
+              ],
+              links: { first: null, last: null, prev: null, next: null },
+              meta: {
+                current_page: 1,
+                from: 1,
+                last_page: 1,
+                links: [],
+                path: "/api/coordinator/reports/studies",
+                per_page: 10,
+                to: 1,
+                total: 1,
+              },
+            }),
+          ),
+      ],
+      [
+        /\/api\/coordinator\/reports(\?|$)/,
+        () =>
+          new Response(
+            JSON.stringify({
+              data: {
+                schema_version: 1,
+                filters: { institute: null, program: null },
+                counts: {
+                  active_instructors: 0,
+                  active_advisers: 1,
+                  active_researchers: 0,
+                  draft: 0,
+                  submitted: 0,
+                  under_review: 0,
+                  revision_required: 1,
+                  approved: 0,
+                  archived: 0,
+                  flagged_similarity: 0,
+                  defenses_scheduled: 0,
+                  defenses_completed: 0,
+                  evaluations_submitted: 0,
+                  methodology_signed_off: 0,
+                },
+                studies: [
+                  {
+                    id: 42,
+                    title: "Sample Study",
+                    section: "Class A",
+                    degree_program: "Computer Science",
+                    submission_status: "revision_required",
+                    updated_at: "2026-09-21T08:00:00Z",
+                  },
+                ],
+                researchers: [],
+                defense_schedules: [],
+                evaluations: [],
+                methodology_reviews: [],
+                active_instructors_list: [],
+                active_advisers_list: [],
+                instructors: [
+                  {
+                    user_id: "i",
+                    name: "Prof. Dela Cruz",
+                    email: "instructor@example.edu",
+                    sections: ["Class A"],
+                    studies: [{ id: 1, title: "Study A" }],
+                  },
+                ],
+                by_section: [{ id: 1, name: "Class A", documents_count: 1 }],
+                adviser_load: [
+                  {
+                    user_id: "a",
+                    name: "Dr. Rivera",
+                    email: "rivera@example.edu",
+                    active_assignments: 1,
+                    studies: [
+                      {
+                        id: 42,
+                        title: "Sample Study",
+                        research_stage: "ongoing",
+                        submission_status: "revision_required",
+                      },
+                    ],
+                  },
+                ],
+              },
+            }),
+          ),
+      ],
+    ]);
+    render(
+      <RoleSidebarPage
+        role="coordinator"
+        selectedNav="Reports"
+        navigate={vi.fn()}
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "View Revision required" }),
+    );
+    expect(await screen.findByText("Sample Study")).toBeInTheDocument();
+    expect(screen.getByText("1 revision required study")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /close/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Research instructors" }),
+    );
+    expect(
+      screen.getByRole("heading", { name: "Research instructors" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "View Revision required" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Class sections" }));
+    expect(screen.getByText("Class A")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Class A" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Research instructors" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Research advisers" }));
+    expect(screen.getByText("Dr. Rivera")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Dr. Rivera" })).not.toBeInTheDocument();
+  });
+  it("opens an adviser's assigned studies from Adviser Load", async () => {
+    stubFetch([
+      [
+        /\/api\/coordinator\/adviser-load$/,
+        () =>
+          new Response(
+            JSON.stringify({
+              data: [
+                {
+                  user_id: "a",
+                  name: "Dr. Rivera",
+                  email: "rivera@example.edu",
+                  active_assignments: 1,
+                  studies: [
+                    {
+                      id: 42,
+                      title: "Sample Study",
+                      research_stage: "ongoing",
+                      submission_status: "revision_required",
+                    },
+                  ],
+                },
+              ],
+            }),
+          ),
+      ],
+    ]);
+    render(
+      <RoleSidebarPage
+        role="coordinator"
+        selectedNav="Adviser Load"
+        navigate={vi.fn()}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Dr. Rivera" }));
+    expect(
+      await screen.findByRole("dialog", { name: "Dr. Rivera" }),
+    ).toHaveTextContent("Sample Study");
+  });
   it("separates the Instructor research workspace from the review queue", async () => {
     const fetchMock = stubFetch([
       [/\/api\/monitoring\/research$/, () => listData([])],
@@ -183,7 +459,7 @@ describe("role workspace pages", () => {
     );
 
     expect(
-      await screen.findByRole("heading", { name: "Research folders" }),
+      await screen.findByRole("heading", { name: "Assigned Research" }),
     ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/monitoring/research",
@@ -204,6 +480,370 @@ describe("role workspace pages", () => {
     expect(
       screen.getByText(/review assigned manuscript submissions/i),
     ).toBeInTheDocument();
+  });
+
+  it("renders personal user logs from the shared endpoint", async () => {
+    const fetchMock = stubFetch([
+      [
+        /^\/api\/user-logs$/,
+        () =>
+          new Response(
+            JSON.stringify(
+              pageResponse([
+                {
+                  id: 1,
+                  user: {
+                    id: "user-1",
+                    email: "instructor@example.test",
+                  },
+                  action: "CLASS_SECTION_CREATED",
+                  entity_type: "class_section",
+                  entity_id: "7",
+                  description: "Created a research section.",
+                  ip_address: "127.0.0.1",
+                  user_agent: "Vitest",
+                  created_at: "2026-09-17T10:00:00+08:00",
+                },
+              ]),
+            ),
+          ),
+      ],
+    ]);
+
+    render(
+      <RoleSidebarPage
+        role="instructor"
+        selectedNav="User Logs"
+        navigate={vi.fn()}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "User Logs" }),
+    ).toBeInTheDocument();
+
+    expect(screen.getByText("CLASS SECTION CREATED")).toBeInTheDocument();
+    expect(screen.getByText("Created a research section.")).toBeInTheDocument();
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/user-logs", expect.anything());
+  });
+
+  it("paginates user logs", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+
+      if (url === "/api/user-logs") {
+        return new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: 1,
+                user: {
+                  id: "user-1",
+                  email: "instructor@example.test",
+                },
+                action: "PAGE_ONE_EVENT",
+                entity_type: "research_document",
+                entity_id: "1",
+                description: "First page activity.",
+                ip_address: "127.0.0.1",
+                user_agent: "Vitest",
+                created_at: "2026-09-19T08:00:00+08:00",
+              },
+            ],
+            links: {
+              first: "/api/user-logs?page=1",
+              last: "/api/user-logs?page=2",
+              prev: null,
+              next: "/api/user-logs?page=2",
+            },
+            meta: {
+              current_page: 1,
+              from: 1,
+              last_page: 2,
+              links: [],
+              path: "/api/user-logs",
+              per_page: 25,
+              to: 25,
+              total: 26,
+            },
+          }),
+        );
+      }
+
+      if (url === "/api/user-logs?page=2") {
+        return new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: 26,
+                user: {
+                  id: "user-1",
+                  email: "instructor@example.test",
+                },
+                action: "PAGE_TWO_EVENT",
+                entity_type: "research_document",
+                entity_id: "26",
+                description: "Second page activity.",
+                ip_address: "127.0.0.1",
+                user_agent: "Vitest",
+                created_at: "2026-09-18T08:00:00+08:00",
+              },
+            ],
+            links: {
+              first: "/api/user-logs?page=1",
+              last: "/api/user-logs?page=2",
+              prev: "/api/user-logs?page=1",
+              next: null,
+            },
+            meta: {
+              current_page: 2,
+              from: 26,
+              last_page: 2,
+              links: [],
+              path: "/api/user-logs",
+              per_page: 25,
+              to: 26,
+              total: 26,
+            },
+          }),
+        );
+      }
+
+      return new Response(null, { status: 404 });
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <RoleSidebarPage
+        role="instructor"
+        selectedNav="User Logs"
+        navigate={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText("PAGE ONE EVENT")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+
+    expect(await screen.findByText("PAGE TWO EVENT")).toBeInTheDocument();
+    expect(screen.getByText("Showing 26–26 of 26 logs")).toBeInTheDocument();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/user-logs?page=2",
+      expect.anything(),
+    );
+  });
+
+  it("searches and filters user logs while preserving filters across pages", async () => {
+    const log = (action: string) => ({
+      id: action,
+      action,
+      actor: null,
+      subject: { type: "research_document", id: "101" },
+      description: "Proposal review activity.",
+      created_at: "2026-09-10T08:00:00+08:00",
+    });
+    const response = (action: string, page: number) => ({
+      data: [log(action)],
+      links: { first: null, last: null, prev: null, next: null },
+      meta: {
+        current_page: page,
+        from: page,
+        last_page: 2,
+        links: [],
+        path: "/api/user-logs",
+        per_page: 25,
+        to: page,
+        total: 2,
+      },
+    });
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "/api/user-logs") {
+        return new Response(JSON.stringify(response("PAGE_ONE_EVENT", 1)));
+      }
+      if (url === "/api/user-logs?page=2") {
+        return new Response(JSON.stringify(response("PAGE_TWO_EVENT", 2)));
+      }
+      if (
+        url ===
+        "/api/user-logs?search=proposal&created_from=2026-09-10&created_to=2026-09-10"
+      ) {
+        return new Response(JSON.stringify(response("FILTERED_PAGE_ONE", 1)));
+      }
+      if (
+        url ===
+        "/api/user-logs?search=proposal&created_from=2026-09-10&created_to=2026-09-10&page=2"
+      ) {
+        return new Response(JSON.stringify(response("FILTERED_PAGE_TWO", 2)));
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <RoleSidebarPage
+        role="instructor"
+        selectedNav="User Logs"
+        navigate={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText("PAGE ONE EVENT")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(await screen.findByText("PAGE TWO EVENT")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Search logs"), {
+      target: { value: "proposal" },
+    });
+    fireEvent.change(screen.getByLabelText("From"), {
+      target: { value: "2026-09-10" },
+    });
+    fireEvent.change(screen.getByLabelText("To"), {
+      target: { value: "2026-09-10" },
+    });
+
+    expect(await screen.findByText("FILTERED PAGE ONE")).toBeInTheDocument();
+    expect(screen.getByText("Showing 1–1 of 2 logs")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(await screen.findByText("FILTERED PAGE TWO")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/user-logs?search=proposal&created_from=2026-09-10&created_to=2026-09-10&page=2",
+      expect.anything(),
+    );
+  });
+
+  it("resets user-log pagination and preserves filters when server sorting changes", async () => {
+    const fetchMock = vi.fn<
+      (input: string | URL | Request) => Promise<Response>
+    >(
+      async () =>
+        new Response(
+          JSON.stringify(
+            pageResponse([
+              {
+                id: 1,
+                action: "PROPOSAL_REVIEWED",
+                actor: null,
+                subject: { type: "research_document", id: "101" },
+                description: "Proposal review activity.",
+                created_at: "2026-09-10T08:00:00+08:00",
+              },
+            ]),
+          ),
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <RoleSidebarPage
+        role="instructor"
+        selectedNav="User Logs"
+        navigate={vi.fn()}
+      />,
+    );
+
+    await screen.findByText("PROPOSAL REVIEWED");
+    fireEvent.change(screen.getByLabelText("Search logs"), {
+      target: { value: "proposal" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sort by Action" }));
+
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.map(([input]) => String(input));
+      expect(calls).toContain(
+        "/api/user-logs?search=proposal&sort=action&direction=asc",
+      );
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sort by Action" }));
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.map(([input]) => String(input));
+      expect(calls).toContain(
+        "/api/user-logs?search=proposal&sort=action&direction=desc",
+      );
+    });
+  });
+
+  it("reloads Assigned Research when the active account changes", async () => {
+    let monitoringRequests = 0;
+
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+
+      if (url === "/api/monitoring/research") {
+        monitoringRequests += 1;
+
+        return new Response(
+          JSON.stringify({
+            data:
+              monitoringRequests === 1
+                ? [
+                    {
+                      id: 101,
+                      title: "Adviser A Folder",
+                      institute: "Institute of Computing",
+                      researchers: ["Researcher A"],
+                    },
+                  ]
+                : [
+                    {
+                      id: 202,
+                      title: "Adviser B Folder",
+                      institute: "Institute of Computing",
+                      researchers: ["Researcher B"],
+                    },
+                  ],
+          }),
+        );
+      }
+
+      return new Response(JSON.stringify({ error: "NOT_FOUND" }), {
+        status: 404,
+      });
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { rerender } = render(
+      <RoleSidebarPage
+        role="adviser"
+        selectedNav="Assigned Research"
+        navigate={vi.fn()}
+        actorKey="adviser-a@example.test"
+      />,
+    );
+
+    expect(
+      await screen.findByRole("button", {
+        name: "Open research folder Adviser A Folder",
+      }),
+    ).toBeInTheDocument();
+
+    rerender(
+      <RoleSidebarPage
+        role="adviser"
+        selectedNav="Assigned Research"
+        navigate={vi.fn()}
+        actorKey="adviser-b@example.test"
+      />,
+    );
+
+    expect(
+      await screen.findByRole("button", {
+        name: "Open research folder Adviser B Folder",
+      }),
+    ).toBeInTheDocument();
+
+    expect(
+      screen.queryByRole("button", {
+        name: "Open research folder Adviser A Folder",
+      }),
+    ).not.toBeInTheDocument();
+
+    expect(monitoringRequests).toBe(2);
   });
 
   it("opens Editor dashboard sections from the summary cards", async () => {
@@ -234,7 +874,6 @@ describe("role workspace pages", () => {
               title: "Accepted editorial review",
               researchers: ["Student Two"],
               program: null,
-              category: null,
               academic_year: 2026,
               research_stage: "ongoing",
               submission_status: "under_review",
@@ -328,7 +967,7 @@ describe("role workspace pages", () => {
     {
       role: "panel",
       destinations: [
-        ["Defense Schedule", "Defense schedule"],
+        ["Repository", "Repository"],
         ["Evaluation Form", "Evaluation form"],
         ["Panel History", "Panel history"],
       ],
@@ -336,6 +975,7 @@ describe("role workspace pages", () => {
     {
       role: "statistician",
       destinations: [
+        ["Repository", "Repository"],
         ["Methodology Checklist", "Methodology checklist"],
         ["Sign-offs Issued", "Sign-offs issued"],
       ],
@@ -343,8 +983,6 @@ describe("role workspace pages", () => {
     {
       role: "coordinator",
       destinations: [
-        ["Schedules", "Defense schedules"],
-        ["Duplicate Flags", "Duplicate flags"],
         ["Adviser Load", "Adviser load"],
         ["Account Roles", "Account roles"],
         ["Reports", "Program reports"],
@@ -353,7 +991,7 @@ describe("role workspace pages", () => {
     {
       role: "librarian",
       destinations: [
-        ["Repository Catalog", "Repository catalog"],
+        ["Repository", "Repository"],
         ["Metadata Standards", "Metadata standards"],
         ["Retention & Compliance", "Retention & compliance"],
       ],
@@ -362,7 +1000,7 @@ describe("role workspace pages", () => {
       role: "research-office",
       destinations: [
         ["Similarity Check", "Title checker"],
-        ["Upload Manuscript", "Upload Manuscript"],
+        ["Manage Repository", "Manage Repository"],
         ["User & Role Management", "User & role management"],
         ["Reports & Exports", "Reports & exports"],
       ],
@@ -397,6 +1035,247 @@ describe("role workspace pages", () => {
       }
     },
   );
+
+  it.each(["panel", "statistician", "research_editor"] as const)(
+    "renders an archived-only repository for %s",
+    async (role) => {
+      const requests: string[] = [];
+      stubFetch([
+        [
+          /\/api\/archived-repository(\?|$)/,
+          (input) => {
+            requests.push(String(input));
+            return new Response(
+              JSON.stringify({
+                data: [
+                  {
+                    id: 17,
+                    title: "Archived coastal study",
+                    authors: [
+                      { id: 1, author_name: "Archive Author", author_order: 1 },
+                    ],
+                    publication_year: 2026,
+                    institution_name: "Tangub City Global College",
+                    institute: "Institute of Computer Studies",
+                    degree_program: "BS Computer Science",
+                    abstract: "Archived abstract",
+                    keywords: ["archive"],
+                    research_stage: "completed",
+                  },
+                ],
+                links: { first: null, last: null, prev: null, next: null },
+                meta: {
+                  current_page: 1,
+                  from: 1,
+                  last_page: 1,
+                  path: "/api/archived-repository",
+                  per_page: 100,
+                  to: 1,
+                  total: 1,
+                },
+                filters: { years: [2026, 2025, 2021] },
+              }),
+            );
+          },
+        ],
+      ]);
+
+      render(
+        <RoleSidebarPage
+          role={role}
+          selectedNav="Repository"
+          navigate={vi.fn()}
+        />,
+      );
+
+      expect(
+        await screen.findByText("Archived coastal study"),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Repository references")).toBeInTheDocument();
+      expect(screen.queryByText("Visibility")).not.toBeInTheDocument();
+      expect(screen.queryByText("Approved")).not.toBeInTheDocument();
+      expect(requests.every((url) => !url.includes("/librarian/"))).toBe(true);
+    },
+  );
+
+  it("renders a searchable read-only librarian repository", async () => {
+    const requests: string[] = [];
+    stubFetch([
+      [
+        /\/api\/librarian\/catalog(\?|$)/,
+        (input) => {
+          requests.push(String(input));
+          return new Response(
+            JSON.stringify({
+              data: [
+                {
+                  id: 17,
+                  title: "Coastal resilience study",
+                  submission_status: "archived",
+                  archive_status: "archived",
+                  visibility: "public",
+                  publication_year: 2026,
+                  updated_at: "2026-11-16T08:00:00Z",
+                },
+              ],
+              meta: { current_page: 1, last_page: 1, total: 1, per_page: 25 },
+            }),
+          );
+        },
+      ],
+    ]);
+
+    render(
+      <RoleSidebarPage
+        role="librarian"
+        selectedNav="Repository"
+        navigate={vi.fn()}
+      />,
+    );
+
+    expect(
+      await screen.findByText("Coastal resilience study"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Repository" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /edit|delete|restore|add study/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("combobox", { name: /category/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("columnheader", { name: /category/i }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Search"), {
+      target: { value: "coastal" },
+    });
+    await waitFor(() =>
+      expect(requests.some((url) => url.includes("search=coastal"))).toBe(true),
+    );
+    expect(requests.every((url) => !url.includes("category="))).toBe(true);
+  });
+
+  it("clears visible user logs without deleting audit history", async () => {
+    let cleared = false;
+
+    const fetchMock = vi.fn(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+
+        if (url === "/api/user-logs/clear" && init?.method === "POST") {
+          cleared = true;
+          return new Response(null, { status: 204 });
+        }
+
+        if (url === "/api/user-logs") {
+          return new Response(
+            JSON.stringify(
+              pageResponse(
+                cleared
+                  ? []
+                  : [
+                      {
+                        id: 1,
+                        user: {
+                          id: "user-1",
+                          email: "instructor@example.test",
+                        },
+                        action: "VISIBLE_EVENT",
+                        entity_type: "research_document",
+                        entity_id: "1",
+                        description: "Visible activity.",
+                        ip_address: "127.0.0.1",
+                        user_agent: "Vitest",
+                        created_at: "2026-09-19T08:00:00+08:00",
+                      },
+                    ],
+              ),
+            ),
+          );
+        }
+
+        return new Response(null, { status: 404 });
+      },
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <RoleSidebarPage
+        role="instructor"
+        selectedNav="User Logs"
+        navigate={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText("VISIBLE EVENT")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear Logs" }));
+
+    expect(
+      screen.getByText(
+        "Are you sure you want to clear all logs? This action cannot be undone.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Clear Logs" })).toHaveClass(
+      "clear-logs-confirmation",
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Clear Logs" })[1]);
+
+    await waitFor(() => {
+      expect(screen.queryByText("VISIBLE EVENT")).not.toBeInTheDocument();
+    });
+
+    expect(
+      await screen.findByText("No activity has been recorded yet."),
+    ).toBeInTheDocument();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/user-logs/clear",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("renders visible icon-only user log actions", async () => {
+    stubFetch([
+      [
+        /^\/api\/user-logs$/,
+        () =>
+          new Response(
+            JSON.stringify(
+              pageResponse([
+                {
+                  id: 1,
+                  action: "LOG_VIEWED",
+                  description: "Viewed logs.",
+                  created_at: "2026-09-19T08:00:00+08:00",
+                },
+              ]),
+            ),
+          ),
+      ],
+    ]);
+
+    render(
+      <RoleSidebarPage
+        role="librarian"
+        selectedNav="User Logs"
+        navigate={vi.fn()}
+      />,
+    );
+
+    await screen.findByText("LOG VIEWED");
+    const clear = screen.getByRole("button", { name: "Clear Logs" });
+    const refresh = screen.getByRole("button", { name: "Refresh" });
+    expect(clear).toHaveClass("icon-button");
+    expect(refresh).toHaveClass("icon-button");
+    expect(clear.querySelector("svg")).toBeInTheDocument();
+    expect(refresh.querySelector("svg")).toBeInTheDocument();
+  });
 
   it("uses the manuscript queue and filters its returned submissions by status", async () => {
     stubFetch([
@@ -456,12 +1335,13 @@ describe("role workspace pages", () => {
 
     await screen.findByRole("heading", { name: "My research" });
     expect(
-      screen.getByRole("heading", { name: "One folder, two kinds of updates" }),
-    ).toBeInTheDocument();
+      screen.queryByText("Researcher", { selector: ".eyebrow" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("How My Research works")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Research status")).not.toBeInTheDocument();
     expect(
-      screen.getByText(/do not submit your manuscript for review/i),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Refresh" })).toBeInTheDocument();
+      screen.queryByRole("button", { name: "Refresh" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "No assigned research folders" }),
     ).toBeInTheDocument();
@@ -485,7 +1365,6 @@ describe("role workspace pages", () => {
         /\/api\/research\?/,
         () => new Response(JSON.stringify(pageResponse([draft]))),
       ],
-      [/\/api\/categories$/, () => listData([draft.category])],
       [
         /^\/api\/research\/7$/,
         (_input, init) =>
@@ -540,12 +1419,20 @@ describe("role workspace pages", () => {
 
     await screen.findByText("My study title");
     expect(
-      screen.getByRole("button", { name: "Manage folder" }),
+      screen.getByRole("button", {
+        name: "Open research folder My study title",
+      }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Submit" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Edit submission" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Submit research" }),
+    ).toBeInTheDocument();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Edit submission" }),
+    );
     await screen.findByRole("heading", { name: "Edit submission" });
     expect(screen.queryByLabelText(/User ID/)).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Title"), {
@@ -563,7 +1450,7 @@ describe("role workspace pages", () => {
     const manuscript = new File(["%PDF test"], "proposal.pdf", {
       type: "application/pdf",
     });
-    fireEvent.change(screen.getByLabelText("PDF or DOCX (maximum 25 MB)"), {
+    fireEvent.change(screen.getByLabelText("PDF (maximum 25 MB)"), {
       target: { files: [manuscript] },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save and submit" }));
@@ -574,10 +1461,7 @@ describe("role workspace pages", () => {
     expect(
       fetchMock.mock.calls
         .map(([input]) => String(input))
-        .filter(
-          (path) =>
-            path !== "/api/categories" && !path.includes("/api/research?"),
-        ),
+        .filter((path) => !path.includes("/api/research?")),
     ).toEqual([
       "/api/research/7",
       "/api/research/7/files",
@@ -590,7 +1474,6 @@ describe("role workspace pages", () => {
     const updated = draftResource({ title: "Updated study title" });
     let listRequests = 0;
     const fetchMock = stubFetch([
-      [/\/api\/categories$/, () => listData([draft.category])],
       [
         /\/api\/research\?/,
         () => {
@@ -620,7 +1503,9 @@ describe("role workspace pages", () => {
         navigate={vi.fn()}
       />,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Edit submission" }),
+    );
     expect(
       await screen.findByRole("heading", { name: "Edit submission" }),
     ).toBeInTheDocument();
@@ -653,7 +1538,6 @@ describe("role workspace pages", () => {
         /\/api\/research\?/,
         () => new Response(JSON.stringify(pageResponse([draft]))),
       ],
-      [/\/api\/categories$/, () => listData([draft.category])],
     ]);
     render(
       <RoleSidebarPage
@@ -662,7 +1546,9 @@ describe("role workspace pages", () => {
         navigate={vi.fn()}
       />,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Edit submission" }),
+    );
     await screen.findByRole("heading", { name: "Edit submission" });
     fireEvent.change(screen.getByLabelText("Title"), {
       target: { value: "Unsafe upload" },
@@ -670,13 +1556,13 @@ describe("role workspace pages", () => {
     fireEvent.change(screen.getByLabelText("Author name"), {
       target: { value: "Ada Lovelace" },
     });
-    fireEvent.change(screen.getByLabelText("PDF or DOCX (maximum 25 MB)"), {
+    fireEvent.change(screen.getByLabelText("PDF (maximum 25 MB)"), {
       target: { files: [new File(["bad"], "payload.exe")] },
     });
     fireEvent.click(screen.getByRole("button", { name: "Update draft" }));
 
     expect(
-      await screen.findByText("The manuscript must be a PDF or DOCX file."),
+      await screen.findByText("The manuscript must be a PDF file."),
     ).toBeInTheDocument();
     expect(
       fetchMock.mock.calls.filter(
@@ -690,7 +1576,6 @@ describe("role workspace pages", () => {
     const draft = {
       id: 7,
       submitted_by: "member@example.test",
-      category_id: 2,
       title: "My study title",
       normalized_title: null,
       abstract: null,
@@ -710,7 +1595,6 @@ describe("role workspace pages", () => {
       approved_at: null,
       archived_at: null,
       authors: [],
-      category: null,
     };
     const submitted = {
       ...draft,
@@ -745,7 +1629,9 @@ describe("role workspace pages", () => {
     expect(
       await screen.findByRole("heading", { name: "My research" }),
     ).toBeInTheDocument();
-    const submitButton = await screen.findByRole("button", { name: "Submit" });
+    const submitButton = await screen.findByRole("button", {
+      name: "Submit research",
+    });
     fireEvent.click(submitButton);
     expect(
       await screen.findByText('"My study title" has been submitted.'),
@@ -756,9 +1642,13 @@ describe("role workspace pages", () => {
     );
     await waitFor(() => expect(listRequests).toBeGreaterThan(1));
     expect(
-      screen.queryByRole("button", { name: "Submit" }),
+      screen.queryByRole("button", { name: "Submit research" }),
     ).not.toBeInTheDocument();
-    expect(screen.getAllByText("Submitted")).toHaveLength(1);
+    expect(
+      screen.getByRole("button", {
+        name: "Open research folder My study title",
+      }),
+    ).toHaveTextContent("Submitted");
   });
 
   it("opens and edits a revision-required submission without offering the draft submit action", async () => {
@@ -769,7 +1659,6 @@ describe("role workspace pages", () => {
         /\/api\/research\?/,
         () => new Response(JSON.stringify(pageResponse([revision]))),
       ],
-      [/\/api\/categories$/, () => listData([revision.category])],
     ]);
     render(
       <RoleSidebarPage
@@ -780,10 +1669,12 @@ describe("role workspace pages", () => {
     );
 
     fireEvent.click(
-      await screen.findByRole("button", { name: "Manage folder" }),
+      await screen.findByRole("button", {
+        name: "Open research folder My study title",
+      }),
     );
     expect(navigate).toHaveBeenCalledWith("/research/7");
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit submission" }));
     expect(
       await screen.findByRole("heading", { name: "Edit submission" }),
     ).toBeInTheDocument();
@@ -805,7 +1696,6 @@ describe("role workspace pages", () => {
         /\/api\/research\?/,
         () => new Response(JSON.stringify(pageResponse([draft]))),
       ],
-      [/\/api\/categories$/, () => listData([draft.category])],
     ]);
     render(
       <RoleSidebarPage
@@ -815,7 +1705,9 @@ describe("role workspace pages", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Edit submission" }),
+    );
     const institute = await screen.findByLabelText("Institute");
     const program = screen.getByLabelText("Program");
     expect(program).toBeDisabled();
@@ -900,6 +1792,66 @@ describe("role workspace pages", () => {
     expect(navigate).not.toHaveBeenCalledWith(
       expect.stringContaining("/catalog"),
     );
+    expect(screen.getByText(/9\/18\/2026/)).toBeInTheDocument();
+  });
+
+  it("sorts related studies on the server and resets to the first page", async () => {
+    const owned = draftResource();
+    const fetchMock = stubFetch([
+      [
+        /\/api\/research\?/,
+        (path) => {
+          const page = path.includes("page=2") ? 2 : 1;
+          return new Response(
+            JSON.stringify({
+              ...pageResponse([owned]),
+              meta: {
+                ...pageResponse([owned]).meta,
+                current_page: page,
+                from: page === 1 ? 1 : 11,
+                last_page: 2,
+                to: page === 1 ? 10 : 11,
+                total: 11,
+              },
+            }),
+          );
+        },
+      ],
+      [/\/api\/research\/7\/similarity$/, () => listData([])],
+    ]);
+
+    render(
+      <RoleSidebarPage
+        role="researcher"
+        selectedNav="Related Studies"
+        navigate={vi.fn()}
+      />,
+    );
+
+    await screen.findByRole("heading", { name: "Select a record" });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/research?mine=1&page=2&per_page=10",
+        expect.anything(),
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Sort by Title" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/research?mine=1&sort=title&direction=asc&page=1&per_page=10",
+        expect.anything(),
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Sort by Title" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/research?mine=1&sort=title&direction=desc&page=1&per_page=10",
+        expect.anything(),
+      );
+    });
   });
 
   it("shows an error instead of mock submissions after a failed Researcher list request", async () => {
@@ -956,7 +1908,6 @@ describe("role workspace pages", () => {
               institution_location: null,
               institute: null,
               degree_program: null,
-              category: { name: "Education" },
               abstract: null,
               keywords: [],
               research_stage: "completed",
@@ -990,7 +1941,7 @@ describe("role workspace pages", () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText("Proposed title or keywords"), {
+    fireEvent.change(screen.getByLabelText("Research title or keywords"), {
       target: { value: "rounded" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Check Title" }));
@@ -1130,45 +2081,6 @@ describe("role workspace pages", () => {
     ).toBeGreaterThanOrEqual(2);
   });
 
-  it("clears a failed schedules load while retrying and renders the authoritative response", async () => {
-    let requests = 0;
-    stubFetch([
-      [
-        /\/api\/coordinator\/schedules(\?|$)/,
-        () => {
-          requests += 1;
-          return requests === 1
-            ? new Response(JSON.stringify({ error: "SERVICE_UNAVAILABLE" }), {
-                status: 503,
-              })
-            : listData([
-                {
-                  id: 1,
-                  research_document_id: 7,
-                  title: "Panel defense",
-                  scheduled_at: "2026-08-20T09:00:00.000000Z",
-                  room: "Room 204",
-                  status: "scheduled",
-                  created_by: { id: "coordinator-id", name: "Coordinator" },
-                },
-              ]);
-        },
-      ],
-    ]);
-    const { unmount } = render(
-      <RoleSidebarPage
-        role="coordinator"
-        selectedNav="Schedules"
-        navigate={vi.fn()}
-      />,
-    );
-    expect(await screen.findByRole("alert")).toHaveTextContent("unavailable");
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    expect(await screen.findByText("Panel defense")).toBeInTheDocument();
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    unmount();
-  });
-
   it("enrolls and removes student researchers in a class section", async () => {
     const sections = [
       {
@@ -1245,7 +2157,7 @@ describe("role workspace pages", () => {
     );
     expect(await screen.findByText("CS-101")).toBeInTheDocument();
     expect(await screen.findByText("juan@example.edu")).toBeInTheDocument();
-    expect(screen.getByText("2023-0001")).toBeInTheDocument();
+    expect(screen.queryByText("2023-0001")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Add student" }));
     expect(
       screen.getByRole("heading", { name: "Add a student researcher" }),
@@ -1265,7 +2177,7 @@ describe("role workspace pages", () => {
         expect.anything(),
       ),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Maria Santos" }));
     expect(
       await screen.findByText("Student researcher added to the section."),
     ).toBeInTheDocument();
@@ -1283,13 +2195,16 @@ describe("role workspace pages", () => {
       await screen.findByText("Student researcher removed from the section."),
     ).toBeInTheDocument();
     await waitFor(() =>
-      expect(screen.queryByText("maria@example.edu")).not.toBeInTheDocument(),
+      expect(
+        screen.queryByRole("button", { name: "Remove Maria Santos" }),
+      ).not.toBeInTheDocument(),
     );
   });
 
   it("renders section folder cards and navigates to the route-backed section page", async () => {
     const navigate = vi.fn();
     stubFetch([
+      [/\/api\/institutes$/, () => listData(["Institute of Computer Studies"])],
       [
         /\/api\/instructor\/sections$/,
         () =>
@@ -1297,6 +2212,7 @@ describe("role workspace pages", () => {
             {
               id: 7,
               name: "CS-101",
+              institute: "Institute of Computer Studies",
               section_code: "BSCS-4A",
               academic_year: "2025-2026",
               is_active: true,
@@ -1323,9 +2239,340 @@ describe("role workspace pages", () => {
     fireEvent.click(card);
     expect(navigate).toHaveBeenCalledWith("/app/instructor/sections/7");
     fireEvent.click(screen.getByRole("button", { name: "Add Section" }));
-    expect(screen.getByLabelText("Section name")).toBeInTheDocument();
-    expect(screen.getByLabelText("Section code")).toBeRequired();
-    expect(screen.getByLabelText("Academic year")).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog", { name: "Create class section" });
+    expect(within(dialog).getByLabelText("Section name")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Section code")).toBeRequired();
+    expect(within(dialog).getByLabelText("Academic year")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Institute")).toBeRequired();
+  });
+
+  it("keeps edit section values open when institute reassignment is rejected", async () => {
+    stubFetch([
+      [
+        /\/api\/institutes$/,
+        () =>
+          listData([
+            "Institute of Computer Studies",
+            "Institute of Health Sciences",
+          ]),
+      ],
+      [/\/api\/instructor\/sections\/7\/documents$/, emptyData],
+      [/\/api\/instructor\/sections\/7\/members$/, emptyData],
+      [/\/api\/instructor\/students/, emptyData],
+      [
+        /\/api\/instructor\/sections\/7$/,
+        (_path, init) =>
+          init?.method === "PATCH"
+            ? new Response(
+                JSON.stringify({
+                  error: "VALIDATION_FAILED",
+                  errors: {
+                    institute: [
+                      "The institute cannot be changed because these studies have incompatible degree programs: Computer Science Study.",
+                    ],
+                  },
+                }),
+                { status: 422 },
+              )
+            : listData([]),
+      ],
+      [
+        /\/api\/instructor\/sections$/,
+        () =>
+          listData([
+            {
+              id: 7,
+              name: "CS-101",
+              institute: "Institute of Computer Studies",
+              section_code: "BSCS-4A",
+              academic_year: "2025-2026",
+              is_active: true,
+              documents_count: 1,
+              members_count: 0,
+              created_at: null,
+            },
+          ]),
+      ],
+    ]);
+
+    render(
+      <RoleSidebarPage
+        role="instructor"
+        selectedNav="My Sections"
+        navigate={vi.fn()}
+        instructorSectionId="7"
+      />,
+    );
+    await screen.findByText("CS-101");
+    fireEvent.click(screen.getByRole("button", { name: "Edit section" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit section" });
+    fireEvent.change(within(dialog).getByLabelText("Section name"), {
+      target: { value: "CS-101 Revised" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Institute"), {
+      target: { value: "Institute of Health Sciences" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "Computer Science Study",
+    );
+    expect(within(dialog).getByLabelText("Section name")).toHaveValue(
+      "CS-101 Revised",
+    );
+    expect(within(dialog).getByLabelText("Institute")).toHaveValue(
+      "Institute of Health Sciences",
+    );
+  });
+
+  it("searches and filters section cards using the loaded section metadata", async () => {
+    stubFetch([
+      [
+        /\/api\/instructor\/sections$/,
+        () =>
+          listData([
+            {
+              id: 7,
+              name: "Computer Science 4A",
+              section_code: "BSCS-4A",
+              academic_year: "2025-2026",
+              is_active: true,
+              documents_count: 2,
+              members_count: 4,
+              created_at: null,
+            },
+            {
+              id: 8,
+              name: "Information Systems 3B",
+              section_code: "BSIS-3B",
+              academic_year: "2024-2025",
+              is_active: false,
+              documents_count: 1,
+              members_count: 3,
+              created_at: null,
+            },
+          ]),
+      ],
+    ]);
+
+    render(
+      <RoleSidebarPage
+        role="instructor"
+        selectedNav="My Sections"
+        navigate={vi.fn()}
+      />,
+    );
+
+    const search = await screen.findByLabelText("Search sections or studies");
+    fireEvent.change(search, { target: { value: "  bscs-4a  " } });
+    expect(
+      screen.getByRole("button", { name: "Open section Computer Science 4A" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: "Open section Information Systems 3B",
+      }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: "" } });
+    expect(
+      screen.getByRole("button", {
+        name: "Open section Information Systems 3B",
+      }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Academic year filter"), {
+      target: { value: "2025-2026" },
+    });
+    fireEvent.change(screen.getByLabelText("Section status filter"), {
+      target: { value: "inactive" },
+    });
+    expect(
+      screen.getByText("No sections or studies match your search."),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(
+      screen.getByRole("button", {
+        name: "Open section Information Systems 3B",
+      }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: "missing section" } });
+    expect(
+      screen.getByText("No sections or studies match your search."),
+    ).toBeInTheDocument();
+  });
+
+  it("searches loaded studies and researchers and combines study filters", async () => {
+    const student = {
+      id: "student-1",
+      email: "maria@example.edu",
+      student_employee_id: "2023-0001",
+      first_name: "Maria",
+      middle_name: null,
+      last_name: "Santos",
+      added_at: null,
+    };
+    stubFetch([
+      [
+        /\/api\/instructor\/sections$/,
+        () =>
+          listData([
+            {
+              id: 7,
+              name: "CS-101",
+              section_code: "BSCS-4A",
+              academic_year: "2025-2026",
+              is_active: true,
+              documents_count: 2,
+              members_count: 1,
+              created_at: null,
+            },
+          ]),
+      ],
+      [
+        /\/api\/instructor\/sections\/7\/documents$/,
+        () =>
+          listData([
+            {
+              research_document_id: 11,
+              title: "Coastal Resilience",
+              research_stage: "proposal",
+              submission_status: "draft",
+              updated_at: null,
+            },
+            {
+              research_document_id: 12,
+              title: "Mountain Agriculture",
+              research_stage: "final",
+              submission_status: "approved",
+              updated_at: null,
+            },
+          ]),
+      ],
+      [/\/api\/instructor\/sections\/7\/members$/, () => listData([student])],
+      [/\/api\/instructor\/students(\?|$)/, () => listData([student])],
+    ]);
+
+    render(
+      <RoleSidebarPage
+        role="instructor"
+        selectedNav="My Sections"
+        navigate={vi.fn()}
+        instructorSectionId="7"
+      />,
+    );
+
+    const search = await screen.findByLabelText(
+      "Search studies or researchers",
+    );
+    await screen.findByRole("button", {
+      name: "Open research project Coastal Resilience",
+    });
+    fireEvent.change(search, { target: { value: "  mountain  " } });
+    expect(
+      screen.getByRole("button", {
+        name: "Open research project Mountain Agriculture",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: "Open research project Coastal Resilience",
+      }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: "Maria Santos" } });
+    expect(screen.getByText("maria@example.edu")).toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: "coastal" } });
+    fireEvent.change(screen.getByLabelText("Research stage filter"), {
+      target: { value: "proposal" },
+    });
+    fireEvent.change(screen.getByLabelText("Submission status filter"), {
+      target: { value: "approved" },
+    });
+    expect(
+      screen.getByText("No studies match your search and filters."),
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Submission status filter"), {
+      target: { value: "draft" },
+    });
+    expect(
+      screen.getByRole("button", {
+        name: "Open research project Coastal Resilience",
+      }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    fireEvent.change(search, { target: { value: "" } });
+    expect(
+      screen.getByRole("button", {
+        name: "Open research project Mountain Agriculture",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("does not retain section cards when the Instructor account context changes", async () => {
+    let requestCount = 0;
+    stubFetch([
+      [
+        /\/api\/instructor\/sections$/,
+        () => {
+          requestCount += 1;
+          return listData([
+            {
+              id: requestCount,
+              name:
+                requestCount === 1
+                  ? "Instructor A Section"
+                  : "Instructor B Section",
+              section_code: requestCount === 1 ? "A-1" : "B-1",
+              academic_year: "2025-2026",
+              is_active: true,
+              documents_count: 0,
+              members_count: 0,
+              created_at: null,
+            },
+          ]);
+        },
+      ],
+    ]);
+
+    const { rerender } = render(
+      <RoleSidebarPage
+        role="instructor"
+        selectedNav="My Sections"
+        navigate={vi.fn()}
+        actorKey="instructor-a@example.test"
+      />,
+    );
+    expect(
+      await screen.findByRole("button", {
+        name: "Open section Instructor A Section",
+      }),
+    ).toBeInTheDocument();
+
+    rerender(
+      <RoleSidebarPage
+        role="instructor"
+        selectedNav="My Sections"
+        navigate={vi.fn()}
+        actorKey="instructor-b@example.test"
+      />,
+    );
+    expect(
+      await screen.findByRole("button", {
+        name: "Open section Instructor B Section",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: "Open section Instructor A Section",
+      }),
+    ).not.toBeInTheDocument();
+    expect(requestCount).toBe(2);
   });
 
   it("loads the project route with independent assignment disclosures and confirmations", async () => {
@@ -1381,17 +2628,33 @@ describe("role workspace pages", () => {
         () => listData([student]),
       ],
       [
-        /\/api\/instructor\/sections\/7\/documents\/11\/team$/,
+        /\/api\/instructor\/sections\/7\/documents\/11\/team(?:\?|$)/,
         () =>
           new Response(
             JSON.stringify({
               data: {
                 section_id: 7,
                 research_document_id: 11,
+                researchers: [
+                  {
+                    user_id: student.id,
+                    name: "Student One",
+                    email: student.email,
+                    team_role: "researcher",
+                  },
+                ],
+                instructor: null,
                 adviser,
                 research_office_representative: null,
                 chair: null,
                 panel_members: [],
+                support_assignments: {
+                  editor: null,
+                  statistician: null,
+                  librarian: null,
+                },
+                pre_defense_ready: false,
+                post_defense_ready: false,
                 complete: false,
               },
             }),
@@ -1401,6 +2664,16 @@ describe("role workspace pages", () => {
         /\/api\/instructor\/sections\/7\/documents\/11\/team\/candidates/,
         () => listData([adviser]),
       ],
+      [/\/api\/research\/11$/, () => listData([draftResource({ id: 11 })])],
+      [
+        /\/api\/research\/11\/people$/,
+        () =>
+          new Response(
+            JSON.stringify({ data: { section: null, reviewers: [] } }),
+          ),
+      ],
+      [/\/api\/instructor\/panelists$/, emptyData],
+      [/\/api\/research\/11\/(files|folders|feedback)$/, emptyData],
     ]);
 
     render(
@@ -1416,6 +2689,15 @@ describe("role workspace pages", () => {
     expect(
       await screen.findByRole("button", { name: "Back to Research Projects" }),
     ).toBeInTheDocument();
+    const workspace = await screen.findByTestId("study-workspace");
+    expect(
+      [
+        "Overview",
+        "Research Team",
+        "Documents",
+        "Defense Monitoring Forms",
+      ].map((name) => within(workspace).getByRole("button", { name })),
+    ).toHaveLength(4);
     fireEvent.click(
       screen.getByRole("button", { name: "Delete research project" }),
     );
@@ -1423,6 +2705,8 @@ describe("role workspace pages", () => {
       screen.getByRole("heading", { name: "Delete research project" }),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Research Team" }));
+    await screen.findByLabelText("Defense stage");
     fireEvent.click(
       await screen.findByRole("button", { name: "Remove Student One" }),
     );
@@ -1430,10 +2714,13 @@ describe("role workspace pages", () => {
       screen.getByRole("button", { name: "Remove student" }),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    fireEvent.click(screen.getByRole("button", { name: "Research actors" }));
-    fireEvent.click(screen.getByRole("button", { name: "Manage assignments" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Manage assignments" }),
+    );
     expect(
-      screen.getByRole("dialog", { name: "Manage project assignments" }),
+      await screen.findByRole("dialog", {
+        name: "Manage project assignments",
+      }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Add students" }),
@@ -1447,11 +2734,7 @@ describe("role workspace pages", () => {
       screen.getByRole("button", { name: "Close Manage project assignments" }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Manage assignments" }));
-    await waitFor(() =>
-      expect(
-        screen.queryByText("Loading current project assignments…"),
-      ).not.toBeInTheDocument(),
-    );
+    await screen.findByRole("dialog", { name: "Manage project assignments" });
     fireEvent.click(
       screen.getByRole("button", { name: "Assign research adviser" }),
     );
@@ -1587,6 +2870,9 @@ describe("role workspace pages", () => {
     expect(
       screen.queryByRole("button", { name: "Attach existing research" }),
     ).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Search studies or researchers"), {
+      target: { value: "Project Alpha" },
+    });
     fireEvent.click(
       screen.getByRole("button", { name: "Add Research Project" }),
     );
@@ -1705,9 +2991,7 @@ describe("role workspace pages", () => {
           };
           return new Response(JSON.stringify({ data: officeUser }));
         }
-        return new Response(
-          JSON.stringify({ data: pageResponse([officeUser]) }),
-        );
+        return new Response(JSON.stringify(pageResponse([officeUser])));
       }),
     );
 
@@ -1720,7 +3004,7 @@ describe("role workspace pages", () => {
     );
 
     expect(
-      await screen.findByRole("heading", { name: "Users" }),
+      await screen.findByRole("heading", { name: "User & role management" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Refresh users" }),
@@ -1729,11 +3013,11 @@ describe("role workspace pages", () => {
       screen.getByRole("button", { name: "Edit member@example.test" }),
     );
 
-    const dialog = screen.getByRole("dialog", {
-      name: "Edit member@example.test",
-    });
-    expect(within(dialog).queryByLabelText("Role")).not.toBeInTheDocument();
-    fireEvent.change(within(dialog).getByLabelText("Access status"), {
+    const dialog = screen.getByRole("dialog", { name: "Edit user" });
+    expect(
+      within(dialog).queryByLabelText("Assigned role"),
+    ).not.toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText("Account access status"), {
       target: { value: "blocked" },
     });
     fireEvent.click(
@@ -1754,7 +3038,7 @@ describe("role workspace pages", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("filters office users locally when the API returns an unfiltered page", async () => {
+  it("sends office user filters to the server", async () => {
     const users = [
       {
         id: "researcher-id",
@@ -1779,12 +3063,10 @@ describe("role workspace pages", () => {
         updated_at: null,
       },
     ];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        async () => new Response(JSON.stringify({ data: pageResponse(users) })),
-      ),
-    );
+    const fetchMock = vi.fn<
+      (input: string | URL | Request) => Promise<Response>
+    >(() => Promise.resolve(new Response(JSON.stringify(pageResponse(users)))));
+    vi.stubGlobal("fetch", fetchMock);
 
     render(
       <RoleSidebarPage
@@ -1793,39 +3075,317 @@ describe("role workspace pages", () => {
         navigate={vi.fn()}
       />,
     );
-    expect(
-      await screen.findByText("researcher@example.test"),
-    ).toBeInTheDocument();
-    expect(screen.getByText("panel@example.test")).toBeInTheDocument();
+    await screen.findByText("researcher@example.test");
 
     fireEvent.change(screen.getByLabelText("Search"), {
       target: { value: "Alice" },
     });
-    expect(
-      await screen.findByText("researcher@example.test"),
-    ).toBeInTheDocument();
-    expect(screen.queryByText("panel@example.test")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([input]) =>
+          String(input).includes("search=Alice"),
+        ),
+      ).toBe(true),
+    );
 
     fireEvent.change(screen.getByLabelText("Search"), {
       target: { value: "" },
     });
-    fireEvent.change(screen.getByLabelText("Role"), {
-      target: { value: "panel" },
-    });
-    expect(await screen.findByText("panel@example.test")).toBeInTheDocument();
-    expect(
-      screen.queryByText("researcher@example.test"),
-    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Role"));
+    fireEvent.click(screen.getByRole("option", { name: "Panel" }));
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([input]) =>
+          String(input).includes("role=panel"),
+        ),
+      ).toBe(true),
+    );
 
-    fireEvent.change(screen.getByLabelText("Role"), {
+    fireEvent.click(screen.getByLabelText("Role"));
+    fireEvent.click(screen.getByRole("option", { name: "All roles" }));
+    fireEvent.click(screen.getByLabelText("Access status"));
+    fireEvent.click(screen.getByRole("option", { name: "Active" }));
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([input]) =>
+          String(input).includes("access_status=active"),
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it("uses the matched repository author in the files modal", async () => {
+    const requests: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        requests.push(url);
+        if (url === "/api/librarian/catalog/42/files") {
+          return new Response(
+            JSON.stringify({
+              data: [
+                {
+                  id: 7,
+                  research_document_id: 42,
+                  document_type: "final_manuscript",
+                  version_number: 1,
+                  original_filename: "study.pdf",
+                  file_extension: "pdf",
+                  mime_type: "application/pdf",
+                  file_size: 100,
+                  is_current: true,
+                  uploaded_at: null,
+                },
+              ],
+            }),
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            data: {
+              data: [
+                {
+                  id: 42,
+                  title: "Repository study",
+                  submission_status: "approved",
+                  archive_status: "not_archived",
+                  visibility: "private",
+                  publication_year: 2026,
+                  updated_at: null,
+                  authors: [
+                    { id: 1, author_name: "Ada Rivera" },
+                    { id: 2, author_name: "Ben Santos" },
+                    { id: 3, author_name: "Roger Ondac Lambojon" },
+                    { id: 4, author_name: "ada rivera" },
+                  ],
+                },
+              ],
+              current_page: 1,
+              from: 1,
+              last_page: 1,
+              links: [],
+              path: "/api/librarian/catalog",
+              per_page: 25,
+              to: 1,
+              total: 1,
+              first_page_url: null,
+              last_page_url: null,
+              prev_page_url: null,
+              next_page_url: null,
+            },
+            filters: { years: [2026] },
+          }),
+        );
+      }),
+    );
+
+    render(
+      <RoleSidebarPage
+        role="librarian"
+        selectedNav="Repository"
+        navigate={vi.fn()}
+      />,
+    );
+
+    await screen.findByText("Repository study");
+    expect(screen.queryByRole("columnheader", { name: /Archive/ })).toBeNull();
+    expect(
+      screen.getByPlaceholderText("Search by title or author"),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Search"), {
+      target: { value: "  ondac   lambojon  " },
+    });
+    await waitFor(() =>
+      expect(
+        requests.some((url) => url.includes("search=++ondac+++lambojon++")),
+      ).toBe(true),
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "View files for Repository study" }),
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "Files for Repository study",
+    });
+    expect(within(dialog).getByText("study.pdf")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText("Roger Ondac Lambojon et al."),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByText("Repository files")).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole("link", { name: "View study.pdf" }),
+    ).toHaveAttribute("href", "/api/librarian/catalog/42/files/7/preview");
+  });
+
+  it.each([
+    {
+      name: "first author by default",
+      search: "",
+      authors: ["Alma Cancio Lada", "Roger Ondac Lambojon"],
+      expected: "Alma Cancio Lada et al.",
+    },
+    {
+      name: "first author for a title match",
+      search: "Repository study",
+      authors: ["Alma Cancio Lada", "Roger Ondac Lambojon"],
+      expected: "Alma Cancio Lada et al.",
+    },
+    {
+      name: "single author without et al",
+      search: "Garbo",
+      authors: ["Analia Pepito Garbo"],
+      expected: "Analia Pepito Garbo",
+    },
+    {
+      name: "first matching author in stored order",
+      search: "Lambojon",
+      authors: [
+        "Creselie Ramirez Lambojon",
+        "Roger Ondac Lambojon",
+        "Alma Cancio Lada",
+      ],
+      expected: "Creselie Ramirez Lambojon et al.",
+    },
+  ])("displays the $name", async ({ search, authors, expected }) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        if (String(input) === "/api/librarian/catalog/42/files") {
+          return new Response(JSON.stringify({ data: [] }));
+        }
+        return new Response(
+          JSON.stringify({
+            data: {
+              data: [
+                {
+                  id: 42,
+                  title: "Repository study",
+                  submission_status: "approved",
+                  archive_status: "not_archived",
+                  visibility: "private",
+                  publication_year: 2026,
+                  updated_at: null,
+                  authors: authors.map((author_name, index) => ({
+                    id: index + 1,
+                    author_name,
+                  })),
+                },
+              ],
+              current_page: 1,
+              from: 1,
+              last_page: 1,
+              links: [],
+              path: "/api/librarian/catalog",
+              per_page: 25,
+              to: 1,
+              total: 1,
+              first_page_url: null,
+              last_page_url: null,
+              prev_page_url: null,
+              next_page_url: null,
+            },
+            filters: { years: [2026] },
+          }),
+        );
+      }),
+    );
+    render(
+      <RoleSidebarPage
+        role="librarian"
+        selectedNav="Repository"
+        navigate={vi.fn()}
+      />,
+    );
+    await screen.findByText("Repository study");
+    if (search) {
+      fireEvent.change(screen.getByLabelText("Search"), {
+        target: { value: search },
+      });
+      await waitFor(() =>
+        expect(screen.getByLabelText("Search")).toHaveValue(search),
+      );
+    }
+    fireEvent.click(
+      screen.getByRole("button", { name: "View files for Repository study" }),
+    );
+    expect(
+      await screen.findByText(expected, {
+        selector: ".librarian-files-authors p",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("returns to the first author after clearing repository search", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        if (String(input) === "/api/librarian/catalog/42/files") {
+          return new Response(JSON.stringify({ data: [] }));
+        }
+        return new Response(
+          JSON.stringify({
+            data: {
+              data: [
+                {
+                  id: 42,
+                  title: "Repository study",
+                  submission_status: "approved",
+                  archive_status: "not_archived",
+                  visibility: "private",
+                  publication_year: 2026,
+                  updated_at: null,
+                  authors: [
+                    { id: 1, author_name: "Alma Cancio Lada" },
+                    { id: 2, author_name: "Roger Ondac Lambojon" },
+                  ],
+                },
+              ],
+              current_page: 1,
+              from: 1,
+              last_page: 1,
+              links: [],
+              path: "/api/librarian/catalog",
+              per_page: 25,
+              to: 1,
+              total: 1,
+              first_page_url: null,
+              last_page_url: null,
+              prev_page_url: null,
+              next_page_url: null,
+            },
+            filters: { years: [2026] },
+          }),
+        );
+      }),
+    );
+    render(
+      <RoleSidebarPage
+        role="librarian"
+        selectedNav="Repository"
+        navigate={vi.fn()}
+      />,
+    );
+    await screen.findByText("Repository study");
+    fireEvent.change(screen.getByLabelText("Search"), {
+      target: { value: "Roger" },
+    });
+    await waitFor(() =>
+      expect(screen.getByLabelText("Search")).toHaveValue("Roger"),
+    );
+    fireEvent.change(screen.getByLabelText("Search"), {
       target: { value: "" },
     });
-    fireEvent.change(screen.getByLabelText("Access status"), {
-      target: { value: "active" },
-    });
+    await waitFor(() =>
+      expect(screen.getByLabelText("Search")).toHaveValue(""),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "View files for Repository study" }),
+    );
     expect(
-      await screen.findByText("researcher@example.test"),
+      await screen.findByText("Alma Cancio Lada et al.", {
+        selector: ".librarian-files-authors p",
+      }),
     ).toBeInTheDocument();
-    expect(screen.queryByText("panel@example.test")).not.toBeInTheDocument();
   });
 });

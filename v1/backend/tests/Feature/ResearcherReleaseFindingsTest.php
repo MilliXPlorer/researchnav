@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Models\Category;
 use App\Models\DocumentFile;
 use App\Models\FeedbackComment;
 use App\Models\MonitoringLog;
@@ -12,7 +11,9 @@ use App\Models\ReviewAssignment;
 use App\Models\Revision;
 use App\Models\TitleValidation;
 use App\Models\User;
+use App\Models\UserRole;
 use App\Services\DocumentService;
+use App\Services\FeedbackService;
 use App\Services\ReviewAssignmentService;
 use App\Services\RevisionService;
 use Carbon\CarbonInterface;
@@ -56,10 +57,13 @@ class ResearcherReleaseFindingsTest extends TestCase
         $events = $reviewer->notifications()->get()->map(fn ($notification) => $notification->data['event'])->all();
         $this->assertContains('DOCUMENT_UPLOADED', $events);
         $this->assertContains('REVISION_RESUBMITTED', $events);
-        $notification = $reviewer->notifications()->latest()->firstOrFail()->data;
-        $this->assertSame($research->title, $notification['research_title']);
-        $this->assertSame($research->submission_reference, $notification['submission_reference']);
-        $this->assertSame('/research/'.$research->id, $notification['action_url']);
+        $notifications = $reviewer->notifications()->get()->pluck('data');
+        $uploadNotification = $notifications->firstWhere('event', 'DOCUMENT_UPLOADED');
+        $uploadedFile = DocumentFile::query()->where('original_filename', 'revision.pdf')->latest('id')->firstOrFail();
+        $this->assertSame($research->title, $uploadNotification['research_title']);
+        $this->assertSame($research->submission_reference, $uploadNotification['submission_reference']);
+        $this->assertSame('/research/'.$research->id.'?tab=documents&folder=Unfiled&file='.$uploadedFile->id, $uploadNotification['action_url']);
+        $this->assertSame('/research/'.$research->id, $notifications->firstWhere('event', 'REVISION_RESUBMITTED')['action_url']);
     }
 
     public function test_assignment_updates_notify_only_new_reviewers_and_the_researcher(): void
@@ -76,7 +80,39 @@ class ResearcherReleaseFindingsTest extends TestCase
         $this->assertSame(1, $reviewer->notifications()->get()->filter(fn ($notification) => $notification->data['event'] === 'REVIEW_ASSIGNMENT_UPDATED')->count());
     }
 
-    public function test_assignment_notification_links_open_assigned_reviewer_records_without_granting_panel_or_statistician_mutations(): void
+    public function test_file_feedback_notification_links_to_the_exact_folder_and_file(): void
+    {
+        [$owner, $research] = $this->research();
+        $reviewer = User::factory()->create(['role' => 'adviser']);
+        $this->assign($research, $reviewer);
+        $file = DocumentFile::query()->create([
+            'research_document_id' => $research->id,
+            'uploaded_by' => $owner->id,
+            'document_type' => 'chapter',
+            'version_number' => 1,
+            'original_filename' => 'chapter-one.pdf',
+            'relative_path' => 'Chapter 1',
+            'stored_filename' => 'chapter-one.pdf',
+            'file_path' => 'research/'.$research->id.'/chapter-one.pdf',
+            'file_extension' => 'pdf',
+            'mime_type' => 'application/pdf',
+            'file_size' => 1,
+            'is_current' => true,
+            'uploaded_at' => now(),
+        ]);
+
+        app(FeedbackService::class)->create($reviewer, $research, [
+            'comment' => 'Clarify this section.',
+            'feedback_type' => 'comment',
+            'document_file_id' => $file->id,
+        ]);
+
+        $notification = $owner->notifications()->latest()->firstOrFail()->data;
+        $this->assertSame('FEEDBACK_CREATED', $notification['event']);
+        $this->assertSame('/research/'.$research->id.'?tab=documents&folder=Chapter%201&file='.$file->id.'&panel=feedback', $notification['action_url']);
+    }
+
+    public function test_assignment_notification_links_open_assigned_reviewer_records_with_role_scoped_mutations(): void
     {
         [$owner, $research] = $this->research();
         $office = User::factory()->create(['role' => 'research-office']);
@@ -104,18 +140,81 @@ class ResearcherReleaseFindingsTest extends TestCase
             $this->as($reviewer)->getJson('/api/research/'.$research->id.'/validation')->assertOk();
         }
 
-        foreach ($reviewers->only(['panel', 'statistician']) as $reviewer) {
+        $this->as($reviewers['panel'])->postJson('/api/research/'.$research->id.'/feedback', [
+            'comment' => 'Panel feedback is permitted.',
+            'feedback_type' => 'comment',
+        ], $this->origin())->assertCreated();
+        $this->as($reviewers['statistician'])->postJson('/api/research/'.$research->id.'/feedback', [
+            'comment' => 'Statistician methodology feedback is permitted.',
+            'feedback_type' => 'comment',
+        ], $this->origin())->assertCreated();
+    }
+
+    public function test_disabled_reviewer_roles_lose_assignment_based_document_access(): void
+    {
+        [, $research] = $this->research();
+        $reviewer = User::factory()->create(['role' => 'adviser']);
+        $this->assign($research, $reviewer);
+        UserRole::query()->whereKey($reviewer->role_id)->update(['is_active' => false]);
+
+        $this->as($reviewer)->getJson('/api/research/'.$research->id.'/files')->assertForbidden();
+        $this->as($reviewer)->getJson('/api/research/'.$research->id.'/feedback')->assertForbidden();
+    }
+
+    public function test_support_specialists_can_author_feedback_only_while_actively_assigned(): void
+    {
+        [, $research] = $this->research();
+
+        foreach (['statistician', 'research_editor', 'librarian'] as $role) {
+            $reviewer = User::factory()->create(['role' => $role]);
+            $assignment = ReviewAssignment::query()->create([
+                'research_document_id' => $research->id,
+                'reviewer_id' => $reviewer->id,
+                'assigned_by' => User::factory()->create(['role' => 'research-office'])->id,
+                'review_role' => $role,
+                'is_active' => true,
+            ]);
+
             $this->as($reviewer)->postJson('/api/research/'.$research->id.'/feedback', [
-                'comment' => 'Panel and statistician records are read-only.',
+                'comment' => $role.' feedback is assignment scoped.',
+                'feedback_type' => 'comment',
+            ], $this->origin())->assertCreated();
+
+            $assignment->update(['is_active' => false]);
+            $this->as($reviewer)->postJson('/api/research/'.$research->id.'/feedback', [
+                'comment' => 'Revoked feedback must be denied.',
                 'feedback_type' => 'comment',
             ], $this->origin())->assertForbidden();
         }
+    }
+
+    public function test_feedback_notifications_skip_removed_researchers_and_revoked_authors(): void
+    {
+        [$owner, $research] = $this->research();
+        $reviewer = User::factory()->create(['role' => 'adviser']);
+        $this->assign($research, $reviewer);
+        DB::table('class_section_members')->where('research_document_id', $research->id)->where('user_id', $owner->id)->delete();
+
+        $feedback = app(FeedbackService::class)->create($reviewer, $research, [
+            'comment' => 'Current participants only.',
+            'feedback_type' => 'comment',
+        ]);
+        $this->assertSame(0, $owner->notifications()->count());
+
+        $participant = User::factory()->create(['role' => 'researcher']);
+        $this->assignResearcherToDocument($participant, $research);
+        ReviewAssignment::query()->where('research_document_id', $research->id)->where('reviewer_id', $reviewer->id)->update(['is_active' => false]);
+        $this->as($participant)->patchJson('/api/research/'.$research->id.'/feedback/'.$feedback->id.'/researcher-action', [
+            'action' => 'acknowledge',
+        ], $this->origin())->assertOk();
+        $this->assertSame(0, $reviewer->notifications()->count());
     }
 
     public function test_replaying_researcher_actions_preserves_first_evidence_and_emits_no_duplicate_events(): void
     {
         [$owner, $research] = $this->research();
         $reviewer = User::factory()->create(['role' => 'adviser']);
+        $this->assign($research, $reviewer);
         $feedback = FeedbackComment::query()->create([
             'research_document_id' => $research->id,
             'user_id' => $reviewer->id,
@@ -166,7 +265,7 @@ class ResearcherReleaseFindingsTest extends TestCase
         $this->as($owner)->getJson('/api/research?mine=1')->assertOk()->assertJsonMissing(['id' => $imported->id]);
     }
 
-    public function test_researcher_responses_hide_actor_identifiers_but_office_responses_keep_them(): void
+    public function test_researcher_responses_hide_actor_identifiers_and_office_feedback_is_author_scoped(): void
     {
         [$owner, $research] = $this->research(['research_stage' => 'ongoing']);
         $reviewer = User::factory()->create(['role' => 'adviser']);
@@ -182,7 +281,7 @@ class ResearcherReleaseFindingsTest extends TestCase
         $this->as($owner)->getJson('/api/research/'.$research->id.'/monitoring')->assertJsonPath('data.0.performed_by', null);
         $this->as($owner)->getJson('/api/research/'.$research->id.'/validation')->assertJsonPath('data.0.validated_by', null);
         $this->as($office)->getJson('/api/research/'.$research->id.'/revisions')->assertJsonPath('data.0.requested_by', $revision->requested_by);
-        $this->as($office)->getJson('/api/research/'.$research->id.'/feedback')->assertJsonPath('data.0.user_id', $feedback->user_id);
+        $this->as($office)->getJson('/api/research/'.$research->id.'/feedback')->assertJsonCount(0, 'data');
         $this->as($office)->getJson('/api/research/'.$research->id.'/monitoring')->assertJsonPath('data.0.performed_by', $monitoring->performed_by);
         $this->as($office)->getJson('/api/research/'.$research->id.'/validation')->assertJsonPath('data.0.validated_by', $validation->validated_by);
     }
@@ -215,8 +314,7 @@ class ResearcherReleaseFindingsTest extends TestCase
         if (! $owner instanceof User) {
             $owner = User::query()->findOrFail($owner);
         }
-        $category = Category::query()->create(['name' => 'Category '.fake()->unique()->word(), 'slug' => 'category-'.fake()->unique()->numberBetween(1, 999999)]);
-        $research = ResearchDocument::factory()->create(array_merge(['submitted_by' => $owner->id, 'category_id' => $category->id], $attributes));
+        $research = ResearchDocument::factory()->create(array_merge(['submitted_by' => $owner->id], $attributes));
         $this->assignResearcherToDocument($owner, $research);
         ResearchAuthor::factory()->create(['research_document_id' => $research->id, 'user_id' => $owner->id]);
 

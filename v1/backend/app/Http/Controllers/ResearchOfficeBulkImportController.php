@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Services\ManuscriptMetadataExtractor;
 use App\Services\ResearchOfficeBulkImportService;
-use App\Services\SupabaseStorageException;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -45,7 +44,7 @@ class ResearchOfficeBulkImportController extends Controller
 
         if ($validator->fails()) {
             return response()->json([
-                'message' => 'Please upload valid DOCX or text-based PDF manuscript files.',
+                'message' => 'Please upload valid text-based PDF manuscript files.',
                 'errors' => $validator->errors(),
             ], 422);
         }
@@ -59,13 +58,9 @@ class ResearchOfficeBulkImportController extends Controller
                 );
 
                 /*
-                 * Only DOCX and PDF manuscript files are supported.
-                 *
-                 * We validate the extension manually instead of relying only
-                 * on Laravel's mimes rule because DOCX files can sometimes
-                 * be detected by PHP as ZIP archives.
+                 * Only text-based PDF manuscript files are supported.
                  */
-                if (! in_array($extension, ['docx', 'pdf'], true)) {
+                if ($extension !== 'pdf') {
                     $results[] = [
                         'file_name' => $file->getClientOriginalName(),
                         'file_size' => $file->getSize(),
@@ -85,7 +80,7 @@ class ResearchOfficeBulkImportController extends Controller
                             'institute' => 'Unclassified',
                         ],
 
-                        'error' => 'Unsupported file type. Please upload a DOCX or text-based PDF manuscript.',
+                        'error' => 'Unsupported file type. Please upload a text-based PDF manuscript.',
                     ];
 
                     continue;
@@ -177,7 +172,7 @@ class ResearchOfficeBulkImportController extends Controller
                         'institute' => 'Unclassified',
                     ],
 
-                    'error' => 'This manuscript could not be read. Please upload a valid DOCX or text-based PDF file.',
+                    'error' => 'This manuscript could not be read. Please upload a valid text-based PDF file.',
                 ];
             }
         }
@@ -294,6 +289,8 @@ class ResearchOfficeBulkImportController extends Controller
             'metadata.year' => ['required', 'integer', 'between:1901,2155'],
             'metadata.final_binding_date' => ['required', 'string', 'max:50'],
             'metadata.institute' => ['required', 'string', 'in:'.implode(',', self::INSTITUTES)],
+            'metadata.sdg_ids' => ['sometimes', 'array', 'max:17'],
+            'metadata.sdg_ids.*' => ['integer', 'distinct', 'exists:sdgs,id'],
         ]);
 
         if ($validator->fails()) {
@@ -303,20 +300,21 @@ class ResearchOfficeBulkImportController extends Controller
             ], 422);
         }
 
-        if (collect($uploadedFiles)->contains(fn ($file) => ! in_array(strtolower($file->getClientOriginalExtension()), ['pdf', 'docx'], true))) {
-            return response()->json(['message' => 'Only DOCX and text-based PDF manuscripts can be uploaded.'], 422);
+        if (collect($uploadedFiles)->contains(fn ($file) => strtolower($file->getClientOriginalExtension()) !== 'pdf')) {
+            return response()->json(['message' => 'Only text-based PDF manuscripts can be uploaded.'], 422);
         }
 
         try {
             // The ordered front file is metadata authority; reviewed metadata remains authoritative.
             $extractor->extract($uploadedFiles[0]->getRealPath(), strtolower($uploadedFiles[0]->getClientOriginalExtension()));
-            $document = $service->import(
+            $import = $service->import(
                 $request->attributes->get('current_user'),
                 count($uploadedFiles) === 1 ? $uploadedFiles[0] : $uploadedFiles,
                 $validator->validated()['metadata'],
                 $request,
                 $relativePaths === [] ? null : $relativePaths,
             );
+            $document = $import['document'];
 
             return response()->json([
                 'message' => 'The manuscript was uploaded successfully.',
@@ -326,10 +324,9 @@ class ResearchOfficeBulkImportController extends Controller
                     'submission_status' => $document->submission_status,
                     'archive_status' => $document->archive_status,
                     'visibility' => $document->visibility,
+                    'content_indexing_outcome' => $import['content_indexing_outcome'],
                 ],
             ], 201);
-        } catch (SupabaseStorageException) {
-            return response()->json(['message' => 'Manuscript storage is temporarily unavailable. Please try again.'], 503);
         } catch (QueryException) {
             return response()->json(['message' => 'The manuscript could not be saved to the database.'], 500);
         } catch (\RuntimeException $exception) {

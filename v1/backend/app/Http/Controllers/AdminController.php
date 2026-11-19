@@ -19,6 +19,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Throwable;
 
 class AdminController extends DomainController
@@ -26,7 +27,62 @@ class AdminController extends DomainController
     public function users(AdminUserIndexRequest $request): JsonResponse
     {
         $input = $request->validated();
-        $query = User::query()->select(['id', 'email', 'student_employee_id', 'first_name', 'middle_name', 'last_name', 'role', 'access_status', 'is_admin', 'invitation_sent_at', 'confirmed_at', 'last_login_at', 'created_at', 'updated_at'])->orderByDesc('created_at')->orderByDesc('id');
+        $summary = [
+            'total' => User::query()->count(),
+            'active' => User::query()->where('access_status', 'active')->count(),
+            'inactive' => User::query()->where('access_status', '!=', 'active')->count(),
+        ];
+        $query = User::query()->select([
+            'id',
+            'email',
+            'student_employee_id',
+            'first_name',
+            'middle_name',
+            'last_name',
+            'role',
+            'institute',
+            'access_status',
+            'is_admin',
+            'invitation_sent_at',
+            'confirmed_at',
+            'last_login_at',
+            'created_at',
+            'updated_at',
+        ]);
+
+        $sort = $input['sort'] ?? null;
+        $direction = $input['direction'] ?? 'asc';
+
+        if ($sort === 'email') {
+            $query
+                ->orderBy('email', $direction)
+                ->orderBy('id', $direction);
+        } elseif ($sort === 'last_name') {
+            $query
+                ->orderBy('last_name', $direction)
+                ->orderBy('first_name', $direction)
+                ->orderBy('id', $direction);
+        } elseif ($sort === 'role') {
+            $query
+                ->orderBy('role', $direction)
+                ->orderBy('last_name', $direction)
+                ->orderBy('id', $direction);
+        } elseif ($sort === 'access_status') {
+            $query
+                ->orderBy('access_status', $direction)
+                ->orderBy('last_name', $direction)
+                ->orderBy('id', $direction);
+        } elseif ($sort === 'created_at') {
+            $query
+                ->orderBy('created_at', $direction)
+                ->orderBy('id', $direction);
+        } elseif ($sort === 'last_login_at') {
+            $query
+                ->orderBy('last_login_at', $direction)
+                ->orderBy('id', $direction);
+        } else {
+            $query->orderByDesc('created_at')->orderByDesc('id');
+        }
         if (($role = $input['role'] ?? null) !== null) {
             $query->where('role', $role);
         }
@@ -42,7 +98,10 @@ class AdminController extends DomainController
             });
         }
 
-        return AdminUserResource::collection($query->paginate($input['per_page'] ?? 25)->appends($request->query()))->response()->header('Cache-Control', 'private, no-store');
+        return AdminUserResource::collection($query->paginate($input['per_page'] ?? 25)->appends($request->query()))
+            ->additional(['summary' => $summary])
+            ->response()
+            ->header('Cache-Control', 'private, no-store');
     }
 
     public function updateUser(UpdateAdminUserRequest $request, string $user, AdminUserService $users): JsonResponse
@@ -70,7 +129,7 @@ class AdminController extends DomainController
     public function auditLogs(AdminAuditLogIndexRequest $request): JsonResponse
     {
         $input = $request->validated();
-        $query = AuditLog::query()->with('user:id,email')->orderByDesc('created_at')->orderByDesc('id');
+        $query = AuditLog::query()->with('user:id,email');
         if (($action = $input['action'] ?? null) !== null) {
             $query->where('action', $action);
         }
@@ -84,6 +143,29 @@ class AdminController extends DomainController
             $query->whereDate('created_at', '<=', $to);
         }
 
+        $sort = $input['sort'] ?? null;
+        $direction = $input['direction'] ?? 'asc';
+        if ($sort === 'actor') {
+            $actorEmail = User::withTrashed()
+                ->select('email')
+                ->whereColumn('users.id', AuditLog::column('user_id'));
+            $query
+                ->orderByRaw(
+                    "CASE WHEN ({$actorEmail->toSql()}) IS NULL THEN 1 ELSE 0 END",
+                    $actorEmail->getBindings(),
+                )
+                ->orderBy($actorEmail, $direction);
+        } elseif ($sort === 'action') {
+            $query->orderBy('action', $direction);
+        } elseif ($sort === 'subject') {
+            $query->orderBy('entity_type', $direction)->orderBy('entity_id', $direction);
+        } elseif ($sort === 'created_at') {
+            $query->orderBy('created_at', $direction);
+        } else {
+            $query->orderByDesc('created_at');
+        }
+        $query->orderBy((new AuditLog)->getKeyName(), $sort === null ? 'desc' : $direction);
+
         return AdminAuditLogResource::collection($query->paginate($input['per_page'] ?? 25)->appends($request->query()))->response()->header('Cache-Control', 'private, no-store');
     }
 
@@ -95,8 +177,14 @@ class AdminController extends DomainController
                 ->selectRaw('access_status, COUNT(*) as aggregate')
                 ->groupBy('access_status')
                 ->pluck('aggregate', 'access_status');
-            $appliedMigrations = DB::table('migrations')->count();
-            $availableMigrations = count(File::glob(database_path('migrations/*.php')));
+            $appliedMigrations = DB::table('migrations')
+                ->distinct()
+                ->pluck('migration')
+                ->map(static fn (mixed $migration): string => (string) $migration)
+                ->all();
+            $deployedMigrations = collect(File::glob(database_path('migrations/*_*.php')))
+                ->mapWithKeys(static fn (string $path): array => [Str::beforeLast(basename($path), '.php') => true]);
+            $appliedDeployedMigrations = count(array_intersect($appliedMigrations, $deployedMigrations->keys()->all()));
             $counts = [
                 'users' => [
                     'total' => User::query()->count(),
@@ -115,9 +203,10 @@ class AdminController extends DomainController
                 'document_file_bytes' => (int) DocumentFile::query()->sum('file_size'),
             ];
             $migrations = [
-                'applied' => $appliedMigrations,
-                'available' => $availableMigrations,
-                'pending' => max(0, $availableMigrations - $appliedMigrations),
+                'applied' => count($appliedMigrations),
+                'available' => $deployedMigrations->count(),
+                'pending' => $deployedMigrations->count() - $appliedDeployedMigrations,
+                'historical' => count($appliedMigrations) - $appliedDeployedMigrations,
             ];
             $databaseStatus = 'operational';
         } catch (Throwable) {
@@ -130,7 +219,7 @@ class AdminController extends DomainController
                 'document_files' => null,
                 'document_file_bytes' => null,
             ];
-            $migrations = ['applied' => null, 'available' => null, 'pending' => null];
+            $migrations = ['applied' => null, 'available' => null, 'pending' => null, 'historical' => null];
             $databaseStatus = 'unavailable';
         }
 
@@ -164,31 +253,35 @@ class AdminController extends DomainController
         ]])->header('Cache-Control', 'private, no-store');
     }
 
-    /** @return array{disk: string, driver: mixed, status: string, capabilities: ?array{read: bool, write: bool, delete: bool}} */
+    /** @return array{disk: string, driver: mixed, status: string, capabilities: array{read: bool, write: bool, delete: bool}} */
     private function privateStorageStatus(): array
     {
         $diskName = 'researchnav_private';
         $probe = '.researchnav-status-'.bin2hex(random_bytes(8));
         $disk = Storage::disk($diskName);
 
+        $write = false;
+        $read = false;
+        $delete = false;
+
         try {
             $write = $disk->put($probe, 'ok');
             $read = $write && $disk->get($probe) === 'ok';
-            $delete = $disk->delete($probe);
-            $operational = $write && $read && $delete;
         } catch (Throwable) {
+        } finally {
             try {
-                $disk->delete($probe);
+                $delete = $disk->delete($probe);
             } catch (Throwable) {
             }
-            $operational = false;
         }
+
+        $operational = $write && $read && $delete;
 
         return [
             'disk' => $diskName,
             'driver' => config("filesystems.disks.{$diskName}.driver"),
             'status' => $operational ? 'operational' : 'unavailable',
-            'capabilities' => $operational ? ['read' => true, 'write' => true, 'delete' => true] : null,
+            'capabilities' => ['read' => $read, 'write' => $write, 'delete' => $delete],
         ];
     }
 

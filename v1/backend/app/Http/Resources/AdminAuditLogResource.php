@@ -3,7 +3,6 @@
 namespace App\Http\Resources;
 
 use App\Models\AuditLog;
-use App\Models\Category;
 use App\Models\DocumentFile;
 use App\Models\FeedbackComment;
 use App\Models\ResearchDocument;
@@ -20,7 +19,6 @@ class AdminAuditLogResource extends JsonResource
     /** @var array<class-string, string> */
     private const SUBJECT_TYPES = [
         User::class => 'user',
-        Category::class => 'category',
         ResearchDocument::class => 'research_document',
         DocumentFile::class => 'document_file',
         FeedbackComment::class => 'feedback_comment',

@@ -1,7 +1,10 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import { BadgeCheck, Pencil, Plus, Printer, Trash2 } from "lucide-react";
-import preDefenseForm from "./form_templates/monitoring-pre-defense.png";
-import postDefenseForm from "./form_templates/monitoring-post-defense.png";
+import { Pencil, Plus, Printer, Trash2 } from "lucide-react";
+import { formatPhilippineDate } from "./dateTime";
+import beforeProposalForm from "./form_templates/monitoring-before-proposal-1.png";
+import afterProposalForm from "./form_templates/monitoring-after-proposal-1.png";
+import beforeFinalForm from "./form_templates/monitoring-before-final-1.png";
+import afterFinalForm from "./form_templates/monitoring-after-final-1.png";
 import { Button } from "./components";
 import { Modal } from "./Modal";
 import {
@@ -10,7 +13,6 @@ import {
   listSharedMonitoringResearch,
   saveSharedMonitoring,
   uploadSharedMonitoringSignature,
-  verifySharedMonitoring,
   type SharedMonitoringData,
   type SharedMonitoringResearch,
 } from "./api";
@@ -86,16 +88,32 @@ async function centeredSignature(signature: Blob): Promise<Blob> {
 }
 import type { Role } from "./types";
 
+export type DefenseType = "proposal" | "final";
+type StageTiming = "before" | "after";
+type MonitoringStage = `${StageTiming}_${DefenseType}_defense`;
+
+/**
+ * Compact sheet date ("2026-09-22 21:16") so overlay text fits the narrow
+ * Date column identically on screen and in print (the full timestamp with
+ * seconds overflows the printed cell and gets clipped).
+ */
+function sheetDate(entry: { saved_at?: string | null; activity_date?: string | null }) {
+  const raw = (entry.saved_at ?? entry.activity_date ?? "").replace("T", " ");
+  return raw.length > 16 ? raw.slice(0, 16) : raw;
+}
+
 export default function SharedMonitoring({
   role,
   researchDocumentId,
   embedded = false,
   readOnly: forceReadOnly = false,
+  defenseType: controlledDefenseType,
 }: {
   role: Role;
   researchDocumentId?: string | number;
   embedded?: boolean;
   readOnly?: boolean;
+  defenseType?: DefenseType;
 }) {
   const [research, setResearch] = useState<SharedMonitoringResearch[]>([]);
   const [selectedResearch, setSelectedResearch] = useState("");
@@ -104,9 +122,12 @@ export default function SharedMonitoring({
       ? String(researchDocumentId)
       : selectedResearch;
   const [data, setData] = useState<SharedMonitoringData | null>(null);
-  const [stage, setStage] = useState<
-    "before_proposal_defense" | "after_proposal_defense"
-  >(role === "panel" ? "after_proposal_defense" : "before_proposal_defense");
+  const [defenseType, setDefenseType] = useState<DefenseType>("proposal");
+  const selectedDefenseType = controlledDefenseType ?? defenseType;
+  const [stageTiming, setStageTiming] = useState<StageTiming>(
+    role === "panel" ? "after" : "before",
+  );
+  const stage: MonitoringStage = `${stageTiming}_${selectedDefenseType}_defense`;
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [editingEntryId, setEditingEntryId] = useState<number | undefined>();
@@ -148,36 +169,49 @@ export default function SharedMonitoring({
   const readOnly = forceReadOnly || role === "researcher";
   const canEditCurrent =
     !readOnly &&
-    !(role === "panel" && stage === "before_proposal_defense") &&
-    !(role === "statistician" && stage === "after_proposal_defense");
-  function geometryFor(
-    formStage: "before_proposal_defense" | "after_proposal_defense",
-  ) {
-    return formStage === "before_proposal_defense"
-      ? [
-          [25.05, 14.45, 14],
-          [41.35, 12.55, 16],
-          [55.75, 12.6, 16],
-          [70.2, 10.8, 18],
-          [82.9, 7.2, 25],
-        ]
-      : [
-          [25.05, 9.0, 20],
-          [35.9, 5.4, 33],
-          [43.15, 5.35, 33],
-          [50.35, 5.4, 33],
-          [57.6, 5.3, 33],
-          [64.75, 5.4, 33],
-          [72.0, 5.35, 33],
-          [79.2, 5.35, 33],
-          [86.4, 5.45, 33],
-        ];
+    (data?.editable_stages?.includes(stage) ?? false) &&
+    !(role === "panel" && stageTiming === "before") &&
+    !(role === "statistician" && stageTiming === "after");
+  function geometryFor(formStage: MonitoringStage) {
+    // [block top %, block height %, header height % of block, data row
+    // height % of block] measured pixel-perfect from each raster template so
+    // overlay text lands mid-cell instead of drifting onto grid lines.
+    if (formStage === "before_proposal_defense" || formStage === "before_final_defense") {
+      return [
+        [23.227, 16.273, 11.173, 11.103],
+        [39.5, 14.409, 12.618, 12.483],
+        [53.909, 14.455, 12.579, 12.489],
+        [68.364, 12.682, 14.337, 14.277],
+        [81.045, 8.955, 19.797, 20.051],
+      ];
+    }
+    if (formStage === "after_proposal_defense") {
+      return [
+        [23.227, 10.864, 16.736, 16.653],
+        [34.091, 7.227, 24.528, 25.157],
+        [41.318, 7.227, 24.528, 25.157],
+        [48.545, 7.182, 24.684, 25.105],
+        [55.727, 7.227, 25.157, 24.948],
+        [62.955, 7.227, 25.157, 24.948],
+        [70.182, 7.227, 25.157, 24.948],
+        [77.409, 7.227, 25.157, 24.948],
+        [84.636, 7.182, 25.316, 24.895],
+      ];
+    }
+    return [
+      [23.227, 9.045, 20.101, 19.975],
+      [32.273, 7.227, 25.157, 24.948],
+      [39.5, 7.182, 25.316, 24.895],
+      [46.682, 7.227, 25.786, 24.738],
+      [53.909, 7.227, 25.157, 24.948],
+      [61.136, 7.227, 25.157, 24.948],
+      [68.364, 7.227, 25.157, 24.948],
+      [75.591, 7.227, 25.157, 24.948],
+      [82.818, 9.0, 20.202, 19.949],
+    ];
   }
 
-  function officialSheet(
-    formStage: "before_proposal_defense" | "after_proposal_defense",
-    className = "",
-  ) {
+  function officialSheet(formStage: MonitoringStage, className = "") {
     const form = data?.stages[formStage];
     if (!form) return null;
     const geometry = geometryFor(formStage);
@@ -188,8 +222,12 @@ export default function SharedMonitoring({
           className="official-monitoring-template"
           src={
             formStage === "before_proposal_defense"
-              ? preDefenseForm
-              : postDefenseForm
+              ? beforeProposalForm
+              : formStage === "after_proposal_defense"
+                ? afterProposalForm
+                : formStage === "before_final_defense"
+                  ? beforeFinalForm
+                  : afterFinalForm
           }
           alt=""
         />
@@ -200,6 +238,8 @@ export default function SharedMonitoring({
         {form.sections.map((section, index) => {
           const placement = geometry[index];
           if (!placement) return null;
+          const headerHeight = placement[2] ?? 0;
+          const rowHeight = placement[3] ?? placement[2];
           const entries =
             section.entries ?? (section.entry ? [section.entry] : []);
           return (
@@ -208,19 +248,25 @@ export default function SharedMonitoring({
               key={section.designation}
               style={{ top: `${placement[0]}%`, height: `${placement[1]}%` }}
             >
-              <span className="official-monitoring-actor">
+              <span
+                className="official-monitoring-actor"
+                style={{
+                  top: `${headerHeight}%`,
+                  height: `${100 - headerHeight}%`,
+                }}
+              >
                 {section.assigned_actor_name ?? ""}
               </span>
               {entries.map((entry, rowIndex) => {
-                const rowTop = rowIndex * placement[2];
+                const rowTop = headerHeight + rowIndex * rowHeight;
                 const rowStyle = {
                   top: `${rowTop}%`,
-                  height: `${placement[2]}%`,
+                  height: `${rowHeight}%`,
                 };
                 return (
                   <Fragment key={entry.id}>
                     <span className="official-monitoring-date" style={rowStyle}>
-                      {entry.saved_at ?? entry.activity_date ?? ""}
+                      {sheetDate(entry)}
                     </span>
                     <span
                       className="official-monitoring-activity"
@@ -239,7 +285,7 @@ export default function SharedMonitoring({
                         className="official-monitoring-signature"
                         style={{
                           top: `${rowTop + 1}%`,
-                          height: `${placement[2] - 2}%`,
+                          height: `${rowHeight - 2}%`,
                         }}
                         src={entry.signature_url}
                         alt={`${section.designation} signature`}
@@ -409,23 +455,6 @@ export default function SharedMonitoring({
     setHasDrawing(false);
   }
 
-  async function verify() {
-    if (!selected) return;
-    setBusy(true);
-    setError("");
-    try {
-      setData(await verifySharedMonitoring(selected, stage));
-    } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "The defense monitoring form could not be verified.",
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <div
       className={
@@ -473,6 +502,35 @@ export default function SharedMonitoring({
         </div>
       )}
 
+      {controlledDefenseType === undefined && (
+        <div className="monitoring-stage-tabs" aria-label="Defense type">
+          <button
+            type="button"
+            aria-pressed={selectedDefenseType === "proposal"}
+            className={selectedDefenseType === "proposal" ? "is-active" : ""}
+            onClick={() => {
+              setDefenseType("proposal");
+              setStageTiming(role === "panel" ? "after" : "before");
+              setEditing(false);
+            }}
+          >
+            Proposal Defense
+          </button>
+          <button
+            type="button"
+            aria-pressed={selectedDefenseType === "final"}
+            className={selectedDefenseType === "final" ? "is-active" : ""}
+            onClick={() => {
+              setDefenseType("final");
+              setStageTiming(role === "panel" ? "after" : "before");
+              setEditing(false);
+            }}
+          >
+            Final Defense
+          </button>
+        </div>
+      )}
+
       <div
         className="monitoring-stage-tabs"
         role="tablist"
@@ -481,26 +539,28 @@ export default function SharedMonitoring({
         <button
           type="button"
           role="tab"
-          aria-selected={stage === "before_proposal_defense"}
-          className={stage === "before_proposal_defense" ? "is-active" : ""}
+          aria-selected={stageTiming === "before"}
+          className={stageTiming === "before" ? "is-active" : ""}
           onClick={() => {
-            setStage("before_proposal_defense");
+            setStageTiming("before");
             setEditing(false);
           }}
         >
-          Before Proposal Defense
+          Before {selectedDefenseType === "proposal" ? "Proposal" : "Final"}{" "}
+          Defense
         </button>
         <button
           type="button"
           role="tab"
-          aria-selected={stage === "after_proposal_defense"}
-          className={stage === "after_proposal_defense" ? "is-active" : ""}
+          aria-selected={stageTiming === "after"}
+          className={stageTiming === "after" ? "is-active" : ""}
           onClick={() => {
-            setStage("after_proposal_defense");
+            setStageTiming("after");
             setEditing(false);
           }}
         >
-          After Proposal Defense
+          After {selectedDefenseType === "proposal" ? "Proposal" : "Final"}{" "}
+          Defense
         </button>
       </div>
 
@@ -563,7 +623,7 @@ export default function SharedMonitoring({
             <span>
               Verified by Research Instructor:{" "}
               {current.verified_at
-                ? `Verified ${new Date(current.verified_at).toLocaleDateString()}`
+                ? `Verified ${formatPhilippineDate(current.verified_at)}`
                 : "Pending verification"}
             </span>
             <div className="row-actions">
@@ -613,18 +673,6 @@ export default function SharedMonitoring({
                     <Trash2 size={17} aria-hidden="true" />
                   </Button>
                 </>
-              )}
-              {role === "instructor" && (
-                <Button
-                  type="button"
-                  className="icon-button"
-                  aria-label="Verify completed form"
-                  title="Verify completed form"
-                  disabled={busy}
-                  onClick={() => void verify()}
-                >
-                  <BadgeCheck size={18} aria-hidden="true" />
-                </Button>
               )}
             </div>
           </div>

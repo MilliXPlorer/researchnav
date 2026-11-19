@@ -67,14 +67,14 @@ const systemStatusResponse = {
         document_files: 0,
         document_file_bytes: 0,
       },
-      migrations: { applied: 1, available: 1, pending: 0 },
+      migrations: { applied: 1, available: 1, pending: 0, historical: 0 },
     },
     storage: {
       private: {
         disk: "researchnav_private",
         driver: "local",
         status: "operational",
-        capabilities: { read: true, write: true },
+        capabilities: { read: true, write: true, delete: true },
       },
     },
   },
@@ -126,6 +126,8 @@ describe("administrator sidebar pages", () => {
             ]),
           ),
         );
+      if (path.startsWith("/api/office/repository"))
+        return new Response(JSON.stringify(page([])));
       return new Response(
         JSON.stringify({
           data: {
@@ -201,9 +203,9 @@ describe("administrator sidebar pages", () => {
     expect(await screen.findByText("member@example.test")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Audit Logs" }));
     expect(await screen.findByText("Signed in.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Upload Manuscript" }));
+    fireEvent.click(screen.getByRole("button", { name: "Manage Repository" }));
     expect(
-      await screen.findByRole("heading", { name: "Upload Manuscript" }),
+      await screen.findByRole("heading", { name: "Manage Repository" }),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "System Settings" }));
     expect(
@@ -211,6 +213,102 @@ describe("administrator sidebar pages", () => {
         name: "System status and capabilities",
       }),
     ).toBeInTheDocument();
+  });
+
+  it("paginates access requests with the shared pagination controls", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const path = String(input);
+
+      if (path === "/api/admin/access-requests?status=pending&page=2") {
+        return new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: 2,
+                email: "second@example.test",
+                full_name: "Second Applicant",
+                requested_role: "researcher",
+                program: "BSCS",
+                justification: null,
+                status: "pending",
+                requested_at: "2026-09-20T09:00:00.000Z",
+                decided_by_email: null,
+              },
+            ],
+            links: {
+              first: null,
+              last: null,
+              prev: null,
+              next: null,
+            },
+            meta: {
+              current_page: 2,
+              from: 2,
+              last_page: 2,
+              links: [],
+              path: "/api/admin/access-requests",
+              per_page: 1,
+              to: 2,
+              total: 2,
+            },
+          }),
+        );
+      }
+
+      return new Response(
+        JSON.stringify({
+          data: [
+            {
+              id: 1,
+              email: "first@example.test",
+              full_name: "First Applicant",
+              requested_role: "researcher",
+              program: "BSCS",
+              justification: null,
+              status: "pending",
+              requested_at: "2026-09-20T08:00:00.000Z",
+              decided_by_email: null,
+            },
+          ],
+          links: {
+            first: null,
+            last: null,
+            prev: null,
+            next: null,
+          },
+          meta: {
+            current_page: 1,
+            from: 1,
+            last_page: 2,
+            links: [],
+            path: "/api/admin/access-requests",
+            per_page: 1,
+            to: 1,
+            total: 2,
+          },
+        }),
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AdminSidebarPage selectedNav="Access Requests" />);
+
+    expect(await screen.findByText("first@example.test")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Page 2" }));
+
+    expect(await screen.findByText("second@example.test")).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([input]) =>
+            String(input) ===
+            "/api/admin/access-requests?status=pending&page=2",
+        ),
+      ).toBe(true);
+    });
   });
 
   it("loads provisioned accounts and provisions a selected role", async () => {
@@ -268,18 +366,82 @@ describe("administrator sidebar pages", () => {
     );
   });
 
+  it("manages institutes and reflects a new one in the coordinator dropdown", async () => {
+    const institutes = ["Institute of Computer Studies"];
+    const fetchMock = vi.fn(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const path = String(input);
+        if (path === "/api/institutes") {
+          return new Response(JSON.stringify({ data: [...institutes] }));
+        }
+        if (path === "/api/admin/institutes" && init?.method === "POST") {
+          const body = JSON.parse(String(init.body)) as { name: string };
+          institutes.push(body.name);
+          return new Response(JSON.stringify({ data: body.name }), {
+            status: 201,
+          });
+        }
+        if (path === "/api/admin/users")
+          return new Response(JSON.stringify(page([])));
+        return new Response(
+          JSON.stringify({
+            data: [],
+            links: { first: null, last: null, prev: null, next: null },
+            meta: {
+              current_page: 1,
+              from: null,
+              last_page: 1,
+              links: [],
+              path: "/api/admin/users",
+              per_page: 25,
+              to: null,
+              total: 0,
+            },
+          }),
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AdminSidebarPage selectedNav="User & Role Management" />);
+    fireEvent.click(screen.getByRole("button", { name: "Manage institutes" }));
+    const dialog = screen.getByRole("dialog", { name: "Manage institutes" });
+    const nameInput = await screen.findByLabelText("Institute name");
+    expect(
+      await within(dialog).findByText("Institute of Computer Studies"),
+    ).toBeInTheDocument();
+    fireEvent.change(nameInput, {
+      target: { value: "Institute of Engineering" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add institute" }));
+    expect(
+      await within(dialog).findByText("Added Institute of Engineering."),
+    ).toBeInTheDocument();
+    expect(
+      await within(dialog).findByText("Institute of Engineering"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close Manage institutes" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add user" }));
+    fireEvent.change(await screen.findByLabelText("Workspace role"), {
+      target: { value: "coordinator" },
+    });
+    const instituteSelect = await screen.findByLabelText("Institute");
+    expect(
+      within(instituteSelect).getByRole("option", {
+        name: "Institute of Engineering",
+      }),
+    ).toBeInTheDocument();
+  });
+
   it.each([
     {
       selectedNav: "Account Provisioning",
       loadingLabel: "Loading provisioned accounts",
       successfulResponse: { users: [] },
       successText: "No accounts have been provisioned.",
-    },
-    {
-      selectedNav: "All Users",
-      loadingLabel: "Loading users",
-      successfulResponse: page([]),
-      successText: "No user accounts are available.",
     },
     {
       selectedNav: "Audit Logs",
@@ -303,7 +465,14 @@ describe("administrator sidebar pages", () => {
       });
       vi.stubGlobal(
         "fetch",
-        vi.fn(() => {
+        vi.fn((input: string | URL | Request) => {
+          if (String(input) === "/api/institutes") {
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({ data: ["Institute of Computer Studies"] }),
+              ),
+            );
+          }
           requests += 1;
           return requests === 1
             ? Promise.resolve(
@@ -327,7 +496,7 @@ describe("administrator sidebar pages", () => {
       ).toBeInTheDocument();
 
       resolveRetry(new Response(JSON.stringify(successfulResponse)));
-      expect(await screen.findByText(successText)).toBeInTheDocument();
+      expect((await screen.findAllByText(successText)).length).toBeGreaterThan(0);
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
       unmount();
     },
@@ -363,13 +532,11 @@ describe("administrator sidebar pages", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Edit member@example.test" }),
     );
-    const dialog = screen.getByRole("dialog", {
-      name: "Edit member@example.test",
-    });
-    fireEvent.change(within(dialog).getByLabelText("Role"), {
+    const dialog = screen.getByRole("dialog", { name: "Edit user" });
+    fireEvent.change(within(dialog).getByLabelText("Assigned role"), {
       target: { value: "admin" },
     });
-    fireEvent.change(within(dialog).getByLabelText("Access status"), {
+    fireEvent.change(within(dialog).getByLabelText("Account access status"), {
       target: { value: "invited" },
     });
     fireEvent.click(
@@ -379,8 +546,10 @@ describe("administrator sidebar pages", () => {
       await screen.findByText("At least one active administrator must remain."),
     ).toBeInTheDocument();
     await waitFor(() => expect(userRequests).toBeGreaterThan(1));
-    expect(screen.getByRole("cell", { name: "Adviser" })).toBeInTheDocument();
-    expect(screen.getByRole("cell", { name: "Blocked" })).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Assigned role")).toHaveValue("admin");
+    expect(within(dialog).getByLabelText("Account access status")).toHaveValue(
+      "invited",
+    );
     expect(screen.queryByText(/password/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/google_sub/i)).not.toBeInTheDocument();
   });
@@ -417,13 +586,11 @@ describe("administrator sidebar pages", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Edit member@example.test" }),
     );
-    const dialog = screen.getByRole("dialog", {
-      name: "Edit member@example.test",
-    });
-    fireEvent.change(within(dialog).getByLabelText("Role"), {
+    const dialog = screen.getByRole("dialog", { name: "Edit user" });
+    fireEvent.change(within(dialog).getByLabelText("Assigned role"), {
       target: { value: "admin" },
     });
-    fireEvent.change(within(dialog).getByLabelText("Access status"), {
+    fireEvent.change(within(dialog).getByLabelText("Account access status"), {
       target: { value: "invited" },
     });
     fireEvent.click(
@@ -438,39 +605,6 @@ describe("administrator sidebar pages", () => {
       screen.getByRole("cell", { name: "Coordinator" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("cell", { name: "Blocked" })).toBeInTheDocument();
-  });
-
-  it("confirms and deletes a user account", async () => {
-    let deleted = false;
-    const fetchMock = vi.fn(
-      async (input: string | URL | Request, init?: RequestInit) => {
-        if (init?.method === "DELETE") {
-          deleted = true;
-          return new Response(null, { status: 204 });
-        }
-        return new Response(JSON.stringify(page(deleted ? [] : [user])));
-      },
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    render(<AdminSidebarPage selectedNav="All Users" />);
-    fireEvent.click(
-      await screen.findByRole("button", {
-        name: "Delete member@example.test",
-      }),
-    );
-    expect(
-      screen.getByRole("heading", { name: "Delete user account" }),
-    ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Delete user" }));
-
-    expect(
-      await screen.findByText("Deleted member@example.test."),
-    ).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith(
-      `/api/admin/users/${user.id}`,
-      expect.objectContaining({ method: "DELETE" }),
-    );
   });
 
   it("filters admin users live as search text changes without submitting", async () => {
@@ -557,14 +691,19 @@ describe("administrator sidebar pages", () => {
                 document_files: 4,
                 document_file_bytes: 1234,
               },
-              migrations: { applied: 10, available: 11, pending: 1 },
+              migrations: {
+                applied: 10,
+                available: 11,
+                pending: 1,
+                historical: 0,
+              },
             },
             storage: {
               private: {
                 disk: "researchnav_private",
                 driver: "local",
                 status: "operational",
-                capabilities: { read: true, write: true },
+                capabilities: { read: true, write: true, delete: true },
               },
             },
           },
@@ -574,6 +713,13 @@ describe("administrator sidebar pages", () => {
     vi.stubGlobal("fetch", fetchMock);
     const { rerender } = render(<AdminSidebarPage selectedNav="Audit Logs" />);
     expect(await screen.findByText("admin@example.test")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Sort by Timestamp" }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("sort=created_at&direction=asc"),
+        expect.anything(),
+      ),
+    );
     fireEvent.change(screen.getByLabelText("Action"), {
       target: { value: "missing" },
     });
@@ -588,8 +734,393 @@ describe("administrator sidebar pages", () => {
     ).toBeInTheDocument();
     expect(screen.getAllByText("12")).not.toHaveLength(0);
     expect(
-      screen.getByText("database.audit_logs_unavailable"),
+      screen.getByText("Database Audit Logs Unavailable"),
     ).toBeInTheDocument();
-    expect(screen.getByText(/10 applied/)).toBeInTheDocument();
+    expect(screen.getByText("Applied migrations").nextSibling).toHaveTextContent(
+      "10",
+    );
+  });
+
+  it("debounces the AllUsers search and resets page to 1", async () => {
+    let userRequests = 0;
+    const refined = { ...user, email: "anna@example.test" };
+    const page1Users = [
+      user,
+      { ...user, id: "b", email: "second@example.test" },
+    ];
+    function userParams(input: string | URL | Request) {
+      const url = input instanceof Request ? input.url : String(input);
+      const sep = url.indexOf("?");
+      return new URLSearchParams(sep >= 0 ? url.slice(sep + 1) : "");
+    }
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const params = userParams(input);
+      const path = (input instanceof Request ? input.url : String(input)).split(
+        "?",
+      )[0];
+      if (path === "/api/admin/users") {
+        userRequests += 1;
+        if (params.get("search") === "ann") {
+          return new Response(
+            JSON.stringify({
+              data: [refined],
+              links: { first: null, last: null, prev: null, next: null },
+              meta: {
+                current_page: 1,
+                from: 1,
+                last_page: 1,
+                links: [],
+                path: "/api/admin/users",
+                per_page: 25,
+                to: 1,
+                total: 1,
+              },
+            }),
+          );
+        }
+        if (params.get("page") === "2") {
+          return new Response(
+            JSON.stringify({
+              data: [{ ...user, id: "c", email: "page2@example.test" }],
+              links: {
+                first: null,
+                last: null,
+                prev: "/api/admin/users?page=1",
+                next: null,
+              },
+              meta: {
+                current_page: 2,
+                from: 3,
+                last_page: 2,
+                links: [],
+                path: "/api/admin/users",
+                per_page: 25,
+                to: 3,
+                total: 3,
+              },
+            }),
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            data: page1Users,
+            links: {
+              first: null,
+              last: null,
+              prev: null,
+              next: "/api/admin/users?page=2",
+            },
+            meta: {
+              current_page: 1,
+              from: 1,
+              last_page: 2,
+              links: [],
+              path: "/api/admin/users",
+              per_page: 25,
+              to: 2,
+              total: 3,
+            },
+          }),
+        );
+      }
+      return new Response(JSON.stringify(systemStatusResponse));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AdminSidebarPage selectedNav="All Users" />);
+    expect(await screen.findByText("member@example.test")).toBeInTheDocument();
+    expect(screen.getByText("second@example.test")).toBeInTheDocument();
+    expect(screen.getByText("Showing 1–2 of 3 users")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(await screen.findByText("page2@example.test")).toBeInTheDocument();
+    expect(screen.getByText("Showing 3–3 of 3 users")).toBeInTheDocument();
+    const requestsAfterPage2 = userRequests;
+
+    fireEvent.change(screen.getByLabelText("Search"), {
+      target: { value: "ann" },
+    });
+    expect(screen.getByLabelText("Search")).toHaveValue("ann");
+
+    let searchCall: (typeof fetchMock.mock.calls)[number] | undefined;
+    await waitFor(() => {
+      searchCall = fetchMock.mock.calls.find(
+        ([input]) => userParams(input).get("search") === "ann",
+      );
+      expect(searchCall).toBeDefined();
+    });
+    expect(userRequests).toBeGreaterThan(requestsAfterPage2);
+    expect(userParams(searchCall![0]).get("page")).not.toBe("2");
+  });
+
+  it("resets sorting to page 1 and preserves filters and sorting across pages", async () => {
+    function userParams(input: string | URL | Request) {
+      const url = input instanceof Request ? input.url : String(input);
+      const separator = url.indexOf("?");
+      return new URLSearchParams(
+        separator >= 0 ? url.slice(separator + 1) : "",
+      );
+    }
+
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const path = (input instanceof Request ? input.url : String(input)).split(
+        "?",
+      )[0];
+      if (path === "/api/admin/users") {
+        const params = userParams(input);
+        const currentPage = Number(params.get("page") ?? 1);
+        return new Response(
+          JSON.stringify({
+            data: [
+              {
+                ...user,
+                id: `page-${currentPage}`,
+                email: `page-${currentPage}@example.test`,
+              },
+            ],
+            links: { first: null, last: null, prev: null, next: null },
+            meta: {
+              current_page: currentPage,
+              from: currentPage,
+              last_page: 2,
+              links: [],
+              path: "/api/admin/users",
+              per_page: 25,
+              to: currentPage,
+              total: 2,
+            },
+          }),
+        );
+      }
+      return new Response(JSON.stringify(systemStatusResponse));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AdminSidebarPage selectedNav="All Users" />);
+    await screen.findByText("page-1@example.test");
+
+    fireEvent.click(screen.getByLabelText("Access status"));
+    fireEvent.click(screen.getByRole("option", { name: "Active" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Page 2" }));
+    await screen.findByText("page-2@example.test");
+
+    fireEvent.click(screen.getByRole("button", { name: "Sort by User" }));
+
+    await waitFor(() => {
+      const resetSortCall = fetchMock.mock.calls.find(([input]) => {
+        const params = userParams(input);
+        return (
+          params.get("access_status") === "active" &&
+          params.get("sort") === "last_name" &&
+          params.get("direction") === "asc" &&
+          params.get("page") !== "2"
+        );
+      });
+      expect(resetSortCall).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Page 2" }));
+    await waitFor(() => {
+      const sortedPageCall = fetchMock.mock.calls.find(([input]) => {
+        const params = userParams(input);
+        return (
+          params.get("access_status") === "active" &&
+          params.get("sort") === "last_name" &&
+          params.get("direction") === "asc" &&
+          params.get("page") === "2"
+        );
+      });
+      expect(sortedPageCall).toBeDefined();
+    });
+  });
+
+  it("sorts AllUsers by last name ascending when Name is clicked", async () => {
+    function userParams(input: string | URL | Request) {
+      const url = input instanceof Request ? input.url : String(input);
+      const sep = url.indexOf("?");
+      return new URLSearchParams(sep >= 0 ? url.slice(sep + 1) : "");
+    }
+
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const path = (input instanceof Request ? input.url : String(input)).split(
+        "?",
+      )[0];
+
+      if (path === "/api/admin/users") {
+        return new Response(
+          JSON.stringify({
+            data: [user],
+            links: { first: null, last: null, prev: null, next: null },
+            meta: {
+              current_page: 1,
+              from: 1,
+              last_page: 1,
+              links: [],
+              path: "/api/admin/users",
+              per_page: 25,
+              to: 1,
+              total: 1,
+            },
+          }),
+        );
+      }
+
+      return new Response(JSON.stringify(systemStatusResponse));
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AdminSidebarPage selectedNav="All Users" />);
+
+    expect(await screen.findByText("member@example.test")).toBeInTheDocument();
+
+    expect(
+      screen.getByRole("button", { name: "Sort by User" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("columnheader", { name: "Actions" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Sort by User" }));
+    await waitFor(() => {
+      const sortCall = fetchMock.mock.calls.find(([input]) => {
+        const params = userParams(input);
+        return (
+          params.get("sort") === "last_name" &&
+          params.get("direction") === "asc"
+        );
+      });
+
+      expect(sortCall).toBeDefined();
+    });
+    expect(screen.getByRole("columnheader", { name: "User" })).toHaveAttribute(
+      "aria-sort",
+      "ascending",
+    );
+  });
+
+  it("toggles AllUsers Name sorting to descending on second click", async () => {
+    function userParams(input: string | URL | Request) {
+      const url = input instanceof Request ? input.url : String(input);
+      const sep = url.indexOf("?");
+      return new URLSearchParams(sep >= 0 ? url.slice(sep + 1) : "");
+    }
+
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const path = (input instanceof Request ? input.url : String(input)).split(
+        "?",
+      )[0];
+
+      if (path === "/api/admin/users") {
+        return new Response(
+          JSON.stringify({
+            data: [user],
+            links: { first: null, last: null, prev: null, next: null },
+            meta: {
+              current_page: 1,
+              from: 1,
+              last_page: 1,
+              links: [],
+              path: "/api/admin/users",
+              per_page: 25,
+              to: 1,
+              total: 1,
+            },
+          }),
+        );
+      }
+
+      return new Response(JSON.stringify(systemStatusResponse));
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AdminSidebarPage selectedNav="All Users" />);
+
+    await screen.findByText("member@example.test");
+
+    const nameHeader = screen.getByRole("button", { name: "Sort by User" });
+
+    fireEvent.click(nameHeader);
+    fireEvent.click(nameHeader);
+
+    expect(screen.getByRole("columnheader", { name: "User" })).toHaveAttribute(
+      "aria-sort",
+      "descending",
+    );
+
+    await waitFor(() => {
+      const descendingCall = fetchMock.mock.calls.find(([input]) => {
+        const params = userParams(input);
+        return (
+          params.get("sort") === "last_name" &&
+          params.get("direction") === "desc"
+        );
+      });
+
+      expect(descendingCall).toBeDefined();
+    });
+  });
+
+  it("sorts AllUsers by each remaining sortable column", async () => {
+    function userParams(input: string | URL | Request) {
+      const url = input instanceof Request ? input.url : String(input);
+      const sep = url.indexOf("?");
+      return new URLSearchParams(sep >= 0 ? url.slice(sep + 1) : "");
+    }
+
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const path = (input instanceof Request ? input.url : String(input)).split(
+        "?",
+      )[0];
+
+      if (path === "/api/admin/users") {
+        return new Response(
+          JSON.stringify({
+            data: [user],
+            links: { first: null, last: null, prev: null, next: null },
+            meta: {
+              current_page: 1,
+              from: 1,
+              last_page: 1,
+              links: [],
+              path: "/api/admin/users",
+              per_page: 25,
+              to: 1,
+              total: 1,
+            },
+          }),
+        );
+      }
+
+      return new Response(JSON.stringify(systemStatusResponse));
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AdminSidebarPage selectedNav="All Users" />);
+
+    await screen.findByText("member@example.test");
+
+    const columns = [
+      ["Role", "role"],
+      ["Access Status", "access_status"],
+      ["Date Created", "created_at"],
+    ] as const;
+
+    for (const [label, sort] of columns) {
+      fireEvent.click(screen.getByRole("button", { name: `Sort by ${label}` }));
+
+      await waitFor(() => {
+        const matchingCall = fetchMock.mock.calls.find(([input]) => {
+          const params = userParams(input);
+          return (
+            params.get("sort") === sort && params.get("direction") === "asc"
+          );
+        });
+
+        expect(matchingCall).toBeDefined();
+      });
+    }
   });
 });

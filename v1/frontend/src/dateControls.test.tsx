@@ -1,13 +1,15 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { philippineYear } from "./dateTime";
 import { describe, expect, it, vi } from "vitest";
 import {
   AcademicYearSelect,
   DatePickerInput,
   PublicationYearInput,
+  YearRangeSelect,
 } from "./dateControls";
 
 describe("date controls", () => {
-  it("uses the native picker while blocking typed and pasted dates", () => {
+  it("uses the native datetime picker", () => {
     const onChange = vi.fn();
     render(
       <DatePickerInput
@@ -18,20 +20,28 @@ describe("date controls", () => {
       />,
     );
     const input = screen.getByLabelText("Scheduled at");
-    const typed = new KeyboardEvent("keydown", {
-      key: "2",
-      bubbles: true,
-      cancelable: true,
-    });
-
     expect(input).toHaveAttribute("type", "datetime-local");
-    expect(input.dispatchEvent(typed)).toBe(false);
-    expect(fireEvent.paste(input)).toBe(false);
-    expect(fireEvent.drop(input)).toBe(false);
+  });
+
+  it("renders date fields as native date inputs", () => {
+    render(<DatePickerInput aria-label="From" type="date" value="" readOnly />);
+
+    expect(screen.getByLabelText("From")).toHaveAttribute("type", "date");
+  });
+
+  it("opens the native picker when the date field is clicked", () => {
+    const showPicker = vi.fn();
+    const original = HTMLInputElement.prototype.showPicker;
+    HTMLInputElement.prototype.showPicker = showPicker;
+    render(<DatePickerInput aria-label="From" type="date" value="" readOnly />);
+
+    fireEvent.click(screen.getByLabelText("From"));
+    expect(showPicker).toHaveBeenCalled();
+    HTMLInputElement.prototype.showPicker = original;
   });
 
   it("offers publication and academic years as selections", () => {
-    const latestYear = new Date().getUTCFullYear();
+    const latestYear = philippineYear();
     render(
       <>
         <PublicationYearInput
@@ -73,5 +83,36 @@ describe("date controls", () => {
     );
 
     expect(screen.getByLabelText("Academic year")).toHaveValue("AY 2025-2026");
+  });
+
+  it("narrows the opposite year bound in the range dropdown", () => {
+    render(
+      <>
+        <YearRangeSelect
+          aria-label="From year"
+          bound="from"
+          otherValue="2024"
+          value=""
+        />
+        <YearRangeSelect
+          aria-label="To year"
+          bound="to"
+          otherValue="2022"
+          value=""
+        />
+      </>,
+    );
+
+    const from = screen.getByLabelText("From year") as HTMLSelectElement;
+    const to = screen.getByLabelText("To year") as HTMLSelectElement;
+    const fromYears = Array.from(from.options).map((option) => option.value);
+    const toYears = Array.from(to.options).map((option) => option.value);
+
+    expect(fromYears[0]).toBe("");
+    expect(toYears[0]).toBe("");
+    expect(fromYears).not.toContain("2026");
+    expect(fromYears).toContain("2024");
+    expect(toYears).not.toContain("1901");
+    expect(toYears).toContain("2022");
   });
 });

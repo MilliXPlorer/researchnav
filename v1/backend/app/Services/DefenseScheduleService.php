@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Models\DefenseSchedule;
-use App\Models\ResearchDocument;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -11,13 +10,19 @@ use Illuminate\Validation\ValidationException;
 
 class DefenseScheduleService
 {
-    public function __construct(private readonly AuditService $audit, private readonly MonitoringService $monitoring) {}
+    public function __construct(private readonly AuditService $audit, private readonly MonitoringService $monitoring, private readonly CoordinatorInstituteScope $scope) {}
 
     public function list(User $actor, bool $mineOnly = false): array
     {
         $query = DefenseSchedule::query()
             ->with(['researchDocument:id,title,submission_status,research_stage', 'createdBy:id,first_name,middle_name,last_name'])
             ->orderByDesc('scheduled_at');
+        if (! $mineOnly) {
+            $institute = $this->scope->institute($actor);
+            if ($institute !== null) {
+                $query->whereHas('researchDocument', fn ($documents) => $documents->where('institute', $institute));
+            }
+        }
 
         if ($mineOnly) {
             $query->whereHas('researchDocument', function ($documents) use ($actor): void {
@@ -52,7 +57,8 @@ class DefenseScheduleService
     public function create(User $actor, array $data, ?Request $request = null): DefenseSchedule
     {
         return DB::transaction(function () use ($actor, $data, $request): DefenseSchedule {
-            $document = ResearchDocument::query()->whereKey($data['research_document_id'])->lockForUpdate()->firstOrFail();
+            $documents = $this->scope->documents($actor);
+            $document = $documents->whereKey($data['research_document_id'])->lockForUpdate()->firstOrFail();
             $schedule = DefenseSchedule::query()->create([
                 'research_document_id' => $document->id,
                 'created_by' => $actor->id,
@@ -71,7 +77,10 @@ class DefenseScheduleService
     public function update(User $actor, DefenseSchedule $schedule, array $data, ?Request $request = null): DefenseSchedule
     {
         return DB::transaction(function () use ($actor, $schedule, $data, $request): DefenseSchedule {
-            $locked = DefenseSchedule::query()->whereKey($schedule->id)->lockForUpdate()->firstOrFail();
+            $institute = $this->scope->institute($actor);
+            $locked = DefenseSchedule::query()->whereKey($schedule->id)
+                ->when($institute !== null, fn ($query) => $query->whereHas('researchDocument', fn ($documents) => $documents->where('institute', $institute)))
+                ->lockForUpdate()->firstOrFail();
             $locked->update([
                 'scheduled_at' => $data['scheduled_at'] ?? $locked->scheduled_at,
                 'room' => array_key_exists('room', $data) ? $data['room'] : $locked->room,

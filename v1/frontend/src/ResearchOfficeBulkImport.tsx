@@ -2,6 +2,7 @@ import { ChangeEvent, DragEvent, useMemo, useRef, useState } from "react";
 import { instituteNames } from "./data";
 import { Modal } from "./Modal";
 import { Pencil, RefreshCw, Save } from "lucide-react";
+import { SdgSelector } from "./SdgMetadata";
 
 type Metadata = {
   title: string | null;
@@ -11,6 +12,7 @@ type Metadata = {
   year: number | null;
   final_binding_date: string | null;
   institute: string | null;
+  sdg_ids: number[];
 };
 
 type ImportState = "idle" | "importing" | "imported" | "failed";
@@ -76,6 +78,7 @@ const emptyMetadata = (): Metadata => ({
   year: null,
   final_binding_date: null,
   institute: null,
+  sdg_ids: [],
 });
 
 const instituteOptions = [...instituteNames, "Unclassified"] as const;
@@ -99,6 +102,7 @@ function normalizeMetadata(metadata?: Partial<Metadata>): Metadata {
     ...metadata,
     researchers: metadata?.researchers ?? [],
     keywords: uniqueKeywords(metadata?.keywords ?? []),
+    sdg_ids: metadata?.sdg_ids ?? [],
   };
 }
 
@@ -163,10 +167,6 @@ const styles = {
     fontFamily: '"Inter", Arial, sans-serif',
   },
 
-  pageHeader: {
-    marginBottom: "24px",
-  },
-
   eyebrow: {
     margin: "0 0 5px",
     fontSize: "12px",
@@ -174,23 +174,6 @@ const styles = {
     textTransform: "uppercase" as const,
     letterSpacing: "0.08em",
     color: "#5b6660",
-  },
-
-  pageTitle: {
-    margin: 0,
-    fontSize: "27px",
-    lineHeight: 1.25,
-    color: "#10331f",
-    fontWeight: 700,
-    fontFamily: '"Source Serif 4", Georgia, serif',
-  },
-
-  pageDescription: {
-    maxWidth: "720px",
-    margin: "8px 0 0",
-    color: "#5b6660",
-    fontSize: "14px",
-    lineHeight: 1.6,
   },
 
   section: {
@@ -759,8 +742,12 @@ const styles = {
 
 export default function ResearchOfficeBulkImport({
   contextLabel = "Research Office",
+  compact = false,
+  onComplete,
 }: {
   contextLabel?: string;
+  compact?: boolean;
+  onComplete?: () => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
@@ -784,6 +771,7 @@ export default function ResearchOfficeBulkImport({
   const [uploadReport, setUploadReport] = useState<{
     uploaded: number;
     failed: Array<{ name: string; message: string }>;
+    indexingWarnings: Array<{ name: string; outcome: string }>;
   } | null>(null);
   const uploadLock = useRef(false);
   const [editingMetadata, setEditingMetadata] = useState<number | null>(null);
@@ -791,6 +779,9 @@ export default function ResearchOfficeBulkImport({
     {},
   );
   const [metadataNotice, setMetadataNotice] = useState("");
+  const [researcherDrafts, setResearcherDrafts] = useState<
+    Record<number, string>
+  >({});
 
   const [activeFilter, setActiveFilter] = useState<FilterType>("all");
 
@@ -859,7 +850,7 @@ export default function ResearchOfficeBulkImport({
     const allowed = selectedFiles.filter((file) => {
       const extension = file.name.split(".").pop()?.toLowerCase();
 
-      return extension === "docx" || extension === "pdf";
+      return extension === "pdf";
     });
     const skipped = selectedFiles
       .filter((file) => !allowed.includes(file))
@@ -1145,6 +1136,14 @@ export default function ResearchOfficeBulkImport({
     }
 
     setResults(extractedResults);
+    setResearcherDrafts(
+      Object.fromEntries(
+        extractedResults.map((result) => [
+          result.source_file_index,
+          result.metadata.researchers?.join("\n") ?? "",
+        ]),
+      ),
+    );
     setExtracting(false);
     setExtractionProgress(null);
   }
@@ -1222,6 +1221,23 @@ export default function ResearchOfficeBulkImport({
     );
   }
 
+  function updateSdgs(resultIndex: number, sdgIds: number[]) {
+    setResults((current) =>
+      current.map((result) =>
+        result.source_file_index === resultIndex
+          ? {
+              ...result,
+              metadata: { ...result.metadata, sdg_ids: sdgIds },
+              import_error: undefined,
+              import_state:
+                result.import_state === "failed" ? "idle" : result.import_state,
+            }
+          : result,
+      ),
+    );
+    setMetadataDirty((current) => ({ ...current, [resultIndex]: true }));
+  }
+
   async function reextractMetadata(result: ImportResult) {
     const indexes = result.source_file_indices ?? [result.source_file_index];
     const formData = new FormData();
@@ -1294,6 +1310,7 @@ export default function ResearchOfficeBulkImport({
     });
     let uploaded = 0;
     const failed: Array<{ name: string; message: string }> = [];
+    const indexingWarnings: Array<{ name: string; outcome: string }> = [];
 
     for (const result of readyForImport) {
       const indexes = result.source_file_indices ?? [result.source_file_index];
@@ -1396,6 +1413,24 @@ export default function ResearchOfficeBulkImport({
           throw new Error(message);
         }
 
+        try {
+          const responseData = await response.json();
+          const outcome = responseData?.data?.content_indexing_outcome;
+          if (
+            typeof outcome === "string" &&
+            ["failed", "no_source", "unsupported", "ineligible"].includes(
+              outcome,
+            )
+          ) {
+            indexingWarnings.push({
+              name: result.folder_name ?? result.file_name,
+              outcome,
+            });
+          }
+        } catch {
+          // Older deployments may return a successful response without this field.
+        }
+
         setResults((current) =>
           current.map((item) =>
             item.source_file_index === result.source_file_index
@@ -1436,7 +1471,12 @@ export default function ResearchOfficeBulkImport({
 
     setImporting(false);
     setUploadProgress(null);
-    setUploadReport({ uploaded, failed });
+    setUploadReport({ uploaded, failed, indexingWarnings });
+    if (failed.length === 0 && indexingWarnings.length === 0 && onComplete) {
+      onComplete();
+      uploadLock.current = false;
+      return;
+    }
     if (failed.length === 0) {
       resetSelection();
     }
@@ -1544,7 +1584,17 @@ export default function ResearchOfficeBulkImport({
   }
 
   return (
-    <div style={styles.page}>
+    <div
+      style={
+        compact
+          ? {
+              ...styles.page,
+              maxWidth: "960px",
+              padding: "0",
+            }
+          : styles.page
+      }
+    >
       {extractionProgress && (
         <Modal
           label="Extracting manuscript metadata"
@@ -1775,7 +1825,8 @@ export default function ResearchOfficeBulkImport({
                 fontSize: "21px",
               }}
             >
-              {uploadReport.failed.length === 0
+              {uploadReport.failed.length === 0 &&
+              uploadReport.indexingWarnings.length === 0
                 ? "All manuscripts uploaded"
                 : "Some manuscripts need attention"}
             </h2>
@@ -1785,6 +1836,39 @@ export default function ResearchOfficeBulkImport({
               {uploadReport.uploaded} uploaded · {uploadReport.failed.length}{" "}
               not uploaded
             </p>
+            {uploadReport.indexingWarnings.length > 0 && (
+              <div
+                role="status"
+                style={{ display: "grid", gap: "8px", marginBottom: "12px" }}
+              >
+                {uploadReport.indexingWarnings.map((item) => (
+                  <div
+                    key={`${item.name}-${item.outcome}`}
+                    style={{
+                      padding: "11px 12px",
+                      border: "1px solid #ead3a6",
+                      borderRadius: "7px",
+                      background: "#fffaf0",
+                    }}
+                  >
+                    <strong
+                      style={{
+                        display: "block",
+                        color: "#765515",
+                        fontSize: "13px",
+                      }}
+                    >
+                      {item.name}
+                    </strong>
+                    <span style={{ color: "#806529", fontSize: "12px" }}>
+                      Study uploaded successfully, but manuscript content
+                      extraction failed. It will not appear in Content Checker
+                      until it is reindexed.
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
             {uploadReport.failed.length > 0 && (
               <div
                 style={{
@@ -1852,18 +1936,31 @@ export default function ResearchOfficeBulkImport({
           </div>
         </Modal>
       )}
-      <div style={styles.pageHeader}>
-        <p style={styles.eyebrow}>{contextLabel}</p>
+      <header
+        className="workspace-header"
+        style={compact ? { marginBottom: "18px" } : undefined}
+      >
+        <div>
+          <p className="eyebrow">{contextLabel}</p>
+          <h1>Upload Manuscript</h1>
+          <p>
+            Upload finalized research manuscripts and review the extracted
+            information before they are added to ResearchNAV.
+          </p>
+        </div>
+      </header>
 
-        <h1 style={styles.pageTitle}>Upload Manuscript</h1>
-
-        <p style={styles.pageDescription}>
-          Upload finalized research manuscripts and review the extracted
-          information before they are added to ResearchNAV.
-        </p>
-      </div>
-
-      <section style={styles.section}>
+      <section
+        style={
+          compact
+            ? {
+                ...styles.section,
+                padding: "18px",
+                marginBottom: 0,
+              }
+            : styles.section
+        }
+      >
         <div style={styles.sectionHeading}>
           <span style={styles.stepNumber}>1</span>
 
@@ -1871,7 +1968,7 @@ export default function ResearchOfficeBulkImport({
             <h2 style={styles.sectionTitle}>Upload Manuscripts</h2>
 
             <p style={styles.sectionDescription}>
-              Select DOCX or text-based PDF manuscript files.
+              Select text-based PDF manuscript files.
             </p>
           </div>
         </div>
@@ -1879,7 +1976,7 @@ export default function ResearchOfficeBulkImport({
         <input
           ref={fileInputRef}
           type="file"
-          accept=".docx,.pdf"
+          accept=".pdf,application/pdf"
           multiple
           onChange={handleFileChange}
           style={{
@@ -1901,6 +1998,7 @@ export default function ResearchOfficeBulkImport({
         <div
           style={{
             ...styles.uploadArea,
+            ...(compact ? { minHeight: "160px", padding: "20px" } : {}),
             ...(dragActive ? styles.uploadAreaActive : {}),
           }}
           onDragEnter={(event) => {
@@ -1954,7 +2052,7 @@ export default function ResearchOfficeBulkImport({
           </div>
 
           <span style={styles.uploadHelp}>
-            Supports DOCX and text-based PDF • Maximum 20 MB per file
+            Supports text-based PDF only • Maximum 20 MB per file
           </span>
         </div>
         {files.length > 0 && (
@@ -2340,7 +2438,7 @@ export default function ResearchOfficeBulkImport({
 
                           <p style={styles.failedText}>
                             {result.error ||
-                              "Please upload a valid DOCX or text-based PDF copy."}
+                              "Please upload a valid text-based PDF copy."}
                           </p>
                         </div>
 
@@ -2427,15 +2525,21 @@ export default function ResearchOfficeBulkImport({
                               importing || result.import_state === "imported"
                             }
                             value={
-                              result.metadata.researchers?.join("\n") || ""
+                              researcherDrafts[originalIndex] ??
+                              result.metadata.researchers?.join("\n") ??
+                              ""
                             }
-                            onChange={(event) =>
+                            onChange={(event) => {
+                              setResearcherDrafts((current) => ({
+                                ...current,
+                                [originalIndex]: event.target.value,
+                              }));
                               updateMetadata(
                                 originalIndex,
                                 "researchers",
                                 event.target.value,
-                              )
-                            }
+                              );
+                            }}
                           />
                         </div>
 
@@ -2583,6 +2687,16 @@ export default function ResearchOfficeBulkImport({
                             />
                           </div>
                         </div>
+                        <SdgSelector
+                          selectedIds={result.metadata.sdg_ids}
+                          onChange={(sdgIds) =>
+                            updateSdgs(originalIndex, sdgIds)
+                          }
+                          disabled={
+                            importing || result.import_state === "imported"
+                          }
+                          legend="Sustainable Development Goals (optional)"
+                        />
                       </div>
                     )}
                   </article>

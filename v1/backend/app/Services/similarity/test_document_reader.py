@@ -1,14 +1,14 @@
 import io
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
-from zipfile import ZIP_DEFLATED, ZipFile
 
 from similarity.document_reader import (
     DocumentReadError,
-    MAX_DOCX_COMPRESSION_RATIO,
     MAX_PDF_PAGES,
-    _docx_text,
     _pdf_text,
+    extract_text,
 )
 
 
@@ -22,10 +22,9 @@ class DocumentReaderTest(unittest.TestCase):
             with self.assertRaises(DocumentReadError):
                 _pdf_text(io.BytesIO(b"pdf"))
 
-    def test_docx_compression_ratio_is_rejected_before_parser_runs(self):
-        stream = io.BytesIO()
-        with ZipFile(stream, "w", ZIP_DEFLATED) as archive:
-            archive.writestr("word/document.xml", b"a" * (MAX_DOCX_COMPRESSION_RATIO * 1000))
-        stream.seek(0)
-        with self.assertRaises(DocumentReadError):
-            _docx_text(stream)
+    def test_docx_is_not_supported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "manuscript.docx"
+            path.write_bytes(b"legacy-docx")
+            with self.assertRaises(DocumentReadError):
+                extract_text(path)

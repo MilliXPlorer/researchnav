@@ -12,11 +12,22 @@ class ReviewAssignment extends Model
 
     protected $table = 'research_review_assignments';
 
-    protected $fillable = ['research_document_id', 'reviewer_id', 'assigned_by', 'review_role', 'is_active', 'status', 'designation'];
+    protected $fillable = [
+        'research_document_id',
+        'defense_type',
+        'reviewer_id',
+        'assigned_by',
+        'review_role',
+        'is_active',
+        'status',
+        'designation',
+        'support_pending_slot',
+        'support_history_slot',
+    ];
 
     protected function casts(): array
     {
-        return ['is_active' => 'boolean'];
+        return ['is_active' => 'boolean', 'support_pending_slot' => 'boolean'];
     }
 
     public function getTable(): string
@@ -48,6 +59,21 @@ class ReviewAssignment extends Model
         return Schema::getColumnType('research_assignments', 'user_id') === Schema::getColumnType('users', 'id');
     }
 
+    public static function supportsPendingSlot(): bool
+    {
+        return Schema::hasColumn((new static)->getTable(), 'support_pending_slot');
+    }
+
+    public static function supportsHistorySlot(): bool
+    {
+        return Schema::hasColumn((new static)->getTable(), 'support_history_slot');
+    }
+
+    public static function supportsStatus(): bool
+    {
+        return Schema::hasColumn((new static)->getTable(), 'status');
+    }
+
     public function getAttribute($key): mixed
     {
         if ($key === 'status' && ! Schema::hasColumn($this->getTable(), 'status')) {
@@ -65,6 +91,12 @@ class ReviewAssignment extends Model
 
     public function setAttribute($key, $value): static
     {
+        if ($key === 'is_active'
+            && $this->getTable() !== 'research_assignments'
+            && Schema::hasColumn($this->getTable(), 'status')
+            && ! array_key_exists('status', $this->getAttributes())) {
+            parent::setAttribute('status', $value ? 'accepted' : 'inactive');
+        }
         if ($key === 'status' && ! Schema::hasColumn($this->getTable(), 'status')) {
             return parent::setAttribute('is_active', in_array($value, ['accepted', 'confirmed', 'active'], true));
         }

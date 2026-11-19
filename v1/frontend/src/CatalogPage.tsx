@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
+  ArrowUp,
   ArrowUpDown,
+  ChevronDown,
   Download,
   FileText,
   Filter,
@@ -12,36 +14,62 @@ import {
   Button,
   EmptyState,
   Logo,
+  Pagination,
   SearchBox,
   SimilarityBadge,
   SimilarityRing,
 } from "./components";
 import {
-  repositoryDownloadUrl,
   searchPublicResearch,
   searchPublicResearchBySimilarity,
+  type LaravelPaginationMeta,
 } from "./api";
 import ProfileDialog, { ProfileAvatar } from "./ProfileDialog";
 import { instituteNames } from "./data";
-import { PublicationYearInput } from "./dateControls";
 import { classificationLabel, formatSimilarityPercentage } from "./similarity";
 import type { SimilarityClassification } from "./similarity";
 import type { ResearchRecord, UserSession } from "./types";
+import { processingProgress } from "./processingProgress";
 import { useDialogFocus } from "./useDialogFocus";
+import { SdgBadges } from "./SdgMetadata";
+import SdgPickerModal from "./SdgPickerModal";
+import ProtectedFileAccess from "./ProtectedFileAccess";
+import SelectMenu from "./SelectMenu";
+import { philippineYear } from "./dateTime";
 
 type SimilaritySearchResponse =
   | {
-      query: string;
+      key: string;
       request: number;
       status: "success";
       records: ResearchRecord[];
+      meta: LaravelPaginationMeta;
     }
   | {
-      query: string;
+      key: string;
       request: number;
       status: "error";
       message: string;
     };
+
+function catalogYearOptions(
+  emptyLabel: string,
+  bound: "from" | "to",
+  otherValue: string,
+) {
+  const currentYear = philippineYear();
+  const other = Number(otherValue);
+  const hasOther = otherValue !== "" && Number.isInteger(other);
+  return [
+    { value: "", label: emptyLabel },
+    ...Array.from({ length: 9 }, (_, index) => currentYear - index)
+      .filter(
+        (year) =>
+          !hasOther || (bound === "from" ? year <= other : year >= other),
+      )
+      .map((year) => ({ value: String(year), label: String(year) })),
+  ];
+}
 
 export default function CatalogPage({
   onSignIn,
@@ -76,18 +104,28 @@ export default function CatalogPage({
     null,
   );
   const [profileOpen, setProfileOpen] = useState(false);
+  const [sdgPickerOpen, setSdgPickerOpen] = useState(false);
+  const [showBackToTop, setShowBackToTop] = useState(false);
   const exactYear = searchParams.get("year") ?? "";
   const yearFrom = searchParams.get("year_from") ?? exactYear;
   const yearTo = searchParams.get("year_to") ?? exactYear;
-  const category = searchParams.get("category") ?? "all";
   const institute = searchParams.get("institute") ?? "all";
+  const sdgFilter = searchParams.get("sdgs") ?? "";
+  const sdgIds = useMemo(
+    () =>
+      sdgFilter
+        .split(",")
+        .map(Number)
+        .filter((id) => id >= 1 && id <= 17),
+    [sdgFilter],
+  );
   const hasServerFilters =
-    Boolean(yearFrom || yearTo) || category !== "all" || institute !== "all";
+    Boolean(yearFrom || yearTo || sdgIds.length) || institute !== "all";
   const serverFilterKey = JSON.stringify({
     yearFrom,
     yearTo,
-    category,
     institute,
+    sdgIds,
   });
   const [serverFiltered, setServerFiltered] = useState<{
     key: string;
@@ -96,20 +134,32 @@ export default function CatalogPage({
   } | null>(null);
   const serverFilterState =
     serverFiltered?.key === serverFilterKey ? serverFiltered : null;
+  const activeQuery = (searchParams.get("q") ?? "").trim();
+  const page = Math.max(1, Number(searchParams.get("page") ?? 1) || 1);
+  const hasActiveSimilarityQuery = activeQuery.length > 0;
   // Derived, so the effect never has to write a loading flag.
-  const serverFiltersLoading = hasServerFilters && serverFilterState === null;
-  const serverFiltersFailed = serverFilterState?.status === "error";
+  const serverFiltersLoading =
+    !hasActiveSimilarityQuery && hasServerFilters && serverFilterState === null;
+  const serverFiltersFailed =
+    !hasActiveSimilarityQuery && serverFilterState?.status === "error";
 
   useEffect(() => {
-    if (!hasServerFilters) return;
+    const update = () => setShowBackToTop(window.scrollY > 360);
+    update();
+    window.addEventListener("scroll", update, { passive: true });
+    return () => window.removeEventListener("scroll", update);
+  }, []);
+
+  useEffect(() => {
+    if (!hasServerFilters || hasActiveSimilarityQuery) return;
 
     let active = true;
     const controller = new AbortController();
 
     searchPublicResearch(
       {
-        category: category === "all" ? undefined : category,
         institute: institute === "all" ? undefined : institute,
+        sdgIds,
         yearFrom: yearFrom || undefined,
         yearTo: yearTo || undefined,
       },
@@ -138,21 +188,34 @@ export default function CatalogPage({
       controller.abort();
     };
   }, [
-    category,
+    hasActiveSimilarityQuery,
     hasServerFilters,
     institute,
+    sdgIds,
     serverFilterKey,
     yearFrom,
     yearTo,
   ]);
 
-  const activeQuery = (searchParams.get("q") ?? "").trim();
-  const hasActiveSimilarityQuery = activeQuery.length > 0;
   const [similarityRequest, setSimilarityRequest] = useState(0);
   const [similarityResponse, setSimilarityResponse] =
     useState<SimilaritySearchResponse | null>(null);
+  const [similarityProgress, setSimilarityProgress] = useState<{
+    key: string;
+    value: number;
+  } | null>(null);
+  const similarityKey = JSON.stringify({
+    activeQuery,
+    page,
+    yearFrom,
+    yearTo,
+    institute,
+    sdgIds,
+    sort: searchParams.get("sort") ?? "relevance",
+    request: similarityRequest,
+  });
   const isCurrentSimilarityResponse =
-    similarityResponse?.query === activeQuery &&
+    similarityResponse?.key === similarityKey &&
     similarityResponse.request === similarityRequest;
   const similarityLoading =
     hasActiveSimilarityQuery && !isCurrentSimilarityResponse;
@@ -170,19 +233,37 @@ export default function CatalogPage({
 
     let active = true;
     const controller = new AbortController();
+    const startedAt = Date.now();
+    const progressTimer = window.setInterval(() => {
+      setSimilarityProgress({
+        key: similarityKey,
+        value: processingProgress(Date.now() - startedAt),
+      });
+    }, 1_000);
 
     searchPublicResearchBySimilarity(
-      activeQuery,
+      {
+        q: activeQuery,
+        page,
+        yearFrom: yearFrom || undefined,
+        yearTo: yearTo || undefined,
+        institute: institute === "all" ? undefined : institute,
+        sdgIds,
+        sort: (searchParams.get("sort") ?? "relevance") as
+          "relevance" | "newest" | "oldest",
+      },
       globalThis.fetch,
       controller.signal,
     )
-      .then((rankedRecords) => {
+      .then((response) => {
         if (active) {
+          setSimilarityProgress({ key: similarityKey, value: 100 });
           setSimilarityResponse({
-            query: activeQuery,
+            key: similarityKey,
             request: similarityRequest,
             status: "success",
-            records: rankedRecords,
+            records: response.data,
+            meta: response.meta,
           });
         }
       })
@@ -194,7 +275,7 @@ export default function CatalogPage({
             });
           }
           setSimilarityResponse({
-            query: activeQuery,
+            key: similarityKey,
             request: similarityRequest,
             status: "error",
             message: "Similarity results are unavailable for this search.",
@@ -204,15 +285,61 @@ export default function CatalogPage({
 
     return () => {
       active = false;
+      window.clearInterval(progressTimer);
       controller.abort();
     };
-  }, [activeQuery, hasActiveSimilarityQuery, similarityRequest]);
+  }, [
+    activeQuery,
+    hasActiveSimilarityQuery,
+    institute,
+    page,
+    sdgIds,
+    searchParams,
+    similarityRequest,
+    similarityKey,
+    yearFrom,
+    yearTo,
+  ]);
+  const visibleSimilarityProgress =
+    similarityProgress?.key === similarityKey
+      ? similarityProgress.value
+      : processingProgress(0);
+  const loadingTitleCandidates = useMemo(() => {
+    const queryTerms = activeQuery
+      .toLocaleLowerCase()
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter((term) => term.length >= 2);
+    const matching = records.filter((record) => {
+      const searchable = [
+        record.title,
+        record.abstract,
+        record.authors,
+        ...record.keywords,
+      ]
+        .join(" ")
+        .toLocaleLowerCase();
+      return queryTerms.some((term) => searchable.includes(term));
+    });
+    return (matching.length > 0 ? matching : records).slice(0, 20);
+  }, [activeQuery, records]);
+  const loadingTitle =
+    loadingTitleCandidates[
+      Math.min(
+        loadingTitleCandidates.length - 1,
+        Math.floor(
+          (visibleSimilarityProgress / 100) * loadingTitleCandidates.length,
+        ),
+      )
+    ]?.title ?? "Preparing ranked results";
 
   const results = useMemo(() => {
-    // Server-side matching decides which records qualify whenever category or
-    // year filters are active.
+    // Server-side matching decides which records qualify whenever server filters
+    // are active. Similarity search includes those filters in its
+    // own page request, so no client-side intersection is needed there.
     const allowedIds = hasServerFilters
-      ? new Set(serverFilterState?.records.map((record) => record.id))
+      ? hasActiveSimilarityQuery
+        ? null
+        : new Set(serverFilterState?.records.map((record) => record.id))
       : null;
 
     const base = hasActiveSimilarityQuery
@@ -227,18 +354,12 @@ export default function CatalogPage({
 
     // Relevance preserves the backend's exact similarity rank. Date options
     // deliberately reorder only the already-qualified similarity results.
-    if (hasActiveSimilarityQuery) {
-      if (searchParams.get("sort") === "newest")
-        return [...filtered].sort((a, b) => b.year - a.year);
-      if (searchParams.get("sort") === "oldest")
-        return [...filtered].sort((a, b) => a.year - b.year);
-      return filtered;
-    }
+    if (hasActiveSimilarityQuery) return filtered;
     if (searchParams.get("sort") === "newest")
       return [...filtered].sort((a, b) => b.year - a.year);
     if (searchParams.get("sort") === "oldest")
       return [...filtered].sort((a, b) => a.year - b.year);
-    return filtered;
+    return [...filtered].sort((a, b) => Number(a.id) - Number(b.id));
   }, [
     records,
     similarityRecords,
@@ -253,6 +374,7 @@ export default function CatalogPage({
     if (value === "all" || !value) next.delete(name);
     else next.set(name, value);
     if (name === "year_from" || name === "year_to") next.delete("year");
+    if (name !== "page") next.delete("page");
     setSearchParams(next);
     window.history.replaceState(
       {},
@@ -268,7 +390,6 @@ export default function CatalogPage({
         query: submittedQuery,
         yearFrom: yearFrom || null,
         yearTo: yearTo || null,
-        category: category === "all" ? null : category,
         institute: institute === "all" ? null : institute,
       });
     }
@@ -316,56 +437,54 @@ export default function CatalogPage({
             <FileText /> Open metadata
           </span>
         </div>
-        <SearchBox value={query} onChange={setQuery} onSubmit={submitSearch} />
+        <SearchBox
+          value={query}
+          onChange={setQuery}
+          onSubmit={submitSearch}
+          submitIcon="search"
+        />
         <div className="catalog-toolbar">
           <div className="filter-label">
             <Filter /> Refine results
           </div>
           <label className="catalog-year-filter">
             From year
-            <PublicationYearInput
-              aria-label="Filter from publication year"
+            <SelectMenu
+              label="Filter from publication year"
               value={yearFrom}
-              max={yearTo || undefined}
-              placeholder="From"
-              onChange={(event) => updateParam("year_from", event.target.value)}
+              onChange={(value) => updateParam("year_from", value)}
+              options={catalogYearOptions("Any year", "from", yearTo)}
             />
           </label>
           <label className="catalog-year-filter">
             To year
-            <PublicationYearInput
-              aria-label="Filter to publication year"
+            <SelectMenu
+              label="Filter to publication year"
               value={yearTo}
-              min={yearFrom || undefined}
-              placeholder="To"
-              onChange={(event) => updateParam("year_to", event.target.value)}
+              onChange={(value) => updateParam("year_to", value)}
+              options={catalogYearOptions("Any year", "to", yearFrom)}
             />
           </label>
-          <label>
-            Category<span className="sr-only">Filter by category</span>
-            <select
-              value={category}
-              onChange={(event) => updateParam("category", event.target.value)}
-            >
-              <option value="all">All categories</option>
-              {[...new Set(records.map((record) => record.category))].map(
-                (value) => (
-                  <option key={value}>{value}</option>
-                ),
-              )}
-            </select>
-          </label>
+          <div className="catalog-sdg-filter-trigger">
+            <span>
+              SDG<span className="sr-only">Filter by SDG</span>
+            </span>
+            <button type="button" onClick={() => setSdgPickerOpen(true)}>
+              {sdgIds.length > 0 ? `${sdgIds.length} selected` : "All SDGs"}
+              <ChevronDown />
+            </button>
+          </div>
           <label>
             Institute<span className="sr-only">Filter by institute</span>
-            <select
+            <SelectMenu
+              label="Filter by institute"
               value={institute}
-              onChange={(event) => updateParam("institute", event.target.value)}
-            >
-              <option value="all">All institutes</option>
-              {instituteNames.map((value) => (
-                <option key={value}>{value}</option>
-              ))}
-            </select>
+              onChange={(value) => updateParam("institute", value)}
+              options={[
+                { value: "all", label: "All institutes" },
+                ...instituteNames.map((value) => ({ value, label: value })),
+              ]}
+            />
           </label>
         </div>
         <aside className="aside-note catalog-search-tip">
@@ -378,7 +497,13 @@ export default function CatalogPage({
         <div className="results-summary">
           <p>
             <strong>
-              {similarityLoading || serverFiltersLoading ? "…" : results.length}
+              {similarityLoading || serverFiltersLoading
+                ? "…"
+                : hasActiveSimilarityQuery &&
+                    isCurrentSimilarityResponse &&
+                    similarityResponse.status === "success"
+                  ? similarityResponse.meta.total.toLocaleString()
+                  : results.length}
             </strong>{" "}
             {results.length === 1 ? "study" : "studies"} found
           </p>
@@ -396,12 +521,40 @@ export default function CatalogPage({
           </label>
         </div>
         <div className={`catalog-layout${session ? " is-authenticated" : ""}`}>
-          <section className="result-list" aria-label="Research results">
+          <section
+            className="result-list"
+            aria-label="Research results"
+            aria-busy={similarityLoading}
+          >
             {hasActiveSimilarityQuery && similarityLoading ? (
-              <EmptyState
-                title="Calculating similarity results"
-                message="Ranking public research studies for your submitted search…"
-              />
+              <div
+                className="similarity-loading"
+                role="status"
+                aria-label="Calculating similarity results"
+              >
+                <div
+                  className="similarity-progress-ring"
+                  role="progressbar"
+                  aria-label={`Ranking ${loadingTitle}`}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={visibleSimilarityProgress}
+                  style={
+                    {
+                      "--progress": visibleSimilarityProgress,
+                    } as React.CSSProperties
+                  }
+                >
+                  <span>{visibleSimilarityProgress}%</span>
+                </div>
+                <div className="similarity-loading-copy">
+                  <span className="similarity-loading-label">
+                    Ranking research matches
+                  </span>
+                  <h3 title={loadingTitle}>{loadingTitle}</h3>
+                  <p>Highest similarity results will appear first.</p>
+                </div>
+              </div>
             ) : hasActiveSimilarityQuery && similarityError ? (
               <div role="alert">
                 <EmptyState
@@ -412,7 +565,7 @@ export default function CatalogPage({
             ) : serverFiltersLoading ? (
               <EmptyState
                 title="Applying filters"
-                message="Matching authors, keywords, categories, and years in the repository…"
+                message="Matching authors, keywords, and years in the repository…"
               />
             ) : serverFiltersFailed ? (
               <div role="alert">
@@ -446,17 +599,19 @@ export default function CatalogPage({
                 />
               )
             ) : (
-              results.map((record) => (
+              results.map((record, index) => (
                 <article className="result-card" key={record.id}>
                   <div className="result-accession">
-                    <span>{record.id}</span>
-                    <span>{record.category}</span>
+                    <span>{index + 1}</span>
                   </div>
                   <h2>{record.title}</h2>
                   <p className="result-authors">
                     {record.authors} · {record.year} · {record.program}
                   </p>
                   <p className="result-abstract">{record.abstract}</p>
+                  {(record.sdgs?.length ?? 0) > 0 && (
+                    <SdgBadges sdgs={record.sdgs ?? []} limit={4} />
+                  )}
                   {hasActiveSimilarityQuery ? (
                     <OverallSimilarityScore record={record} />
                   ) : (
@@ -471,36 +626,45 @@ export default function CatalogPage({
                     ))}
                   </div>
                   <div className="result-actions">
-                    <button onClick={() => setSelectedRecord(record)}>
+                    <button
+                      className="result-metadata-action"
+                      onClick={() => setSelectedRecord(record)}
+                    >
                       View full metadata <ArrowRight />
                     </button>
-                    {session ? (
-                      record.hasDownloadableManuscript ? (
-                        <a
-                          className="button button-primary"
-                          href={repositoryDownloadUrl(record.id)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          <Download /> View files
-                        </a>
-                      ) : (
-                        <span className="download-gate is-unavailable">
-                          <FileText /> Final manuscript unavailable
-                        </span>
-                      )
-                    ) : (
-                      <button
-                        className="button button-primary"
-                        onClick={onSignIn}
+                    {record.hasDownloadableManuscript ? (
+                      <ProtectedFileAccess
+                        researchDocumentId={record.id}
+                        authenticated={Boolean(session)}
+                        onSignIn={onSignIn}
                       >
-                        <LockKeyhole /> Sign in to view files
-                      </button>
+                        {session ? <Download /> : <LockKeyhole />} View files
+                      </ProtectedFileAccess>
+                    ) : session ? (
+                      <span className="download-gate is-unavailable">
+                        <FileText /> Final manuscript unavailable
+                      </span>
+                    ) : (
+                      <span className="download-gate is-unavailable">
+                        <FileText /> Final manuscript unavailable
+                      </span>
                     )}
                   </div>
                 </article>
               ))
             )}
+            {hasActiveSimilarityQuery &&
+              isCurrentSimilarityResponse &&
+              similarityResponse.status === "success" &&
+              similarityResponse.meta.last_page > 1 && (
+                <Pagination
+                  meta={similarityResponse.meta}
+                  noun="studies"
+                  onPage={(nextPage) => {
+                    updateParam("page", String(nextPage));
+                  }}
+                />
+              )}
           </section>
           {!session && (
             <aside className="catalog-aside">
@@ -528,14 +692,33 @@ export default function CatalogPage({
           authenticated={Boolean(session)}
         />
       )}
+      {sdgPickerOpen && (
+        <SdgPickerModal
+          onClose={() => setSdgPickerOpen(false)}
+          onApply={(ids) => {
+            setSdgPickerOpen(false);
+            updateParam("sdgs", ids.join(","));
+          }}
+        />
+      )}
       {session && profileOpen && onSessionChange && (
         <ProfileDialog
           session={session}
           onSessionChange={onSessionChange}
           onClose={() => setProfileOpen(false)}
-          onOpenWorkspace={() => navigate("/app")}
           onLogout={onLogout}
         />
+      )}
+      {showBackToTop && (
+        <button
+          type="button"
+          className="catalog-scroll-top"
+          aria-label="Back to top"
+          title="Back to top"
+          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+        >
+          <ArrowUp aria-hidden="true" />
+        </button>
       )}
     </div>
   );
@@ -610,6 +793,9 @@ function MetadataDialog({
           <h3>Abstract</h3>
           <p>{record.abstract}</p>
         </div>
+        {(record.sdgs?.length ?? 0) > 0 && (
+          <SdgBadges sdgs={record.sdgs ?? []} />
+        )}
         <div className="keyword-list">
           {record.keywords.map((keyword) => (
             <span key={keyword}>{keyword}</span>
@@ -619,23 +805,18 @@ function MetadataDialog({
           <Button variant="secondary" onClick={onClose}>
             Return to results
           </Button>
-          {authenticated && record.hasDownloadableManuscript ? (
-            <a
-              className="button button-primary"
-              href={repositoryDownloadUrl(record.id)}
-              target="_blank"
-              rel="noopener noreferrer"
+          {record.hasDownloadableManuscript ? (
+            <ProtectedFileAccess
+              researchDocumentId={record.id}
+              authenticated={authenticated}
+              onSignIn={onSignIn}
             >
-              <Download /> View files
-            </a>
-          ) : authenticated ? (
+              {authenticated ? <Download /> : <LockKeyhole />} View files
+            </ProtectedFileAccess>
+          ) : (
             <span className="download-gate is-unavailable">
               <FileText /> Final manuscript unavailable
             </span>
-          ) : (
-            <Button onClick={onSignIn}>
-              <LockKeyhole /> Sign in to view files
-            </Button>
           )}
         </div>
       </section>

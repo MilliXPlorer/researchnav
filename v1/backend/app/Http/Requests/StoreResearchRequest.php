@@ -19,13 +19,14 @@ class StoreResearchRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'category_id' => ['nullable', 'integer', 'exists:categories,id'],
             'institute' => ['nullable', Rule::in(ResearchDocument::INSTITUTES)],
             'degree_program' => ['nullable', 'string', 'max:255'],
             'title' => ['required', 'string', 'max:500'],
             'abstract' => ['nullable', 'string', 'max:50000'],
             'keywords' => ['nullable', 'string', 'max:5000'],
             'publication_year' => ['nullable', 'integer', 'between:1901,2155'],
+            'sdg_ids' => ['sometimes', 'array', 'max:17'],
+            'sdg_ids.*' => ['integer', 'distinct', 'exists:sdgs,id'],
             'research_stage' => ['required', Rule::in(ResearchDocument::RESEARCH_STAGES)],
             'visibility' => ['prohibited'],
             'authors' => ['required', 'array', 'min:1', 'max:50'],
@@ -38,7 +39,7 @@ class StoreResearchRequest extends FormRequest
     public function withValidator(Validator $validator): void
     {
         $validator->after(function () use ($validator): void {
-            $this->rejectUnknownFields($validator, ['category_id', 'institute', 'degree_program', 'title', 'abstract', 'keywords', 'publication_year', 'research_stage', 'authors']);
+            $this->rejectUnknownFields($validator, ['institute', 'degree_program', 'title', 'abstract', 'keywords', 'publication_year', 'sdg_ids', 'research_stage', 'authors']);
             $this->validateProgram($validator);
             foreach ((array) $this->input('authors', []) as $index => $author) {
                 if (! is_array($author)) {

@@ -15,6 +15,7 @@ class DocumentFileResource extends JsonResource
             'uploaded_by' => $this->uploaded_by,
             'uploader_name' => $this->whenLoaded('uploader', fn () => $this->uploader?->profileName() ?? $this->uploader?->email),
             'document_type' => $this->document_type,
+            'upload_purpose' => $this->upload_purpose,
             'version_number' => $this->version_number,
             'original_filename' => $this->original_filename,
             'relative_path' => $this->relative_path,

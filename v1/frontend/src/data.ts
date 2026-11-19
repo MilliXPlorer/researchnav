@@ -13,10 +13,7 @@ export const programsByInstitute: Record<
   (typeof instituteNames)[number],
   readonly string[]
 > = {
-  "Institute of Computer Studies": [
-    "Bachelor of Science in Computer Science",
-    "Bachelor of Science in Information Technology",
-  ],
+  "Institute of Computer Studies": ["Bachelor of Science in Computer Science"],
   "Institute of Health Sciences": ["Bachelor of Science in Midwifery"],
   "Institute of Business and Financial Management": [
     "Bachelor of Science in Business Administration major in Human Resource Management",
@@ -66,7 +63,7 @@ export const roleConfigs: RoleConfig[] = [
       "Access Requests",
       "User & Role Management",
       "Audit Logs",
-      "Upload Manuscript",
+      "Manage Repository",
       "System Settings",
     ],
   },
@@ -82,59 +79,28 @@ export const roleConfigs: RoleConfig[] = [
     label: "Research Adviser",
     shortLabel: "Adviser",
     description: "Review advisee drafts and similarity alerts.",
-    nav: [
-      "Dashboard",
-      "Assigned Research",
-      "Title Review",
-      "Manuscript Review",
-      "Research Progress Updates",
-      "Defense Monitoring Forms",
-      "Review History",
-    ],
+    nav: ["Dashboard", "Assigned Research", "User Logs"],
   },
   {
     id: "instructor",
     label: "Research Instructor",
     shortLabel: "Instructor",
     description: "Oversee class proposals and similarity trends.",
-    nav: [
-      "Dashboard",
-      "My Sections",
-      "Assigned Research",
-      "Title Review",
-      "Manuscript Review",
-      "Research Progress Updates",
-      "Defense Monitoring Forms",
-      "Review History",
-    ],
+    nav: ["Dashboard", "My Sections", "User Logs"],
   },
   {
     id: "panel",
     label: "Research Panel",
     shortLabel: "Panel member",
     description: "Read manuscripts and submit evaluations.",
-    nav: [
-      "Dashboard",
-      "Research Folders",
-      "Assigned Defenses",
-      "Defense Evaluation",
-      "Availability Calendar",
-      "Defense Monitoring Forms",
-      "Evaluation History",
-    ],
+    nav: ["Dashboard", "Assigned Research", "Repository", "User Logs"],
   },
   {
     id: "statistician",
     label: "Statistician",
     shortLabel: "Statistician",
     description: "Review methodology and issue sign-offs.",
-    nav: [
-      "Dashboard",
-      "Assigned Research",
-      "Statistical Review",
-      "Defense Monitoring Forms",
-      "Review History",
-    ],
+    nav: ["Dashboard", "Assigned Research", "Repository", "User Logs"],
   },
   {
     id: "research_editor",
@@ -142,27 +108,14 @@ export const roleConfigs: RoleConfig[] = [
     shortLabel: "Editor",
     description:
       "Review manuscript language, clarity, organization, and formatting.",
-    nav: [
-      "Dashboard",
-      "Assigned Research",
-      "Editorial Review",
-      "Defense Monitoring Forms",
-      "Review History",
-    ],
+    nav: ["Dashboard", "Assigned Research", "Repository", "User Logs"],
   },
   {
     id: "coordinator",
     label: "Research Coordinator",
     shortLabel: "Coordinator",
-    description: "Monitor the program, schedules, and duplicate flags.",
-    nav: [
-      "Program Overview",
-      "Schedules",
-      "Duplicate Flags",
-      "Adviser Load",
-      "Account Roles",
-      "Reports",
-    ],
+    description: "Monitor the program.",
+    nav: ["Program Overview", "Research Assignments", "Repository", "Reports"],
   },
   {
     id: "librarian",
@@ -170,14 +123,7 @@ export const roleConfigs: RoleConfig[] = [
     shortLabel: "Librarian",
     description:
       "Review references, citations, links, and source documentation.",
-    nav: [
-      "Dashboard",
-      "Assignment Requests",
-      "Assigned Research",
-      "Reference Review",
-      "Defense Monitoring Forms",
-      "Review History",
-    ],
+    nav: ["Dashboard", "Assigned Research", "Repository", "User Logs"],
   },
   {
     id: "research-office",
@@ -190,9 +136,9 @@ export const roleConfigs: RoleConfig[] = [
 
     nav: [
       "Dashboard",
-      "Research Folders",
+      "Assigned Research",
       "Similarity Check",
-      "Upload Manuscript",
+      "Manage Repository",
       "User & Role Management",
       "Reports & Exports",
     ],

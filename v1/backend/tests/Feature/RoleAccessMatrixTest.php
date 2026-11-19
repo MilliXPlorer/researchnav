@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Models\Category;
 use App\Models\ResearchDocument;
 use App\Models\ReviewAssignment;
 use App\Models\User;
@@ -92,7 +91,7 @@ class RoleAccessMatrixTest extends TestCase
 
     public function test_compatibility_roles_are_denied_office_authority_but_keep_their_workspace(): void
     {
-        $coordinator = $this->user(['role' => 'coordinator']);
+        $coordinator = $this->user(['role' => 'coordinator', 'institute' => 'Institute of Computer Studies']);
         $this->as($coordinator)->getJson('/api/office/users')
             ->assertForbidden()
             ->assertExactJson(['error' => 'ROLE_NOT_AUTHORIZED']);
@@ -206,11 +205,8 @@ class RoleAccessMatrixTest extends TestCase
     private function research(): array
     {
         $owner = $this->user(['role' => 'researcher']);
-        $category = Category::query()->create(['name' => 'Category '.Str::random(8), 'slug' => 'category-'.Str::random(8)]);
-
         $research = ResearchDocument::query()->create([
             'submitted_by' => $owner->id,
-            'category_id' => $category->id,
             'title' => 'Research '.Str::random(10),
             'abstract' => 'Abstract '.Str::random(10),
             'keywords' => 'research',

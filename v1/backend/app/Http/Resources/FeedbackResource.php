@@ -23,9 +23,23 @@ class FeedbackResource extends JsonResource
             'comment' => $this->comment,
             'feedback_type' => $this->feedback_type,
             'feedback_status' => $this->feedback_status,
+            'resolved_at' => $this->resolved_at?->toISOString(),
             'researcher_acknowledged_at' => $this->researcher_acknowledged_at?->toISOString(),
             'researcher_addressed_at' => $this->researcher_addressed_at?->toISOString(),
             'researcher_action_remarks' => $this->researcher_action_remarks,
+            'attachment' => $this->whenLoaded('attachment', function () {
+                if ($this->attachment === null) {
+                    return null;
+                }
+
+                return [
+                    'original_filename' => $this->attachment->original_filename,
+                    'file_extension' => $this->attachment->file_extension,
+                    'mime_type' => $this->attachment->mime_type,
+                    'file_size' => (int) $this->attachment->file_size,
+                    'url' => '/api/research/'.$this->research_document_id.'/feedback/'.$this->getRouteKey().'/attachment',
+                ];
+            }),
             'created_at' => $this->created_at?->toISOString(),
         ];
     }

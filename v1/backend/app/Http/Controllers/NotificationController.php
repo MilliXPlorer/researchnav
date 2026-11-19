@@ -8,6 +8,16 @@ use Illuminate\Http\Request;
 
 class NotificationController extends DomainController
 {
+    public function unreadCount(Request $request, AccessRequestService $accessRequests)
+    {
+        $actor = $this->actor($request);
+        $accessRequests->syncPendingNotificationsFor($actor);
+
+        return response()->json([
+            'unread_count' => $actor->unreadNotifications()->count(),
+        ]);
+    }
+
     public function index(Request $request, AccessRequestService $accessRequests)
     {
         $actor = $this->actor($request);
@@ -22,5 +32,13 @@ class NotificationController extends DomainController
         $item->markAsRead();
 
         return new NotificationResource($item->fresh());
+    }
+
+    public function destroy(Request $request, string $notification)
+    {
+        $item = $this->actor($request)->notifications()->whereKey($notification)->firstOrFail();
+        $item->delete();
+
+        return response()->noContent();
     }
 }

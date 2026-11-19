@@ -3,10 +3,160 @@
 from __future__ import annotations
 
 import math
+import re
+import unicodedata
+from collections import Counter
+from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 _TWELVE_PLACES = Decimal("0.000000000001")
+_ORDINAL_NUMBER_RE = re.compile(r"\A\d+(?:st|nd|rd|th)\Z", re.IGNORECASE)
+_CONTENT_TOKEN_RE = re.compile(r"(?u)\b[\w\d]{2,}\b")
+_CHAPTER_HEADING = re.compile(
+    r"(?im)^[ \t]*(?:chapter|chpter|kabanata|tsapter)[\s\u00a0]+"
+    r"(?P<number>10|[1-9]|one|uno|two|three|four|five|six|seven|eight|nine|ten|"
+    r"viii|vii|vi|iv|iii|ii|ix|x|v|i)"
+    r"(?!\w)[ \t]*(?:[:.\-–—][ \t]*)?[^\r\n]*\r?$"
+)
+_BACK_MATTER_HEADING = re.compile(
+    r"(?im)^[ \t]*(?:references(?:[ \t]+and[ \t]+bibliography)?|bibliography|"
+    r"appendix|appendices|annex(?:es)?|curriculum[ \t]+vitae|questionnaires?|"
+    r"research[ \t]+instrument)(?:[ \t]+[A-Z0-9]+)?"
+    r"(?:[ \t]*[:.\-–—][^\r\n]*)?[ \t]*\r?$"
+)
+_INLINE_CHAPTER_HEADING = re.compile(
+    r"\b(?:chapter|chpter|kabanata|tsapter)[\s\u00a0]+(?:10|[1-9]|one|uno|two|three|four|five|six|"
+    r"seven|eight|nine|ten|viii|vii|vi|iv|iii|ii|ix|x|v|i)(?!\w)",
+    re.IGNORECASE,
+)
+_FLAT_CHAPTER_HEADING = re.compile(
+    r"(?<!\w)(?:CHAPTER|Chapter|CHPTER|Chpter|KABANATA|Kabanata|TSAPTER|Tsapter)[\s\u00a0]+"
+    r"(?P<number>10|[1-9]|ONE|UNO|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|"
+    r"VIII|VII|VI|IV|III|II|IX|X|V|I)"
+    r"(?!\w)(?=[ \t]*(?:[:.\-–—]|[A-Z]))",
+)
+_FLAT_BACK_MATTER_HEADING = re.compile(
+    r"(?<!\w)(?:REFERENCES|BIBLIOGRAPHY|APPENDICES|APPENDIX|ANNEXES|"
+    r"CURRICULUM[ \t]+VITAE|QUESTIONNAIRES?|RESEARCH[ \t]+INSTRUMENT)(?!\w)"
+)
+_FLAT_NUMBERED_CHAPTER_HEADING = re.compile(
+    r"(?<!\w)(?P<number>[2-5])[ \t]+"
+    r"(?=(?:THE[ \t]+REVIEW[ \t]+OF[ \t]+RELATED[ \t]+LITERATURE|"
+    r"REVIEW[ \t]+OF[ \t]+RELATED[ \t]+LITERATURE|"
+    r"RESEARCH[ \t]+METHODOLOGY|METHODOLOGY|"
+    r"PRESENTATION(?:,[ \t]+|[ \t]+)(?:ANALYSIS|INTERPRETATION)|"
+    r"RESULTS[ \t]+AND[ \t]+DISCUSSION|"
+    r"SUMMARY[ \t]+OF[ \t]+FINDINGS|SUMMARY(?:,[ \t]+|[ \t]+)"
+    r"(?:CONCLUSIONS?|FINDINGS))\b)",
+    re.IGNORECASE,
+)
+_FIRST_SECTION_TITLE = re.compile(
+    r"(?im)^[ \t]*(?:SAKLAW[ \t]+AT[ \t]+SULIRANIN|THE[ \t]+PROBLEM[ \t]+AND[ \t]+ITS[ \t]+SCOPE)[ \t]*\r?$"
+)
+_NUMBER_WORDS = {
+    word: number
+    for number, word in enumerate(
+        (
+            "",
+            "ONE",
+            "TWO",
+            "THREE",
+            "FOUR",
+            "FIVE",
+            "SIX",
+            "SEVEN",
+            "EIGHT",
+            "NINE",
+            "TEN",
+        )
+    )
+    if word
+}
+_ROMAN_NUMERALS = {
+    "I": 1,
+    "II": 2,
+    "III": 3,
+    "IV": 4,
+    "V": 5,
+    "VI": 6,
+    "VII": 7,
+    "VIII": 8,
+    "IX": 9,
+    "X": 10,
+}
+_CONTENT_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "by",
+        "for",
+        "from",
+        "in",
+        "is",
+        "of",
+        "on",
+        "or",
+        "that",
+        "the",
+        "to",
+        "with",
+        "ako",
+        "ang",
+        "ay",
+        "bilang",
+        "dahil",
+        "din",
+        "dito",
+        "doon",
+        "habang",
+        "ito",
+        "iyon",
+        "kanilang",
+        "kanyang",
+        "kapag",
+        "kasi",
+        "kay",
+        "kaya",
+        "kung",
+        "lang",
+        "mga",
+        "mula",
+        "na",
+        "namin",
+        "nang",
+        "ng",
+        "ngunit",
+        "ni",
+        "nila",
+        "nito",
+        "o",
+        "para",
+        "pero",
+        "rin",
+        "sa",
+        "sila",
+        "siya",
+        "tayo",
+        "upang",
+    }
+)
+_MAX_TOKEN_UTF8_BYTES = 100
+_MAX_CONTENT_TOKENS = 500_000
+_MAX_CONTENT_VOCABULARY = 50_000
+_MAX_CONTENT_CORPUS_CHARACTERS = 100_000_000
+
+
+@dataclass(frozen=True)
+class _ChapterScope:
+    text: str
+    last_chapter: int
+
 
 try:
     from .cosine import source_cosine_scores
@@ -24,9 +174,44 @@ class InvalidWorkerInput(ValueError):
     """Raised when the worker protocol is malformed."""
 
 
+class InvalidUploadedContentScope(InvalidWorkerInput):
+    """Raised when an uploaded manuscript cannot be chapter-scoped."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+class SimilarityCapacityExceeded(RuntimeError):
+    """Raised before a bounded similarity workload becomes expensive."""
+
+
 def title_tokens(title: str) -> list[str]:
     """Backward-compatible name for deterministic title preprocessing."""
     return preprocess_title(title)
+
+
+def matched_terms(left: Iterable[str], right: Iterable[str]) -> list[str]:
+    """Return bounded lexical overlap without changing scoring tokens."""
+    shared = sorted(set(left).intersection(right))
+    return [
+        term
+        for term in shared
+        if len(term) <= 100
+        and any(character.isalpha() for character in term)
+        and _ORDINAL_NUMBER_RE.fullmatch(term) is None
+    ][:32]
+
+
+def _bounded_terms(
+    shared: Iterable[str], predicate: Callable[[str], bool] = lambda term: True
+) -> list[str]:
+    """Bound response terms by encoded size before taking the result limit."""
+    return [
+        term
+        for term in sorted(shared)
+        if len(term.encode("utf-8")) <= _MAX_TOKEN_UTF8_BYTES and predicate(term)
+    ][:32]
 
 
 def decimal_score(value: float) -> str:
@@ -34,22 +219,454 @@ def decimal_score(value: float) -> str:
     if not math.isfinite(value):
         raise ValueError("Score must be finite.")
     normalized = min(1.0, max(0.0, value))
-    return format(Decimal(str(normalized)).quantize(_TWELVE_PLACES, rounding=ROUND_HALF_UP), "f")
+    return format(
+        Decimal(str(normalized)).quantize(_TWELVE_PLACES, rounding=ROUND_HALF_UP), "f"
+    )
 
 
 def percentage_score(score: str) -> str:
     """Compatibility utility; policy percentages are authoritative in PHP."""
-    return format((Decimal(score) * Decimal("100")).quantize(_TWELVE_PLACES, rounding=ROUND_HALF_UP), "f")
+    return format(
+        (Decimal(score) * Decimal("100")).quantize(
+            _TWELVE_PLACES, rounding=ROUND_HALF_UP
+        ),
+        "f",
+    )
 
 
 def record_text(record: dict[str, Any]) -> str:
     """Combine a record title with extracted content when content is available."""
     content = record.get("content")
     return (
-        f'{record["title"]}\n{content}'
+        f"{record['title']}\n{content}"
         if isinstance(content, str) and content
         else record["title"]
     )
+
+
+def _chapter_number(value: str) -> int:
+    normalized = value.upper()
+    if normalized == "UNO":
+        return 1
+    if normalized.isdigit():
+        return int(normalized)
+    if normalized in _NUMBER_WORDS:
+        return _NUMBER_WORDS[normalized]
+    return _ROMAN_NUMERALS[normalized]
+
+
+def _structural_chapter_matches(text: str) -> list[re.Match[str]]:
+    matches = []
+    for match in _CHAPTER_HEADING.finditer(text):
+        heading = match.group(0).strip()
+        title_start = match.start("number") - match.start() + len(match.group("number"))
+        title = heading[title_start:].lstrip(" \t:.-–—")
+        if title and (
+            len(title) > 120
+            or title.endswith((".", "?", "!"))
+            or (title[0].islower() and len(title.split()) > 3)
+        ):
+            continue
+        matches.append(match)
+    return matches
+
+
+def _scope_from_matches(
+    text: str, matches: list[re.Match[str]], back_matter: re.Pattern[str] | None
+) -> _ChapterScope:
+    headings = sorted(
+        ((match, _chapter_number(match.group("number"))) for match in matches),
+        key=lambda item: item[0].start(),
+    )
+    starts = [(match, number) for match, number in headings if number == 1]
+    if not starts:
+        raise InvalidWorkerInput("Chapter 1 was not detected.")
+
+    start, _ = starts[-1]
+    included = [(start, 1)]
+    previous = 1
+    end = len(text)
+    for match, number in headings:
+        if match.start() <= start.start():
+            continue
+        if number <= previous:
+            raise InvalidWorkerInput("Chapter headings are duplicated or out of order.")
+        included.append((match, number))
+        previous = number
+
+    parts: list[str] = []
+    position = start.start()
+    for match, number in included:
+        parts.append(text[position : match.start()])
+        heading = match.group(0).strip()
+        title_start = match.start("number") - match.start() + len(match.group("number"))
+        title = heading[title_start:].lstrip(" \t:.-–—")
+        parts.append(f"CHAPTER {number}" + (f" {title}" if title else ""))
+        if (
+            not title
+            and match.end() < len(text)
+            and not text[match.end()].isspace()
+            and text[match.end()] not in ":.-–—"
+        ):
+            parts.append(" ")
+        position = match.end()
+    parts.append(text[position:end])
+    scoped = "".join(parts).strip()
+    if not scoped:
+        raise InvalidWorkerInput("No chapter content was detected.")
+    return _ChapterScope(scoped, included[-1][1])
+
+
+def _complete_scope_from_matches(text: str, matches: list[re.Match[str]]) -> _ChapterScope:
+    headings = sorted(
+        ((match, _chapter_number(match.group("number"))) for match in matches),
+        key=lambda item: item[0].start(),
+    )
+    starts = [(match, number) for match, number in headings if number == 1]
+    if not starts:
+        raise InvalidWorkerInput("Chapter 1 was not detected.")
+    candidates = []
+    for start, _ in starts:
+        boundary_match = _BACK_MATTER_HEADING.search(text, start.end())
+        boundary = boundary_match.start() if boundary_match else len(text)
+        following = []
+        previous = 1
+        invalid = False
+        for match, number in headings:
+            if match.start() <= start.start() or match.start() >= boundary:
+                continue
+            if number == previous:
+                continue
+            if number < previous:
+                invalid = True
+                break
+            following.append((match, number))
+            previous = number
+        content = text[start.end() : boundary].strip(" \t\r\n:.-–—")
+        if not invalid and content:
+            candidates.append((start, boundary, following, previous))
+    if not candidates:
+        if any(text[start.end() :].strip(" \t\r\n:.-–—") for start, _ in starts):
+            raise InvalidWorkerInput("Chapter headings are out of order.")
+        raise InvalidWorkerInput("No chapter content was detected.")
+    start, boundary, following, previous = max(
+        candidates,
+        key=lambda candidate: (candidate[3], len(candidate[2]), candidate[0].start()),
+    )
+    parts: list[str] = []
+    position = start.start()
+    for match, number in [(start, 1), *following]:
+        parts.append(text[position : match.start()])
+        heading = match.group(0).strip()
+        title_start = match.start("number") - match.start() + len(match.group("number"))
+        title = heading[title_start:].lstrip(" \t:.-–—")
+        parts.append(f"CHAPTER {number}" + (f" {title}" if title else ""))
+        if not title and match.end() < len(text) and not text[match.end()].isspace():
+            parts.append(" ")
+        position = match.end()
+    parts.append(text[position:])
+    scoped = "".join(parts).strip()
+    content_after_heading = text[start.end() : boundary].strip(" \t\r\n:.-–—")
+    if not scoped or not content_after_heading:
+        raise InvalidWorkerInput("No chapter content was detected.")
+    return _ChapterScope(scoped, previous)
+
+
+def _scope_from_first_section_title(
+    text: str, matches: list[re.Match[str]]
+) -> _ChapterScope:
+    title = _FIRST_SECTION_TITLE.search(text)
+    if title is None:
+        raise InvalidWorkerInput("Chapter 1 was not detected.")
+    following = sorted(
+        (
+            (match, _chapter_number(match.group("number")))
+            for match in matches
+            if match.start() > title.start()
+        ),
+        key=lambda item: item[0].start(),
+    )
+    if not any(number == 2 for _, number in following):
+        raise InvalidWorkerInput("Chapter 2 was not detected after the first section.")
+    synthetic = text[: title.start()] + "CHAPTER 1\n" + text[title.start() :]
+    offset = len("CHAPTER 1\n")
+    shifted_matches = list(_CHAPTER_HEADING.finditer(synthetic))
+    if not any(match.start() >= title.start() + offset for match in shifted_matches):
+        raise InvalidWorkerInput("Later chapter headings were not detected.")
+    return _complete_scope_from_matches(synthetic, shifted_matches)
+
+
+def _chapter_scope(text: str) -> _ChapterScope:
+    matches = _structural_chapter_matches(text)
+    return _scope_from_matches(text, matches, _BACK_MATTER_HEADING)
+
+
+def _flattened_chapter_scope(text: str) -> _ChapterScope:
+    headings = list(_FLAT_CHAPTER_HEADING.finditer(text))
+    starts = [
+        match for match in headings if _chapter_number(match.group("number")) == 1
+    ]
+    if not starts:
+        return _scope_from_matches(text, headings, _FLAT_BACK_MATTER_HEADING)
+
+    start = starts[-1]
+    boundary_match = _FLAT_BACK_MATTER_HEADING.search(text, start.end())
+    boundary = boundary_match.start() if boundary_match else len(text)
+    combined = [
+        match for match in headings if start.start() <= match.start() < boundary
+    ]
+    combined.extend(
+        match
+        for match in _FLAT_NUMBERED_CHAPTER_HEADING.finditer(text)
+        if start.start() < match.start() < boundary
+        and not any(
+            heading.start() <= match.start() < heading.end() for heading in headings
+        )
+        and not re.search(
+            r"(?:TABLE|FIGURE)[ \t]+$",
+            text[max(start.start(), match.start() - 32) : match.start()],
+            re.IGNORECASE,
+        )
+    )
+    combined.sort(key=lambda match: match.start())
+    selected = [start]
+    expected = 2
+    for match in combined:
+        if match.start() <= start.start():
+            continue
+        number = _chapter_number(match.group("number"))
+        explicit = match.re is _FLAT_CHAPTER_HEADING
+        if number == expected:
+            selected.append(match)
+            expected += 1
+        elif explicit and number > expected:
+            selected.append(match)
+            expected = number + 1
+        elif number > expected:
+            continue
+        elif explicit and number >= 2:
+            continue
+    return _scope_from_matches(text, selected, _FLAT_BACK_MATTER_HEADING)
+
+
+def _uploaded_content_scope(text: str) -> _ChapterScope:
+    """Keep complete content from Chapter 1 using line or flattened headings."""
+    line_matches = _structural_chapter_matches(text)
+    flat_matches = list(_FLAT_CHAPTER_HEADING.finditer(text))
+    line_numbers = [_chapter_number(match.group("number")) for match in line_matches]
+    upper_text = text.upper()
+    has_toc = "TABLE OF CONTENTS" in upper_text or "TALAAN NG NILALAMAN" in upper_text
+    if 1 in line_numbers and any(number > 1 for number in line_numbers[: line_numbers.index(1)]) and not has_toc:
+        raise InvalidUploadedContentScope("chapter_order_invalid")
+    if has_toc:
+        chapter_one_matches = [match for match in line_matches if _chapter_number(match.group("number")) == 1]
+        if len(chapter_one_matches) == 1:
+            only = chapter_one_matches[0]
+            heading = only.group(0).strip()
+            title_start = only.start("number") - only.start() + len(only.group("number"))
+            trailing = heading[title_start:].strip(" \t:.-–—")
+            if trailing and re.search(r"\s\d+$", trailing):
+                raise InvalidUploadedContentScope("chapter_one_not_found")
+    prefer_flattened = "\n" not in text and len(flat_matches) > 1
+    try:
+        return _complete_scope_from_matches(
+            text, flat_matches if prefer_flattened else line_matches
+        )
+    except InvalidWorkerInput as exception:
+        try:
+            return _complete_scope_from_matches(
+                text, line_matches if prefer_flattened else flat_matches
+            )
+        except InvalidWorkerInput as fallback_exception:
+            try:
+                return _scope_from_first_section_title(text, line_matches)
+            except InvalidWorkerInput:
+                message = f"{exception} {fallback_exception}".lower()
+                if "out of order" in message or "duplicated" in message:
+                    reason = "chapter_order_invalid"
+                elif "no chapter content" in message:
+                    reason = "chapter_scope_empty"
+                else:
+                    reason = "chapter_one_not_found"
+                raise InvalidUploadedContentScope(reason) from exception
+
+
+def uploaded_content_scope_diagnostic(
+    text: str, require_chapter_one: bool = True
+) -> dict[str, Any]:
+    """Return bounded structural metadata without returning manuscript content."""
+    if require_chapter_one:
+        scope = _uploaded_content_scope(text)
+        scoped_text = scope.text
+    else:
+        matches = _structural_chapter_matches(text)
+        if not matches:
+            matches = list(_FLAT_CHAPTER_HEADING.finditer(text))
+        if not matches:
+            raise InvalidUploadedContentScope("chapter_one_not_found")
+        ordered = [_chapter_number(match.group("number")) for match in matches]
+        if 1 in ordered:
+            scope = _uploaded_content_scope(text)
+        else:
+            first = matches[0]
+            boundary_match = _BACK_MATTER_HEADING.search(text, first.end())
+            boundary = boundary_match.start() if boundary_match else len(text)
+            bounded = [
+                (match, _chapter_number(match.group("number")))
+                for match in matches
+                if match.start() < boundary
+            ]
+            if any(current <= previous for (_, previous), (_, current) in zip(bounded, bounded[1:])):
+                raise InvalidUploadedContentScope("chapter_order_invalid")
+            if not text[first.end() : boundary].strip(" \t\r\n:.-–—"):
+                raise InvalidUploadedContentScope("chapter_scope_empty")
+            scope = _ChapterScope(text[first.start() : boundary].strip(), bounded[-1][1])
+        scoped_text = scope.text
+    chapters = []
+    chapter_text = scope.text
+    for match in [
+        *_structural_chapter_matches(chapter_text),
+        *_FLAT_CHAPTER_HEADING.finditer(chapter_text),
+    ]:
+        chapter = _chapter_number(match.group("number"))
+        if chapter not in chapters:
+            chapters.append(chapter)
+    if require_chapter_one and 1 not in chapters:
+        chapters.insert(0, 1)
+    return {
+        "status": "valid",
+        "chapters": chapters,
+        "scope_characters": len(scope.text),
+    }
+
+
+def _normalize_content(text: str) -> str:
+    return " ".join(
+        unicodedata.normalize("NFC", text.lower())
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+        .split()
+    )
+
+
+def _content_terms(text: str) -> Counter[str]:
+    return _content_terms_with_vocabulary(text, None)
+
+
+def _content_terms_with_vocabulary(
+    text: str, vocabulary: set[str] | None
+) -> Counter[str]:
+    terms: Counter[str] = Counter()
+    token_count = 0
+    for match in _CONTENT_TOKEN_RE.finditer(text):
+        term = match.group(0).casefold()
+        token_count += 1
+        if token_count > _MAX_CONTENT_TOKENS:
+            raise SimilarityCapacityExceeded("The content token limit was exceeded.")
+        if term in _CONTENT_STOPWORDS or term == "chapter" or term.isdigit():
+            continue
+        if term not in terms and len(terms) >= _MAX_CONTENT_VOCABULARY:
+            raise SimilarityCapacityExceeded(
+                "The content vocabulary limit was exceeded."
+            )
+        if vocabulary is not None and term not in vocabulary:
+            if len(vocabulary) >= _MAX_CONTENT_VOCABULARY:
+                raise SimilarityCapacityExceeded(
+                    "The content vocabulary limit was exceeded."
+                )
+            vocabulary.add(term)
+        terms[term] += 1
+    return terms
+
+
+def _content_cosine(
+    left: Counter[str], right: Counter[str], inverse_frequency: dict[str, float]
+) -> float:
+    if not left or not right:
+        return 0.0
+    left_vector = {
+        term: count * inverse_frequency[term] for term, count in left.items()
+    }
+    right_vector = {
+        term: count * inverse_frequency[term] for term, count in right.items()
+    }
+    numerator = sum(
+        left_vector[term] * right_vector[term]
+        for term in left_vector.keys() & right_vector.keys()
+    )
+    left_norm = math.sqrt(sum(value * value for value in left_vector.values()))
+    right_norm = math.sqrt(sum(value * value for value in right_vector.values()))
+    if not left_norm or not right_norm:
+        return 0.0
+    return min(1.0, max(0.0, numerator / (left_norm * right_norm)))
+
+
+def _compare_uploaded_content(
+    uploaded_content: str, candidates: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Port the standalone chapter-scoped content checker without FastText."""
+    upload = _uploaded_content_scope(uploaded_content)
+    upload_normalized = _normalize_content(upload.text)
+    if not upload_normalized:
+        raise InvalidWorkerInput("The manuscript contains no extractable text.")
+    upload_terms = _content_terms(upload_normalized)
+
+    comparable: list[tuple[dict[str, Any], bool, Counter[str]]] = []
+    corpus_characters = 0
+    for candidate in candidates:
+        content = candidate.get("content")
+        if not isinstance(content, str) or not content:
+            continue
+        try:
+            scope = _uploaded_content_scope(content)
+        except InvalidWorkerInput:
+            continue
+        normalized = _normalize_content(scope.text)
+        if not normalized:
+            continue
+        corpus_characters += len(normalized)
+        if corpus_characters > _MAX_CONTENT_CORPUS_CHARACTERS:
+            raise SimilarityCapacityExceeded("The content corpus limit was exceeded.")
+        terms = _content_terms(normalized)
+        comparable.append((candidate, normalized == upload_normalized, terms))
+
+    ranked: list[tuple[float, int, bool, list[str]]] = []
+    for candidate, exact, terms in comparable:
+        frequencies = Counter(upload_terms.keys())
+        frequencies.update(terms.keys())
+        inverse_frequency = {
+            term: math.log(3 / (1 + frequency)) + 1
+            for term, frequency in frequencies.items()
+        }
+        score = _content_cosine(upload_terms, terms, inverse_frequency)
+        ranked.append((
+            score,
+            candidate["id"],
+            exact,
+            _bounded_terms(
+                upload_terms.keys() & terms.keys(),
+                lambda term: _ORDINAL_NUMBER_RE.fullmatch(term) is None,
+            ),
+        ))
+
+    results: list[dict[str, Any]] = []
+    for score, candidate_id, exact, shared in sorted(
+        ranked, key=lambda item: (-item[2], -item[0], item[1])
+    )[:10]:
+        rendered_score = decimal_score(score)
+        if rendered_score == "0.000000000000":
+            continue
+        results.append(
+            {
+                "matched_research_id": candidate_id,
+                "title_similarity_score": "0.000000000000",
+                "content_similarity_score": rendered_score,
+                "matched_terms": shared,
+                "fasttext_support_score": None,
+                "exact_content_match": exact,
+            }
+        )
+    return results
 
 
 def _content_scores(
@@ -58,15 +675,26 @@ def _content_scores(
     """Score only pairs with two extracted full-text projections."""
     if not isinstance(source.get("content"), str) or not source["content"]:
         return {candidate["id"]: None for candidate in candidates}
-    available = [candidate for candidate in candidates if isinstance(candidate.get("content"), str) and candidate["content"]]
-    matrix = title_tfidf_matrix([source["content"], *(candidate["content"] for candidate in available)])
+    available = [
+        candidate
+        for candidate in candidates
+        if isinstance(candidate.get("content"), str) and candidate["content"]
+    ]
+    matrix = title_tfidf_matrix(
+        [source["content"], *(candidate["content"] for candidate in available)]
+    )
     values = source_cosine_scores(matrix)
-    by_id = {candidate["id"]: value for candidate, value in zip(available, values, strict=True)}
+    by_id = {
+        candidate["id"]: value
+        for candidate, value in zip(available, values, strict=True)
+    }
     return {candidate["id"]: by_id.get(candidate["id"]) for candidate in candidates}
 
 
 def compare_titles(
-    source: dict[str, Any], candidates: Iterable[dict[str, Any]], fasttext_model: Any | None
+    source: dict[str, Any],
+    candidates: Iterable[dict[str, Any]],
+    fasttext_model: Any | None,
 ) -> list[dict[str, Any]]:
     """Emit independent title/content TF-IDF cosine components only."""
     candidate_list = list(candidates)
@@ -91,7 +719,9 @@ def compare_titles(
         support = None
         if fasttext_model is not None:
             try:
-                support = contextual_support(fasttext_model, comparison_texts[0], candidate_text)
+                support = contextual_support(
+                    fasttext_model, comparison_texts[0], candidate_text
+                )
             except (TypeError, ValueError, ArithmeticError, RuntimeError):
                 # Model errors can include runtime/model details, so this is
                 # deliberately converted to generic supporting-only context.
@@ -99,13 +729,13 @@ def compare_titles(
         result = {
             "matched_research_id": candidate["id"],
             "title_similarity_score": decimal_score(title_value),
-            "content_similarity_score": decimal_score(content_value) if content_value is not None else None,
-            "fasttext_score": decimal_score(support.score) if support is not None else None,
-            "matched_terms": [
-                term
-                for term in sorted(source_tokens.intersection(tokens))
-                if len(term) <= 100
-            ][:32],
+            "content_similarity_score": decimal_score(content_value)
+            if content_value is not None
+            else None,
+            "fasttext_score": decimal_score(support.score)
+            if support is not None
+            else None,
+            "matched_terms": matched_terms(source_tokens, tokens),
             "contextual_analysis": (
                 support.analysis
                 if support is not None
@@ -123,26 +753,54 @@ def compare_titles(
 
 
 def compare_query(
-    query: str, candidates: Iterable[dict[str, Any]], fasttext_model: Any | None
+    query: str,
+    candidates: Iterable[dict[str, Any]],
+    fasttext_model: Any | None,
+    uploaded_content: bool = False,
 ) -> list[dict[str, Any]]:
-    """Emit independent components for a typed query; PHP applies policy."""
+    """Emit independent components for a typed query or uploaded manuscript."""
     candidate_list = list(candidates)
-    comparison_texts = [query, *(record_text(candidate) for candidate in candidate_list)]
+    if uploaded_content:
+        return _compare_uploaded_content(query, candidate_list)
+    comparison_texts = [
+        query,
+        *(
+            candidate.get("content", "") if uploaded_content else record_text(candidate)
+            for candidate in candidate_list
+        ),
+    ]
+
     token_lists = [preprocess_title(text) for text in comparison_texts]
     title_scores = source_cosine_scores(
-        title_tfidf_matrix([query, *(candidate["title"] for candidate in candidate_list)])
+        title_tfidf_matrix(
+            [query, *(candidate["title"] for candidate in candidate_list)]
+        )
     )
-    available = [candidate for candidate in candidate_list if isinstance(candidate.get("content"), str) and candidate["content"]]
-    content_values = source_cosine_scores(title_tfidf_matrix([query, *(candidate["content"] for candidate in available)]))
-    content_scores = {candidate["id"]: value for candidate, value in zip(available, content_values, strict=True)}
+    metadata_scores = source_cosine_scores(
+        title_tfidf_matrix(
+            [query, *(candidate.get("metadata", "") for candidate in candidate_list)]
+        )
+    )
+    available = [
+        candidate
+        for candidate in candidate_list
+        if isinstance(candidate.get("content"), str) and candidate["content"]
+    ]
+    content_texts = [query, *(candidate["content"] for candidate in available)]
+    content_values = source_cosine_scores(title_tfidf_matrix(content_texts))
+    content_scores = {
+        candidate["id"]: value
+        for candidate, value in zip(available, content_values, strict=True)
+    }
     query_tokens = set(token_lists[0])
     ranked_results: list[tuple[float, int, dict[str, Any]]] = []
 
-    for candidate, candidate_text, tokens, title_value in zip(
+    for candidate, candidate_text, tokens, title_value, metadata_value in zip(
         candidate_list,
         comparison_texts[1:],
         token_lists[1:],
         title_scores,
+        metadata_scores,
         strict=True,
     ):
         content_value = content_scores.get(candidate["id"])
@@ -158,13 +816,18 @@ def compare_query(
                 support = None
         result = {
             "matched_research_id": candidate["id"],
-            "title_similarity_score": title_score,
-            "content_similarity_score": decimal_score(content_value) if content_value is not None else None,
-            "matched_terms": [
-                term
-                for term in sorted(query_tokens.intersection(tokens))
-                if len(term) <= 100
-            ][:32],
+            "title_similarity_score": (
+                title_score
+                if title_value > 0
+                else decimal_score(metadata_value)
+            ),
+            "content_similarity_score": decimal_score(content_value)
+            if content_value is not None
+            else None,
+            "matched_terms": matched_terms(
+                query_tokens,
+                [*tokens, *preprocess_title(candidate.get("metadata", ""))],
+            ),
             "fasttext_support_score": (
                 decimal_score(support.score) if support is not None else None
             ),

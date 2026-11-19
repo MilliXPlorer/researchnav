@@ -10,6 +10,16 @@ use ReflectionMethod;
 
 class ManuscriptMetadataExtractorInstituteTest extends TestCase
 {
+    public function test_metadata_output_does_not_expose_manuscript_body_text(): void
+    {
+        $extractor = new ManuscriptMetadataExtractor($this->createStub(PdfTextExtractionService::class));
+        $method = new ReflectionMethod($extractor, 'extractMetadata');
+
+        $metadata = $method->invoke($extractor, "A STUDY TITLE\nABSTRACT\nA manuscript abstract.\nCHAPTER I\nBody text.");
+
+        $this->assertArrayNotHasKey('raw_text', $metadata);
+    }
+
     #[DataProvider('programs')]
     public function test_it_detects_only_the_configured_program_mappings(string $text, string $expected): void
     {

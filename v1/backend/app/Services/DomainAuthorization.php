@@ -126,7 +126,9 @@ class DomainAuthorization
         if (self::isSectionInstructor($user, $research) || self::isAssignedReviewer($user, $research)) {
             return true;
         }
-        if (! ReviewAssignment::identityCompatible() || ! self::isActiveAccount($user)) {
+        if (! ReviewAssignment::identityCompatible()
+            || ! self::isActiveAccount($user)
+            || $user->roleDefinition?->is_active !== true) {
             return false;
         }
 

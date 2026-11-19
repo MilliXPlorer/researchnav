@@ -149,7 +149,10 @@ class ApiContractTest extends TestCase
         $admin = $this->user(['role' => 'admin', 'is_admin' => true, 'access_status' => 'active']);
 
         $this->withSession(['user_id' => $admin->id])
-            ->postJson('/api/admin/coordinators', ['email' => 'Coordinator@Example.edu'], ['Origin' => 'http://localhost:5173'])
+            ->postJson('/api/admin/coordinators', [
+                'email' => 'Coordinator@Example.edu',
+                'institute' => 'Institute of Computer Studies',
+            ], ['Origin' => 'http://localhost:5173'])
             ->assertCreated()
             ->assertExactJson(['user' => [
                 'email' => 'coordinator@example.edu',

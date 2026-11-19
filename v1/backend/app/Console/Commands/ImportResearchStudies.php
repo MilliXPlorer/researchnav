@@ -10,7 +10,7 @@ class ImportResearchStudies extends Command
 {
     protected $signature = 'research:import-studies
         {--owner= : Existing active owner account email}
-        {--source= : Directory containing catalog.json and DOCX files}';
+        {--source= : Legacy directory containing catalog.json and canonical DOCX files}';
 
     protected $description = 'Import private research-study source data into the repository';
 
