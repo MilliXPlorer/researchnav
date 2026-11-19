@@ -76,6 +76,52 @@ class SharedMonitoringTest extends TestCase
         ];
     }
 
+    public function test_pending_adviser_history_does_not_create_an_invitation_or_grant_access(): void
+    {
+        $researcher = $this->user(['role' => 'researcher']);
+        $adviser = $this->user(['role' => 'adviser']);
+        $research = ResearchDocument::factory()->create();
+        $research->reviewAssignments()->create([
+            'reviewer_id' => $adviser->id,
+            'assigned_by' => $researcher->id,
+            'review_role' => 'adviser',
+            'is_active' => false,
+            'status' => 'requested',
+        ]);
+
+        $this->as($adviser)->getJson('/api/monitoring/research')
+            ->assertOk()->assertJsonCount(0, 'data');
+        $this->as($adviser)->getJson('/api/research/'.$research->id.'/shared-monitoring')
+            ->assertForbidden();
+    }
+
+    public function test_active_adviser_assignment_wins_over_newer_declined_history(): void
+    {
+        $researcher = $this->user(['role' => 'researcher']);
+        $adviser = $this->user(['role' => 'adviser']);
+        $research = ResearchDocument::factory()->create();
+        $active = $research->reviewAssignments()->create([
+            'reviewer_id' => $adviser->id,
+            'assigned_by' => $researcher->id,
+            'review_role' => 'adviser',
+            'is_active' => true,
+            'status' => 'active',
+        ]);
+        $research->reviewAssignments()->create([
+            'reviewer_id' => $adviser->id,
+            'assigned_by' => $researcher->id,
+            'review_role' => 'adviser',
+            'is_active' => false,
+            'status' => 'declined',
+        ]);
+
+        $this->as($adviser)->getJson('/api/monitoring/research')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.assignment_id', $active->id)
+            ->assertJsonPath('data.0.assignment_status', 'active');
+    }
+
     public function test_final_defense_entries_use_an_independent_stage_context(): void
     {
         $office = $this->user(['role' => 'research-office']);

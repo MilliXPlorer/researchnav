@@ -825,8 +825,8 @@ export default function Dashboard({
               setDrawer({ scope: requestScope, open: false });
               return;
             }
-            if (isAllowedNotificationPath(item.action_url))
-              navigate(item.action_url);
+            const destination = notificationDestination(item, session);
+            if (destination) navigate(destination);
             setDrawer({ scope: requestScope, open: false });
           }}
           onClose={() => setDrawer({ scope: dashboardScope, open: false })}
@@ -1182,18 +1182,26 @@ function notificationErrorMessage(error: unknown) {
 }
 
 /** Notification destinations are navigation hints, never arbitrary external URLs. */
-function isAllowedNotificationPath(path: string | null): path is string {
-  if (!path || !path.startsWith("/")) return false;
-  return (
-    path === "/app" ||
-    path.startsWith("/app/") ||
-    path.startsWith("/app?") ||
-    path.startsWith("/app#") ||
-    /^\/research\/\d+(?:[/?#]|$)/.test(path) ||
-    path === "/catalog" ||
-    path.startsWith("/catalog?") ||
-    path.startsWith("/catalog#")
-  );
+function notificationDestination(
+  item: NotificationResource,
+  session: UserSession,
+): string | null {
+  const path = item.action_url;
+  if (!path || !path.startsWith("/")) return null;
+  if (item.research_document_id) {
+    const canonical = `/research/${item.research_document_id}`;
+    if (/^\/research\/\d+$/.test(path)) return canonical;
+  }
+  if (path === "/app" || path.startsWith("/app?") || path.startsWith("/app#")) {
+    return path;
+  }
+  if (path === "/catalog" || path.startsWith("/catalog?") || path.startsWith("/catalog#")) {
+    return path;
+  }
+
+  const pathname = path.split(/[?#]/, 1)[0];
+  const rolePrefix = session.role.replace("_", "-");
+  return pathname.startsWith(`/app/${rolePrefix}/`) ? path : null;
 }
 
 function AccessBlocker({

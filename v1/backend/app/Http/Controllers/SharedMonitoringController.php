@@ -44,12 +44,22 @@ class SharedMonitoringController extends DomainController
                 $active = ReviewAssignment::column('is_active');
                 $documents->whereHas('reviewAssignments', function ($assignments) use ($actor, $active): void {
                     $assignments->where(ReviewAssignment::column('reviewer_id'), $actor->id)
-                        ->where(function ($status) use ($active): void {
-                            $status->where($active, $active === 'status' ? 'active' : true);
-                            if (Schema::hasColumn((new ReviewAssignment)->getTable(), 'status')) {
-                                $status->orWhereIn('status', ['requested', 'pending', 'accepted', 'confirmed', 'active']);
-                            }
-                        });
+                        ->when(
+                            DomainAuthorization::hasAnyRole($actor, ['statistician', 'librarian', 'research_editor']),
+                            function ($query) use ($active): void {
+                                $query->where(function ($status) use ($active): void {
+                                    $status->where($active, $active === 'status' ? 'active' : true);
+                                    if (Schema::hasColumn((new ReviewAssignment)->getTable(), 'status')) {
+                                        $status->orWhereIn('status', ['requested', 'pending', 'accepted', 'confirmed', 'active']);
+                                    }
+                                });
+                            },
+                            fn ($query) => $query->when(
+                                $active === 'status',
+                                fn ($activeQuery) => $activeQuery->whereIn($active, ['accepted', 'confirmed', 'active']),
+                                fn ($activeQuery) => $activeQuery->where($active, true),
+                            ),
+                        );
                 });
                 if (DomainAuthorization::hasAnyRole($actor, ['instructor', 'research_instructor'])) {
                     $documents->orWhereHas('section', fn ($section) => $section->where('instructor_id', $actor->id));
@@ -58,8 +68,24 @@ class SharedMonitoringController extends DomainController
         }
 
         return response()->json(['data' => $query->latest()->get()->map(function ($item) use ($actor) {
+            $active = ReviewAssignment::column('is_active');
             $assignment = $item->reviewAssignments()
                 ->where(ReviewAssignment::column('reviewer_id'), $actor->id)
+                ->when(
+                    DomainAuthorization::hasAnyRole($actor, ['statistician', 'librarian', 'research_editor']),
+                    fn ($assignmentQuery) => $assignmentQuery->where(function ($status) use ($active): void {
+                        if (Schema::hasColumn((new ReviewAssignment)->getTable(), 'status')) {
+                            $status->whereIn('status', ['requested', 'pending', 'accepted', 'confirmed', 'active']);
+                        } else {
+                            $status->where($active, true);
+                        }
+                    }),
+                    fn ($assignmentQuery) => $assignmentQuery->when(
+                        $active === 'status',
+                        fn ($activeQuery) => $activeQuery->whereIn($active, ['accepted', 'confirmed', 'active']),
+                        fn ($activeQuery) => $activeQuery->where($active, true),
+                    ),
+                )
                 ->latest('id')
                 ->first();
 

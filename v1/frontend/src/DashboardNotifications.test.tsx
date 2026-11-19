@@ -146,6 +146,48 @@ describe("Dashboard notification request ownership", () => {
     unmount();
   });
 
+  it("canonicalizes research notification destinations from the document id", async () => {
+    const fetchMock = mockApi();
+    fetchMock.mockImplementation(async (input: string | URL | Request) => {
+      const path = String(input);
+      if (path === "/api/notifications/unread-count") return new Response(JSON.stringify({ unread_count: 1 }));
+      if (path === "/api/notifications") return new Response(JSON.stringify({ data: [{ ...notification, action_url: "/research/999" }], links: { next: null } }));
+      if (path === "/api/notifications/notification-one/read") return new Response(JSON.stringify({ data: { ...notification, read_at: "now" } }));
+      if (path === "/api/dashboard") return new Response(JSON.stringify({ data: { schema_version: 1, role: "adviser", sections: [] } }));
+      return new Response(null, { status: 404 });
+    });
+    const navigate = vi.fn();
+    render(<Dashboard session={session} navigate={navigate} />);
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Open notifications" }));
+    await flush();
+    fireEvent.click(screen.getByText(notification.title));
+    await flush();
+
+    expect(navigate).toHaveBeenCalledWith("/research/42");
+  });
+
+  it("rejects role-inappropriate application notification paths", async () => {
+    const fetchMock = mockApi();
+    fetchMock.mockImplementation(async (input: string | URL | Request) => {
+      const path = String(input);
+      if (path === "/api/notifications/unread-count") return new Response(JSON.stringify({ unread_count: 1 }));
+      if (path === "/api/notifications") return new Response(JSON.stringify({ data: [{ ...notification, research_document_id: null, action_url: "/app/admin/users" }], links: { next: null } }));
+      if (path === "/api/notifications/notification-one/read") return new Response(JSON.stringify({ data: { ...notification, read_at: "now" } }));
+      if (path === "/api/dashboard") return new Response(JSON.stringify({ data: { schema_version: 1, role: "adviser", sections: [] } }));
+      return new Response(null, { status: 404 });
+    });
+    const navigate = vi.fn();
+    render(<Dashboard session={session} navigate={navigate} />);
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Open notifications" }));
+    await flush();
+    fireEvent.click(screen.getByText(notification.title));
+    await flush();
+
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
   it("selects and deletes a notification without opening it", async () => {
     const fetchMock = mockApi();
     const navigate = vi.fn();

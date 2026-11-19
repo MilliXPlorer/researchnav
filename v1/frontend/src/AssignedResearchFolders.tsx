@@ -701,9 +701,13 @@ function AssignedResearchFoldersContent({
                   </p>
                 )}
                 {visibleFolders.map((item, index) => {
-                  const pendingAssignment = ["requested", "pending"].includes(
-                    item.assignment_status ?? "",
-                  );
+                  const pendingAssignment =
+                    ["statistician", "librarian", "research_editor"].includes(
+                      role,
+                    ) &&
+                    ["requested", "pending"].includes(
+                      item.assignment_status ?? "",
+                    );
 
                   return (
                     <div key={item.id}>

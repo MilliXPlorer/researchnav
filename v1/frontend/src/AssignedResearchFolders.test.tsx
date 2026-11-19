@@ -557,6 +557,36 @@ describe("AssignedResearchFolders", () => {
     await waitFor(() => expect(decline).not.toBeDisabled());
   });
 
+  it("does not treat pending adviser history as a support invitation", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/monitoring/research") {
+          return new Response(
+            JSON.stringify({
+              data: [
+                {
+                  ...research,
+                  assignment_id: 83,
+                  assignment_status: "requested",
+                },
+              ],
+            }),
+          );
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+
+    render(<AssignedResearchFolders role="adviser" />);
+
+    expect(await screen.findByText(research.title)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Accept assignment request/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Decline assignment request/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Assignment request pending/)).not.toBeInTheDocument();
+  });
+
   it("moves from the full-width assigned study list to the workspace and back", async () => {
     vi.stubGlobal(
       "fetch",
