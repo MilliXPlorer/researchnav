@@ -6695,7 +6695,7 @@ function CoordinatorReports({ role }: { role: Role }) {
                 ["overview", "Overview", FileText],
                 ["instructors", "Research instructors", GraduationCap],
                 ["sections", "Class sections", Folder],
-                ["advisers", "Adviser load", Users],
+                ["advisers", "Research advisers", Users],
               ] as const
             ).map(([section, title, Icon]) => (
               <button

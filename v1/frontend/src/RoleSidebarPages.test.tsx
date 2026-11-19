@@ -400,7 +400,7 @@ describe("role workspace pages", () => {
     expect(
       screen.queryByRole("heading", { name: "Research instructors" }),
     ).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Adviser load" }));
+    fireEvent.click(screen.getByRole("button", { name: "Research advisers" }));
     expect(screen.getByText("Dr. Rivera")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Dr. Rivera" })).not.toBeInTheDocument();
   });

@@ -19355,6 +19355,52 @@ body::-webkit-scrollbar {
   gap: 14px;
 }
 
+.coordinator-kpi-grid .dashboard-kpi-card,
+.coordinator-report-kpis .dashboard-kpi-card {
+  min-height: 92px;
+  padding: 14px 16px;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.coordinator-kpi-grid .dashboard-kpi-icon,
+.coordinator-report-kpis .dashboard-kpi-icon {
+  width: 40px;
+  height: 40px;
+}
+
+.coordinator-kpi-grid .dashboard-kpi-icon svg,
+.coordinator-report-kpis .dashboard-kpi-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.coordinator-kpi-grid .dashboard-kpi-card > div,
+.coordinator-report-kpis .dashboard-kpi-card > div {
+  display: flex;
+  flex-direction: column;
+}
+
+.coordinator-kpi-grid .dashboard-kpi-card strong,
+.coordinator-report-kpis .dashboard-kpi-card strong {
+  order: 1;
+  margin: 0 0 4px;
+  font-size: 28px;
+}
+
+.coordinator-kpi-grid .dashboard-kpi-card h2,
+.coordinator-report-kpis .dashboard-kpi-card h2 {
+  order: 2;
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.coordinator-kpi-grid .dashboard-kpi-card p,
+.coordinator-report-kpis .dashboard-kpi-card p {
+  order: 3;
+}
+
 .coordinator-dashboard-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.75fr);
